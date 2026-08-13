@@ -7,3 +7,6 @@ venv/
 *.log
 .DS_Store
 Thumbs.db
+scripts/_stage0_report.json
+scripts/_review_memo.txt
+scripts/_test_out.txt

@@ -19,6 +19,8 @@ CREATE TABLE documents (
     apply_mode    TEXT NOT NULL DEFAULT 'apply' CHECK (apply_mode IN ('apply','compare')),
     parse_quality TEXT NOT NULL DEFAULT 'high' CHECK (parse_quality IN ('high','low')),
     src_path      TEXT NOT NULL,
+    roles         TEXT[] NOT NULL DEFAULT '{}',   -- manifest 의 role (judgment_index, rule_source, golden_set ...)
+    index_target  BOOLEAN NOT NULL DEFAULT FALSE, -- chunks 에 넣을 문서인가
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 COMMENT ON TABLE documents IS '원본 문서 대장. 인덱서는 status=active 만 읽는다.';
