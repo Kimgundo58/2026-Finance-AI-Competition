@@ -142,16 +142,36 @@ UTF-16LE 디코드, 제어문자 0~31 처리, 짝 없는 서로게이트 제거
 > `L4_서울대_연구비관리규정_20200325.hwp`가 그렇다 (국가법령정보센터 산출물로 추정).
 > 헤더 첫 바이트가 `<?xml`이면 OLE 파서가 아니라 HWPML 경로로 보낸다.
 
-#### 0-c. PDF — 2단 전략 (속도)
+#### 0-c. PDF — 🔴 pdfplumber를 기본으로 쓴다
 
 ```
-1) pypdf 로 먼저 추출               ← 빠름 (10배 이상)
-2) 조문 구조가 안 잡히면 pdfplumber  ← 느리지만 다단 레이아웃 인식
+1) pdfplumber   ← 기본
+2) pypdf        ← pdfplumber 가 예외를 던질 때만 폴백
 ```
 
-**전량 pdfplumber는 비현실적이다.** 실측 3,744페이지 기준 pdfplumber만 쓰면 15분+가 걸린다. 대부분의 문서는 단일 컬럼이라 pypdf로 충분하고, 다단인 L3 세부관리기준 같은 문서만 폴백하면 된다.
+**pypdf를 속도 때문에 기본으로 쓰면 안 된다.** 한국어 PDF에서 쉼표·괄호·숫자를 문장 끝으로 밀어내고 조문 헤더를 깨뜨린다.
 
-> 인덱싱 대상이 아닌 문서는 **애초에 파싱하지 않는다.** 실측에서 권익위재결례집 2개(863p + 811p = 1,674p)가 archive 문서인데도 파싱되어 전체 시간의 절반을 잡아먹었다. manifest의 `role`로 먼저 거른다.
+**실측 (L2 통합관리지침 제14차, 55p — 판정 인덱스의 핵심 문서)**
+
+| 추출기 | 시간 | 조 개수 | 조 제목 | 판정 |
+|---|---|---|---|---|
+| pypdf | 2.7초 | **12개** | **0개** | ❌ 사용 불가 |
+| **pdfplumber** | 12.8초 | **83개** | **83개** | ✅ |
+
+pypdf 결과로 인덱싱했을 때 실제로 검색된 텍스트:
+
+```
+"으로 사용이 가능한 기계 또는 설비를 구매하는 비용을 말한다. 사무용 공간에
+ 들어가는 집기 가구 기구 등은 집행할 수 없으며 노트북 및 , , , PC("
+```
+
+**§원칙 4(인용은 생성이 아니라 추출)가 여기서 무너진다.** 이런 텍스트를 "제32조 원문"이라고 내보내면 정산 심사에서 즉시 드러난다. 게다가 조가 12개로 뭉개지면서 **조 번호 자체가 틀렸다**(제32조가 실제로는 여비인데 기계장치 내용을 담고 있었다).
+
+문서당 10초 차이다. 인용 정확도와 바꿀 값이 아니다.
+
+> 참고: **HWP 파서(`hwp_extract.py`)가 pypdf보다 정확하다.** 같은 성격의 문서에서 HWP 경로는 36~37개 조를 제목까지 온전히 뽑았다.
+
+> 인덱싱 대상이 아닌 문서는 **애초에 파싱하지 않는다.** 실측에서 권익위재결례집 2개(863p + 811p = 1,674p)가 archive 문서인데도 파싱되어 전체 시간의 절반을 잡아먹었다. manifest의 `role`로 먼저 거른다 — `judgment_index` / `rule_source` / `diff_only` / `golden_set` + `layer='L4'` + `index:true` 만 처리한다.
 
 #### 0-d. 조문 재조립 (공통)
 
@@ -338,9 +358,23 @@ effective_rule(사업, 비목, 기관) =
 | 모델 | `nlpai-lab/KURE-v1` |
 | 차원 | **1024** (bge-m3 기반이라 스키마 호환) |
 | 정규화 | L2 정규화 후 저장 → 코사인 = 내적 |
-| 최대 길이 | 8,192 토큰 (조 단위 청크는 여유 있음) |
+| `max_seq_length` | **1024로 낮출 것** (기본값 8192) — 아래 참조 |
 | 실행 | 로컬 CPU. 인제스천 1회 + 쿼리당 1회(~150ms) |
 | 교체 비용 | 재임베딩 1회. 골든셋에서 열세면 bge-m3로 전환 |
+
+> 🔴 **`max_seq_length` 기본값이 8192다.** 조 단위 청크(최대 3,000자)에는 과도하고, 긴 청크에서 attention 비용이 급증한다. `model.max_seq_length = 1024`로 낮춘다.
+
+**실측 소요 (Core Ultra 7 255H, 16코어, CPU only)**
+
+| 항목 | 값 |
+|---|---|
+| 청크 수 | 판정 2,096 + 사례 242 |
+| 처리 속도 | 약 **1건/초** |
+| 인제스천 총 소요 | **약 35~40분** (1회) |
+
+> 초기 추정 "2~5분"은 틀렸다. GPU 없이 568M 파라미터 모델로 2천여 건을 처리하면 **30분대**가 정상이다. 한 번만 하면 되는 작업이니 그냥 돌려두면 되지만, 재임베딩이 필요한 변경(청킹 정책·모델 교체)은 그만큼 비용이 든다는 점을 감안해 일정을 잡을 것.
+>
+> 쿼리 시점은 문장 1건이라 **~150ms**로 영향 없다.
 
 **판정 인덱스와 사례 인덱스는 같은 모델**을 쓴다(비교 가능성 유지). 다만 테이블은 물리적으로 분리한다(§4.5).
 
@@ -788,20 +822,25 @@ for 조항 in L4(기관):
 
 ## 부록 A. 스크립트 구성
 
+✅ = 구현 완료 · ⬜ = 미구현
+
 ```
-hwp_extract.py                 # HWP v5 → 평문 (구현 완료)
+hwp_extract.py                 ✅ HWP v5 → 평문 (olefile + zlib, 외부 의존 없음)
+db/
+├─ docker-compose.yml          ✅ Postgres17+pgvector + pgweb(뷰어)
+└─ init/01_schema.sql          ✅ 9테이블 + v_적재현황 뷰
 scripts/
-├─ validate_manifest.py        # manifest ↔ 실제 파일 대조
-├─ parse_l1.py                 # 법령 XML → doc_articles
-├─ parse_pdf.py                # PDF → 조 재조립 (다단 처리)
-├─ parse_hwp.py                # hwp_extract 래퍼 → 조 재조립
-├─ verify_articles.py          # V1~V6 검증 게이트
-├─ check_xref.py               # 크로스 레퍼런스 대조 → xref_mismatch
-├─ extract_rules.py            # 룰 소스 → rules (unverified)
-├─ review_rules.py             # 사람 검수 CLI (원문 대조 y/n)
-├─ build_index.py              # 청킹 + KURE-v1 임베딩 + BM25 직렬화
-├─ eval_golden.py              # 골든셋 실행 → 지표 3종
-└─ agent_diff.py               # A4 개정 대응
+├─ stage0_extract.py           ✅ XML/PDF/HWP/HWPML/TXT 추출
+├─ stage0_articles.py          ✅ 섹션 분리(붙임·별표·부칙) + 조 3단 fallback + V1~V6
+├─ stage0_ingest.py            ✅ manifest 라우팅 → documents / doc_articles / xref
+├─ seed_rules.py               ✅ [붙임2] → rules 19행 초안 (verified=false)
+├─ review_rules.py             ✅ D단계 사람 검수 CLI (원문 대조 y/n)
+├─ build_index.py              ✅ 조 단위 청킹 + KURE-v1 임베딩 → chunks/case_chunks
+├─ smoke_search.py             ✅ 인덱스 스모크 테스트 (벡터 검색만)
+├─ build_bm25.py               ⬜ kiwipiepy + bm25s 직렬화
+├─ query.py                    ⬜ Stage 3 쿼리 파이프라인 (RRF + LLM 2회)
+├─ eval_golden.py              ⬜ 골든셋 실행 → 지표 3종
+└─ agent_diff.py               ⬜ A4 개정 대응
 ```
 
 ## 부록 B. 추출 산출물
