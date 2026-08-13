@@ -1,0 +1,18 @@
+# 바이너리 — 줄바꿈 변환 금지 (변환 시 파일 손상)
+*.hwp   binary
+*.hwpx  binary
+*.pdf   binary
+*.xlsx  binary
+*.docx  binary
+*.pptx  binary
+*.zip   binary
+*.png   binary
+*.jpg   binary
+
+# 텍스트 — 저장소에는 LF로 정규화
+*.md    text eol=lf
+*.py    text eol=lf
+*.json  text eol=lf
+*.txt   text eol=lf
+*.xml   text eol=lf
+*.sql   text eol=lf
