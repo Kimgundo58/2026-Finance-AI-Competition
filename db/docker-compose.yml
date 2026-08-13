@@ -1,0 +1,54 @@
+# 「써도돼요」 로컬 개발 DB
+#
+# 실행:  db 폴더에서  docker compose up -d
+# 종료:  docker compose stop      (데이터 보존)
+# 삭제:  docker compose down -v   (데이터까지 전부 삭제)
+#
+# Docker Desktop > Containers 에 "suddoe" 그룹으로 묶여 보입니다.
+
+name: suddoe
+
+services:
+  # ── Postgres + pgvector : 실제 데이터가 저장되는 곳 ──────────────
+  db:
+    image: pgvector/pgvector:pg17
+    container_name: suddoe-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devpw}
+      POSTGRES_DB: ${POSTGRES_DB:-suddoe}
+      # C.UTF-8 = 유니코드 코드포인트 순 정렬.
+      # 현대 한글은 코드포인트 순 = 가나다 순이라 한국어에 적합하다.
+      # (ko_KR.utf8 은 이 이미지에 없어서 initdb 가 실패한다)
+      POSTGRES_INITDB_ARGS: "--locale=C.UTF-8"
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # 컨테이너를 "처음" 만들 때 이 폴더의 .sql 이 자동 실행됩니다
+      - ./init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-suddoe}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+
+  # ── pgweb : 브라우저에서 표를 눈으로 보는 화면 ──────────────────
+  #    로그인 없음. http://localhost:8081 열면 바로 연결됩니다.
+  pgweb:
+    image: sosedoff/pgweb:latest
+    container_name: suddoe-pgweb
+    restart: unless-stopped
+    environment:
+      PGWEB_DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-devpw}@db:5432/${POSTGRES_DB:-suddoe}?sslmode=disable
+    ports:
+      - "8081:8081"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+    name: suddoe_pgdata
