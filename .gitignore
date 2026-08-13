@@ -10,3 +10,7 @@ Thumbs.db
 scripts/_stage0_report.json
 scripts/_review_memo.txt
 scripts/_test_out.txt
+
+# UI 프로토타입 — 푸시하지 않음 (사용자 요청)
+관리자_프로토타입*.html
+*프로토타입*.html

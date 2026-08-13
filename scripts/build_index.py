@@ -13,6 +13,14 @@ from pathlib import Path
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 ROOT = Path(__file__).resolve().parent.parent
 
+# 모델이 이미 캐시에 있으면 오프라인으로 고정한다.
+# (기본 동작은 매 로드마다 HF Hub 에 업데이트를 확인하러 나간다 →
+#  네트워크가 끊기면 수십 초 지연되거나 40분짜리 작업이 실패할 수 있다)
+_CACHE = Path.home() / ".cache/huggingface/hub/models--nlpai-lab--KURE-v1"
+if _CACHE.exists() and any(_CACHE.rglob("model.safetensors")):
+    os.environ.setdefault("HF_HUB_OFFLINE", "1")
+    os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+
 import psycopg
 
 DSN = os.environ.get("SUDDOE_DSN", "postgresql://postgres:devpw@localhost:5432/suddoe")
@@ -32,9 +40,63 @@ def split_by(pattern, text: str) -> list[str]:
     return parts if len(parts) > 1 else []
 
 
+def split_비목표(본문: str) -> list[tuple[str, str]]:
+    """[붙임N] 비목 해설표를 **비목 단위**로 쪼갠다.
+
+    이 표는 ①②③ 구조가 없어서 일반 항/호 분할을 쓰면 비목 경계를 무시하고
+    엉뚱한 곳에서 잘린다. 실측: 4,521자가 2조각으로 잘려 '창업활동비 월 50만원'이
+    인건비 덩어리 끝에 묻혔고, 창업활동비 질문에 검색이 실패했다.
+
+    구조: <비목명 줄들> / '정의' / ... / '증빙' '서류' / ... / '유의' '사항' / ...
+    → '정의'만 있는 줄을 기준으로 앞의 비목명 블록까지 거슬러 올라가 경계를 잡는다.
+    """
+    lines = 본문.split("\n")
+    라벨무시 = {"정의", "증빙", "서류", "유의", "사항", "비목", "내용", "구분", "기 타", "기타"}
+    경계 = []
+    for i, ln in enumerate(lines):
+        if ln.strip() != "정의":
+            continue
+        # '정의' 위쪽으로 거슬러 올라가며 비목명을 모은다.
+        # 비목명과 '정의' 사이, 그리고 비목명 줄들 사이에 빈 줄이 낀다
+        # ( ['', '재료비', '', '정의'] · ['창업', '', '활동비', '', '정의'] )
+        # → 빈 줄은 건너뛰고, 라벨/불릿을 만나면 멈춘다.
+        j, name, start, steps = i - 1, [], i, 0
+        while j >= 0 and len(name) < 3 and steps < 8:
+            s = lines[j].strip()
+            steps += 1
+            if not s:
+                j -= 1
+                continue
+            if s in 라벨무시 or s.startswith("•"):
+                break
+            name.insert(0, s)
+            start = j
+            j -= 1
+        if name:
+            경계.append((start, "".join(name)))
+
+    if len(경계) < 3:
+        return []
+
+    out = []
+    for k, (start, name) in enumerate(경계):
+        end = 경계[k + 1][0] if k + 1 < len(경계) else len(lines)
+        seg = "\n".join(lines[start:end]).strip()
+        if len(seg) >= 40:
+            out.append((name[:40], seg))
+    return out
+
+
 def chunk_article(본문: str, 조번호: str) -> list[tuple[str | None, str]]:
     """반환: [(항호, 텍스트)]"""
     본문 = 본문.strip()
+
+    # 붙임/별표의 비목 해설표는 비목 단위로 (길이와 무관하게)
+    if (조번호 or "").startswith(("붙임", "별표")):
+        표 = split_비목표(본문)
+        if 표:
+            return [(name, seg) for name, seg in 표]
+
     if len(본문) <= MAX_CHARS:
         return [(None, 본문)]
 
@@ -88,7 +150,10 @@ def main():
     from sentence_transformers import SentenceTransformer
     model = SentenceTransformer(MODEL)
     dim = model.get_sentence_embedding_dimension()
-    print(f"  {MODEL}  ({dim}차원)")
+    # bge-m3 계열은 max_seq_length 가 8192 로 잡혀 있어 긴 청크에서 매우 느리다.
+    # 조 단위 청크(최대 3,000자)는 1024 토큰이면 충분하다.
+    print(f"  {MODEL}  ({dim}차원, max_seq_length {model.max_seq_length} → 1024)")
+    model.max_seq_length = 1024
     assert dim == 1024, f"차원 불일치: {dim}"
 
     with psycopg.connect(DSN) as conn:

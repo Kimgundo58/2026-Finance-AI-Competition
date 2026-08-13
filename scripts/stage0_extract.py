@@ -95,16 +95,20 @@ def _pdf_plumber(path: Path) -> tuple[str, dict[int, int]]:
 def extract_pdf(path: Path) -> tuple[str, dict[int, int]]:
     """PDF → 평문 + {문자오프셋: 페이지번호}.
 
-    pypdf 로 먼저 뽑고, 조문 구조가 안 잡히면 pdfplumber 로 재시도한다.
-    (pdfplumber 는 10배 이상 느리므로 필요한 문서에만 쓴다)
+    ⚠️ pdfplumber 를 기본으로 쓴다. pypdf 는 실패 시 폴백일 뿐이다.
+
+    실측 (L2 통합관리지침 제14차, 55p):
+        pypdf        2.7초  →  조 12개, 제목 0개   ← 쓸 수 없음
+        pdfplumber  12.8초  →  조 83개, 제목 83개  ← 정상
+
+    pypdf 는 한국어 PDF 에서 쉼표·괄호·숫자를 문장 끝으로 밀어내고
+    조문 헤더를 깨뜨린다. 인용 원문이 곧 제품 품질(§원칙 4)이므로
+    문서당 10초를 아끼려고 정확도를 포기할 이유가 없다.
     """
-    text, offsets = _pdf_pypdf(path)
-    if len(_RE_JO_COUNT.findall(text)) >= 5 or len(text) > 3000:
-        return text, offsets
     try:
         return _pdf_plumber(path)
     except Exception:
-        return text, offsets
+        return _pdf_pypdf(path)
 
 
 # ── HWP ──────────────────────────────────────────────────────────
