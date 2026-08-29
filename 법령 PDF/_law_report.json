@@ -1,0 +1,3377 @@
+[
+  {
+    "ref_id": "L01",
+    "keyword": "중소기업창업 지원법",
+    "doc_type": "법률",
+    "as_written": "중소기업창업 지원법",
+    "target": "law",
+    "cited": [
+      "2",
+      "12",
+      "32",
+      "43",
+      "59",
+      "5",
+      "8"
+    ],
+    "cited_raw": "제2조, 제12조, 제32조, 제43조, 제59조, (모두의창업: 제2조제6호·제5조①·제8조③·제32조③)",
+    "parse_notes": [],
+    "flags": [],
+    "files": [
+      {
+        "file": "법령 PDF/L1_법령/L1_중소기업창업지원법_20260701.xml",
+        "kind": "현행",
+        "mst": "281995",
+        "effective_date": "20260701"
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_중소기업창업지원법_20230628_246795.xml",
+        "kind": "시점본",
+        "mst": "246795",
+        "effective_date": "20230628",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_중소기업창업지원법_20230419_244985.xml",
+        "kind": "시점본",
+        "mst": "244985",
+        "effective_date": "20230419",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_중소기업창업지원법_20240828_260845.xml",
+        "kind": "시점본",
+        "mst": "260845",
+        "effective_date": "20240828",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_중소기업창업지원법_20240501_255895.xml",
+        "kind": "시점본",
+        "mst": "255895",
+        "effective_date": "20240501",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_중소기업창업지원법_20240315_254919.xml",
+        "kind": "시점본",
+        "mst": "254919",
+        "effective_date": "20240315",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_중소기업창업지원법_20251001_277133.xml",
+        "kind": "시점본",
+        "mst": "277133",
+        "effective_date": "20251001",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_중소기업창업지원법_20250722_268605.xml",
+        "kind": "시점본",
+        "mst": "268605",
+        "effective_date": "20250722",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_중소기업창업지원법_20250101_267597.xml",
+        "kind": "시점본",
+        "mst": "267597",
+        "effective_date": "20250101",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_중소기업창업지원법_20260602_286603.xml",
+        "kind": "시점본",
+        "mst": "286603",
+        "effective_date": "20260602",
+        "doc_year": 2026
+      }
+    ],
+    "article_titles": [
+      {
+        "ref": "제2조",
+        "title": "정의",
+        "ok": true
+      },
+      {
+        "ref": "제12조",
+        "title": "창업지원정책의 효율화",
+        "ok": true
+      },
+      {
+        "ref": "제32조",
+        "title": "대학 내 창업지원 전담조직의 설립 등",
+        "ok": true
+      },
+      {
+        "ref": "제43조",
+        "title": "재창업기업 성실경영 평가",
+        "ok": true
+      },
+      {
+        "ref": "제59조",
+        "title": "업무기준의 고시",
+        "ok": true
+      },
+      {
+        "ref": "제5조",
+        "title": "적용 범위",
+        "ok": true
+      },
+      {
+        "ref": "제8조",
+        "title": "창업지원시행계획의 수립 등",
+        "ok": true
+      }
+    ],
+    "law_id": "001472",
+    "mst": "281995",
+    "name": "중소기업창업 지원법",
+    "effective_date": "20260701",
+    "promulgation_no": "21293",
+    "law_type": "법률",
+    "ministry": "중소벤처기업부",
+    "status": "수집"
+  },
+  {
+    "ref_id": "L02",
+    "keyword": "중소기업창업 지원법 시행령",
+    "doc_type": "대통령령",
+    "as_written": "〃 시행령",
+    "target": "law",
+    "cited": [
+      "2",
+      "4"
+    ],
+    "cited_raw": "제2조, 제4조",
+    "parse_notes": [],
+    "flags": [],
+    "files": [
+      {
+        "file": "법령 PDF/L1_법령/L1_중소기업창업지원법시행령_20260324.xml",
+        "kind": "현행",
+        "mst": "284871",
+        "effective_date": "20260324"
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_중소기업창업지원법시행령_20231221_257119.xml",
+        "kind": "시점본",
+        "mst": "257119",
+        "effective_date": "20231221",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_중소기업창업지원법시행령_20230207_247961.xml",
+        "kind": "시점본",
+        "mst": "247961",
+        "effective_date": "20230207",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_중소기업창업지원법시행령_20240828_265077.xml",
+        "kind": "시점본",
+        "mst": "265077",
+        "effective_date": "20240828",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_중소기업창업지원법시행령_20240710_263699.xml",
+        "kind": "시점본",
+        "mst": "263699",
+        "effective_date": "20240710",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_중소기업창업지원법시행령_20240601_261939.xml",
+        "kind": "시점본",
+        "mst": "261939",
+        "effective_date": "20240601",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_중소기업창업지원법시행령_20240501_260751.xml",
+        "kind": "시점본",
+        "mst": "260751",
+        "effective_date": "20240501",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_중소기업창업지원법시행령_20251223_280531.xml",
+        "kind": "시점본",
+        "mst": "280531",
+        "effective_date": "20251223",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_중소기업창업지원법시행령_20251001_277509.xml",
+        "kind": "시점본",
+        "mst": "277509",
+        "effective_date": "20251001",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_중소기업창업지원법시행령_20250612_269659.xml",
+        "kind": "시점본",
+        "mst": "269659",
+        "effective_date": "20250612",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_중소기업창업지원법시행령_20260201_283003.xml",
+        "kind": "시점본",
+        "mst": "283003",
+        "effective_date": "20260201",
+        "doc_year": 2026
+      }
+    ],
+    "article_titles": [
+      {
+        "ref": "제2조",
+        "title": "창업의 범위",
+        "ok": true
+      },
+      {
+        "ref": "제4조",
+        "title": "창업에서 제외되는 업종",
+        "ok": true
+      }
+    ],
+    "law_id": "004974",
+    "mst": "284871",
+    "name": "중소기업창업 지원법 시행령",
+    "effective_date": "20260324",
+    "promulgation_no": "36220",
+    "law_type": "대통령령",
+    "ministry": "중소벤처기업부",
+    "status": "수집"
+  },
+  {
+    "ref_id": "L03",
+    "keyword": "주식회사 등의 외부감사에 관한 법률 시행령",
+    "doc_type": "대통령령",
+    "as_written": "「외부감사법 시행령」",
+    "target": "law",
+    "cited": [
+      "5"
+    ],
+    "cited_raw": "제5조",
+    "parse_notes": [],
+    "flags": [],
+    "files": [
+      {
+        "file": "법령 PDF/L1_법령/L1_주식회사등의외부감사에관한법률시행령_20260526.xml",
+        "kind": "현행",
+        "mst": "286317",
+        "effective_date": "20260526"
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_주식회사등의외부감사에관한법률시행령_20231219_257061.xml",
+        "kind": "시점본",
+        "mst": "257061",
+        "effective_date": "20231219",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_주식회사등의외부감사에관한법률시행령_20230502_250585.xml",
+        "kind": "시점본",
+        "mst": "250585",
+        "effective_date": "20230502",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_주식회사등의외부감사에관한법률시행령_20250520_271155.xml",
+        "kind": "시점본",
+        "mst": "271155",
+        "effective_date": "20250520",
+        "doc_year": 2025
+      }
+    ],
+    "article_titles": [
+      {
+        "ref": "제5조",
+        "title": "외부감사의 대상",
+        "ok": true
+      }
+    ],
+    "law_id": "004940",
+    "mst": "286317",
+    "name": "주식회사 등의 외부감사에 관한 법률 시행령",
+    "effective_date": "20260526",
+    "promulgation_no": "36358",
+    "law_type": "대통령령",
+    "ministry": "금융위원회",
+    "status": "수집"
+  },
+  {
+    "ref_id": "L04",
+    "keyword": "출입국관리법 시행령",
+    "doc_type": "대통령령",
+    "as_written": "출입국관리법 시행령 / 출입국 관리법",
+    "target": "law",
+    "cited": [
+      "23"
+    ],
+    "cited_raw": "제23조",
+    "parse_notes": [],
+    "flags": [],
+    "files": [
+      {
+        "file": "법령 PDF/L1_법령/L1_출입국관리법시행령_20250601.xml",
+        "kind": "현행",
+        "mst": "271319",
+        "effective_date": "20250601"
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_출입국관리법시행령_20231214_256765.xml",
+        "kind": "시점본",
+        "mst": "256765",
+        "effective_date": "20231214",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_출입국관리법시행령_20230710_252457.xml",
+        "kind": "시점본",
+        "mst": "252457",
+        "effective_date": "20230710",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_출입국관리법시행령_20230614_251207.xml",
+        "kind": "시점본",
+        "mst": "251207",
+        "effective_date": "20230614",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_출입국관리법시행령_20230307_248709.xml",
+        "kind": "시점본",
+        "mst": "248709",
+        "effective_date": "20230307",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_출입국관리법시행령_20230112_247685.xml",
+        "kind": "시점본",
+        "mst": "247685",
+        "effective_date": "20230112",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_출입국관리법시행령_20230101_246559.xml",
+        "kind": "시점본",
+        "mst": "246559",
+        "effective_date": "20230101",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_출입국관리법시행령_20241029_266139.xml",
+        "kind": "시점본",
+        "mst": "266139",
+        "effective_date": "20241029",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_출입국관리법시행령_20240710_263719.xml",
+        "kind": "시점본",
+        "mst": "263719",
+        "effective_date": "20240710",
+        "doc_year": 2024
+      }
+    ],
+    "article_titles": [
+      {
+        "ref": "제23조",
+        "title": "외국인의 취업과 체류자격",
+        "ok": true
+      }
+    ],
+    "law_id": "005256",
+    "mst": "271319",
+    "name": "출입국관리법 시행령",
+    "effective_date": "20250601",
+    "promulgation_no": "35540",
+    "law_type": "대통령령",
+    "ministry": "법무부",
+    "status": "수집"
+  },
+  {
+    "ref_id": "L05",
+    "keyword": "출입국관리법",
+    "doc_type": "법률",
+    "as_written": "출입국 관리법",
+    "target": "law",
+    "cited": [],
+    "cited_raw": "조항 미특정",
+    "parse_notes": [],
+    "flags": [],
+    "files": [
+      {
+        "file": "법령 PDF/L1_법령/L1_출입국관리법_20260123.xml",
+        "kind": "현행",
+        "mst": "272921",
+        "effective_date": "20260123"
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_출입국관리법_20231214_251683.xml",
+        "kind": "시점본",
+        "mst": "251683",
+        "effective_date": "20231214",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_출입국관리법_20230614_245973.xml",
+        "kind": "시점본",
+        "mst": "245973",
+        "effective_date": "20230614",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_출입국관리법_20251023_269943.xml",
+        "kind": "시점본",
+        "mst": "269943",
+        "effective_date": "20251023",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_출입국관리법_20250722_268557.xml",
+        "kind": "시점본",
+        "mst": "268557",
+        "effective_date": "20250722",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_출입국관리법_20250621_267361.xml",
+        "kind": "시점본",
+        "mst": "267361",
+        "effective_date": "20250621",
+        "doc_year": 2025
+      }
+    ],
+    "article_titles": [],
+    "law_id": "001707",
+    "mst": "272921",
+    "name": "출입국관리법",
+    "effective_date": "20260123",
+    "promulgation_no": "20992",
+    "law_type": "법률",
+    "ministry": "법무부",
+    "status": "수집"
+  },
+  {
+    "ref_id": "L06",
+    "keyword": "국민연금법",
+    "doc_type": "법률",
+    "as_written": "국민연금법",
+    "target": "law",
+    "cited": [],
+    "cited_raw": "조항 미특정",
+    "parse_notes": [],
+    "flags": [],
+    "files": [
+      {
+        "file": "법령 PDF/L1_법령/L1_국민연금법_20260617.xml",
+        "kind": "현행",
+        "mst": "280269",
+        "effective_date": "20260617"
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국민연금법_20230929_249303.xml",
+        "kind": "시점본",
+        "mst": "249303",
+        "effective_date": "20230929",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국민연금법_20230914_251711.xml",
+        "kind": "시점본",
+        "mst": "251711",
+        "effective_date": "20230914",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국민연금법_20241220_267373.xml",
+        "kind": "시점본",
+        "mst": "267373",
+        "effective_date": "20241220",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국민연금법_20240920_265421.xml",
+        "kind": "시점본",
+        "mst": "265421",
+        "effective_date": "20240920",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국민연금법_20240118_257295.xml",
+        "kind": "시점본",
+        "mst": "257295",
+        "effective_date": "20240118",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국민연금법_20251125_279865.xml",
+        "kind": "시점본",
+        "mst": "279865",
+        "effective_date": "20251125",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국민연금법_20251111_279687.xml",
+        "kind": "시점본",
+        "mst": "279687",
+        "effective_date": "20251111",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국민연금법_20251001_276655.xml",
+        "kind": "시점본",
+        "mst": "276655",
+        "effective_date": "20251001",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국민연금법_20260526_286165.xml",
+        "kind": "시점본",
+        "mst": "286165",
+        "effective_date": "20260526",
+        "doc_year": 2026
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국민연금법_20260101_270511.xml",
+        "kind": "시점본",
+        "mst": "270511",
+        "effective_date": "20260101",
+        "doc_year": 2026
+      }
+    ],
+    "article_titles": [],
+    "law_id": "001781",
+    "mst": "280269",
+    "name": "국민연금법",
+    "effective_date": "20260617",
+    "promulgation_no": "21203",
+    "law_type": "법률",
+    "ministry": "보건복지부",
+    "status": "수집"
+  },
+  {
+    "ref_id": "L07",
+    "keyword": "소득세법 시행령",
+    "doc_type": "대통령령",
+    "as_written": "소득세법 시행령",
+    "target": "law",
+    "cited": [],
+    "cited_raw": "조항 미특정(준용)",
+    "parse_notes": [],
+    "flags": [],
+    "files": [
+      {
+        "file": "법령 PDF/L1_법령/L1_소득세법시행령_20260701.xml",
+        "kind": "현행",
+        "mst": "286211",
+        "effective_date": "20260701"
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20231001_254955.xml",
+        "kind": "시점본",
+        "mst": "254955",
+        "effective_date": "20231001",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20230929_255045.xml",
+        "kind": "시점본",
+        "mst": "255045",
+        "effective_date": "20230929",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20230710_252427.xml",
+        "kind": "시점본",
+        "mst": "252427",
+        "effective_date": "20230710",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20230701_248191.xml",
+        "kind": "시점본",
+        "mst": "248191",
+        "effective_date": "20230701",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20230605_249595.xml",
+        "kind": "시점본",
+        "mst": "249595",
+        "effective_date": "20230605",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20230105_244819.xml",
+        "kind": "시점본",
+        "mst": "244819",
+        "effective_date": "20230105",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20230101_247489.xml",
+        "kind": "시점본",
+        "mst": "247489",
+        "effective_date": "20230101",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20230101_240311.xml",
+        "kind": "시점본",
+        "mst": "240311",
+        "effective_date": "20230101",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20241112_266275.xml",
+        "kind": "시점본",
+        "mst": "266275",
+        "effective_date": "20241112",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20240915_265219.xml",
+        "kind": "시점본",
+        "mst": "265219",
+        "effective_date": "20240915",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20240910_265247.xml",
+        "kind": "시점본",
+        "mst": "265247",
+        "effective_date": "20240910",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20240731_264243.xml",
+        "kind": "시점본",
+        "mst": "264243",
+        "effective_date": "20240731",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20240710_263667.xml",
+        "kind": "시점본",
+        "mst": "263667",
+        "effective_date": "20240710",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20240701_260889.xml",
+        "kind": "시점본",
+        "mst": "260889",
+        "effective_date": "20240701",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20240627_263313.xml",
+        "kind": "시점본",
+        "mst": "263313",
+        "effective_date": "20240627",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20240517_262425.xml",
+        "kind": "시점본",
+        "mst": "262425",
+        "effective_date": "20240517",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20240101_257437.xml",
+        "kind": "시점본",
+        "mst": "257437",
+        "effective_date": "20240101",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20251128_279961.xml",
+        "kind": "시점본",
+        "mst": "279961",
+        "effective_date": "20251128",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20251001_277617.xml",
+        "kind": "시점본",
+        "mst": "277617",
+        "effective_date": "20251001",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20250719_271007.xml",
+        "kind": "시점본",
+        "mst": "271007",
+        "effective_date": "20250719",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20250701_272559.xml",
+        "kind": "시점본",
+        "mst": "272559",
+        "effective_date": "20250701",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20250701_269541.xml",
+        "kind": "시점본",
+        "mst": "269541",
+        "effective_date": "20250701",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20250101_267821.xml",
+        "kind": "시점본",
+        "mst": "267821",
+        "effective_date": "20250101",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20250101_229391.xml",
+        "kind": "시점본",
+        "mst": "229391",
+        "effective_date": "20250101",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20260701_283631.xml",
+        "kind": "시점본",
+        "mst": "283631",
+        "effective_date": "20260701",
+        "doc_year": 2026
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20260701_280865.xml",
+        "kind": "시점본",
+        "mst": "280865",
+        "effective_date": "20260701",
+        "doc_year": 2026
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20260423_285631.xml",
+        "kind": "시점본",
+        "mst": "285631",
+        "effective_date": "20260423",
+        "doc_year": 2026
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20260201_282973.xml",
+        "kind": "시점본",
+        "mst": "282973",
+        "effective_date": "20260201",
+        "doc_year": 2026
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20260101_282539.xml",
+        "kind": "시점본",
+        "mst": "282539",
+        "effective_date": "20260101",
+        "doc_year": 2026
+      }
+    ],
+    "article_titles": [],
+    "law_id": "003956",
+    "mst": "286211",
+    "name": "소득세법 시행령",
+    "effective_date": "20260701",
+    "promulgation_no": "36343",
+    "law_type": "대통령령",
+    "ministry": "재정경제부",
+    "status": "수집"
+  },
+  {
+    "ref_id": "L08",
+    "keyword": "공무원 여비 규정",
+    "doc_type": "대통령령",
+    "as_written": "공무원 여비규정 / 공무원 여비지급 규정 / 공무원여비 규정(대통령령 제32168호)",
+    "target": "law",
+    "cited": [
+      "별표1",
+      "별표2",
+      "별표4"
+    ],
+    "cited_raw": "별표 1 제2호, 국외 여비 지급표",
+    "parse_notes": [
+      "보강수집 별표2, 별표4 — 별표 1 은 등급 구분표일 뿐 금액이 없다. 숙박비 실액은 별표 2(국내 여비 지급표), 국외 여비는 별표 4(국외 여비 지급표)"
+    ],
+    "flags": [
+      "보강수집 별표2, 별표4 — 별표 1 은 등급 구분표일 뿐 금액이 없다. 숙박비 실액은 별표 2(국내 여비 지급표), 국외 여비는 별표 4(국외 여비 지급표)"
+    ],
+    "files": [
+      {
+        "file": "법령 PDF/L1_법령/L1_공무원여비규정_20260701.xml",
+        "kind": "현행",
+        "mst": "287535",
+        "effective_date": "20260701"
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_공무원여비규정_20230302_248443.xml",
+        "kind": "시점본",
+        "mst": "248443",
+        "effective_date": "20230302",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_공무원여비규정_20240702_263513.xml",
+        "kind": "시점본",
+        "mst": "263513",
+        "effective_date": "20240702",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_공무원여비규정_20251001_278047.xml",
+        "kind": "시점본",
+        "mst": "278047",
+        "effective_date": "20251001",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_공무원여비규정_20260102_282471.xml",
+        "kind": "시점본",
+        "mst": "282471",
+        "effective_date": "20260102",
+        "doc_year": 2026
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_공무원여비규정_20260102_281713.xml",
+        "kind": "시점본",
+        "mst": "281713",
+        "effective_date": "20260102",
+        "doc_year": 2026
+      }
+    ],
+    "article_titles": [
+      {
+        "ref": "별표 1",
+        "title": "여비 지급 구분표(제3조 관련)",
+        "ok": true
+      },
+      {
+        "ref": "별표 2",
+        "title": "국내 여비 지급표(제10조부터 제13조까지 및 제16조제1항 관련)",
+        "ok": true
+      },
+      {
+        "ref": "별표 4",
+        "title": "국외 여비 지급표(제16조제1항 관련)",
+        "ok": true
+      }
+    ],
+    "law_id": "009402",
+    "mst": "287535",
+    "name": "공무원 여비 규정",
+    "effective_date": "20260701",
+    "promulgation_no": "36492",
+    "law_type": "대통령령",
+    "ministry": "인사혁신처",
+    "status": "수집"
+  },
+  {
+    "ref_id": "L09",
+    "keyword": "민법",
+    "doc_type": "법률",
+    "as_written": "민법",
+    "target": "law",
+    "cited": [
+      "397",
+      "767",
+      "777"
+    ],
+    "cited_raw": "제397조, 제767조",
+    "parse_notes": [
+      "보강수집 777 — 문서는 제767조(친족의 정의)를 인용하나 친족 범위 실체 규정은 제777조"
+    ],
+    "flags": [
+      "보강수집 777 — 문서는 제767조(친족의 정의)를 인용하나 친족 범위 실체 규정은 제777조"
+    ],
+    "files": [
+      {
+        "file": "법령 PDF/L1_법령/L1_민법_20260317.xml",
+        "kind": "현행",
+        "mst": "284415",
+        "effective_date": "20260317"
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_민법_20230628_246569.xml",
+        "kind": "시점본",
+        "mst": "246569",
+        "effective_date": "20230628",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_민법_20240517_251069.xml",
+        "kind": "시점본",
+        "mst": "251069",
+        "effective_date": "20240517",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_민법_20250131_265307.xml",
+        "kind": "시점본",
+        "mst": "265307",
+        "effective_date": "20250131",
+        "doc_year": 2025
+      }
+    ],
+    "article_titles": [
+      {
+        "ref": "제397조",
+        "title": "금전채무불이행에 대한 특칙",
+        "ok": true
+      },
+      {
+        "ref": "제767조",
+        "title": "친족의 정의",
+        "ok": true
+      },
+      {
+        "ref": "제777조",
+        "title": "친족의 범위",
+        "ok": true
+      }
+    ],
+    "law_id": "001706",
+    "mst": "284415",
+    "name": "민법",
+    "effective_date": "20260317",
+    "promulgation_no": "21454",
+    "law_type": "법률",
+    "ministry": "법무부",
+    "status": "수집"
+  },
+  {
+    "ref_id": "L10",
+    "keyword": "기술의 이전 및 사업화 촉진에 관한 법률",
+    "doc_type": "법률",
+    "as_written": "〃",
+    "target": "law",
+    "cited": [
+      "35"
+    ],
+    "cited_raw": "제35조",
+    "parse_notes": [],
+    "flags": [],
+    "files": [
+      {
+        "file": "법령 PDF/L1_법령/L1_기술의이전및사업화촉진에관한법률_20251001.xml",
+        "kind": "현행",
+        "mst": "276481",
+        "effective_date": "20251001"
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_기술의이전및사업화촉진에관한법률_20240710_258487.xml",
+        "kind": "시점본",
+        "mst": "258487",
+        "effective_date": "20240710",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_기술의이전및사업화촉진에관한법률_20250121_268577.xml",
+        "kind": "시점본",
+        "mst": "268577",
+        "effective_date": "20250121",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_기술의이전및사업화촉진에관한법률_20261127_286279.xml",
+        "kind": "시점본",
+        "mst": "286279",
+        "effective_date": "20261127",
+        "doc_year": 2026
+      }
+    ],
+    "article_titles": [
+      {
+        "ref": "제35조",
+        "title": "기술평가기관의 지정 등",
+        "ok": true
+      }
+    ],
+    "law_id": "009371",
+    "mst": "276481",
+    "name": "기술의 이전 및 사업화 촉진에 관한 법률",
+    "effective_date": "20251001",
+    "promulgation_no": "21065",
+    "law_type": "법률",
+    "ministry": "산업통상부",
+    "status": "수집"
+  },
+  {
+    "ref_id": "L11",
+    "keyword": "산업안전보건법",
+    "doc_type": "법률",
+    "as_written": "〃",
+    "target": "law",
+    "cited": [
+      "129"
+    ],
+    "cited_raw": "제129조",
+    "parse_notes": [],
+    "flags": [],
+    "files": [
+      {
+        "file": "법령 PDF/L1_법령/L1_산업안전보건법_20260801.xml",
+        "kind": "현행",
+        "mst": "283449",
+        "effective_date": "20260801"
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_산업안전보건법_20230808_253643.xml",
+        "kind": "시점본",
+        "mst": "253643",
+        "effective_date": "20230808",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_산업안전보건법_20240517_253521.xml",
+        "kind": "시점본",
+        "mst": "253521",
+        "effective_date": "20240517",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_산업안전보건법_20251001_276853.xml",
+        "kind": "시점본",
+        "mst": "276853",
+        "effective_date": "20251001",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_산업안전보건법_20250722_268551.xml",
+        "kind": "시점본",
+        "mst": "268551",
+        "effective_date": "20250722",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_산업안전보건법_20250601_265961.xml",
+        "kind": "시점본",
+        "mst": "265961",
+        "effective_date": "20250601",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_산업안전보건법_20261208_285379.xml",
+        "kind": "시점본",
+        "mst": "285379",
+        "effective_date": "20261208",
+        "doc_year": 2026
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_산업안전보건법_20260707_287805.xml",
+        "kind": "시점본",
+        "mst": "287805",
+        "effective_date": "20260707",
+        "doc_year": 2026
+      }
+    ],
+    "article_titles": [
+      {
+        "ref": "제129조",
+        "title": "일반건강진단",
+        "ok": true
+      }
+    ],
+    "law_id": "001766",
+    "mst": "283449",
+    "name": "산업안전보건법",
+    "effective_date": "20260801",
+    "promulgation_no": "21374",
+    "law_type": "법률",
+    "ministry": "고용노동부",
+    "status": "수집"
+  },
+  {
+    "ref_id": "L12",
+    "keyword": "부정청탁 및 금품등 수수의 금지에 관한 법률",
+    "doc_type": "법률",
+    "as_written": "청탁금지법",
+    "target": "law",
+    "cited": [],
+    "cited_raw": "조항 미특정",
+    "parse_notes": [],
+    "flags": [],
+    "files": [
+      {
+        "file": "법령 PDF/L1_법령/L1_부정청탁및금품등수수의금지에관한법률_20250121.xml",
+        "kind": "현행",
+        "mst": "268655",
+        "effective_date": "20250121"
+      }
+    ],
+    "article_titles": [],
+    "law_id": "012268",
+    "mst": "268655",
+    "name": "부정청탁 및 금품등 수수의 금지에 관한 법률",
+    "effective_date": "20250121",
+    "promulgation_no": "20712",
+    "law_type": "법률",
+    "ministry": "국민권익위원회",
+    "status": "수집"
+  },
+  {
+    "ref_id": "L13",
+    "keyword": "부정청탁 및 금품등 수수의 금지에 관한 법률 시행령",
+    "doc_type": "대통령령",
+    "as_written": "〃 시행령",
+    "target": "law",
+    "cited": [
+      "별표1"
+    ],
+    "cited_raw": "별표 1",
+    "parse_notes": [],
+    "flags": [],
+    "files": [
+      {
+        "file": "법령 PDF/L1_법령/L1_부정청탁및금품등수수의금지에관한법률시행령_20260630.xml",
+        "kind": "현행",
+        "mst": "287511",
+        "effective_date": "20260630"
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_부정청탁및금품등수수의금지에관한법률시행령_20230830_254237.xml",
+        "kind": "시점본",
+        "mst": "254237",
+        "effective_date": "20230830",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_부정청탁및금품등수수의금지에관한법률시행령_20240827_265085.xml",
+        "kind": "시점본",
+        "mst": "265085",
+        "effective_date": "20240827",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_부정청탁및금품등수수의금지에관한법률시행령_20240423_261911.xml",
+        "kind": "시점본",
+        "mst": "261911",
+        "effective_date": "20240423",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_부정청탁및금품등수수의금지에관한법률시행령_20251230_281817.xml",
+        "kind": "시점본",
+        "mst": "281817",
+        "effective_date": "20251230",
+        "doc_year": 2025
+      }
+    ],
+    "article_titles": [
+      {
+        "ref": "별표 1",
+        "title": "음식물ㆍ경조사비ㆍ선물 등의 가액 범위(제17조제1항 관련)",
+        "ok": true
+      }
+    ],
+    "law_id": "012661",
+    "mst": "287511",
+    "name": "부정청탁 및 금품등 수수의 금지에 관한 법률 시행령",
+    "effective_date": "20260630",
+    "promulgation_no": "36485",
+    "law_type": "대통령령",
+    "ministry": "국민권익위원회",
+    "status": "수집"
+  },
+  {
+    "ref_id": "L14",
+    "keyword": "인공지능 발전과 신뢰 기반 조성 등에 관한 기본법",
+    "doc_type": "법률",
+    "as_written": "'인공지능 기본법'",
+    "target": "law",
+    "cited": [],
+    "cited_raw": "조항 미특정",
+    "parse_notes": [],
+    "flags": [],
+    "files": [
+      {
+        "file": "법령 PDF/L1_법령/L1_인공지능발전과신뢰기반조성등에관한기본법_20260721.xml",
+        "kind": "현행",
+        "mst": "282791",
+        "effective_date": "20260721"
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_인공지능발전과신뢰기반조성등에관한기본법_20260122_276241.xml",
+        "kind": "시점본",
+        "mst": "276241",
+        "effective_date": "20260122",
+        "doc_year": 2026
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_인공지능발전과신뢰기반조성등에관한기본법_20260122_268543.xml",
+        "kind": "시점본",
+        "mst": "268543",
+        "effective_date": "20260122",
+        "doc_year": 2026
+      }
+    ],
+    "article_titles": [],
+    "law_id": "014820",
+    "mst": "282791",
+    "name": "인공지능 발전과 신뢰 기반 조성 등에 관한 기본법",
+    "effective_date": "20260721",
+    "promulgation_no": "21311",
+    "law_type": "법률",
+    "ministry": "과학기술정보통신부",
+    "status": "수집"
+  },
+  {
+    "ref_id": "L15",
+    "keyword": "근로기준법",
+    "doc_type": "법률",
+    "as_written": "근로기준법",
+    "target": "law",
+    "cited": [],
+    "cited_raw": "조항 미특정",
+    "parse_notes": [],
+    "flags": [],
+    "files": [
+      {
+        "file": "법령 PDF/L1_법령/L1_근로기준법_20260820.xml",
+        "kind": "현행",
+        "mst": "283457",
+        "effective_date": "20260820"
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_근로기준법_20241022_265959.xml",
+        "kind": "시점본",
+        "mst": "265959",
+        "effective_date": "20241022",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_근로기준법_20251001_276849.xml",
+        "kind": "시점본",
+        "mst": "276849",
+        "effective_date": "20251001",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_근로기준법_20261210_286771.xml",
+        "kind": "시점본",
+        "mst": "286771",
+        "effective_date": "20261210",
+        "doc_year": 2026
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_근로기준법_20261208_285279.xml",
+        "kind": "시점본",
+        "mst": "285279",
+        "effective_date": "20261208",
+        "doc_year": 2026
+      }
+    ],
+    "article_titles": [],
+    "law_id": "001872",
+    "mst": "283457",
+    "name": "근로기준법",
+    "effective_date": "20260820",
+    "promulgation_no": "21373",
+    "law_type": "법률",
+    "ministry": "고용노동부",
+    "status": "수집"
+  },
+  {
+    "ref_id": "L16",
+    "keyword": "근로자퇴직급여 보장법",
+    "doc_type": "법률",
+    "as_written": "근로자퇴직급여보장법",
+    "target": "law",
+    "cited": [],
+    "cited_raw": "조항 미특정",
+    "parse_notes": [],
+    "flags": [],
+    "files": [
+      {
+        "file": "법령 PDF/L1_법령/L1_근로자퇴직급여보장법_20260701.xml",
+        "kind": "현행",
+        "mst": "284455",
+        "effective_date": "20260701"
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_근로자퇴직급여보장법_20251111_279829.xml",
+        "kind": "시점본",
+        "mst": "279829",
+        "effective_date": "20251111",
+        "doc_year": 2025
+      }
+    ],
+    "article_titles": [],
+    "law_id": "009883",
+    "mst": "284455",
+    "name": "근로자퇴직급여 보장법",
+    "effective_date": "20260701",
+    "promulgation_no": "21475",
+    "law_type": "법률",
+    "ministry": "고용노동부",
+    "status": "수집"
+  },
+  {
+    "ref_id": "L17",
+    "keyword": "최저임금법",
+    "doc_type": "법률",
+    "as_written": "최저시급·법정최저급여",
+    "target": "law",
+    "cited": [],
+    "cited_raw": "조항 미특정",
+    "parse_notes": [],
+    "flags": [],
+    "files": [
+      {
+        "file": "법령 PDF/L1_법령/L1_최저임금법_20200526.xml",
+        "kind": "현행",
+        "mst": "218303",
+        "effective_date": "20200526"
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_최저임금법_20261208_285389.xml",
+        "kind": "시점본",
+        "mst": "285389",
+        "effective_date": "20261208",
+        "doc_year": 2026
+      }
+    ],
+    "article_titles": [],
+    "law_id": "000129",
+    "mst": "218303",
+    "name": "최저임금법",
+    "effective_date": "20200526",
+    "promulgation_no": "17326",
+    "law_type": "법률",
+    "ministry": "고용노동부",
+    "status": "수집"
+  },
+  {
+    "ref_id": "L18",
+    "keyword": "고등교육법",
+    "doc_type": "법률",
+    "as_written": "고등교육법",
+    "target": "law",
+    "cited": [],
+    "cited_raw": "조항 미특정",
+    "parse_notes": [],
+    "flags": [],
+    "files": [
+      {
+        "file": "법령 PDF/L1_법령/L1_고등교육법_20260811.xml",
+        "kind": "현행",
+        "mst": "283297",
+        "effective_date": "20260811"
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_고등교육법_20230710_251527.xml",
+        "kind": "시점본",
+        "mst": "251527",
+        "effective_date": "20230710",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_고등교육법_20230419_244957.xml",
+        "kind": "시점본",
+        "mst": "244957",
+        "effective_date": "20230419",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_고등교육법_20241022_265805.xml",
+        "kind": "시점본",
+        "mst": "265805",
+        "effective_date": "20241022",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_고등교육법_20240814_260177.xml",
+        "kind": "시점본",
+        "mst": "260177",
+        "effective_date": "20240814",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_고등교육법_20251001_273309.xml",
+        "kind": "시점본",
+        "mst": "273309",
+        "effective_date": "20251001",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_고등교육법_20250722_268513.xml",
+        "kind": "시점본",
+        "mst": "268513",
+        "effective_date": "20250722",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_고등교육법_20250621_267347.xml",
+        "kind": "시점본",
+        "mst": "267347",
+        "effective_date": "20250621",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_고등교육법_20261203_280021.xml",
+        "kind": "시점본",
+        "mst": "280021",
+        "effective_date": "20261203",
+        "doc_year": 2026
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_고등교육법_20261120_286083.xml",
+        "kind": "시점본",
+        "mst": "286083",
+        "effective_date": "20261120",
+        "doc_year": 2026
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_고등교육법_20260911_283883.xml",
+        "kind": "시점본",
+        "mst": "283883",
+        "effective_date": "20260911",
+        "doc_year": 2026
+      }
+    ],
+    "article_titles": [],
+    "law_id": "000899",
+    "mst": "283297",
+    "name": "고등교육법",
+    "effective_date": "20260811",
+    "promulgation_no": "21332",
+    "law_type": "법률",
+    "ministry": "교육부",
+    "status": "수집"
+  },
+  {
+    "ref_id": "L19",
+    "keyword": "공무원 인재개발법",
+    "doc_type": "법률",
+    "as_written": "**공무원교육훈련법**(구 법명)",
+    "target": "law",
+    "cited": [],
+    "cited_raw": "조항 미특정",
+    "parse_notes": [],
+    "flags": [
+      "구법명"
+    ],
+    "files": [
+      {
+        "file": "법령 PDF/L1_법령/L1_공무원인재개발법_20221115.xml",
+        "kind": "현행",
+        "mst": "245371",
+        "effective_date": "20221115"
+      }
+    ],
+    "article_titles": [],
+    "law_id": "001343",
+    "mst": "245371",
+    "name": "공무원 인재개발법",
+    "effective_date": "20221115",
+    "promulgation_no": "19062",
+    "law_type": "법률",
+    "ministry": "인사혁신처",
+    "status": "수집"
+  },
+  {
+    "ref_id": "L20",
+    "keyword": "보조금 관리에 관한 법률",
+    "doc_type": "법률",
+    "as_written": "보조금 관리에 관한 법률 / 보조금법",
+    "target": "law",
+    "cited": [
+      "31-2"
+    ],
+    "cited_raw": "제31조의2",
+    "parse_notes": [],
+    "flags": [],
+    "files": [
+      {
+        "file": "법령 PDF/L1_법령/L1_보조금관리에관한법률_20260602.xml",
+        "kind": "현행",
+        "mst": "286449",
+        "effective_date": "20260602"
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_보조금관리에관한법률_20240326_261431.xml",
+        "kind": "시점본",
+        "mst": "261431",
+        "effective_date": "20240326",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_보조금관리에관한법률_20240119_252685.xml",
+        "kind": "시점본",
+        "mst": "252685",
+        "effective_date": "20240119",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_보조금관리에관한법률_20260102_276113.xml",
+        "kind": "시점본",
+        "mst": "276113",
+        "effective_date": "20260102",
+        "doc_year": 2026
+      }
+    ],
+    "article_titles": [
+      {
+        "ref": "제31조의2",
+        "title": "보조사업 수행 배제 등",
+        "ok": true
+      }
+    ],
+    "law_id": "000729",
+    "mst": "286449",
+    "name": "보조금 관리에 관한 법률",
+    "effective_date": "20260602",
+    "promulgation_no": "21751",
+    "law_type": "법률",
+    "ministry": "기획예산처",
+    "status": "수집"
+  },
+  {
+    "ref_id": "L21",
+    "keyword": "국가를 당사자로 하는 계약에 관한 법률",
+    "doc_type": "법률",
+    "as_written": "국가계약법",
+    "target": "law",
+    "cited": [],
+    "cited_raw": "조항 미특정",
+    "parse_notes": [],
+    "flags": [],
+    "files": [
+      {
+        "file": "법령 PDF/L1_법령/L1_국가를당사자로하는계약에관한법률_20260611.xml",
+        "kind": "현행",
+        "mst": "283877",
+        "effective_date": "20260611"
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국가를당사자로하는계약에관한법률_20231019_252681.xml",
+        "kind": "시점본",
+        "mst": "252681",
+        "effective_date": "20231019",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국가를당사자로하는계약에관한법률_20230929_249397.xml",
+        "kind": "시점본",
+        "mst": "249397",
+        "effective_date": "20230929",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국가를당사자로하는계약에관한법률_20240927_261415.xml",
+        "kind": "시점본",
+        "mst": "261415",
+        "effective_date": "20240927",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국가를당사자로하는계약에관한법률_20260102_277151.xml",
+        "kind": "시점본",
+        "mst": "277151",
+        "effective_date": "20260102",
+        "doc_year": 2026
+      }
+    ],
+    "article_titles": [],
+    "law_id": "000695",
+    "mst": "283877",
+    "name": "국가를 당사자로 하는 계약에 관한 법률",
+    "effective_date": "20260611",
+    "promulgation_no": "21418",
+    "law_type": "법률",
+    "ministry": "재정경제부,조달청",
+    "status": "수집"
+  },
+  {
+    "ref_id": "L22",
+    "keyword": "국가를 당사자로 하는 계약에 관한 법률 시행령",
+    "doc_type": "대통령령",
+    "as_written": "국가계약법 시행령",
+    "target": "law",
+    "cited": [],
+    "cited_raw": "조항 미특정",
+    "parse_notes": [],
+    "flags": [],
+    "files": [
+      {
+        "file": "법령 PDF/L1_법령/L1_국가를당사자로하는계약에관한법률시행령_20260603.xml",
+        "kind": "현행",
+        "mst": "285893",
+        "effective_date": "20260603"
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국가를당사자로하는계약에관한법률시행령_20231116_255991.xml",
+        "kind": "시점본",
+        "mst": "255991",
+        "effective_date": "20231116",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국가를당사자로하는계약에관한법률시행령_20230605_249589.xml",
+        "kind": "시점본",
+        "mst": "249589",
+        "effective_date": "20230605",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국가를당사자로하는계약에관한법률시행령_20230105_247213.xml",
+        "kind": "시점본",
+        "mst": "247213",
+        "effective_date": "20230105",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국가를당사자로하는계약에관한법률시행령_20241224_267171.xml",
+        "kind": "시점본",
+        "mst": "267171",
+        "effective_date": "20241224",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국가를당사자로하는계약에관한법률시행령_20240927_265313.xml",
+        "kind": "시점본",
+        "mst": "265313",
+        "effective_date": "20240927",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국가를당사자로하는계약에관한법률시행령_20240716_264001.xml",
+        "kind": "시점본",
+        "mst": "264001",
+        "effective_date": "20240716",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국가를당사자로하는계약에관한법률시행령_20240710_263629.xml",
+        "kind": "시점본",
+        "mst": "263629",
+        "effective_date": "20240710",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국가를당사자로하는계약에관한법률시행령_20240517_262571.xml",
+        "kind": "시점본",
+        "mst": "262571",
+        "effective_date": "20240517",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국가를당사자로하는계약에관한법률시행령_20240517_262495.xml",
+        "kind": "시점본",
+        "mst": "262495",
+        "effective_date": "20240517",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국가를당사자로하는계약에관한법률시행령_20251001_277589.xml",
+        "kind": "시점본",
+        "mst": "277589",
+        "effective_date": "20251001",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국가를당사자로하는계약에관한법률시행령_20250823_273045.xml",
+        "kind": "시점본",
+        "mst": "273045",
+        "effective_date": "20250823",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국가를당사자로하는계약에관한법률시행령_20250422_270701.xml",
+        "kind": "시점본",
+        "mst": "270701",
+        "effective_date": "20250422",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국가를당사자로하는계약에관한법률시행령_20260512_285979.xml",
+        "kind": "시점본",
+        "mst": "285979",
+        "effective_date": "20260512",
+        "doc_year": 2026
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국가를당사자로하는계약에관한법률시행령_20260102_280803.xml",
+        "kind": "시점본",
+        "mst": "280803",
+        "effective_date": "20260102",
+        "doc_year": 2026
+      }
+    ],
+    "article_titles": [],
+    "law_id": "002652",
+    "mst": "285893",
+    "name": "국가를 당사자로 하는 계약에 관한 법률 시행령",
+    "effective_date": "20260603",
+    "promulgation_no": "36338",
+    "law_type": "대통령령",
+    "ministry": "재정경제부,조달청",
+    "status": "수집"
+  },
+  {
+    "ref_id": "L23",
+    "keyword": "공공재정 부정청구 금지 및 부정이익 환수 등에 관한 법률",
+    "doc_type": "법률",
+    "as_written": "공공재정환수법",
+    "target": "law",
+    "cited": [],
+    "cited_raw": "조항 미특정",
+    "parse_notes": [],
+    "flags": [],
+    "files": [
+      {
+        "file": "법령 PDF/L1_법령/L1_공공재정부정청구금지및부정이익환수등에관한법률_20240927.xml",
+        "kind": "현행",
+        "mst": "261479",
+        "effective_date": "20240927"
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_공공재정부정청구금지및부정이익환수등에관한법률_20230622_249031.xml",
+        "kind": "시점본",
+        "mst": "249031",
+        "effective_date": "20230622",
+        "doc_year": 2023
+      }
+    ],
+    "article_titles": [],
+    "law_id": "013463",
+    "mst": "261479",
+    "name": "공공재정 부정청구 금지 및 부정이익 환수 등에 관한 법률",
+    "effective_date": "20240927",
+    "promulgation_no": "20426",
+    "law_type": "법률",
+    "ministry": "국민권익위원회",
+    "status": "수집"
+  },
+  {
+    "ref_id": "L24",
+    "keyword": "소상공인 보호 및 지원에 관한 법률",
+    "doc_type": "법률",
+    "as_written": "〃",
+    "target": "law",
+    "cited": [
+      "17"
+    ],
+    "cited_raw": "제17조",
+    "parse_notes": [],
+    "flags": [],
+    "files": [
+      {
+        "file": "법령 PDF/L1_법령/L1_소상공인보호및지원에관한법률_20260701.xml",
+        "kind": "현행",
+        "mst": "281985",
+        "effective_date": "20260701"
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_소상공인보호및지원에관한법률_20230704_247295.xml",
+        "kind": "시점본",
+        "mst": "247295",
+        "effective_date": "20230704",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_소상공인보호및지원에관한법률_20230328_249355.xml",
+        "kind": "시점본",
+        "mst": "249355",
+        "effective_date": "20230328",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_소상공인보호및지원에관한법률_20240920_265493.xml",
+        "kind": "시점본",
+        "mst": "265493",
+        "effective_date": "20240920",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_소상공인보호및지원에관한법률_20240717_258839.xml",
+        "kind": "시점본",
+        "mst": "258839",
+        "effective_date": "20240717",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_소상공인보호및지원에관한법률_20240710_258441.xml",
+        "kind": "시점본",
+        "mst": "258441",
+        "effective_date": "20240710",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_소상공인보호및지원에관한법률_20251001_277117.xml",
+        "kind": "시점본",
+        "mst": "277117",
+        "effective_date": "20251001",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_소상공인보호및지원에관한법률_20250722_268277.xml",
+        "kind": "시점본",
+        "mst": "268277",
+        "effective_date": "20250722",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_소상공인보호및지원에관한법률_20261127_286259.xml",
+        "kind": "시점본",
+        "mst": "286259",
+        "effective_date": "20261127",
+        "doc_year": 2026
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_소상공인보호및지원에관한법률_20260617_280273.xml",
+        "kind": "시점본",
+        "mst": "280273",
+        "effective_date": "20260617",
+        "doc_year": 2026
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_소상공인보호및지원에관한법률_20260603_280159.xml",
+        "kind": "시점본",
+        "mst": "280159",
+        "effective_date": "20260603",
+        "doc_year": 2026
+      }
+    ],
+    "article_titles": [
+      {
+        "ref": "제17조",
+        "title": "소상공인시장진흥공단의 설립 등",
+        "ok": true
+      }
+    ],
+    "law_id": "000360",
+    "mst": "281985",
+    "name": "소상공인 보호 및 지원에 관한 법률",
+    "effective_date": "20260701",
+    "promulgation_no": "21288",
+    "law_type": "법률",
+    "ministry": "중소벤처기업부",
+    "status": "수집"
+  },
+  {
+    "ref_id": "L25",
+    "keyword": "상법",
+    "doc_type": "법률",
+    "as_written": "상법",
+    "target": "law",
+    "cited": [],
+    "cited_raw": "조항 미특정",
+    "parse_notes": [],
+    "flags": [],
+    "files": [
+      {
+        "file": "법령 PDF/L1_법령/L1_상법_20260723.xml",
+        "kind": "현행",
+        "mst": "272919",
+        "effective_date": "20260723"
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_상법_20250131_265387.xml",
+        "kind": "시점본",
+        "mst": "265387",
+        "effective_date": "20250131",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_상법_20260910_273629.xml",
+        "kind": "시점본",
+        "mst": "273629",
+        "effective_date": "20260910",
+        "doc_year": 2026
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_상법_20260306_284143.xml",
+        "kind": "시점본",
+        "mst": "284143",
+        "effective_date": "20260306",
+        "doc_year": 2026
+      }
+    ],
+    "article_titles": [],
+    "law_id": "001702",
+    "mst": "272919",
+    "name": "상법",
+    "effective_date": "20260723",
+    "promulgation_no": "20991",
+    "law_type": "법률",
+    "ministry": "법무부",
+    "status": "수집"
+  },
+  {
+    "ref_id": "L26",
+    "keyword": "형법",
+    "doc_type": "법률",
+    "as_written": "형법",
+    "target": "law",
+    "cited": [],
+    "cited_raw": "조항 미특정(사기·업무방해)",
+    "parse_notes": [],
+    "flags": [],
+    "files": [
+      {
+        "file": "법령 PDF/L1_법령/L1_형법_20260312.xml",
+        "kind": "현행",
+        "mst": "284025",
+        "effective_date": "20260312"
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_형법_20230808_253323.xml",
+        "kind": "시점본",
+        "mst": "253323",
+        "effective_date": "20230808",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_형법_20251231_282557.xml",
+        "kind": "시점본",
+        "mst": "282557",
+        "effective_date": "20251231",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_형법_20251223_280439.xml",
+        "kind": "시점본",
+        "mst": "280439",
+        "effective_date": "20251223",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_형법_20250408_270563.xml",
+        "kind": "시점본",
+        "mst": "270563",
+        "effective_date": "20250408",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_형법_20250318_269905.xml",
+        "kind": "시점본",
+        "mst": "269905",
+        "effective_date": "20250318",
+        "doc_year": 2025
+      }
+    ],
+    "article_titles": [],
+    "law_id": "001692",
+    "mst": "284025",
+    "name": "형법",
+    "effective_date": "20260312",
+    "promulgation_no": "21450",
+    "law_type": "법률",
+    "ministry": "법무부",
+    "status": "수집"
+  },
+  {
+    "ref_id": "L27",
+    "keyword": "국세징수법",
+    "doc_type": "법률",
+    "as_written": "〃",
+    "target": "law",
+    "cited": [
+      "105"
+    ],
+    "cited_raw": "제105조",
+    "parse_notes": [],
+    "flags": [],
+    "files": [
+      {
+        "file": "법령 PDF/L1_법령/L1_국세징수법_20260602.xml",
+        "kind": "현행",
+        "mst": "286427",
+        "effective_date": "20260602"
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국세징수법_20230605_248481.xml",
+        "kind": "시점본",
+        "mst": "248481",
+        "effective_date": "20230605",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국세징수법_20230401_247435.xml",
+        "kind": "시점본",
+        "mst": "247435",
+        "effective_date": "20230401",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국세징수법_20240719_252777.xml",
+        "kind": "시점본",
+        "mst": "252777",
+        "effective_date": "20240719",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국세징수법_20240701_257979.xml",
+        "kind": "시점본",
+        "mst": "257979",
+        "effective_date": "20240701",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국세징수법_20250101_267583.xml",
+        "kind": "시점본",
+        "mst": "267583",
+        "effective_date": "20250101",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국세징수법_20261001_280377.xml",
+        "kind": "시점본",
+        "mst": "280377",
+        "effective_date": "20261001",
+        "doc_year": 2026
+      }
+    ],
+    "article_titles": [
+      {
+        "ref": "제105조",
+        "title": "압류ㆍ매각의 유예",
+        "ok": true
+      }
+    ],
+    "law_id": "001585",
+    "mst": "286427",
+    "name": "국세징수법",
+    "effective_date": "20260602",
+    "promulgation_no": "21713",
+    "law_type": "법률",
+    "ministry": "재정경제부",
+    "status": "수집"
+  },
+  {
+    "ref_id": "L28",
+    "keyword": "지방세징수법",
+    "doc_type": "법률",
+    "as_written": "〃",
+    "target": "law",
+    "cited": [
+      "105"
+    ],
+    "cited_raw": "제105조",
+    "parse_notes": [],
+    "flags": [],
+    "files": [
+      {
+        "file": "법령 PDF/L1_법령/L1_지방세징수법_20260205.xml",
+        "kind": "현행",
+        "mst": "283259",
+        "effective_date": "20260205"
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_지방세징수법_20230605_248517.xml",
+        "kind": "시점본",
+        "mst": "248517",
+        "effective_date": "20230605",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_지방세징수법_20230401_248607.xml",
+        "kind": "시점본",
+        "mst": "248607",
+        "effective_date": "20230401",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_지방세징수법_20230101_239761.xml",
+        "kind": "시점본",
+        "mst": "239761",
+        "effective_date": "20230101",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_지방세징수법_20240719_252785.xml",
+        "kind": "시점본",
+        "mst": "252785",
+        "effective_date": "20240719",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_지방세징수법_20240701_257513.xml",
+        "kind": "시점본",
+        "mst": "257513",
+        "effective_date": "20240701",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_지방세징수법_20240101_224907.xml",
+        "kind": "시점본",
+        "mst": "224907",
+        "effective_date": "20240101",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_지방세징수법_20250101_268021.xml",
+        "kind": "시점본",
+        "mst": "268021",
+        "effective_date": "20250101",
+        "doc_year": 2025
+      }
+    ],
+    "article_titles": [
+      {
+        "ref": "제105조",
+        "title": "체납처분 유예",
+        "ok": true
+      }
+    ],
+    "law_id": "012708",
+    "mst": "283259",
+    "name": "지방세징수법",
+    "effective_date": "20260205",
+    "promulgation_no": "21327",
+    "law_type": "법률",
+    "ministry": "행정안전부",
+    "status": "수집"
+  },
+  {
+    "ref_id": "L29",
+    "keyword": "특정 금융거래정보의 보고 및 이용 등에 관한 법률",
+    "doc_type": "법률",
+    "as_written": "〃",
+    "target": "law",
+    "cited": [
+      "5-2"
+    ],
+    "cited_raw": "제5조의2",
+    "parse_notes": [],
+    "flags": [],
+    "files": [
+      {
+        "file": "법령 PDF/L1_법령/L1_특정금융거래정보의보고및이용등에관한법률_20260820.xml",
+        "kind": "현행",
+        "mst": "283365",
+        "effective_date": "20260820"
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_특정금융거래정보의보고및이용등에관한법률_20240719_252787.xml",
+        "kind": "시점본",
+        "mst": "252787",
+        "effective_date": "20240719",
+        "doc_year": 2024
+      }
+    ],
+    "article_titles": [
+      {
+        "ref": "제5조의2",
+        "title": "금융회사등의 고객 확인의무",
+        "ok": true
+      }
+    ],
+    "law_id": "009244",
+    "mst": "283365",
+    "name": "특정 금융거래정보의 보고 및 이용 등에 관한 법률",
+    "effective_date": "20260820",
+    "promulgation_no": "21358",
+    "law_type": "법률",
+    "ministry": "금융위원회,법무부",
+    "status": "수집"
+  },
+  {
+    "ref_id": "L30",
+    "keyword": "국세기본법",
+    "doc_type": "법률",
+    "as_written": "〃",
+    "target": "law",
+    "cited": [
+      "39"
+    ],
+    "cited_raw": "제39조",
+    "parse_notes": [],
+    "flags": [],
+    "files": [
+      {
+        "file": "법령 PDF/L1_법령/L1_국세기본법_20260811.xml",
+        "kind": "현행",
+        "mst": "288571",
+        "effective_date": "20260811"
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국세기본법_20230401_247433.xml",
+        "kind": "시점본",
+        "mst": "247433",
+        "effective_date": "20230401",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국세기본법_20240401_257977.xml",
+        "kind": "시점본",
+        "mst": "257977",
+        "effective_date": "20240401",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국세기본법_20251111_279813.xml",
+        "kind": "시점본",
+        "mst": "279813",
+        "effective_date": "20251111",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국세기본법_20251001_276083.xml",
+        "kind": "시점본",
+        "mst": "276083",
+        "effective_date": "20251001",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국세기본법_20250915_269803.xml",
+        "kind": "시점본",
+        "mst": "269803",
+        "effective_date": "20250915",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국세기본법_20250101_267577.xml",
+        "kind": "시점본",
+        "mst": "267577",
+        "effective_date": "20250101",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국세기본법_20260701_280373.xml",
+        "kind": "시점본",
+        "mst": "280373",
+        "effective_date": "20260701",
+        "doc_year": 2026
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국세기본법_20260602_286425.xml",
+        "kind": "시점본",
+        "mst": "286425",
+        "effective_date": "20260602",
+        "doc_year": 2026
+      }
+    ],
+    "article_titles": [
+      {
+        "ref": "제39조",
+        "title": "출자자의 제2차 납세의무",
+        "ok": true
+      }
+    ],
+    "law_id": "001586",
+    "mst": "288571",
+    "name": "국세기본법",
+    "effective_date": "20260811",
+    "promulgation_no": "21860",
+    "law_type": "법률",
+    "ministry": "재정경제부",
+    "status": "수집"
+  },
+  {
+    "ref_id": "L31",
+    "keyword": "중소기업기술혁신 촉진법",
+    "doc_type": "법률",
+    "as_written": "〃",
+    "target": "law",
+    "cited": [
+      "9"
+    ],
+    "cited_raw": "제9조",
+    "parse_notes": [],
+    "flags": [],
+    "files": [
+      {
+        "file": "법령 PDF/L1_법령/L1_중소기업기술혁신촉진법_20260701.xml",
+        "kind": "현행",
+        "mst": "281987",
+        "effective_date": "20260701"
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_중소기업기술혁신촉진법_20231221_251977.xml",
+        "kind": "시점본",
+        "mst": "251977",
+        "effective_date": "20231221",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_중소기업기술혁신촉진법_20240710_258539.xml",
+        "kind": "시점본",
+        "mst": "258539",
+        "effective_date": "20240710",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_중소기업기술혁신촉진법_20240501_255893.xml",
+        "kind": "시점본",
+        "mst": "255893",
+        "effective_date": "20240501",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_중소기업기술혁신촉진법_20240109_258343.xml",
+        "kind": "시점본",
+        "mst": "258343",
+        "effective_date": "20240109",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_중소기업기술혁신촉진법_20251001_277123.xml",
+        "kind": "시점본",
+        "mst": "277123",
+        "effective_date": "20251001",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_중소기업기술혁신촉진법_20260526_286263.xml",
+        "kind": "시점본",
+        "mst": "286263",
+        "effective_date": "20260526",
+        "doc_year": 2026
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_중소기업기술혁신촉진법_20260201_268809.xml",
+        "kind": "시점본",
+        "mst": "268809",
+        "effective_date": "20260201",
+        "doc_year": 2026
+      }
+    ],
+    "article_titles": [
+      {
+        "ref": "제9조",
+        "title": "중소기업의 기술혁신 촉진 지원사업",
+        "ok": true
+      }
+    ],
+    "law_id": "009145",
+    "mst": "281987",
+    "name": "중소기업 기술혁신 촉진법",
+    "effective_date": "20260701",
+    "promulgation_no": "21289",
+    "law_type": "법률",
+    "ministry": "중소벤처기업부",
+    "status": "수집"
+  },
+  {
+    "ref_id": "L32",
+    "keyword": "중소기업기술혁신 촉진법 시행령",
+    "doc_type": "대통령령",
+    "as_written": "〃",
+    "target": "law",
+    "cited": [
+      "19"
+    ],
+    "cited_raw": "제19조",
+    "parse_notes": [],
+    "flags": [],
+    "files": [
+      {
+        "file": "법령 PDF/L1_법령/L1_중소기업기술혁신촉진법시행령_20260701.xml",
+        "kind": "현행",
+        "mst": "287505",
+        "effective_date": "20260701"
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_중소기업기술혁신촉진법시행령_20231221_256821.xml",
+        "kind": "시점본",
+        "mst": "256821",
+        "effective_date": "20231221",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_중소기업기술혁신촉진법시행령_20240710_263693.xml",
+        "kind": "시점본",
+        "mst": "263693",
+        "effective_date": "20240710",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_중소기업기술혁신촉진법시행령_20240514_262679.xml",
+        "kind": "시점본",
+        "mst": "262679",
+        "effective_date": "20240514",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_중소기업기술혁신촉진법시행령_20251001_277499.xml",
+        "kind": "시점본",
+        "mst": "277499",
+        "effective_date": "20251001",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_중소기업기술혁신촉진법시행령_20260201_283001.xml",
+        "kind": "시점본",
+        "mst": "283001",
+        "effective_date": "20260201",
+        "doc_year": 2026
+      }
+    ],
+    "article_titles": [
+      {
+        "ref": "제19조",
+        "title": "업무의 위탁",
+        "ok": true
+      }
+    ],
+    "law_id": "009255",
+    "mst": "287505",
+    "name": "중소기업 기술혁신 촉진법 시행령",
+    "effective_date": "20260701",
+    "promulgation_no": "36482",
+    "law_type": "대통령령",
+    "ministry": "중소벤처기업부",
+    "status": "수집"
+  },
+  {
+    "ref_id": "L33",
+    "keyword": "국가연구개발혁신법",
+    "doc_type": "법률",
+    "as_written": "〃",
+    "target": "law",
+    "cited": [
+      "13",
+      "22",
+      "32",
+      "33"
+    ],
+    "cited_raw": "제13조(④), 제22조, 제32조, 제33조 (※ \"제1*조\"로 판독 불가 1건)",
+    "parse_notes": [
+      "판독불가"
+    ],
+    "flags": [
+      "판독불가"
+    ],
+    "files": [
+      {
+        "file": "법령 PDF/L1_법령/L1_국가연구개발혁신법_20260820.xml",
+        "kind": "현행",
+        "mst": "283413",
+        "effective_date": "20260820"
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국가연구개발혁신법_20230922_248877.xml",
+        "kind": "시점본",
+        "mst": "248877",
+        "effective_date": "20230922",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국가연구개발혁신법_20240724_258987.xml",
+        "kind": "시점본",
+        "mst": "258987",
+        "effective_date": "20240724",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국가연구개발혁신법_20250228_260807.xml",
+        "kind": "시점본",
+        "mst": "260807",
+        "effective_date": "20250228",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국가연구개발혁신법_20260911_283849.xml",
+        "kind": "시점본",
+        "mst": "283849",
+        "effective_date": "20260911",
+        "doc_year": 2026
+      }
+    ],
+    "article_titles": [
+      {
+        "ref": "제13조",
+        "title": "연구개발비의 지급 및 사용 등",
+        "ok": true
+      },
+      {
+        "ref": "제22조",
+        "title": "전문기관의 지정 등",
+        "ok": true
+      },
+      {
+        "ref": "제32조",
+        "title": "부정행위 등에 대한 제재처분",
+        "ok": true
+      },
+      {
+        "ref": "제33조",
+        "title": "제재처분의 절차 및 재검토 요청 등",
+        "ok": true
+      }
+    ],
+    "law_id": "013774",
+    "mst": "283413",
+    "name": "국가연구개발혁신법",
+    "effective_date": "20260820",
+    "promulgation_no": "21347",
+    "law_type": "법률",
+    "ministry": "과학기술정보통신부",
+    "status": "수집"
+  },
+  {
+    "ref_id": "L34",
+    "keyword": "국가연구개발혁신법 시행령",
+    "doc_type": "대통령령",
+    "as_written": "〃",
+    "target": "law",
+    "cited": [
+      "49"
+    ],
+    "cited_raw": "제49조",
+    "parse_notes": [],
+    "flags": [],
+    "files": [
+      {
+        "file": "법령 PDF/L1_법령/L1_국가연구개발혁신법시행령_20260820.xml",
+        "kind": "현행",
+        "mst": "288773",
+        "effective_date": "20260820"
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국가연구개발혁신법시행령_20231214_256367.xml",
+        "kind": "시점본",
+        "mst": "256367",
+        "effective_date": "20231214",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국가연구개발혁신법시행령_20230922_254925.xml",
+        "kind": "시점본",
+        "mst": "254925",
+        "effective_date": "20230922",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국가연구개발혁신법시행령_20241231_267625.xml",
+        "kind": "시점본",
+        "mst": "267625",
+        "effective_date": "20241231",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국가연구개발혁신법시행령_20241008_265737.xml",
+        "kind": "시점본",
+        "mst": "265737",
+        "effective_date": "20241008",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국가연구개발혁신법시행령_20240807_264683.xml",
+        "kind": "시점본",
+        "mst": "264683",
+        "effective_date": "20240807",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국가연구개발혁신법시행령_20240710_263631.xml",
+        "kind": "시점본",
+        "mst": "263631",
+        "effective_date": "20240710",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국가연구개발혁신법시행령_20240430_262013.xml",
+        "kind": "시점본",
+        "mst": "262013",
+        "effective_date": "20240430",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국가연구개발혁신법시행령_20240206_260037.xml",
+        "kind": "시점본",
+        "mst": "260037",
+        "effective_date": "20240206",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국가연구개발혁신법시행령_20251001_278201.xml",
+        "kind": "시점본",
+        "mst": "278201",
+        "effective_date": "20251001",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국가연구개발혁신법시행령_20250325_270143.xml",
+        "kind": "시점본",
+        "mst": "270143",
+        "effective_date": "20250325",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국가연구개발혁신법시행령_20260911_288335.xml",
+        "kind": "시점본",
+        "mst": "288335",
+        "effective_date": "20260911",
+        "doc_year": 2026
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국가연구개발혁신법시행령_20260611_285767.xml",
+        "kind": "시점본",
+        "mst": "285767",
+        "effective_date": "20260611",
+        "doc_year": 2026
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국가연구개발혁신법시행령_20260611_283965.xml",
+        "kind": "시점본",
+        "mst": "283965",
+        "effective_date": "20260611",
+        "doc_year": 2026
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국가연구개발혁신법시행령_20260201_282931.xml",
+        "kind": "시점본",
+        "mst": "282931",
+        "effective_date": "20260201",
+        "doc_year": 2026
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_국가연구개발혁신법시행령_20260102_281423.xml",
+        "kind": "시점본",
+        "mst": "281423",
+        "effective_date": "20260102",
+        "doc_year": 2026
+      }
+    ],
+    "article_titles": [
+      {
+        "ref": "제49조",
+        "title": "전문기관의 지정 등",
+        "ok": true
+      }
+    ],
+    "law_id": "013933",
+    "mst": "288773",
+    "name": "국가연구개발혁신법 시행령",
+    "effective_date": "20260820",
+    "promulgation_no": "36580",
+    "law_type": "대통령령",
+    "ministry": "과학기술정보통신부",
+    "status": "수집"
+  },
+  {
+    "ref_id": "L35",
+    "keyword": "전자문서 및 전자거래 기본법",
+    "doc_type": "법률",
+    "as_written": "〃",
+    "target": "law",
+    "cited": [],
+    "cited_raw": "조항 미특정",
+    "parse_notes": [],
+    "flags": [],
+    "files": [
+      {
+        "file": "법령 PDF/L1_법령/L1_전자문서및전자거래기본법_20221020.xml",
+        "kind": "현행",
+        "mst": "236053",
+        "effective_date": "20221020"
+      }
+    ],
+    "article_titles": [],
+    "law_id": "002000",
+    "mst": "236053",
+    "name": "전자문서 및 전자거래 기본법",
+    "effective_date": "20221020",
+    "promulgation_no": "18478",
+    "law_type": "법률",
+    "ministry": "과학기술정보통신부,법무부",
+    "status": "수집"
+  },
+  {
+    "ref_id": "L36",
+    "keyword": "법인세법 시행령",
+    "doc_type": "대통령령",
+    "as_written": "〃",
+    "target": "law",
+    "cited": [
+      "158"
+    ],
+    "cited_raw": "제158조",
+    "parse_notes": [],
+    "flags": [],
+    "files": [
+      {
+        "file": "법령 PDF/L1_법령/L1_법인세법시행령_20260227.xml",
+        "kind": "현행",
+        "mst": "283635",
+        "effective_date": "20260227"
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_법인세법시행령_20231221_257099.xml",
+        "kind": "시점본",
+        "mst": "257099",
+        "effective_date": "20231221",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_법인세법시행령_20231214_256415.xml",
+        "kind": "시점본",
+        "mst": "256415",
+        "effective_date": "20231214",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_법인세법시행령_20230929_255043.xml",
+        "kind": "시점본",
+        "mst": "255043",
+        "effective_date": "20230929",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_법인세법시행령_20230926_254951.xml",
+        "kind": "시점본",
+        "mst": "254951",
+        "effective_date": "20230926",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_법인세법시행령_20230710_252417.xml",
+        "kind": "시점본",
+        "mst": "252417",
+        "effective_date": "20230710",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_법인세법시행령_20230701_248223.xml",
+        "kind": "시점본",
+        "mst": "248223",
+        "effective_date": "20230701",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_법인세법시행령_20230112_247641.xml",
+        "kind": "시점본",
+        "mst": "247641",
+        "effective_date": "20230112",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_법인세법시행령_20230101_247531.xml",
+        "kind": "시점본",
+        "mst": "247531",
+        "effective_date": "20230101",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_법인세법시행령_20241112_266373.xml",
+        "kind": "시점본",
+        "mst": "266373",
+        "effective_date": "20241112",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_법인세법시행령_20240731_264239.xml",
+        "kind": "시점본",
+        "mst": "264239",
+        "effective_date": "20240731",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_법인세법시행령_20240710_263649.xml",
+        "kind": "시점본",
+        "mst": "263649",
+        "effective_date": "20240710",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_법인세법시행령_20240701_260949.xml",
+        "kind": "시점본",
+        "mst": "260949",
+        "effective_date": "20240701",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_법인세법시행령_20240517_262405.xml",
+        "kind": "시점본",
+        "mst": "262405",
+        "effective_date": "20240517",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_법인세법시행령_20251128_279963.xml",
+        "kind": "시점본",
+        "mst": "279963",
+        "effective_date": "20251128",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_법인세법시행령_20251001_277607.xml",
+        "kind": "시점본",
+        "mst": "277607",
+        "effective_date": "20251001",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_법인세법시행령_20250604_269543.xml",
+        "kind": "시점본",
+        "mst": "269543",
+        "effective_date": "20250604",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_법인세법시행령_20250101_267755.xml",
+        "kind": "시점본",
+        "mst": "267755",
+        "effective_date": "20250101",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_법인세법시행령_20250101_240247.xml",
+        "kind": "시점본",
+        "mst": "240247",
+        "effective_date": "20250101",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_법인세법시행령_20250101_229325.xml",
+        "kind": "시점본",
+        "mst": "229325",
+        "effective_date": "20250101",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_법인세법시행령_20260102_280853.xml",
+        "kind": "시점본",
+        "mst": "280853",
+        "effective_date": "20260102",
+        "doc_year": 2026
+      }
+    ],
+    "article_titles": [
+      {
+        "ref": "제158조",
+        "title": "지출증명서류의 수취 및 보관",
+        "ok": true
+      }
+    ],
+    "law_id": "003608",
+    "mst": "283635",
+    "name": "법인세법 시행령",
+    "effective_date": "20260227",
+    "promulgation_no": "36130",
+    "law_type": "대통령령",
+    "ministry": "재정경제부",
+    "status": "수집"
+  },
+  {
+    "ref_id": "L37",
+    "keyword": "행정절차법",
+    "doc_type": "법률",
+    "as_written": "〃",
+    "target": "law",
+    "cited": [
+      "21"
+    ],
+    "cited_raw": "제21조",
+    "parse_notes": [],
+    "flags": [],
+    "files": [
+      {
+        "file": "법령 PDF/L1_법령/L1_행정절차법_20230324.xml",
+        "kind": "현행",
+        "mst": "239291",
+        "effective_date": "20230324"
+      }
+    ],
+    "article_titles": [
+      {
+        "ref": "제21조",
+        "title": "처분의 사전 통지",
+        "ok": true
+      }
+    ],
+    "law_id": "001362",
+    "mst": "239291",
+    "name": "행정절차법",
+    "effective_date": "20230324",
+    "promulgation_no": "18748",
+    "law_type": "법률",
+    "ministry": "행정안전부",
+    "status": "수집"
+  },
+  {
+    "ref_id": "L38",
+    "keyword": "개인정보 보호법",
+    "doc_type": "법률",
+    "as_written": "〃",
+    "target": "law",
+    "cited": [],
+    "cited_raw": "조항 미특정",
+    "parse_notes": [],
+    "flags": [],
+    "files": [
+      {
+        "file": "법령 PDF/L1_법령/L1_개인정보보호법_20251002.xml",
+        "kind": "현행",
+        "mst": "270351",
+        "effective_date": "20251002"
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_개인정보보호법_20230915_248613.xml",
+        "kind": "시점본",
+        "mst": "248613",
+        "effective_date": "20230915",
+        "doc_year": 2023
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_개인정보보호법_20260911_283839.xml",
+        "kind": "시점본",
+        "mst": "283839",
+        "effective_date": "20260911",
+        "doc_year": 2026
+      }
+    ],
+    "article_titles": [],
+    "law_id": "011357",
+    "mst": "270351",
+    "name": "개인정보 보호법",
+    "effective_date": "20251002",
+    "promulgation_no": "20897",
+    "law_type": "법률",
+    "ministry": "개인정보보호위원회",
+    "status": "수집"
+  },
+  {
+    "ref_id": "L39",
+    "keyword": "연구실 안전환경 조성에 관한 법률",
+    "doc_type": "법률",
+    "as_written": "〃",
+    "target": "law",
+    "cited": [],
+    "cited_raw": "조항 미특정",
+    "parse_notes": [],
+    "flags": [],
+    "files": [
+      {
+        "file": "법령 PDF/L1_법령/L1_연구실안전환경조성에관한법률_20260520.xml",
+        "kind": "현행",
+        "mst": "283355",
+        "effective_date": "20260520"
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_연구실안전환경조성에관한법률_20240501_255643.xml",
+        "kind": "시점본",
+        "mst": "255643",
+        "effective_date": "20240501",
+        "doc_year": 2024
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_연구실안전환경조성에관한법률_20250131_268831.xml",
+        "kind": "시점본",
+        "mst": "268831",
+        "effective_date": "20250131",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_연구실안전환경조성에관한법률_20250121_268529.xml",
+        "kind": "시점본",
+        "mst": "268529",
+        "effective_date": "20250121",
+        "doc_year": 2025
+      },
+      {
+        "file": "법령 PDF/L1_법령/연혁/L1_연구실안전환경조성에관한법률_20260201_268797.xml",
+        "kind": "시점본",
+        "mst": "268797",
+        "effective_date": "20260201",
+        "doc_year": 2026
+      }
+    ],
+    "article_titles": [],
+    "law_id": "009925",
+    "mst": "283355",
+    "name": "연구실 안전환경 조성에 관한 법률",
+    "effective_date": "20260520",
+    "promulgation_no": "21349",
+    "law_type": "법률",
+    "ministry": "과학기술정보통신부",
+    "status": "수집"
+  },
+  {
+    "ref_id": "R01",
+    "keyword": "중소기업창업 지원사업 운영요령",
+    "doc_type": "중소벤처기업부 고시",
+    "as_written": "운영요령 / 요령",
+    "target": "admrul",
+    "cited": [
+      "5",
+      "10",
+      "11",
+      "12",
+      "14",
+      "15",
+      "23",
+      "30",
+      "31",
+      "38"
+    ],
+    "cited_raw": "제5조, 제10조, 제11조(제2항 1~7호), 제12조, 제14조, 제15조, 제23조제5항, 제30조, 제31조, 제38조",
+    "parse_notes": [],
+    "flags": [],
+    "files": [
+      {
+        "file": "법령 PDF/L1_법령/L1_중소기업창업지원사업운영요령_20241206.xml",
+        "kind": "현행",
+        "mst": "2100000250454",
+        "effective_date": "20241206"
+      }
+    ],
+    "article_titles": [
+      {
+        "ref": "제5조",
+        "title": "업무의 위탁ㆍ대행",
+        "ok": true
+      },
+      {
+        "ref": "제10조",
+        "title": "선정평가 등",
+        "ok": true
+      },
+      {
+        "ref": "제11조",
+        "title": "창업지원사업 예비위원",
+        "ok": true
+      },
+      {
+        "ref": "제12조",
+        "title": "평가위원회 구성ㆍ운영",
+        "ok": true
+      },
+      {
+        "ref": "제14조",
+        "title": "사업운영위원회 구성ㆍ운영",
+        "ok": true
+      },
+      {
+        "ref": "제15조",
+        "title": "협약의 체결",
+        "ok": true
+      },
+      {
+        "ref": "제23조",
+        "title": "사업비 사용실적 보고 및 정산",
+        "ok": true
+      },
+      {
+        "ref": "제30조",
+        "title": "환수 및 제재처분 등",
+        "ok": true
+      },
+      {
+        "ref": "제31조",
+        "title": "이의신청",
+        "ok": true
+      },
+      {
+        "ref": "제38조",
+        "title": "부속요령 및 사업관리지침 제정ㆍ운영",
+        "ok": true
+      }
+    ],
+    "law_id": "85233",
+    "mst": "2100000250454",
+    "name": "중소기업창업 지원사업 운영요령",
+    "effective_date": "20241206",
+    "promulgation_no": "2024-101",
+    "law_type": "고시",
+    "ministry": "중소벤처기업부",
+    "status": "수집"
+  },
+  {
+    "ref_id": "R02",
+    "keyword": "국고보조금 통합관리지침",
+    "doc_type": "기획재정부",
+    "as_written": "〃",
+    "target": "admrul",
+    "cited": [
+      "32"
+    ],
+    "cited_raw": "제32조",
+    "parse_notes": [],
+    "flags": [],
+    "files": [
+      {
+        "file": "법령 PDF/L1_법령/L1_국고보조금통합관리지침_20260520.xml",
+        "kind": "현행",
+        "mst": "2100000279462",
+        "effective_date": "20260520"
+      }
+    ],
+    "article_titles": [
+      {
+        "ref": "제32조",
+        "title": "보조사업 집행점검",
+        "ok": true
+      }
+    ],
+    "law_id": "56590",
+    "mst": "2100000279462",
+    "name": "국고보조금 통합관리지침",
+    "effective_date": "20260520",
+    "promulgation_no": "2026-108",
+    "law_type": "공고",
+    "ministry": "기획예산처",
+    "status": "수집"
+  },
+  {
+    "ref_id": "R03",
+    "keyword": "중소벤처기업부 보조사업 관리규정",
+    "doc_type": "중소벤처기업부 훈령",
+    "as_written": "〃",
+    "target": "admrul",
+    "cited": [],
+    "cited_raw": "조항 미특정(제재 근거)",
+    "parse_notes": [],
+    "flags": [],
+    "files": [
+      {
+        "file": "법령 PDF/L1_법령/L1_중소벤처기업부보조사업관리규정_20241223.xml",
+        "kind": "현행",
+        "mst": "2100000251344",
+        "effective_date": "20241223"
+      }
+    ],
+    "article_titles": [],
+    "law_id": "56043",
+    "mst": "2100000251344",
+    "name": "중소벤처기업부 보조사업 관리규정",
+    "effective_date": "20241223",
+    "promulgation_no": "181",
+    "law_type": "훈령",
+    "ministry": "중소벤처기업부",
+    "status": "수집"
+  },
+  {
+    "ref_id": "R04",
+    "keyword": "신산업 창업 분야에 관한 규정",
+    "doc_type": "중소벤처기업부 고시",
+    "as_written": "중소벤처기업부고시 제2022-45호",
+    "target": "admrul",
+    "cited": [],
+    "cited_raw": "전체(신산업분야 영위 기준)",
+    "parse_notes": [],
+    "flags": [],
+    "files": [
+      {
+        "file": "법령 PDF/L1_법령/L1_신산업창업분야에관한규정_20240130.xml",
+        "kind": "현행",
+        "mst": "2100000235934",
+        "effective_date": "20240130"
+      }
+    ],
+    "article_titles": [],
+    "law_id": "82324",
+    "mst": "2100000235934",
+    "name": "신산업 창업 분야에 관한 규정",
+    "effective_date": "20240130",
+    "promulgation_no": "2024-2",
+    "law_type": "고시",
+    "ministry": "중소벤처기업부",
+    "status": "수집"
+  },
+  {
+    "ref_id": "R05",
+    "keyword": "창업사업화 지원사업 통합관리지침",
+    "doc_type": "중기부·창업진흥원 (내부지침)",
+    "as_written": "통합지침 / 지침",
+    "target": null,
+    "cited": [],
+    "cited_raw": "매우 다수 — §3 참조",
+    "parse_notes": [],
+    "flags": [
+      "수동수집"
+    ],
+    "files": [],
+    "article_titles": [],
+    "status": "수동수집",
+    "reason": "창업진흥원 운영지침. 국가법령정보센터 미등재 → k-startup / vcs.go.kr 수동 확보"
+  },
+  {
+    "ref_id": "R06",
+    "keyword": "중소기업창업 지원사업 통합관리지침 (R05의 2025.12 개명판, 제14차)",
+    "doc_type": "〃",
+    "as_written": "지침 (제10차·제11차 개정안)",
+    "target": null,
+    "cited": [],
+    "cited_raw": "다수 — §3 참조",
+    "parse_notes": [],
+    "flags": [
+      "수동수집"
+    ],
+    "files": [],
+    "article_titles": [],
+    "status": "수동수집",
+    "reason": "R05의 2025.12 개명판(제14차). 미등재 → vcs.go.kr 수동 확보"
+  },
+  {
+    "ref_id": "R07",
+    "keyword": "신사업창업사관학교 운영지침",
+    "doc_type": "소상공인시장진흥공단",
+    "as_written": "〃",
+    "target": null,
+    "cited": [
+      "8",
+      "9",
+      "17",
+      "18",
+      "19",
+      "21",
+      "22",
+      "23",
+      "24",
+      "25",
+      "26",
+      "27",
+      "28",
+      "29",
+      "30",
+      "31",
+      "32",
+      "40",
+      "41",
+      "42",
+      "43",
+      "44",
+      "45",
+      "46",
+      "47",
+      "48",
+      "49",
+      "50",
+      "51",
+      "52",
+      "53",
+      "54",
+      "55",
+      "56",
+      "57",
+      "58",
+      "61"
+    ],
+    "cited_raw": "제8·9·17~19·21~32·40~58·61조",
+    "parse_notes": [],
+    "flags": [
+      "수동수집"
+    ],
+    "files": [],
+    "article_titles": [],
+    "status": "수동수집",
+    "reason": "소상공인시장진흥공단 내부 운영지침 → 소진공 공고 별첨"
+  },
+  {
+    "ref_id": "R08",
+    "keyword": "예산 및 기금운용계획 집행지침",
+    "doc_type": "기획재정부",
+    "as_written": "〃",
+    "target": null,
+    "cited": [],
+    "cited_raw": "조항 미특정(특근매식비)",
+    "parse_notes": [],
+    "flags": [
+      "수동수집"
+    ],
+    "files": [],
+    "article_titles": [],
+    "status": "수동수집",
+    "reason": "law.go.kr 검색 0건(2026-08 확인). 기재부 열린재정에서 연도판 확보 필요"
+  },
+  {
+    "ref_id": "R09",
+    "keyword": "중소기업기술개발 지원사업 운영요령",
+    "doc_type": "중소벤처기업부 고시",
+    "as_written": "〃",
+    "target": "admrul",
+    "cited": [
+      "48"
+    ],
+    "cited_raw": "제48조",
+    "parse_notes": [],
+    "flags": [],
+    "files": [
+      {
+        "file": "법령 PDF/L1_법령/L1_중소기업기술개발지원사업운영요령_20260121.xml",
+        "kind": "현행",
+        "mst": "2100000273462",
+        "effective_date": "20260121"
+      }
+    ],
+    "article_titles": [
+      {
+        "ref": "제48조",
+        "title": "부속요령 및 사업관리지침 제정ㆍ운영",
+        "ok": true
+      }
+    ],
+    "law_id": "36832",
+    "mst": "2100000273462",
+    "name": "중소기업기술개발 지원사업 운영요령",
+    "effective_date": "20260121",
+    "promulgation_no": "2026-6",
+    "law_type": "고시",
+    "ministry": "중소벤처기업부",
+    "status": "수집"
+  },
+  {
+    "ref_id": "R10",
+    "keyword": "국가연구개발사업 연구개발비 사용 기준",
+    "doc_type": "과학기술정보통신부 고시",
+    "as_written": "〃",
+    "target": "admrul",
+    "cited": [],
+    "cited_raw": "전반(비목별 산정·관리·정산)",
+    "parse_notes": [],
+    "flags": [],
+    "files": [
+      {
+        "file": "법령 PDF/L1_법령/L1_국가연구개발사업연구개발비사용기준_20260506.xml",
+        "kind": "현행",
+        "mst": "2100000278740",
+        "effective_date": "20260506"
+      }
+    ],
+    "article_titles": [],
+    "law_id": "75386",
+    "mst": "2100000278740",
+    "name": "국가연구개발사업 연구개발비 사용 기준",
+    "effective_date": "20260506",
+    "promulgation_no": "2026-38",
+    "law_type": "고시",
+    "ministry": "과학기술정보통신부",
+    "status": "수집"
+  },
+  {
+    "ref_id": "R11",
+    "keyword": "민관공동 창업자 발굴·육성사업(TIPS) 운영지침",
+    "doc_type": "중소벤처기업부·TIPS 운영사무국",
+    "as_written": "TIPS 운영지침",
+    "target": null,
+    "cited": [],
+    "cited_raw": "본문 전체(대상 문서)",
+    "parse_notes": [],
+    "flags": [
+      "수동수집"
+    ],
+    "files": [],
+    "article_titles": [],
+    "status": "수동수집",
+    "reason": "한국엔젤투자협회 TIPS 운영사무국 배포 → jointips.or.kr"
+  },
+  {
+    "ref_id": "R12",
+    "keyword": "전문기관·업무지원기관 자체 여비지급 기준",
+    "doc_type": "기관 내규",
+    "as_written": "〃",
+    "target": null,
+    "cited": [],
+    "cited_raw": "—",
+    "parse_notes": [],
+    "flags": [
+      "수동수집"
+    ],
+    "files": [],
+    "article_titles": [],
+    "status": "수동수집",
+    "reason": "기관 내규"
+  }
+]
