@@ -49,7 +49,7 @@ def fetch_page(page: int, tries: int = 3):
     """빈 응답이 간헐적으로 온다. 재시도하고, 그래도 안 되면 그 페이지만 건너뛴다."""
     for n in range(tries):
         try:
-            r = requests.get(SEARCH, params={"OC": L.OC, "type": "XML", "target": "admbyl",
+            r = requests.get(SEARCH, params={"OC": L.require_oc(), "type": "XML", "target": "admbyl",
                                              "query": "*", "display": "100", "page": str(page)},
                              timeout=40)
             if not r.text.strip():

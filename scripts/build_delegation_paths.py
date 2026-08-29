@@ -47,7 +47,7 @@ def disk_index() -> dict[str, str]:
 
 def main() -> None:
     rep = json.loads(REPORT.read_text(encoding="utf-8"))
-    api = L.Api(L.OC)
+    api = L.Api()
     have = disk_index()
     cache = json.loads(CACHE_P.read_text(encoding="utf-8")) if CACHE_P.exists() else {}
 
