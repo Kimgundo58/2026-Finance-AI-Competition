@@ -1,0 +1,4914 @@
+{
+  "$schema_note": "「써도돼요」 코퍼스 매니페스트. 인덱서는 반드시 이 파일만 신뢰할 것 — 폴더 스캔으로 인덱싱 금지.",
+  "generated": "2026-08-12",
+  "root": "금융 AI공모전/",
+  "status_values": {
+    "active": "현재 유효한 규범 — 판정 근거로 사용 가능",
+    "superseded": "개정으로 대체된 구버전 — diff 데모 전용, 판정 인덱스 금지",
+    "reference": "판정 근거 불가 참고자료 — 사례 인덱스·분석·보관용"
+  },
+  "role_values": {
+    "judgment_index": "판정 인덱스(A등급) 투입",
+    "rule_source": "룰 테이블 컴파일 소스",
+    "case_index": "사례 인덱스(B등급) 투입",
+    "diff_only": "개정 diff 데모 전용",
+    "golden_set": "평가 골든셋 — 모든 인덱스에서 격리",
+    "compare_analysis": "충돌 조항 분석 재료 (액션 3)",
+    "market_analysis": "시장 규모 계산 (액션 2)",
+    "dev_doc": "개발 참고 문서",
+    "meta": "수집 이력·재수집 주소록",
+    "archive": "보관만"
+  },
+  "files": [
+    {
+      "file": "규정문서/2025_예비창업패키지_사업비집행_세부관리기준.hwp",
+      "layer": "L3",
+      "doc_type": "세부관리기준",
+      "version": "2025",
+      "status": "active",
+      "role": [
+        "judgment_index",
+        "rule_source"
+      ],
+      "index": true,
+      "needs_conversion": "hwp->pdf/hwpx",
+      "notes": "예비창업패키지 판정의 핵심 소스. 변환 후 구버전 PDF와 조 개수 대조 검증"
+    },
+    {
+      "file": "규정문서/2025_초기창업패키지_사업비집행_세부관리기준.hwp",
+      "layer": "L3",
+      "doc_type": "세부관리기준",
+      "version": "2025",
+      "status": "active",
+      "role": [
+        "judgment_index",
+        "rule_source"
+      ],
+      "index": true,
+      "needs_conversion": "hwp->pdf/hwpx",
+      "notes": "초기창업패키지 판정의 핵심 소스"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_중소기업창업지원법_20260701.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-07-01",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "조문 XML 직파싱. 지원사업 정의·환수 법적 근거 · L01 · 법령ID 001472 · MST 281995 · 공포 21293 · 인용 제2조, 제12조, 제32조, 제43조, 제59조, 제5조, 제8조"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_중소기업창업지원법_시행령_20260324.xml",
+      "layer": "L1",
+      "doc_type": "시행령",
+      "version": "시행 2026-03-24",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_중소기업창업지원법_시행규칙_20260101.xml",
+      "layer": "L1",
+      "doc_type": "시행규칙",
+      "version": "시행 2026-01-01",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_보조금관리에관한법률_20260602.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-06-02",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "제재부가금(최대 5배)·반환의 법률 근거 · L20 · 법령ID 000729 · MST 286449 · 공포 21751 · 인용 제31-2조"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_보조금관리에관한법률_시행령_20260102.xml",
+      "layer": "L1",
+      "doc_type": "시행령",
+      "version": "시행 2026-01-02",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_산업교육진흥및산학연협력촉진에관한법률_20250621.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2025-06-21",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "산학협력단 관련 조문만 선별 인덱싱 — L4 이중 규정의 법적 근거"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_산업교육진흥및산학연협력촉진에관한법률_시행령_20260324.xml",
+      "layer": "L1",
+      "doc_type": "시행령",
+      "version": "시행 2026-03-24",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "관련 조문만 선별"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_국가연구개발혁신법_20260911.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-09-11",
+      "status": "reference",
+      "role": [
+        "archive"
+      ],
+      "index": false,
+      "notes": "R&D 확장(§8) 대비 보관. v1 판정 무관"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_국가연구개발혁신법_시행령_20260728.xml",
+      "layer": "L1",
+      "doc_type": "시행령",
+      "version": "시행 2026-07-28",
+      "status": "reference",
+      "role": [
+        "archive"
+      ],
+      "index": false
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_국가연구개발혁신법_시행규칙_20260611.xml",
+      "layer": "L1",
+      "doc_type": "시행규칙",
+      "version": "시행 2026-06-11",
+      "status": "reference",
+      "role": [
+        "archive"
+      ],
+      "index": false
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_중소기업기술혁신촉진법_20260701.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-07-01",
+      "status": "reference",
+      "role": [
+        "archive"
+      ],
+      "index": false,
+      "notes": "L31 · 법령ID 009145 · MST 281987 · 공포 21289 · 인용 제9조"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_산업기술혁신사업공통운영요령_20241230.xml",
+      "layer": "L1",
+      "doc_type": "행정규칙",
+      "version": "2024-12-30",
+      "status": "reference",
+      "role": [
+        "archive"
+      ],
+      "index": false,
+      "notes": "산업부 R&D 계열 — TP 확장 대비 보관"
+    },
+    {
+      "file": "법령 PDF/L2_부처지침/L2_중소기업창업지원사업통합관리지침_제14차_20251223.pdf",
+      "layer": "L2",
+      "doc_type": "부처지침",
+      "version": "제14차",
+      "effective_date": "2025-12-23",
+      "status": "active",
+      "role": [
+        "judgment_index",
+        "rule_source"
+      ],
+      "index": true,
+      "notes": "판정의 실질적 최상위 근거. 유일한 L2 active"
+    },
+    {
+      "file": "법령 PDF/L2_부처지침/L2_창업사업화지원사업통합관리지침_제13차.pdf",
+      "layer": "L2",
+      "doc_type": "부처지침",
+      "version": "제13차",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "제14차 diff 데모(A4)의 비교 대상"
+    },
+    {
+      "file": "법령 PDF/L2_부처지침/L2_창업사업화지원사업통합관리지침_제12차.pdf",
+      "layer": "L2",
+      "doc_type": "부처지침",
+      "version": "제12차",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false
+    },
+    {
+      "file": "법령 PDF/L2_부처지침/L2_창업사업화지원사업통합관리지침_제4차_20190201_구버전.pdf",
+      "layer": "L2",
+      "doc_type": "부처지침",
+      "version": "제4차",
+      "effective_date": "2019-02-01",
+      "status": "superseded",
+      "role": [
+        "archive"
+      ],
+      "index": false,
+      "notes": "장기 변화 시연용"
+    },
+    {
+      "file": "법령 PDF/L2_부처지침/L2_통합관리지침_부정사용제재조항포함본.pdf",
+      "layer": "L2",
+      "doc_type": "부처지침",
+      "version": "미상",
+      "status": "reference",
+      "role": [
+        "archive"
+      ],
+      "index": false,
+      "notes": "검토 필요: 제14차와 중복이면 유지, 제14차에 없는 제재 조항이 있으면 해당 부분만 active 승격"
+    },
+    {
+      "file": "법령 PDF/L3_공고별표/L3_예비창업패키지_세부관리기준.pdf",
+      "layer": "L3",
+      "doc_type": "세부관리기준",
+      "version": "2020 개정본",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "2025 HWP 변환 검증의 대조본으로도 사용"
+    },
+    {
+      "file": "법령 PDF/L3_공고별표/L3_예비창업패키지_세부관리기준_창진원본.pdf",
+      "layer": "L3",
+      "doc_type": "세부관리기준",
+      "version": "구버전",
+      "status": "superseded",
+      "role": [
+        "archive"
+      ],
+      "index": false
+    },
+    {
+      "file": "법령 PDF/L3_공고별표/L3_초기창업패키지_세부관리기준.pdf",
+      "layer": "L3",
+      "doc_type": "세부관리기준",
+      "version": "구버전",
+      "status": "superseded",
+      "role": [
+        "archive"
+      ],
+      "index": false
+    },
+    {
+      "file": "법령 PDF/L3_공고별표/L3_별표_집행기준및증빙서류_2024경.hwp",
+      "layer": "L3",
+      "doc_type": "별표",
+      "version": "2024경",
+      "status": "active",
+      "role": [
+        "rule_source"
+      ],
+      "index": false,
+      "notes": "비목×증빙서류 매핑표 — 룰 테이블 전용(표라서 텍스트 인덱스 부적합). 변환 필요",
+      "needs_conversion": "hwp->pdf/hwpx"
+    },
+    {
+      "file": "법령 PDF/L3_공고별표/L3_2025예비창업패키지모집공고.pdf",
+      "layer": "L3",
+      "doc_type": "모집공고",
+      "version": "공고 제2025-105호",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "별표·사업비 관련 부분만 인덱싱. 본문 나머지는 화면 0 메타데이터"
+    },
+    {
+      "file": "법령 PDF/L3_공고별표/L3_2025초기창업패키지모집공고_민간투자매칭형.pdf",
+      "layer": "L3",
+      "doc_type": "모집공고",
+      "version": "2025",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "별표·사업비 관련 부분만"
+    },
+    {
+      "file": "법령 PDF/L3_공고별표/L3_2026초기창업패키지모집공고_딥테크특화형.pdf",
+      "layer": "L3",
+      "doc_type": "모집공고",
+      "version": "공고 제2026-671호",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "별표·사업비 관련 부분만"
+    },
+    {
+      "file": "법령 PDF/L3_공고별표/L3_2025창업도약패키지_일반형_모집공고.pdf",
+      "layer": "L3",
+      "doc_type": "모집공고",
+      "version": "공고 제2025-119호(수정공고본)",
+      "status": "reference",
+      "role": [
+        "archive"
+      ],
+      "index": false,
+      "notes": "MVP 대상 사업(예비·초기) 아님 — 사업 확장 시 승격"
+    },
+    {
+      "file": "법령 PDF/L3_공고별표/L3_2026창업지원사업통합공고문.pdf",
+      "layer": "L3",
+      "doc_type": "통합공고",
+      "version": "공고 제2025-648호",
+      "status": "reference",
+      "role": [
+        "dev_doc"
+      ],
+      "index": false,
+      "notes": "화면 0 사업 카탈로그 설계 참고 (508개 사업 목록 구조)"
+    },
+    {
+      "file": "법령 PDF/L3_공고별표/L3_2025초기창업패키지_주요질의응답집_별첨4.pdf",
+      "layer": "L3",
+      "doc_type": "질의응답집",
+      "version": "2025.2",
+      "status": "reference",
+      "role": [
+        "golden_set"
+      ],
+      "index": false,
+      "notes": "골든셋 1순위 — 창진원 공식 답변이 정답지. 인덱스 투입 절대 금지(정답 유출)"
+    },
+    {
+      "file": "법령 PDF/L4_기관규정/대학/L4_강원대_연구비관리지침_202509.hwp",
+      "layer": "L4",
+      "doc_type": "대학규정",
+      "status": "reference",
+      "role": [
+        "compare_analysis"
+      ],
+      "index": false
+    },
+    {
+      "file": "법령 PDF/L4_기관규정/대학/L4_경희대_산학협력단외부연구비관리지침_202009.pdf",
+      "layer": "L4",
+      "doc_type": "대학규정",
+      "status": "reference",
+      "role": [
+        "compare_analysis"
+      ],
+      "index": false
+    },
+    {
+      "file": "법령 PDF/L4_기관규정/대학/L4_고려대_산학협력단교외연구비관리지침_202405.pdf",
+      "layer": "L4",
+      "doc_type": "대학규정",
+      "status": "reference",
+      "role": [
+        "compare_analysis"
+      ],
+      "index": false
+    },
+    {
+      "file": "법령 PDF/L4_기관규정/대학/L4_대구한의대_대학혁신지원사업사업비집행지침_202505.pdf",
+      "layer": "L4",
+      "doc_type": "대학규정",
+      "status": "reference",
+      "role": [
+        "compare_analysis"
+      ],
+      "index": false,
+      "notes": "실제 출처 동아보건대(duh.ac.kr) 추정 — 사용 전 표지 확인 (다운로드 리포트 참조)"
+    },
+    {
+      "file": "법령 PDF/L4_기관규정/대학/L4_동서대_대학혁신지원사업유형운영매뉴얼.pdf",
+      "layer": "L4",
+      "doc_type": "대학규정",
+      "status": "reference",
+      "role": [
+        "compare_analysis"
+      ],
+      "index": false
+    },
+    {
+      "file": "법령 PDF/L4_기관규정/대학/L4_목포해양대_산학협력단회계처리규칙해설_2021.pdf",
+      "layer": "L4",
+      "doc_type": "대학규정",
+      "status": "reference",
+      "role": [
+        "compare_analysis"
+      ],
+      "index": false
+    },
+    {
+      "file": "법령 PDF/L4_기관규정/대학/L4_부산대_대학혁신지원사업사업비집행관리기준.pdf",
+      "layer": "L4",
+      "doc_type": "대학규정",
+      "status": "reference",
+      "role": [
+        "compare_analysis"
+      ],
+      "index": false
+    },
+    {
+      "file": "법령 PDF/L4_기관규정/대학/L4_서울대_연구비관리규정_20200325.hwp",
+      "layer": "L4",
+      "doc_type": "대학규정",
+      "status": "reference",
+      "role": [
+        "compare_analysis"
+      ],
+      "index": false
+    },
+    {
+      "file": "법령 PDF/L4_기관규정/대학/L4_서울시립대_산학협력단회계처리규칙_20160129.hwp",
+      "layer": "L4",
+      "doc_type": "대학규정",
+      "status": "reference",
+      "role": [
+        "compare_analysis"
+      ],
+      "index": false
+    },
+    {
+      "file": "법령 PDF/L4_기관규정/대학/L4_성결대_대학혁신지원사업비집행가이드라인.pdf",
+      "layer": "L4",
+      "doc_type": "대학규정",
+      "status": "reference",
+      "role": [
+        "compare_analysis"
+      ],
+      "index": false
+    },
+    {
+      "file": "법령 PDF/L4_기관규정/대학/L4_성신여대_연구비비목별계상집행기준지침.pdf",
+      "layer": "L4",
+      "doc_type": "대학규정",
+      "status": "reference",
+      "role": [
+        "compare_analysis"
+      ],
+      "index": false,
+      "notes": "비목별 계상 기준이라 충돌 조항 분석(액션 3)에 특히 유용"
+    },
+    {
+      "file": "법령 PDF/L4_기관규정/대학/L4_위덕대_산학협력단회계처리규칙.hwp",
+      "layer": "L4",
+      "doc_type": "대학규정",
+      "status": "reference",
+      "role": [
+        "compare_analysis"
+      ],
+      "index": false
+    },
+    {
+      "file": "법령 PDF/L4_기관규정/대학/L4_전남대_산학협력단연구관리업무간편매뉴얼.pdf",
+      "layer": "L4",
+      "doc_type": "대학규정",
+      "status": "reference",
+      "role": [
+        "compare_analysis"
+      ],
+      "index": false
+    },
+    {
+      "file": "법령 PDF/L4_기관규정/대학/L4_중앙대_외부연구비관리규정_6-9.pdf",
+      "layer": "L4",
+      "doc_type": "대학규정",
+      "status": "reference",
+      "role": [
+        "compare_analysis"
+      ],
+      "index": false
+    },
+    {
+      "file": "법령 PDF/L4_기관규정/대학/L4_한국항공대_연구비중앙관리지침_2019_16차개정.pdf",
+      "layer": "L4",
+      "doc_type": "대학규정",
+      "status": "reference",
+      "role": [
+        "compare_analysis"
+      ],
+      "index": false
+    },
+    {
+      "file": "법령 PDF/L4_기관규정/대학/L4_한신대_대학혁신지원사업사업비집행관리지침_202503.pdf",
+      "layer": "L4",
+      "doc_type": "대학규정",
+      "status": "reference",
+      "role": [
+        "compare_analysis"
+      ],
+      "index": false
+    },
+    {
+      "file": "법령 PDF/L4_기관규정/대학/L4_한양여대_외부연구비관리규정_2014.pdf",
+      "layer": "L4",
+      "doc_type": "대학규정",
+      "status": "reference",
+      "role": [
+        "compare_analysis"
+      ],
+      "index": false
+    },
+    {
+      "file": "법령 PDF/L4_기관규정/대학/L4_협성대_대학혁신지원사업관리집행지침_202510.pdf",
+      "layer": "L4",
+      "doc_type": "대학규정",
+      "status": "reference",
+      "role": [
+        "compare_analysis"
+      ],
+      "index": false
+    },
+    {
+      "file": "법령 PDF/L4_기관규정/대학/L4_협성대_산학협력단사업비관리지침_2020.pdf",
+      "layer": "L4",
+      "doc_type": "대학규정",
+      "status": "reference",
+      "role": [
+        "compare_analysis"
+      ],
+      "index": false
+    },
+    {
+      "file": "법령 PDF/L4_기관규정/액셀러레이터/AC_중소벤처기업부_창업기획자등록및관리규정_2021.txt",
+      "layer": "L4",
+      "doc_type": "기관유형규범",
+      "status": "reference",
+      "role": [
+        "archive"
+      ],
+      "index": false,
+      "notes": "§8 확장 논거 — AC도 자체 규정 체계 존재의 증거"
+    },
+    {
+      "file": "법령 PDF/L4_기관규정/창업보육센터BI/BI_중소벤처기업부_창업보육센터운영요령_2025.txt",
+      "layer": "L4",
+      "doc_type": "기관유형규범",
+      "status": "reference",
+      "role": [
+        "archive"
+      ],
+      "index": false
+    },
+    {
+      "file": "법령 PDF/L4_기관규정/창업보육센터BI/BI_영월군_창업보육센터설치및운영조례_2019.txt",
+      "layer": "L4",
+      "doc_type": "기관유형규범",
+      "status": "reference",
+      "role": [
+        "archive"
+      ],
+      "index": false
+    },
+    {
+      "file": "법령 PDF/L4_기관규정/창조경제혁신센터/혁신센터_경기도_경기창조경제혁신센터지원조례_2020.txt",
+      "layer": "L4",
+      "doc_type": "기관유형규범",
+      "status": "reference",
+      "role": [
+        "archive"
+      ],
+      "index": false
+    },
+    {
+      "file": "법령 PDF/L4_기관규정/테크노파크/TP_산업통상자원부_산업기술혁신사업사업비산정관리및사용정산에관한요령_2017.txt",
+      "layer": "L4",
+      "doc_type": "기관유형규범",
+      "status": "reference",
+      "role": [
+        "archive"
+      ],
+      "index": false
+    },
+    {
+      "file": "법령 PDF/사례집_판례_FAQ/사례집_한국연구재단_정부연구비사용QA사례집_2025개정.pdf",
+      "layer": "사례",
+      "doc_type": "QA사례집",
+      "version": "2025 개정",
+      "status": "reference",
+      "role": [
+        "case_index",
+        "rule_source",
+        "golden_set"
+      ],
+      "index": true,
+      "notes": "사례 인덱스 1순위(80+ Q&A, Q&A 단위 청킹). 일부 문항은 골든셋 홀드아웃으로 분리 — 홀드아웃 분은 인덱스 제외. 출처 라벨 'R&D' 필수"
+    },
+    {
+      "file": "법령 PDF/사례집_판례_FAQ/사례집_미래창조과학부_연구비사용상담부당집행사례집_2013.pdf",
+      "layer": "사례",
+      "doc_type": "사례집",
+      "version": "2013",
+      "status": "reference",
+      "role": [
+        "case_index"
+      ],
+      "index": true,
+      "notes": "부정집행 유형·패턴. 오래됐으므로 제재 수위 숫자는 인용 금지, 유형만 활용"
+    },
+    {
+      "file": "법령 PDF/사례집_판례_FAQ/사례집_경인교대_산학협력단연구비집행FAQ_목록.txt",
+      "layer": "사례",
+      "doc_type": "FAQ스냅샷",
+      "status": "reference",
+      "role": [
+        "case_index"
+      ],
+      "index": true,
+      "notes": "게시판 스냅샷(77건) — 살아있는 게시판이라 주기적 재수집 필요"
+    },
+    {
+      "file": "법령 PDF/사례집_판례_FAQ/판례_행정심판재결례_보조금환수_deccSeq243657.txt",
+      "layer": "사례",
+      "doc_type": "재결례",
+      "status": "reference",
+      "role": [
+        "case_index"
+      ],
+      "index": true,
+      "notes": "실제 환수 사례 인용용"
+    },
+    {
+      "file": "법령 PDF/사례집_판례_FAQ/사례집_KISTEP_국가연구개발사업제재처분판례조사분석_2022.pdf",
+      "layer": "사례",
+      "doc_type": "판례분석",
+      "version": "2022",
+      "status": "reference",
+      "role": [
+        "case_index"
+      ],
+      "index": true,
+      "notes": "제재 수위 관련 부분만 선별 청킹"
+    },
+    {
+      "file": "법령 PDF/사례집_판례_FAQ/사례집_IITP_제재처분가이드라인_2025.pdf",
+      "layer": "사례",
+      "doc_type": "제재가이드",
+      "version": "2025",
+      "status": "reference",
+      "role": [
+        "case_index"
+      ],
+      "index": true,
+      "notes": "위반유형→제재 매핑 부분만 선별"
+    },
+    {
+      "file": "법령 PDF/사례집_판례_FAQ/사례집_권익위재결례집_1.pdf",
+      "layer": "사례",
+      "doc_type": "재결례집",
+      "version": "2014",
+      "status": "reference",
+      "role": [
+        "case_index"
+      ],
+      "index": false,
+      "notes": "일반 행정심판 전집(10MB급) — 보조금·지원금 키워드 필터로 해당 사건만 추출 후 index true로 변경"
+    },
+    {
+      "file": "법령 PDF/사례집_판례_FAQ/사례집_권익위재결례집_2.pdf",
+      "layer": "사례",
+      "doc_type": "재결례집",
+      "version": "2014",
+      "status": "reference",
+      "role": [
+        "case_index"
+      ],
+      "index": false,
+      "notes": "1권과 동일 — 필터 후 승격"
+    },
+    {
+      "file": "법령 PDF/사례집_판례_FAQ/사례집_기획재정부_국고보조금통합관리지침_2021-210호.pdf",
+      "layer": "사례",
+      "doc_type": "정부지침",
+      "version": "기재부공고 2021-210호",
+      "status": "reference",
+      "role": [
+        "case_index"
+      ],
+      "index": true,
+      "notes": "창업지침에 없는 보조금 일반 개념의 폴백. 하위 우선순위"
+    },
+    {
+      "file": "법령 PDF/사례집_판례_FAQ/사례집_기획재정부_e나라도움보조사업자매뉴얼.pdf",
+      "layer": "사례",
+      "doc_type": "매뉴얼",
+      "status": "reference",
+      "role": [
+        "archive"
+      ],
+      "index": false,
+      "notes": "시스템 사용 매뉴얼 성격 — 판정 가치 낮음, 보관"
+    },
+    {
+      "file": "법령 PDF/통계_시장규모/통계_한국창업보육협회_창업보육센터_전국_현황_2026.csv",
+      "layer": "통계",
+      "doc_type": "현황CSV",
+      "version": "2026",
+      "status": "reference",
+      "role": [
+        "market_analysis"
+      ],
+      "index": false,
+      "notes": "액션 2: 기관 수 × 티어 가격 상한 계산"
+    },
+    {
+      "file": "법령 PDF/통계_시장규모/통계_중소벤처기업부_창업보육센터_센터현황_2025.csv",
+      "layer": "통계",
+      "doc_type": "현황CSV",
+      "version": "2025",
+      "status": "reference",
+      "role": [
+        "market_analysis"
+      ],
+      "index": false,
+      "notes": "입주기업 수·입주율 포함 — 티어 배분 계산"
+    },
+    {
+      "file": "법령 PDF/통계_시장규모/통계_창업진흥원_예비창업패키지_주관기관_현황_2023.csv",
+      "layer": "통계",
+      "doc_type": "현황CSV",
+      "version": "2023",
+      "status": "reference",
+      "role": [
+        "market_analysis"
+      ],
+      "index": false
+    },
+    {
+      "file": "법령 PDF/통계_시장규모/통계_창업진흥원_초기창업패키지_주관기관_현황_2023.csv",
+      "layer": "통계",
+      "doc_type": "현황CSV",
+      "version": "2023",
+      "status": "reference",
+      "role": [
+        "market_analysis"
+      ],
+      "index": false
+    },
+    {
+      "file": "법령 PDF/통계_시장규모/통계_창업진흥원_창업도약패키지_주관기관_정보_2023.csv",
+      "layer": "통계",
+      "doc_type": "현황CSV",
+      "version": "2023",
+      "status": "reference",
+      "role": [
+        "market_analysis"
+      ],
+      "index": false
+    },
+    {
+      "file": "법령 PDF/통계_시장규모/통계_창업진흥원_창업중심대학_주관기관_현황_2023.csv",
+      "layer": "통계",
+      "doc_type": "현황CSV",
+      "version": "2023",
+      "status": "reference",
+      "role": [
+        "market_analysis"
+      ],
+      "index": false
+    },
+    {
+      "file": "법령 PDF/통계_시장규모/통계_창업진흥원_창조경제혁신센터_데이터_현황_2026.csv",
+      "layer": "통계",
+      "doc_type": "현황CSV",
+      "version": "2026",
+      "status": "reference",
+      "role": [
+        "market_analysis"
+      ],
+      "index": false
+    },
+    {
+      "file": "법령 PDF/통계_시장규모/통계_창업진흥원_K-Startup_조회서비스_OpenAPI명세_2026.json",
+      "layer": "통계",
+      "doc_type": "API명세",
+      "version": "2026",
+      "status": "reference",
+      "role": [
+        "dev_doc"
+      ],
+      "index": false,
+      "notes": "L3 자동 갱신 파이프라인(공고 감지) 개발 문서"
+    },
+    {
+      "file": "다운로드_URL_전체목록.md",
+      "layer": "메타",
+      "doc_type": "수집이력",
+      "status": "reference",
+      "role": [
+        "meta"
+      ],
+      "index": false,
+      "notes": "개정 감지 시 재수집 주소록"
+    },
+    {
+      "file": "법령 PDF/_다운로드_결과_리포트.md",
+      "layer": "메타",
+      "doc_type": "수집이력",
+      "status": "reference",
+      "role": [
+        "meta"
+      ],
+      "index": false
+    },
+    {
+      "file": "법령 PDF/_미수집_다운로드URL목록(zip내부원본).md",
+      "layer": "메타",
+      "doc_type": "수집이력",
+      "status": "reference",
+      "role": [
+        "meta"
+      ],
+      "index": false
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_중소기업창업지원법_20230628.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2023-06-28",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L01 · 법령ID 001472 · MST 246795 · 공포 21293 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_중소기업창업지원법_20230419.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2023-04-19",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L01 · 법령ID 001472 · MST 244985 · 공포 21293 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_중소기업창업지원법_20240828.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2024-08-28",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L01 · 법령ID 001472 · MST 260845 · 공포 21293 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_중소기업창업지원법_20240501.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2024-05-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L01 · 법령ID 001472 · MST 255895 · 공포 21293 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_중소기업창업지원법_20240315.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2024-03-15",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L01 · 법령ID 001472 · MST 254919 · 공포 21293 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_중소기업창업지원법_20251001.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2025-10-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L01 · 법령ID 001472 · MST 277133 · 공포 21293 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_중소기업창업지원법_20250722.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2025-07-22",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L01 · 법령ID 001472 · MST 268605 · 공포 21293 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_중소기업창업지원법_20250101.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2025-01-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L01 · 법령ID 001472 · MST 267597 · 공포 21293 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_중소기업창업지원법_20260602.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-06-02",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L01 · 법령ID 001472 · MST 286603 · 공포 21293 · 2026년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_중소기업창업지원법시행령_20260324.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2026-03-24",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "L02 · 법령ID 004974 · MST 284871 · 공포 36220 · 인용 제2조, 제4조"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_중소기업창업지원법시행령_20231221.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2023-12-21",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L02 · 법령ID 004974 · MST 257119 · 공포 36220 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_중소기업창업지원법시행령_20230207.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2023-02-07",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L02 · 법령ID 004974 · MST 247961 · 공포 36220 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_중소기업창업지원법시행령_20240828.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2024-08-28",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L02 · 법령ID 004974 · MST 265077 · 공포 36220 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_중소기업창업지원법시행령_20240710.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2024-07-10",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L02 · 법령ID 004974 · MST 263699 · 공포 36220 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_중소기업창업지원법시행령_20240601.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2024-06-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L02 · 법령ID 004974 · MST 261939 · 공포 36220 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_중소기업창업지원법시행령_20240501.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2024-05-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L02 · 법령ID 004974 · MST 260751 · 공포 36220 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_중소기업창업지원법시행령_20251223.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2025-12-23",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L02 · 법령ID 004974 · MST 280531 · 공포 36220 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_중소기업창업지원법시행령_20251001.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2025-10-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L02 · 법령ID 004974 · MST 277509 · 공포 36220 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_중소기업창업지원법시행령_20250612.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2025-06-12",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L02 · 법령ID 004974 · MST 269659 · 공포 36220 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_중소기업창업지원법시행령_20260201.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2026-02-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L02 · 법령ID 004974 · MST 283003 · 공포 36220 · 2026년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_주식회사등의외부감사에관한법률시행령_20260526.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2026-05-26",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "L03 · 법령ID 004940 · MST 286317 · 공포 36358 · 인용 제5조"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_주식회사등의외부감사에관한법률시행령_20231219.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2023-12-19",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L03 · 법령ID 004940 · MST 257061 · 공포 36358 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_주식회사등의외부감사에관한법률시행령_20230502.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2023-05-02",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L03 · 법령ID 004940 · MST 250585 · 공포 36358 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_주식회사등의외부감사에관한법률시행령_20250520.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2025-05-20",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L03 · 법령ID 004940 · MST 271155 · 공포 36358 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_출입국관리법시행령_20250601.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2025-06-01",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "L04 · 법령ID 005256 · MST 271319 · 공포 35540 · 인용 제23조"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_출입국관리법시행령_20231214.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2023-12-14",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L04 · 법령ID 005256 · MST 256765 · 공포 35540 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_출입국관리법시행령_20230710.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2023-07-10",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L04 · 법령ID 005256 · MST 252457 · 공포 35540 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_출입국관리법시행령_20230614.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2023-06-14",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L04 · 법령ID 005256 · MST 251207 · 공포 35540 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_출입국관리법시행령_20230307.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2023-03-07",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L04 · 법령ID 005256 · MST 248709 · 공포 35540 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_출입국관리법시행령_20230112.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2023-01-12",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L04 · 법령ID 005256 · MST 247685 · 공포 35540 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_출입국관리법시행령_20230101.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2023-01-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L04 · 법령ID 005256 · MST 246559 · 공포 35540 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_출입국관리법시행령_20241029.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2024-10-29",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L04 · 법령ID 005256 · MST 266139 · 공포 35540 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_출입국관리법시행령_20240710.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2024-07-10",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L04 · 법령ID 005256 · MST 263719 · 공포 35540 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_출입국관리법_20260123.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-01-23",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "L05 · 법령ID 001707 · MST 272921 · 공포 20992"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_출입국관리법_20231214.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2023-12-14",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L05 · 법령ID 001707 · MST 251683 · 공포 20992 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_출입국관리법_20230614.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2023-06-14",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L05 · 법령ID 001707 · MST 245973 · 공포 20992 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_출입국관리법_20251023.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2025-10-23",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L05 · 법령ID 001707 · MST 269943 · 공포 20992 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_출입국관리법_20250722.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2025-07-22",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L05 · 법령ID 001707 · MST 268557 · 공포 20992 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_출입국관리법_20250621.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2025-06-21",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L05 · 법령ID 001707 · MST 267361 · 공포 20992 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_국민연금법_20260617.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-06-17",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "L06 · 법령ID 001781 · MST 280269 · 공포 21203"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국민연금법_20230929.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2023-09-29",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L06 · 법령ID 001781 · MST 249303 · 공포 21203 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국민연금법_20230914.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2023-09-14",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L06 · 법령ID 001781 · MST 251711 · 공포 21203 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국민연금법_20241220.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2024-12-20",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L06 · 법령ID 001781 · MST 267373 · 공포 21203 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국민연금법_20240920.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2024-09-20",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L06 · 법령ID 001781 · MST 265421 · 공포 21203 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국민연금법_20240118.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2024-01-18",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L06 · 법령ID 001781 · MST 257295 · 공포 21203 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국민연금법_20251125.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2025-11-25",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L06 · 법령ID 001781 · MST 279865 · 공포 21203 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국민연금법_20251111.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2025-11-11",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L06 · 법령ID 001781 · MST 279687 · 공포 21203 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국민연금법_20251001.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2025-10-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L06 · 법령ID 001781 · MST 276655 · 공포 21203 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국민연금법_20260526.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-05-26",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L06 · 법령ID 001781 · MST 286165 · 공포 21203 · 2026년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국민연금법_20260101.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-01-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L06 · 법령ID 001781 · MST 270511 · 공포 21203 · 2026년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_소득세법시행령_20260701.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2026-07-01",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "L07 · 법령ID 003956 · MST 286211 · 공포 36343"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20231001.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2023-10-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L07 · 법령ID 003956 · MST 254955 · 공포 36343 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20230929.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2023-09-29",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L07 · 법령ID 003956 · MST 255045 · 공포 36343 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20230710.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2023-07-10",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L07 · 법령ID 003956 · MST 252427 · 공포 36343 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20230701.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2023-07-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L07 · 법령ID 003956 · MST 248191 · 공포 36343 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20230605.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2023-06-05",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L07 · 법령ID 003956 · MST 249595 · 공포 36343 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20230105.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2023-01-05",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L07 · 법령ID 003956 · MST 244819 · 공포 36343 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20230101.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2023-01-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L07 · 법령ID 003956 · MST 247489 · 공포 36343 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20230101.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2023-01-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L07 · 법령ID 003956 · MST 240311 · 공포 36343 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20241112.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2024-11-12",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L07 · 법령ID 003956 · MST 266275 · 공포 36343 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20240915.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2024-09-15",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L07 · 법령ID 003956 · MST 265219 · 공포 36343 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20240910.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2024-09-10",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L07 · 법령ID 003956 · MST 265247 · 공포 36343 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20240731.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2024-07-31",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L07 · 법령ID 003956 · MST 264243 · 공포 36343 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20240710.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2024-07-10",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L07 · 법령ID 003956 · MST 263667 · 공포 36343 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20240701.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2024-07-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L07 · 법령ID 003956 · MST 260889 · 공포 36343 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20240627.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2024-06-27",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L07 · 법령ID 003956 · MST 263313 · 공포 36343 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20240517.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2024-05-17",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L07 · 법령ID 003956 · MST 262425 · 공포 36343 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20240101.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2024-01-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L07 · 법령ID 003956 · MST 257437 · 공포 36343 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20251128.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2025-11-28",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L07 · 법령ID 003956 · MST 279961 · 공포 36343 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20251001.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2025-10-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L07 · 법령ID 003956 · MST 277617 · 공포 36343 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20250719.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2025-07-19",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L07 · 법령ID 003956 · MST 271007 · 공포 36343 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20250701.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2025-07-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L07 · 법령ID 003956 · MST 272559 · 공포 36343 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20250701.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2025-07-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L07 · 법령ID 003956 · MST 269541 · 공포 36343 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20250101.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2025-01-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L07 · 법령ID 003956 · MST 267821 · 공포 36343 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20250101.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2025-01-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L07 · 법령ID 003956 · MST 229391 · 공포 36343 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20260701.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2026-07-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L07 · 법령ID 003956 · MST 283631 · 공포 36343 · 2026년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20260701.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2026-07-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L07 · 법령ID 003956 · MST 280865 · 공포 36343 · 2026년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20260423.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2026-04-23",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L07 · 법령ID 003956 · MST 285631 · 공포 36343 · 2026년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20260201.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2026-02-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L07 · 법령ID 003956 · MST 282973 · 공포 36343 · 2026년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_소득세법시행령_20260101.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2026-01-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L07 · 법령ID 003956 · MST 282539 · 공포 36343 · 2026년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_공무원여비규정_20260701.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2026-07-01",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "L08 · 법령ID 009402 · MST 287535 · 공포 36492 · 인용 별표1"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_공무원여비규정_20230302.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2023-03-02",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L08 · 법령ID 009402 · MST 248443 · 공포 36492 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_공무원여비규정_20240702.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2024-07-02",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L08 · 법령ID 009402 · MST 263513 · 공포 36492 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_공무원여비규정_20251001.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2025-10-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L08 · 법령ID 009402 · MST 278047 · 공포 36492 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_공무원여비규정_20260102.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2026-01-02",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L08 · 법령ID 009402 · MST 282471 · 공포 36492 · 2026년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_공무원여비규정_20260102.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2026-01-02",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L08 · 법령ID 009402 · MST 281713 · 공포 36492 · 2026년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_민법_20260317.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-03-17",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "L09 · 법령ID 001706 · MST 284415 · 공포 21454 · 인용 제397조, 제767조, 제777조 · 보강수집 제777조 — 문서는 제767조(친족의 정의)를 인용하나 친족 범위 실체 규정은 제777조"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_민법_20230628.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2023-06-28",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L09 · 법령ID 001706 · MST 246569 · 공포 21454 · 2023년 문서 대조용 · 보강수집 제777조 — 문서는 제767조(친족의 정의)를 인용하나 친족 범위 실체 규정은 제777조"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_민법_20240517.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2024-05-17",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L09 · 법령ID 001706 · MST 251069 · 공포 21454 · 2024년 문서 대조용 · 보강수집 제777조 — 문서는 제767조(친족의 정의)를 인용하나 친족 범위 실체 규정은 제777조"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_민법_20250131.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2025-01-31",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L09 · 법령ID 001706 · MST 265307 · 공포 21454 · 2025년 문서 대조용 · 보강수집 제777조 — 문서는 제767조(친족의 정의)를 인용하나 친족 범위 실체 규정은 제777조"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_기술의이전및사업화촉진에관한법률_20251001.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2025-10-01",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "L10 · 법령ID 009371 · MST 276481 · 공포 21065 · 인용 제35조"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_기술의이전및사업화촉진에관한법률_20240710.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2024-07-10",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L10 · 법령ID 009371 · MST 258487 · 공포 21065 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_기술의이전및사업화촉진에관한법률_20250121.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2025-01-21",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L10 · 법령ID 009371 · MST 268577 · 공포 21065 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_기술의이전및사업화촉진에관한법률_20261127.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-11-27",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L10 · 법령ID 009371 · MST 286279 · 공포 21065 · 2026년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_산업안전보건법_20260801.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-08-01",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "L11 · 법령ID 001766 · MST 283449 · 공포 21374 · 인용 제129조"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_산업안전보건법_20230808.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2023-08-08",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L11 · 법령ID 001766 · MST 253643 · 공포 21374 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_산업안전보건법_20240517.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2024-05-17",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L11 · 법령ID 001766 · MST 253521 · 공포 21374 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_산업안전보건법_20251001.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2025-10-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L11 · 법령ID 001766 · MST 276853 · 공포 21374 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_산업안전보건법_20250722.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2025-07-22",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L11 · 법령ID 001766 · MST 268551 · 공포 21374 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_산업안전보건법_20250601.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2025-06-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L11 · 법령ID 001766 · MST 265961 · 공포 21374 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_산업안전보건법_20261208.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-12-08",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L11 · 법령ID 001766 · MST 285379 · 공포 21374 · 2026년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_산업안전보건법_20260707.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-07-07",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L11 · 법령ID 001766 · MST 287805 · 공포 21374 · 2026년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_부정청탁및금품등수수의금지에관한법률_20250121.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2025-01-21",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "L12 · 법령ID 012268 · MST 268655 · 공포 20712"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_부정청탁및금품등수수의금지에관한법률시행령_20260630.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2026-06-30",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "L13 · 법령ID 012661 · MST 287511 · 공포 36485 · 인용 별표1"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_부정청탁및금품등수수의금지에관한법률시행령_20230830.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2023-08-30",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L13 · 법령ID 012661 · MST 254237 · 공포 36485 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_부정청탁및금품등수수의금지에관한법률시행령_20240827.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2024-08-27",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L13 · 법령ID 012661 · MST 265085 · 공포 36485 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_부정청탁및금품등수수의금지에관한법률시행령_20240423.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2024-04-23",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L13 · 법령ID 012661 · MST 261911 · 공포 36485 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_부정청탁및금품등수수의금지에관한법률시행령_20251230.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2025-12-30",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L13 · 법령ID 012661 · MST 281817 · 공포 36485 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_인공지능발전과신뢰기반조성등에관한기본법_20260721.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-07-21",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "L14 · 법령ID 014820 · MST 282791 · 공포 21311"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_인공지능발전과신뢰기반조성등에관한기본법_20260122.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-01-22",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L14 · 법령ID 014820 · MST 276241 · 공포 21311 · 2026년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_인공지능발전과신뢰기반조성등에관한기본법_20260122.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-01-22",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L14 · 법령ID 014820 · MST 268543 · 공포 21311 · 2026년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_근로기준법_20260820.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-08-20",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "L15 · 법령ID 001872 · MST 283457 · 공포 21373"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_근로기준법_20241022.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2024-10-22",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L15 · 법령ID 001872 · MST 265959 · 공포 21373 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_근로기준법_20251001.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2025-10-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L15 · 법령ID 001872 · MST 276849 · 공포 21373 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_근로기준법_20261210.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-12-10",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L15 · 법령ID 001872 · MST 286771 · 공포 21373 · 2026년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_근로기준법_20261208.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-12-08",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L15 · 법령ID 001872 · MST 285279 · 공포 21373 · 2026년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_근로자퇴직급여보장법_20260701.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-07-01",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "L16 · 법령ID 009883 · MST 284455 · 공포 21475"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_근로자퇴직급여보장법_20251111.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2025-11-11",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L16 · 법령ID 009883 · MST 279829 · 공포 21475 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_최저임금법_20200526.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2020-05-26",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "L17 · 법령ID 000129 · MST 218303 · 공포 17326"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_최저임금법_20261208.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-12-08",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L17 · 법령ID 000129 · MST 285389 · 공포 17326 · 2026년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_고등교육법_20260811.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-08-11",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "L18 · 법령ID 000899 · MST 283297 · 공포 21332"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_고등교육법_20230710.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2023-07-10",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L18 · 법령ID 000899 · MST 251527 · 공포 21332 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_고등교육법_20230419.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2023-04-19",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L18 · 법령ID 000899 · MST 244957 · 공포 21332 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_고등교육법_20241022.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2024-10-22",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L18 · 법령ID 000899 · MST 265805 · 공포 21332 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_고등교육법_20240814.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2024-08-14",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L18 · 법령ID 000899 · MST 260177 · 공포 21332 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_고등교육법_20251001.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2025-10-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L18 · 법령ID 000899 · MST 273309 · 공포 21332 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_고등교육법_20250722.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2025-07-22",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L18 · 법령ID 000899 · MST 268513 · 공포 21332 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_고등교육법_20250621.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2025-06-21",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L18 · 법령ID 000899 · MST 267347 · 공포 21332 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_고등교육법_20261203.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-12-03",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L18 · 법령ID 000899 · MST 280021 · 공포 21332 · 2026년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_고등교육법_20261120.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-11-20",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L18 · 법령ID 000899 · MST 286083 · 공포 21332 · 2026년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_고등교육법_20260911.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-09-11",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L18 · 법령ID 000899 · MST 283883 · 공포 21332 · 2026년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_공무원인재개발법_20221115.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2022-11-15",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "L19 · 법령ID 001343 · MST 245371 · 공포 19062 · 구법명"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_보조금관리에관한법률_20240326.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2024-03-26",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L20 · 법령ID 000729 · MST 261431 · 공포 21751 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_보조금관리에관한법률_20240119.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2024-01-19",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L20 · 법령ID 000729 · MST 252685 · 공포 21751 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_보조금관리에관한법률_20260102.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-01-02",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L20 · 법령ID 000729 · MST 276113 · 공포 21751 · 2026년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_국가를당사자로하는계약에관한법률_20260611.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-06-11",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "L21 · 법령ID 000695 · MST 283877 · 공포 21418"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국가를당사자로하는계약에관한법률_20231019.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2023-10-19",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L21 · 법령ID 000695 · MST 252681 · 공포 21418 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국가를당사자로하는계약에관한법률_20230929.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2023-09-29",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L21 · 법령ID 000695 · MST 249397 · 공포 21418 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국가를당사자로하는계약에관한법률_20240927.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2024-09-27",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L21 · 법령ID 000695 · MST 261415 · 공포 21418 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국가를당사자로하는계약에관한법률_20260102.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-01-02",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L21 · 법령ID 000695 · MST 277151 · 공포 21418 · 2026년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_국가를당사자로하는계약에관한법률시행령_20260603.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2026-06-03",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "L22 · 법령ID 002652 · MST 285893 · 공포 36338"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국가를당사자로하는계약에관한법률시행령_20231116.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2023-11-16",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L22 · 법령ID 002652 · MST 255991 · 공포 36338 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국가를당사자로하는계약에관한법률시행령_20230605.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2023-06-05",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L22 · 법령ID 002652 · MST 249589 · 공포 36338 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국가를당사자로하는계약에관한법률시행령_20230105.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2023-01-05",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L22 · 법령ID 002652 · MST 247213 · 공포 36338 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국가를당사자로하는계약에관한법률시행령_20241224.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2024-12-24",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L22 · 법령ID 002652 · MST 267171 · 공포 36338 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국가를당사자로하는계약에관한법률시행령_20240927.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2024-09-27",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L22 · 법령ID 002652 · MST 265313 · 공포 36338 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국가를당사자로하는계약에관한법률시행령_20240716.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2024-07-16",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L22 · 법령ID 002652 · MST 264001 · 공포 36338 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국가를당사자로하는계약에관한법률시행령_20240710.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2024-07-10",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L22 · 법령ID 002652 · MST 263629 · 공포 36338 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국가를당사자로하는계약에관한법률시행령_20240517.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2024-05-17",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L22 · 법령ID 002652 · MST 262571 · 공포 36338 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국가를당사자로하는계약에관한법률시행령_20240517.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2024-05-17",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L22 · 법령ID 002652 · MST 262495 · 공포 36338 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국가를당사자로하는계약에관한법률시행령_20251001.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2025-10-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L22 · 법령ID 002652 · MST 277589 · 공포 36338 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국가를당사자로하는계약에관한법률시행령_20250823.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2025-08-23",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L22 · 법령ID 002652 · MST 273045 · 공포 36338 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국가를당사자로하는계약에관한법률시행령_20250422.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2025-04-22",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L22 · 법령ID 002652 · MST 270701 · 공포 36338 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국가를당사자로하는계약에관한법률시행령_20260512.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2026-05-12",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L22 · 법령ID 002652 · MST 285979 · 공포 36338 · 2026년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국가를당사자로하는계약에관한법률시행령_20260102.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2026-01-02",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L22 · 법령ID 002652 · MST 280803 · 공포 36338 · 2026년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_공공재정부정청구금지및부정이익환수등에관한법률_20240927.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2024-09-27",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "L23 · 법령ID 013463 · MST 261479 · 공포 20426"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_공공재정부정청구금지및부정이익환수등에관한법률_20230622.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2023-06-22",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L23 · 법령ID 013463 · MST 249031 · 공포 20426 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_소상공인보호및지원에관한법률_20260701.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-07-01",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "L24 · 법령ID 000360 · MST 281985 · 공포 21288 · 인용 제17조"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_소상공인보호및지원에관한법률_20230704.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2023-07-04",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L24 · 법령ID 000360 · MST 247295 · 공포 21288 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_소상공인보호및지원에관한법률_20230328.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2023-03-28",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L24 · 법령ID 000360 · MST 249355 · 공포 21288 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_소상공인보호및지원에관한법률_20240920.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2024-09-20",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L24 · 법령ID 000360 · MST 265493 · 공포 21288 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_소상공인보호및지원에관한법률_20240717.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2024-07-17",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L24 · 법령ID 000360 · MST 258839 · 공포 21288 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_소상공인보호및지원에관한법률_20240710.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2024-07-10",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L24 · 법령ID 000360 · MST 258441 · 공포 21288 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_소상공인보호및지원에관한법률_20251001.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2025-10-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L24 · 법령ID 000360 · MST 277117 · 공포 21288 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_소상공인보호및지원에관한법률_20250722.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2025-07-22",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L24 · 법령ID 000360 · MST 268277 · 공포 21288 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_소상공인보호및지원에관한법률_20261127.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-11-27",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L24 · 법령ID 000360 · MST 286259 · 공포 21288 · 2026년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_소상공인보호및지원에관한법률_20260617.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-06-17",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L24 · 법령ID 000360 · MST 280273 · 공포 21288 · 2026년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_소상공인보호및지원에관한법률_20260603.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-06-03",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L24 · 법령ID 000360 · MST 280159 · 공포 21288 · 2026년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_상법_20260723.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-07-23",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "L25 · 법령ID 001702 · MST 272919 · 공포 20991"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_상법_20250131.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2025-01-31",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L25 · 법령ID 001702 · MST 265387 · 공포 20991 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_상법_20260910.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-09-10",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L25 · 법령ID 001702 · MST 273629 · 공포 20991 · 2026년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_상법_20260306.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-03-06",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L25 · 법령ID 001702 · MST 284143 · 공포 20991 · 2026년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_형법_20260312.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-03-12",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "L26 · 법령ID 001692 · MST 284025 · 공포 21450"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_형법_20230808.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2023-08-08",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L26 · 법령ID 001692 · MST 253323 · 공포 21450 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_형법_20251231.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2025-12-31",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L26 · 법령ID 001692 · MST 282557 · 공포 21450 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_형법_20251223.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2025-12-23",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L26 · 법령ID 001692 · MST 280439 · 공포 21450 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_형법_20250408.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2025-04-08",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L26 · 법령ID 001692 · MST 270563 · 공포 21450 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_형법_20250318.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2025-03-18",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L26 · 법령ID 001692 · MST 269905 · 공포 21450 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_국세징수법_20260602.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-06-02",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "L27 · 법령ID 001585 · MST 286427 · 공포 21713 · 인용 제105조"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국세징수법_20230605.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2023-06-05",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L27 · 법령ID 001585 · MST 248481 · 공포 21713 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국세징수법_20230401.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2023-04-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L27 · 법령ID 001585 · MST 247435 · 공포 21713 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국세징수법_20240719.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2024-07-19",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L27 · 법령ID 001585 · MST 252777 · 공포 21713 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국세징수법_20240701.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2024-07-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L27 · 법령ID 001585 · MST 257979 · 공포 21713 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국세징수법_20250101.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2025-01-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L27 · 법령ID 001585 · MST 267583 · 공포 21713 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국세징수법_20261001.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-10-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L27 · 법령ID 001585 · MST 280377 · 공포 21713 · 2026년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_지방세징수법_20260205.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-02-05",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "L28 · 법령ID 012708 · MST 283259 · 공포 21327 · 인용 제105조"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_지방세징수법_20230605.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2023-06-05",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L28 · 법령ID 012708 · MST 248517 · 공포 21327 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_지방세징수법_20230401.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2023-04-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L28 · 법령ID 012708 · MST 248607 · 공포 21327 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_지방세징수법_20230101.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2023-01-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L28 · 법령ID 012708 · MST 239761 · 공포 21327 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_지방세징수법_20240719.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2024-07-19",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L28 · 법령ID 012708 · MST 252785 · 공포 21327 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_지방세징수법_20240701.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2024-07-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L28 · 법령ID 012708 · MST 257513 · 공포 21327 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_지방세징수법_20240101.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2024-01-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L28 · 법령ID 012708 · MST 224907 · 공포 21327 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_지방세징수법_20250101.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2025-01-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L28 · 법령ID 012708 · MST 268021 · 공포 21327 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_특정금융거래정보의보고및이용등에관한법률_20260820.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-08-20",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "L29 · 법령ID 009244 · MST 283365 · 공포 21358 · 인용 제5-2조"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_특정금융거래정보의보고및이용등에관한법률_20240719.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2024-07-19",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L29 · 법령ID 009244 · MST 252787 · 공포 21358 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_국세기본법_20260811.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-08-11",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "L30 · 법령ID 001586 · MST 288571 · 공포 21860 · 인용 제39조"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국세기본법_20230401.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2023-04-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L30 · 법령ID 001586 · MST 247433 · 공포 21860 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국세기본법_20240401.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2024-04-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L30 · 법령ID 001586 · MST 257977 · 공포 21860 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국세기본법_20251111.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2025-11-11",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L30 · 법령ID 001586 · MST 279813 · 공포 21860 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국세기본법_20251001.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2025-10-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L30 · 법령ID 001586 · MST 276083 · 공포 21860 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국세기본법_20250915.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2025-09-15",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L30 · 법령ID 001586 · MST 269803 · 공포 21860 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국세기본법_20250101.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2025-01-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L30 · 법령ID 001586 · MST 267577 · 공포 21860 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국세기본법_20260701.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-07-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L30 · 법령ID 001586 · MST 280373 · 공포 21860 · 2026년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국세기본법_20260602.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-06-02",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L30 · 법령ID 001586 · MST 286425 · 공포 21860 · 2026년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_중소기업기술혁신촉진법_20231221.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2023-12-21",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L31 · 법령ID 009145 · MST 251977 · 공포 21289 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_중소기업기술혁신촉진법_20240710.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2024-07-10",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L31 · 법령ID 009145 · MST 258539 · 공포 21289 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_중소기업기술혁신촉진법_20240501.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2024-05-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L31 · 법령ID 009145 · MST 255893 · 공포 21289 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_중소기업기술혁신촉진법_20240109.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2024-01-09",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L31 · 법령ID 009145 · MST 258343 · 공포 21289 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_중소기업기술혁신촉진법_20251001.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2025-10-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L31 · 법령ID 009145 · MST 277123 · 공포 21289 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_중소기업기술혁신촉진법_20260526.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-05-26",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L31 · 법령ID 009145 · MST 286263 · 공포 21289 · 2026년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_중소기업기술혁신촉진법_20260201.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-02-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L31 · 법령ID 009145 · MST 268809 · 공포 21289 · 2026년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_중소기업기술혁신촉진법시행령_20260701.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2026-07-01",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "L32 · 법령ID 009255 · MST 287505 · 공포 36482 · 인용 제19조"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_중소기업기술혁신촉진법시행령_20231221.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2023-12-21",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L32 · 법령ID 009255 · MST 256821 · 공포 36482 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_중소기업기술혁신촉진법시행령_20240710.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2024-07-10",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L32 · 법령ID 009255 · MST 263693 · 공포 36482 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_중소기업기술혁신촉진법시행령_20240514.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2024-05-14",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L32 · 법령ID 009255 · MST 262679 · 공포 36482 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_중소기업기술혁신촉진법시행령_20251001.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2025-10-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L32 · 법령ID 009255 · MST 277499 · 공포 36482 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_중소기업기술혁신촉진법시행령_20260201.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2026-02-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L32 · 법령ID 009255 · MST 283001 · 공포 36482 · 2026년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_국가연구개발혁신법_20260820.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-08-20",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "L33 · 법령ID 013774 · MST 283413 · 공포 21347 · 인용 제13조, 제22조, 제32조, 제33조 · 판독불가"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국가연구개발혁신법_20230922.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2023-09-22",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L33 · 법령ID 013774 · MST 248877 · 공포 21347 · 2023년 문서 대조용 · 판독불가"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국가연구개발혁신법_20240724.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2024-07-24",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L33 · 법령ID 013774 · MST 258987 · 공포 21347 · 2024년 문서 대조용 · 판독불가"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국가연구개발혁신법_20250228.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2025-02-28",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L33 · 법령ID 013774 · MST 260807 · 공포 21347 · 2025년 문서 대조용 · 판독불가"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국가연구개발혁신법_20260911.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-09-11",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L33 · 법령ID 013774 · MST 283849 · 공포 21347 · 2026년 문서 대조용 · 판독불가"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_국가연구개발혁신법시행령_20260820.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2026-08-20",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "L34 · 법령ID 013933 · MST 288773 · 공포 36580 · 인용 제49조"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국가연구개발혁신법시행령_20231214.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2023-12-14",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L34 · 법령ID 013933 · MST 256367 · 공포 36580 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국가연구개발혁신법시행령_20230922.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2023-09-22",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L34 · 법령ID 013933 · MST 254925 · 공포 36580 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국가연구개발혁신법시행령_20241231.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2024-12-31",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L34 · 법령ID 013933 · MST 267625 · 공포 36580 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국가연구개발혁신법시행령_20241008.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2024-10-08",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L34 · 법령ID 013933 · MST 265737 · 공포 36580 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국가연구개발혁신법시행령_20240807.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2024-08-07",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L34 · 법령ID 013933 · MST 264683 · 공포 36580 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국가연구개발혁신법시행령_20240710.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2024-07-10",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L34 · 법령ID 013933 · MST 263631 · 공포 36580 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국가연구개발혁신법시행령_20240430.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2024-04-30",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L34 · 법령ID 013933 · MST 262013 · 공포 36580 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국가연구개발혁신법시행령_20240206.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2024-02-06",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L34 · 법령ID 013933 · MST 260037 · 공포 36580 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국가연구개발혁신법시행령_20251001.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2025-10-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L34 · 법령ID 013933 · MST 278201 · 공포 36580 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국가연구개발혁신법시행령_20250325.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2025-03-25",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L34 · 법령ID 013933 · MST 270143 · 공포 36580 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국가연구개발혁신법시행령_20260911.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2026-09-11",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L34 · 법령ID 013933 · MST 288335 · 공포 36580 · 2026년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국가연구개발혁신법시행령_20260611.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2026-06-11",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L34 · 법령ID 013933 · MST 285767 · 공포 36580 · 2026년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국가연구개발혁신법시행령_20260611.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2026-06-11",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L34 · 법령ID 013933 · MST 283965 · 공포 36580 · 2026년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국가연구개발혁신법시행령_20260201.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2026-02-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L34 · 법령ID 013933 · MST 282931 · 공포 36580 · 2026년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_국가연구개발혁신법시행령_20260102.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2026-01-02",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L34 · 법령ID 013933 · MST 281423 · 공포 36580 · 2026년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_전자문서및전자거래기본법_20221020.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2022-10-20",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "L35 · 법령ID 002000 · MST 236053 · 공포 18478"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_법인세법시행령_20260227.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2026-02-27",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "L36 · 법령ID 003608 · MST 283635 · 공포 36130 · 인용 제158조"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_법인세법시행령_20231221.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2023-12-21",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L36 · 법령ID 003608 · MST 257099 · 공포 36130 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_법인세법시행령_20231214.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2023-12-14",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L36 · 법령ID 003608 · MST 256415 · 공포 36130 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_법인세법시행령_20230929.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2023-09-29",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L36 · 법령ID 003608 · MST 255043 · 공포 36130 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_법인세법시행령_20230926.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2023-09-26",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L36 · 법령ID 003608 · MST 254951 · 공포 36130 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_법인세법시행령_20230710.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2023-07-10",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L36 · 법령ID 003608 · MST 252417 · 공포 36130 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_법인세법시행령_20230701.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2023-07-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L36 · 법령ID 003608 · MST 248223 · 공포 36130 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_법인세법시행령_20230112.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2023-01-12",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L36 · 법령ID 003608 · MST 247641 · 공포 36130 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_법인세법시행령_20230101.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2023-01-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L36 · 법령ID 003608 · MST 247531 · 공포 36130 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_법인세법시행령_20241112.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2024-11-12",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L36 · 법령ID 003608 · MST 266373 · 공포 36130 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_법인세법시행령_20240731.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2024-07-31",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L36 · 법령ID 003608 · MST 264239 · 공포 36130 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_법인세법시행령_20240710.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2024-07-10",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L36 · 법령ID 003608 · MST 263649 · 공포 36130 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_법인세법시행령_20240701.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2024-07-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L36 · 법령ID 003608 · MST 260949 · 공포 36130 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_법인세법시행령_20240517.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2024-05-17",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L36 · 법령ID 003608 · MST 262405 · 공포 36130 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_법인세법시행령_20251128.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2025-11-28",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L36 · 법령ID 003608 · MST 279963 · 공포 36130 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_법인세법시행령_20251001.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2025-10-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L36 · 법령ID 003608 · MST 277607 · 공포 36130 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_법인세법시행령_20250604.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2025-06-04",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L36 · 법령ID 003608 · MST 269543 · 공포 36130 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_법인세법시행령_20250101.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2025-01-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L36 · 법령ID 003608 · MST 267755 · 공포 36130 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_법인세법시행령_20250101.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2025-01-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L36 · 법령ID 003608 · MST 240247 · 공포 36130 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_법인세법시행령_20250101.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2025-01-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L36 · 법령ID 003608 · MST 229325 · 공포 36130 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_법인세법시행령_20260102.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2026-01-02",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L36 · 법령ID 003608 · MST 280853 · 공포 36130 · 2026년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_행정절차법_20230324.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2023-03-24",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "L37 · 법령ID 001362 · MST 239291 · 공포 18748 · 인용 제21조"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_개인정보보호법_20251002.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2025-10-02",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "L38 · 법령ID 011357 · MST 270351 · 공포 20897"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_개인정보보호법_20230915.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2023-09-15",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L38 · 법령ID 011357 · MST 248613 · 공포 20897 · 2023년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_개인정보보호법_20260911.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-09-11",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L38 · 법령ID 011357 · MST 283839 · 공포 20897 · 2026년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_연구실안전환경조성에관한법률_20260520.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-05-20",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "L39 · 법령ID 009925 · MST 283355 · 공포 21349"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_연구실안전환경조성에관한법률_20240501.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2024-05-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L39 · 법령ID 009925 · MST 255643 · 공포 21349 · 2024년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_연구실안전환경조성에관한법률_20250131.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2025-01-31",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L39 · 법령ID 009925 · MST 268831 · 공포 21349 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_연구실안전환경조성에관한법률_20250121.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2025-01-21",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L39 · 법령ID 009925 · MST 268529 · 공포 21349 · 2025년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/연혁/L1_연구실안전환경조성에관한법률_20260201.xml",
+      "layer": "L1",
+      "doc_type": "법률",
+      "version": "시행 2026-02-01",
+      "status": "superseded",
+      "role": [
+        "diff_only"
+      ],
+      "index": false,
+      "notes": "L39 · 법령ID 009925 · MST 268797 · 공포 21349 · 2026년 문서 대조용"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_중소기업창업지원사업운영요령_20241206.xml",
+      "layer": "L1",
+      "doc_type": "고시",
+      "version": "시행 2024-12-06",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "R01 · 법령ID 85233 · MST 2100000250454 · 공포 2024-101 · 인용 제5조, 제10조, 제11조, 제12조, 제14조, 제15조, 제23조, 제30조 외 2건"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_국고보조금통합관리지침_20260520.xml",
+      "layer": "L1",
+      "doc_type": "공고",
+      "version": "시행 2026-05-20",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "R02 · 법령ID 56590 · MST 2100000279462 · 공포 2026-108 · 인용 제32조"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_중소벤처기업부보조사업관리규정_20241223.xml",
+      "layer": "L1",
+      "doc_type": "훈령",
+      "version": "시행 2024-12-23",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "R03 · 법령ID 56043 · MST 2100000251344 · 공포 181"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_신산업창업분야에관한규정_20240130.xml",
+      "layer": "L1",
+      "doc_type": "고시",
+      "version": "시행 2024-01-30",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "R04 · 법령ID 82324 · MST 2100000235934 · 공포 2024-2"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_중소기업기술개발지원사업운영요령_20260121.xml",
+      "layer": "L1",
+      "doc_type": "고시",
+      "version": "시행 2026-01-21",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "R09 · 법령ID 36832 · MST 2100000273462 · 공포 2026-6 · 인용 제48조"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_국가연구개발사업연구개발비사용기준_20260506.xml",
+      "layer": "L1",
+      "doc_type": "고시",
+      "version": "시행 2026-05-06",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "R10 · 법령ID 75386 · MST 2100000278740 · 공포 2026-38"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_재창업자성실경영평가에관한규정_20250612.xml",
+      "layer": "L1",
+      "doc_type": "고시",
+      "version": "시행 2025-06-12",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-53586 · 법령ID 53586 · MST 2100000258652 · 공포 2025-47 · 위임수집 · 위임행정규칙←중소기업창업 지원법"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_중소기업창업지원법시행규칙_20260101.xml",
+      "layer": "L1",
+      "doc_type": "중소벤처기업부령",
+      "version": "시행 2026-01-01",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-008263 · 법령ID 008263 · MST 282421 · 공포 00107 · 위임수집 · 시행규칙←중소기업창업 지원법"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_중소기업창업지원업무운용규정_20240408.xml",
+      "layer": "L1",
+      "doc_type": "고시",
+      "version": "시행 2024-04-08",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-24740 · 법령ID 24740 · MST 2100000238952 · 공포 2024-19 · 위임수집 · 위임행정규칙←중소기업창업 지원법"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_한국표준산업분류_20240701.xml",
+      "layer": "L1",
+      "doc_type": "고시",
+      "version": "시행 2024-07-01",
+      "status": "active",
+      "role": [
+        "archive"
+      ],
+      "index": false,
+      "notes": "D-44735 · 법령ID 44735 · MST 2100000243048 · 공포 2024-203 · 위임수집 · 위임행정규칙←중소기업창업 지원법 시행령 · 본문이 비어 있음(분류표가 첨부 HWP/PDF로만 제공) → 인덱싱 제외. 업종 판정에 필요하면 첨부파일 별도 확보 필요"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_창업기업및국외창업기업범위에관한규정_20260101.xml",
+      "layer": "L1",
+      "doc_type": "고시",
+      "version": "시행 2026-01-01",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-82325 · 법령ID 82325 · MST 2100000271218 · 공포 2025-138 · 위임수집 · 위임행정규칙←중소기업창업 지원법 시행령 · 제명변경(창업 및 창업기업 범위에 관한 규정→창업기업 및 국외 창업기업 범위에 관한 규정)"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_외부감사및회계등에관한규정_20260602.xml",
+      "layer": "L1",
+      "doc_type": "고시",
+      "version": "시행 2026-06-02",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-21840 · 법령ID 21840 · MST 2100000279860 · 공포 2026-19 · 위임수집 · 위임행정규칙←주식회사 등의 외부감사에 관한 법률 시행령"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_주식회사등의외부감사에관한법률시행규칙_20191217.xml",
+      "layer": "L1",
+      "doc_type": "총리령",
+      "version": "시행 2019-12-17",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-008234 · 법령ID 008234 · MST 212377 · 공포 01579 · 위임수집 · 시행규칙←주식회사 등의 외부감사에 관한 법률 시행령"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_출입국관리법시행규칙_20260123.xml",
+      "layer": "L1",
+      "doc_type": "법무부령",
+      "version": "시행 2026-01-23",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-008494 · 법령ID 008494 · MST 283059 · 공포 01106 · 위임수집 · 시행규칙←출입국관리법 시행령"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_국민연금법시행령_20260101.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2026-01-01",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-002833 · 법령ID 002833 · MST 272577 · 공포 35602 · 위임수집 · 시행령←국민연금법"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_국민연금법시행규칙_20260213.xml",
+      "layer": "L1",
+      "doc_type": "보건복지부령",
+      "version": "시행 2026-02-13",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-006709 · 법령ID 006709 · MST 283561 · 공포 01157 · 위임수집 · 시행규칙←국민연금법"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_소득세법시행규칙_20260701.xml",
+      "layer": "L1",
+      "doc_type": "재정경제부령",
+      "version": "시행 2026-07-01",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-007507 · 법령ID 007507 · MST 286379 · 공포 00033 · 위임수집 · 시행규칙←소득세법 시행령"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_민법제312조의2단서의시행에관한규정_19840901.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 1984-09-01",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-003534 · 법령ID 003534 · MST 20194 · 공포 11493 · 위임수집 · 시행령←민법"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_기술의이전및사업화촉진에관한법률시행령_20260324.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2026-03-24",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-003118 · 법령ID 003118 · MST 284941 · 공포 36221 · 위임수집 · 시행령←기술의 이전 및 사업화 촉진에 관한 법률"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_기술의이전및사업화촉진에관한법률시행규칙_20251001.xml",
+      "layer": "L1",
+      "doc_type": "산업통상부령",
+      "version": "시행 2025-10-01",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-010838 · 법령ID 010838 · MST 278707 · 공포 00001 · 위임수집 · 시행규칙←기술의 이전 및 사업화 촉진에 관한 법률"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_산업안전보건법시행규칙_20260801.xml",
+      "layer": "L1",
+      "doc_type": "고용노동부령",
+      "version": "시행 2026-08-01",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-007364 · 법령ID 007364 · MST 288431 · 공포 00477 · 위임수집 · 시행규칙←산업안전보건법"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_산업안전보건법시행령_20260801.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2026-08-01",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-003786 · 법령ID 003786 · MST 288347 · 공포 36540 · 위임수집 · 시행령←산업안전보건법"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_부정청탁및금품등수수의금지에관한법률의시행에관한대법원규칙_20180307.xml",
+      "layer": "L1",
+      "doc_type": "대법원규칙",
+      "version": "시행 2018-03-07",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-012688 · 법령ID 012688 · MST 202616 · 공포 02780 · 위임수집 · 시행규칙←부정청탁 및 금품등 수수의 금지에 관한 법률"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_인공지능발전과신뢰기반조성등에관한기본법시행령_20260820.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2026-08-20",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-015032 · 법령ID 015032 · MST 288781 · 공포 36580 · 위임수집 · 시행령←인공지능 발전과 신뢰 기반 조성 등에 관한 기본법"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_근로기준법시행령_20251023.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2025-10-23",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-003058 · 법령ID 003058 · MST 270551 · 공포 35436 · 위임수집 · 시행령←근로기준법"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_근로기준법시행규칙_20250223.xml",
+      "layer": "L1",
+      "doc_type": "고용노동부령",
+      "version": "시행 2025-02-23",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-006859 · 법령ID 006859 · MST 269393 · 공포 00436 · 위임수집 · 시행규칙←근로기준법"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_근로자퇴직급여보장법시행령_20260324.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2026-03-24",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-010035 · 법령ID 010035 · MST 284693 · 공포 36220 · 위임수집 · 시행령←근로자퇴직급여 보장법"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_근로자퇴직급여보장법시행규칙_20220712.xml",
+      "layer": "L1",
+      "doc_type": "고용노동부령",
+      "version": "시행 2022-07-12",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-010043 · 법령ID 010043 · MST 243903 · 공포 00359 · 위임수집 · 시행규칙←근로자퇴직급여 보장법"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_최저임금법시행령_20190101.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2019-01-01",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-005247 · 법령ID 005247 · MST 206564 · 공포 29469 · 위임수집 · 시행령←최저임금법"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_최저임금법시행규칙_20260102.xml",
+      "layer": "L1",
+      "doc_type": "고용노동부령",
+      "version": "시행 2026-01-02",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-008480 · 법령ID 008480 · MST 282351 · 공포 00459 · 위임수집 · 시행규칙←최저임금법"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_고등교육법시행령_20260811.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2026-08-11",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-002233 · 법령ID 002233 · MST 288157 · 공포 36508 · 위임수집 · 시행령←고등교육법"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_공무원인재개발법시행령_20260630.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2026-06-30",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-002293 · 법령ID 002293 · MST 287527 · 공포 36489 · 위임수집 · 시행령←공무원 인재개발법"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_보조금관리에관한법률시행령_20260102.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2026-01-02",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-003650 · 법령ID 003650 · MST 281407 · 공포 35948 · 위임수집 · 시행령←보조금 관리에 관한 법률"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_국가를당사자로하는계약에관한법률시행규칙_20260102.xml",
+      "layer": "L1",
+      "doc_type": "재정경제부령",
+      "version": "시행 2026-01-02",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-006590 · 법령ID 006590 · MST 282607 · 공포 00001 · 위임수집 · 시행규칙←국가를 당사자로 하는 계약에 관한 법률 시행령"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_공공재정부정청구금지및부정이익환수등에관한법률시행령_20240927.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2024-09-27",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-013639 · 법령ID 013639 · MST 265453 · 공포 34920 · 위임수집 · 시행령←공공재정 부정청구 금지 및 부정이익 환수 등에 관한 법률"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_소상공인보호및지원에관한법률시행령_20260701.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2026-07-01",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-003945 · 법령ID 003945 · MST 287355 · 공포 36440 · 위임수집 · 시행령←소상공인 보호 및 지원에 관한 법률"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_소상공인보호및지원에관한법률시행규칙_20260603.xml",
+      "layer": "L1",
+      "doc_type": "중소벤처기업부령",
+      "version": "시행 2026-06-03",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-011657 · 법령ID 011657 · MST 286679 · 공포 00109 · 위임수집 · 시행규칙←소상공인 보호 및 지원에 관한 법률"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_상법시행령_20260723.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2026-07-23",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-003811 · 법령ID 003811 · MST 288205 · 공포 36511 · 위임수집 · 시행령←상법"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_상법의전자선하증권규정의시행에관한규정_20260102.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2026-01-02",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-010783 · 법령ID 010783 · MST 280989 · 공포 35947 · 위임수집 · 시행령←상법"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_국세징수법시행령_20260227.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2026-02-27",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-002891 · 법령ID 002891 · MST 283487 · 공포 36126 · 위임수집 · 시행령←국세징수법"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_지방세징수법시행령_20260205.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2026-02-05",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-012834 · 법령ID 012834 · MST 283265 · 공포 36076 · 위임수집 · 시행령←지방세징수법"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_특정금융거래정보의보고및이용등에관한법률시행령_20260820.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2026-08-20",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-009256 · 법령ID 009256 · MST 288765 · 공포 36592 · 위임수집 · 시행령←특정 금융거래정보의 보고 및 이용 등에 관한 법률"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_특정금융거래정보보고및감독규정_20260820.xml",
+      "layer": "L1",
+      "doc_type": "고시",
+      "version": "시행 2026-08-20",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-31905 · 법령ID 31905 · MST 2100000284076 · 공포 2026-2 · 위임수집 · 위임행정규칙←특정 금융거래정보의 보고 및 이용 등에 관한 법률"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_국세기본법시행령_20260701.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2026-07-01",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-002884 · 법령ID 002884 · MST 283623 · 공포 36125 · 위임수집 · 시행령←국세기본법"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_국세기본법시행규칙_20260320.xml",
+      "layer": "L1",
+      "doc_type": "재정경제부령",
+      "version": "시행 2026-03-20",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-006741 · 법령ID 006741 · MST 284607 · 공포 00018 · 위임수집 · 시행규칙←국세기본법"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_중소기업기술혁신촉진법시행규칙_20200730.xml",
+      "layer": "L1",
+      "doc_type": "중소벤처기업부령",
+      "version": "시행 2020-07-30",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-009263 · 법령ID 009263 · MST 220365 · 공포 00034 · 위임수집 · 시행규칙←중소기업 기술혁신 촉진법"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_식품의약품안전처연구개발사업전문기관지정_20251222.xml",
+      "layer": "L1",
+      "doc_type": "고시",
+      "version": "시행 2025-12-22",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-76470 · 법령ID 76470 · MST 2100000270586 · 공포 2025-85 · 위임수집 · 위임행정규칙←국가연구개발혁신법"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_조달청연구개발사업전문기관지정고시_20230303.xml",
+      "layer": "L1",
+      "doc_type": "고시",
+      "version": "시행 2023-03-03",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-90102 · 법령ID 90102 · MST 2100000245786 · 공포 2023-5 · 위임수집 · 위임행정규칙←국가연구개발혁신법"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_지식재산처국가연구개발사업전문기관지정고시_20260312.xml",
+      "layer": "L1",
+      "doc_type": "고시",
+      "version": "시행 2026-03-12",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-96370 · 법령ID 96370 · MST 2100000275708 · 공포 2026-6 · 위임수집 · 위임행정규칙←국가연구개발혁신법"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_질병관리청연구개발사업전문기관지정고시_20260415.xml",
+      "layer": "L1",
+      "doc_type": "고시",
+      "version": "시행 2026-04-15",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-82238 · 법령ID 82238 · MST 2100000277984 · 공포 2026-5 · 위임수집 · 위임행정규칙←국가연구개발혁신법"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_경찰청국가연구개발사업연구관리전문기관지정_20230701.xml",
+      "layer": "L1",
+      "doc_type": "고시",
+      "version": "시행 2023-07-01",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-86055 · 법령ID 86055 · MST 2100000226142 · 공포 2023-3 · 위임수집 · 위임행정규칙←국가연구개발혁신법"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_국가연구개발혁신법시행규칙_20260820.xml",
+      "layer": "L1",
+      "doc_type": "과학기술정보통신부령",
+      "version": "시행 2026-08-20",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-013980 · 법령ID 013980 · MST 289003 · 공포 00173 · 위임수집 · 시행규칙←국가연구개발혁신법 시행령"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_전자문서및전자거래기본법시행령_20231212.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2023-12-12",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-004754 · 법령ID 004754 · MST 256703 · 공포 33913 · 위임수집 · 시행령←전자문서 및 전자거래 기본법"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_전자문서및전자거래기본법시행규칙_20201222.xml",
+      "layer": "L1",
+      "doc_type": "과학기술정보통신부령",
+      "version": "시행 2020-12-22",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-009332 · 법령ID 009332 · MST 224723 · 공포 00061 · 위임수집 · 시행규칙←전자문서 및 전자거래 기본법"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_법인세법시행규칙_20260701.xml",
+      "layer": "L1",
+      "doc_type": "재정경제부령",
+      "version": "시행 2026-07-01",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-007229 · 법령ID 007229 · MST 287787 · 공포 00037 · 위임수집 · 시행규칙←법인세법 시행령"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_행정절차법시행령_20230801.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2023-08-01",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-005625 · 법령ID 005625 · MST 253247 · 공포 33649 · 위임수집 · 시행령←행정절차법"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_개인정보보호법시행령_20260820.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2026-08-20",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-011468 · 법령ID 011468 · MST 283503 · 공포 36121 · 위임수집 · 시행령←개인정보 보호법"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_연구실안전환경조성에관한법률시행규칙_20260201.xml",
+      "layer": "L1",
+      "doc_type": "과학기술정보통신부령",
+      "version": "시행 2026-02-01",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-010190 · 법령ID 010190 · MST 283229 · 공포 00163 · 위임수집 · 시행규칙←연구실 안전환경 조성에 관한 법률"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_연구실안전환경조성에관한법률시행령_20260520.xml",
+      "layer": "L1",
+      "doc_type": "대통령령",
+      "version": "시행 2026-05-20",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-010191 · 법령ID 010191 · MST 286181 · 공포 36330 · 위임수집 · 시행령←연구실 안전환경 조성에 관한 법률"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_국세징수법시행규칙_20260320.xml",
+      "layer": "L1",
+      "doc_type": "재정경제부령",
+      "version": "시행 2026-03-20",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-006742 · 법령ID 006742 · MST 284983 · 공포 00019 · 위임수집 · 시행규칙←국세징수법 시행령"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_지방세징수법시행규칙_20260701.xml",
+      "layer": "L1",
+      "doc_type": "행정안전부령",
+      "version": "시행 2026-07-01",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-012839 · 법령ID 012839 · MST 283319 · 공포 00607 · 위임수집 · 시행규칙←지방세징수법 시행령"
+    },
+    {
+      "file": "법령 PDF/L1_법령/L1_행정절차법시행규칙_20220712.xml",
+      "layer": "L1",
+      "doc_type": "행정안전부령",
+      "version": "시행 2022-07-12",
+      "status": "active",
+      "role": [
+        "judgment_index"
+      ],
+      "index": true,
+      "notes": "D-008720 · 법령ID 008720 · MST 243859 · 공포 00343 · 위임수집 · 시행규칙←행정절차법 시행령"
+    }
+  ],
+  "missing": [
+    {
+      "doc": "우리 학교 산학협력단 회계규정",
+      "layer": "L4",
+      "priority": 1,
+      "how": "창업지원단에 직접 요청 (액션 1 인터뷰와 함께)",
+      "why": "MVP 판정 스택의 L4이자 A2(엄격 조항 검토) 데모의 필수 재료. 확보 즉시 status=active, role=[judgment_index, rule_source]로 추가"
+    },
+    {
+      "doc": "창업사업화 부정행위 사례집 (창진원)",
+      "layer": "사례",
+      "priority": 2,
+      "how": "비공개 추정 — 창업지원단에 요청",
+      "why": "창업사업비 도메인 그 자체의 사례집 (현 사례 코퍼스는 전부 R&D·보조금 유사 도메인)"
+    },
+    {
+      "doc": "동아대 창업기업 사업비집행 매뉴얼",
+      "layer": "L4",
+      "priority": 3,
+      "how": "dms.donga.ac.kr 서버 502 — 재시도",
+      "why": "compare_analysis 보강 (없어도 무방)"
+    },
+    {
+      "doc": "신라대 대학혁신지원사업 집행지침",
+      "layer": "L4",
+      "priority": 3,
+      "how": "사이트 폐쇄 — prime.silla.ac.kr 재게시 확인",
+      "why": "동상"
+    },
+    {
+      "doc": "인하대 대학혁신지원사업 집행관리기준",
+      "layer": "L4",
+      "priority": 3,
+      "how": "도메인 만료 — 대체 출처 탐색 필요",
+      "why": "동상"
+    },
+    {
+      "doc": "위덕대 2026 예산관리규칙 운영지침",
+      "layer": "L4",
+      "priority": 3,
+      "how": "sandan.uu.ac.kr 게시판 직접 검색 (원본 idx=5175 오류)",
+      "why": "동상"
+    },
+    {
+      "doc": "창업사업화 지원사업 통합관리지침",
+      "layer": "L2",
+      "priority": 1,
+      "how": "창업진흥원 운영지침. 국가법령정보센터 미등재 → k-startup / vcs.go.kr 수동 확보",
+      "why": "R05 — 세부관리기준이 인용하는 규범. law.go.kr 미등재"
+    },
+    {
+      "doc": "중소기업창업 지원사업 통합관리지침 (R05의 2025.12 개명판, 제14차)",
+      "layer": "L2",
+      "priority": 1,
+      "how": "R05의 2025.12 개명판(제14차). 미등재 → vcs.go.kr 수동 확보",
+      "why": "R06 — 세부관리기준이 인용하는 규범. law.go.kr 미등재"
+    },
+    {
+      "doc": "신사업창업사관학교 운영지침",
+      "layer": "L1",
+      "priority": 3,
+      "how": "소상공인시장진흥공단 내부 운영지침 → 소진공 공고 별첨",
+      "why": "R07 — 세부관리기준이 인용하는 규범. law.go.kr 미등재"
+    },
+    {
+      "doc": "예산 및 기금운용계획 집행지침",
+      "layer": "L1",
+      "priority": 3,
+      "how": "law.go.kr 검색 0건(2026-08 확인). 기재부 열린재정에서 연도판 확보 필요",
+      "why": "R08 — 세부관리기준이 인용하는 규범. law.go.kr 미등재"
+    },
+    {
+      "doc": "민관공동 창업자 발굴·육성사업(TIPS) 운영지침",
+      "layer": "L1",
+      "priority": 3,
+      "how": "한국엔젤투자협회 TIPS 운영사무국 배포 → jointips.or.kr",
+      "why": "R11 — 세부관리기준이 인용하는 규범. law.go.kr 미등재"
+    },
+    {
+      "doc": "전문기관·업무지원기관 자체 여비지급 기준",
+      "layer": "L1",
+      "priority": 3,
+      "how": "기관 내규",
+      "why": "R12 — 세부관리기준이 인용하는 규범. law.go.kr 미등재"
+    }
+  ]
+}
