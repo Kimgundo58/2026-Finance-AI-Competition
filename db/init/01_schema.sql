@@ -1,6 +1,12 @@
 -- 「써도돼요」 판정 엔진 스키마
--- 출처: Rag_Agent구현 파이프라인.md §5
+-- 출처: RAG.md §2 (구 Rag_Agent구현 파이프라인.md §5)
 -- 컨테이너를 처음 만들 때 자동 실행됩니다.
+--
+-- ⚠️ 2026-08-27 개정 — 계층 체계가 L1~L5 에서 L1/L2/L3 로 바뀌었다.
+--    L1 중소벤처기업부(총괄기관) / L2 창업진흥원(전문기관) / L3 주관기관(사용자 업로드)
+--    구 표기의 L3(공고·세부관리기준)와 현 L3(주관기관 규정)는 **의미가 다르다.**
+--    구 L4·L5 로 적재된 기존 데이터가 있으면 재적재해야 한다.
+--    이 파일을 고쳤으면 반드시  docker compose down -v  후  up -d  (init 은 최초 1회만 실행됨)
 
 CREATE EXTENSION IF NOT EXISTS vector;
 
@@ -9,15 +15,25 @@ CREATE EXTENSION IF NOT EXISTS vector;
 -- ════════════════════════════════════════════════════════════════
 CREATE TABLE documents (
     doc_id        TEXT PRIMARY KEY,
-    layer         TEXT NOT NULL CHECK (layer IN ('L1','L2','L3','L4','L5','사례')),
+    layer         TEXT NOT NULL CHECK (layer IN ('L1','L2','L3','사례')),
     domain        TEXT,          -- 창업지원사업 | 연구비 | 대학혁신지원사업 | 기관운영
-    기관ID        TEXT,          -- L4 전용. NULL 이면 전국 공통
+    기관ID        TEXT,          -- L3(주관기관) 전용. NULL 이면 전국 공통
     doc_type      TEXT,
     version       TEXT,
     시행일        DATE,
     status        TEXT NOT NULL CHECK (status IN ('active','superseded','reference')),
-    apply_mode    TEXT NOT NULL DEFAULT 'apply' CHECK (apply_mode IN ('apply','compare')),
+    -- 2026-08-28 제거된 컬럼: 근거가 두 번 갈아끼워졌고 두 번째도 무너졌다.
+    --   옛 근거(타 대학 24건 제외)      -> scripts/index_guard.py 가 코드로 막는다
+    --   새 근거(멀티테넌시)             -> org_id + tenant 스키마 분리 + RLS (RAG.md §2-3)
+    --   실사용(저품질 파싱 판정 제외)   -> parse_quality 가 원래 그 필드다
     parse_quality TEXT NOT NULL DEFAULT 'high' CHECK (parse_quality IN ('high','low')),
+    -- 텍스트를 어떻게 얻었나. 2026-08-27 추가 — 원칙 4(인용은 생성이 아니라 추출)의 방어선.
+    --   native  = PDF/XML 텍스트 레이어 그대로            → A등급 인용 가능
+    --   dedupe  = 문자중복 레이어를 dedupe_chars() 로 해소  → A등급 인용 가능 (제14차 지침 등)
+    --   hancom  = HWP → 한컴 PDF 변환                     → A등급 인용 가능
+    --   vlm     = 스캔 이미지 판독                        → 🔴 A등급 인용 금지. 경고 문구 강제
+    extraction    TEXT NOT NULL DEFAULT 'native'
+                  CHECK (extraction IN ('native','dedupe','hancom','vlm')),
     src_path      TEXT NOT NULL,
     roles         TEXT[] NOT NULL DEFAULT '{}',   -- manifest 의 role (judgment_index, rule_source, golden_set ...)
     index_target  BOOLEAN NOT NULL DEFAULT FALSE, -- chunks 에 넣을 문서인가
@@ -48,9 +64,10 @@ CREATE TABLE chunks (
     doc_id      TEXT NOT NULL REFERENCES documents(doc_id) ON DELETE CASCADE,
     article_id  BIGINT REFERENCES doc_articles(article_id) ON DELETE CASCADE,
     layer       TEXT NOT NULL,
-    domain      TEXT,
     기관ID      TEXT,
-    apply_mode  TEXT NOT NULL DEFAULT 'apply',
+    -- 저품질 파싱은 판정에서 제외한다. 구 apply_mode='compare' 의 실제 역할이었다.
+    -- domain 은 documents 에만 둔다 (인용 시 join). 청크마다 들고 다닐 이유가 없다.
+    parse_quality TEXT NOT NULL DEFAULT 'high' CHECK (parse_quality IN ('high','low')),
     version     TEXT,
     status      TEXT NOT NULL,
     조번호      TEXT,
@@ -62,7 +79,7 @@ CREATE TABLE chunks (
     embedding   vector(1024)     -- KURE-v1
 );
 -- pre-filter 가 검색보다 먼저 (구버전·타사업·타기관 차단)
-CREATE INDEX ix_chunks_filter ON chunks (status, apply_mode, layer, 기관ID);
+CREATE INDEX ix_chunks_filter ON chunks (status, parse_quality, layer, 기관ID);
 CREATE INDEX ix_chunks_사업   ON chunks USING GIN (사업명);
 COMMENT ON COLUMN chunks.text IS '원문 문자열 그대로. 인용 검증이 이 값과 대조한다.';
 -- ⚠️ ANN 인덱스(HNSW/IVFFlat)를 만들지 않는다.
@@ -86,8 +103,8 @@ COMMENT ON TABLE case_chunks IS '판단불가 경로에서만 조회. 판정 근
 -- ════════════════════════════════════════════════════════════════
 CREATE TABLE rules (
     rule_id       BIGSERIAL PRIMARY KEY,
-    layer         TEXT NOT NULL,   -- L2 | L3 | L4
-    기관ID        TEXT,            -- L4 전용
+    layer         TEXT NOT NULL CHECK (layer IN ('L1','L2','L3')),
+    기관ID        TEXT,            -- L3(주관기관) 전용
     사업명        TEXT NOT NULL,
     비목          TEXT NOT NULL,
     허용          TEXT NOT NULL CHECK (허용 IN ('가능','조건부','불가')),
@@ -108,6 +125,63 @@ CREATE TABLE rules (
 );
 CREATE INDEX ix_rules_lookup ON rules (사업명, 비목);
 COMMENT ON COLUMN rules.verified IS 'false 인 룰만으로 "가능" 판정 금지. 조문 인용 동반 필수.';
+
+-- ════════════════════════════════════════════════════════════════
+-- 5-b. precedence_rules : 우선순위 조항 (2026-08-27 추가)
+--      "어느 계층이 이기는가" 를 각 문서의 제3조 부근에서 파싱해 등록한다.
+--      비목 룰이 아니라 충돌 해소 룰이다. 상세: rule_base.md §3
+-- ════════════════════════════════════════════════════════════════
+CREATE TABLE precedence_rules (
+    prec_id     BIGSERIAL PRIMARY KEY,
+    사업명      TEXT NOT NULL,
+    우선계층    TEXT NOT NULL CHECK (우선계층 IN ('L1','L2','L3')),
+    열위계층    TEXT NOT NULL CHECK (열위계층 IN ('L1','L2','L3')),
+    범위        TEXT NOT NULL DEFAULT 'all'
+                CHECK (범위 IN ('all','unspecified_only')),  -- unspecified_only: 상위에 미규정인 사항만 하위 적용
+    근거        JSONB NOT NULL DEFAULT '[]',   -- [{doc_id, 조번호}]
+    원문        TEXT NOT NULL,                 -- 조항 원문 그대로 (화면 7에서 인용)
+    verified    BOOLEAN NOT NULL DEFAULT FALSE,
+    검수자      TEXT,
+    검수일      DATE,
+    UNIQUE (사업명, 우선계층, 열위계층)
+);
+CREATE INDEX ix_prec_lookup ON precedence_rules (사업명);
+COMMENT ON TABLE precedence_rules IS
+  '우선순위 조항. 없으면 폴백(상위 규범 우선 + 엄격한 값 우선). 사업별로 문구가 달라 사람 검수 대상.';
+COMMENT ON COLUMN precedence_rules.범위 IS
+  'all = 항상 우선계층이 이김(재도전성공패키지 제3조) / unspecified_only = 상위에 없는 사항만 하위 적용(초격차 제3조)';
+
+-- ════════════════════════════════════════════════════════════════
+-- 5-c. refs : 참조 그래프 (2026-08-27 추가)
+--      "어느 조가 어느 조를 가리키는가". 한 행 = 엣지 하나.
+--      그래프 DB(Neo4j 등) 불필요 — 깊이 3, 재귀 CTE 로 밀리초.
+--      RAG 의 존재 이유가 여기다: 사용자 문서만으로 답이 안 될 때
+--      "제33조에 따른다" 를 따라가 실제 조항에 닿는다. 상세: 파이프라인 §6.3
+-- ════════════════════════════════════════════════════════════════
+CREATE TABLE refs (
+    ref_id      BIGSERIAL PRIMARY KEY,
+    src_doc_id  TEXT NOT NULL,
+    src_조번호  TEXT NOT NULL,
+    참조문자열  TEXT NOT NULL,   -- 원문 표기 그대로: "통합관리지침 제33조부터 제42조까지"
+    관계        TEXT NOT NULL CHECK (관계 IN ('위임','준용','별표참조','인용','미규정위임')),
+    dst_doc_id  TEXT,            -- dangling 이면 NULL
+    dst_조번호  TEXT,
+    해소상태    TEXT NOT NULL CHECK (해소상태 IN ('resolved','shifted','dangling')),
+    보정근거    TEXT,            -- shifted 일 때: "조제목 '기계장치, 공구·기구' 로 재매칭"
+    depth_hint  INT,             -- 위임 계통 복원 시의 단계 (있으면)
+    발견일      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (src_doc_id, src_조번호, 참조문자열)
+);
+CREATE INDEX ix_refs_src ON refs (src_doc_id, src_조번호);
+CREATE INDEX ix_refs_dst ON refs (dst_doc_id, dst_조번호);   -- 역참조("누가 나를 인용했나")
+CREATE INDEX ix_refs_dangling ON refs (해소상태) WHERE 해소상태 = 'dangling';
+
+COMMENT ON TABLE  refs IS
+  '참조 그래프. 진입점에서 깊이 3까지 폐포를 수집해 LLM 컨텍스트에 싣는다. LLM 은 이 표를 보지 않는다 — 코드가 조회해 텍스트로 먹인다.';
+COMMENT ON COLUMN refs.해소상태 IS
+  'resolved=정상 / shifted=조번호가 구판이라 조제목으로 재매칭함 / dangling=코퍼스에 대상 없음(판단불가 예고)';
+COMMENT ON COLUMN refs.관계 IS
+  '미규정위임 = "이 지침에서 정하지 아니한 사항은 ~에 따름". 건국대 지침 실측 문형. 게이팅(파이프라인 §6.2)의 근거가 된다.';
 
 -- ════════════════════════════════════════════════════════════════
 -- 6. item_alias : 상품명 → 비목 매핑 사전. 여기만 벡터가 필요.

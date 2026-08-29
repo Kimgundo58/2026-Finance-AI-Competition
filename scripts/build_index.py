@@ -160,18 +160,16 @@ def main():
         conn.execute("TRUNCATE chunks, case_chunks;")
 
         docs = conn.execute("""
-            SELECT doc_id, layer, domain, 기관ID, apply_mode, version, status
+            SELECT doc_id, layer, 기관ID, parse_quality, version, status
             FROM documents WHERE index_target = TRUE ORDER BY layer, doc_id
         """).fetchall()
 
         판정_rows, 사례_rows = [], []
-        for doc_id, layer, domain, 기관, apply_mode, version, status in docs:
+        for doc_id, layer, 기관, parse_quality, version, status in docs:
             arts = conn.execute("""
                 SELECT article_id, 조번호, 조제목, 본문, 페이지
                 FROM doc_articles WHERE doc_id = %s ORDER BY article_id
             """, (doc_id,)).fetchall()
-
-            사업명 = _사업명(doc_id, layer)
 
             if layer == "사례":
                 for aid, 조번호, 조제목, 본문, 페이지 in arts:
@@ -179,8 +177,9 @@ def main():
                         사례_rows.append((doc_id, _출처도메인(doc_id), q, a))
             else:
                 for aid, 조번호, 조제목, 본문, 페이지 in arts:
+                    사업명 = _사업명(doc_id, layer, 조번호)
                     for 항호, txt in merge_tiny(chunk_article(본문, 조번호)):
-                        판정_rows.append((doc_id, aid, layer, domain, 기관, apply_mode,
+                        판정_rows.append((doc_id, aid, layer, 기관, parse_quality,
                                         version, status, 조번호, 조제목, 항호, 페이지,
                                         사업명, txt))
 
@@ -194,9 +193,58 @@ def main():
     print(f"\n완료 — {time.time()-t0:.0f}초")
 
 
-def _사업명(doc_id: str, layer: str):
+# ── 역참조(cited_by) 인덱스 ──────────────────────────────────────
+# scripts/build_citations.py 산출물. L1 법령 조문은 doc_id 에 사업명이 없으므로
+# "어느 문서가 이 조를 인용했는가"로 사업명을 붙인다. 없으면 NULL(전 사업 공통).
+_CITE_MAP: dict[tuple[str, str], list[str]] | None = None
+
+
+def _load_cites() -> dict[tuple[str, str], list[str]]:
+    """(doc_id, 조번호) → 사업명 리스트."""
+    global _CITE_MAP
+    if _CITE_MAP is not None:
+        return _CITE_MAP
+    _CITE_MAP = {}
+    cj = ROOT / "법령 PDF" / "_law_citations.json"
+    rj = ROOT / "법령 PDF" / "_law_report.json"
+    if not (cj.exists() and rj.exists()):
+        return _CITE_MAP
+
+    import json as _json
+    cites = _json.loads(cj.read_text(encoding="utf-8"))["citations"]
+    report = _json.loads(rj.read_text(encoding="utf-8"))
+
+    # ref_id → 그 규범의 현행본 doc_id(파일 stem)
+    ref2doc = {}
+    for r in report:
+        for f in r.get("files", []):
+            if f.get("kind") == "현행":
+                ref2doc[r["ref_id"]] = Path(f["file"]).stem
+                break
+
+    for ref, per_jo in cites.items():
+        doc_id = ref2doc.get(ref)
+        if not doc_id:
+            continue                      # 미수집 규범(R05 등)은 건너뛴다
+        for jo, recs in per_jo.items():
+            if jo == "_미특정":
+                continue
+            조번호 = (jo if jo.startswith("별표")
+                    else f"제{jo.split('-')[0]}조의{jo.split('-')[1]}" if "-" in jo
+                    else f"제{jo}조")
+            biz = sorted({b for r in recs for b in r.get("사업명", [])})
+            if biz:
+                _CITE_MAP[(doc_id, 조번호)] = biz
+    return _CITE_MAP
+
+
+def _사업명(doc_id: str, layer: str, 조번호: str | None = None):
     hits = [k for k in ("예비창업패키지", "초기창업패키지", "창업도약패키지") if k in doc_id]
-    return hits or None
+    if hits:
+        return hits
+    if layer == "L1" and 조번호:
+        return _load_cites().get((doc_id, 조번호))
+    return None
 
 
 def _출처도메인(doc_id: str) -> str:
@@ -228,9 +276,9 @@ def _embed_insert(conn, model, rows, kind: str):
         if kind == "판정":
             cur.executemany("""
                 INSERT INTO chunks
-                  (doc_id, article_id, layer, domain, 기관ID, apply_mode, version, status,
+                  (doc_id, article_id, layer, 기관ID, parse_quality, version, status,
                    조번호, 조제목, 항호, 페이지, 사업명, text, embedding)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             """, [(*r, _v(v)) for r, v in zip(rows, vecs)])
         else:
             cur.executemany("""

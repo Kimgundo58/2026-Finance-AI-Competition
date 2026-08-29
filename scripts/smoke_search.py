@@ -38,7 +38,7 @@ def main():
                        1 - (embedding <=> %s::vector) AS sim,
                        left(replace(text, chr(10), ' '), 95)
                 FROM chunks
-                WHERE status='active' AND apply_mode='apply'
+                WHERE status='active' AND parse_quality='high'
                   AND layer IN ('L1','L2','L3')
                 ORDER BY embedding <=> %s::vector
                 LIMIT 3

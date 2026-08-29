@@ -76,7 +76,7 @@ def main():
                 SELECT doc_id, 조번호, coalesce(조제목,''), layer,
                        left(replace(text, chr(10), ' '), 70)
                 FROM chunks
-                WHERE status='active' AND apply_mode='apply' AND layer IN ('L1','L2','L3')
+                WHERE status='active' AND parse_quality='high' AND layer IN ('L1','L2','L3')
                 ORDER BY embedding <=> %s::vector LIMIT {K}
             """, (v,)).fetchall()
 
