@@ -1,0 +1,675 @@
+<?xml version="1.0" encoding="UTF-8"?><AdmRulService><행정규칙기본정보><행정규칙일련번호>2100000257762</행정규칙일련번호><행정규칙명><![CDATA[전자민원창구 운영에 관한 고시]]></행정규칙명><행정규칙종류>고시</행정규칙종류><행정규칙종류코드>B0003</행정규칙종류코드><발령일자>20250408</발령일자><발령번호>2025-112</발령번호><제개정구분명>일부개정</제개정구분명><제개정구분코드>200403</제개정구분코드><조문형식여부>Y</조문형식여부><행정규칙ID>86427</행정규칙ID><소관부처명>법무부</소관부처명><소관부처코드>1270000</소관부처코드><상위부처명>법무부</상위부처명><담당부서기관코드>1271772</담당부서기관코드><담당부서기관명>법무부(체류관리과)</담당부서기관명><담당자명>박중규</담당자명><전화번호>02-2110-4058</전화번호><현행여부>Y</현행여부><시행일자>20250408</시행일자><생성일자>20250415</생성일자></행정규칙기본정보><조문내용><![CDATA[제1조(목적) 이 고시는 「출입국관리법」시행령 제94조의3 제2항에 의한 전자민원창구의 설치ㆍ운영 및 민원업무처리의 절차 등에 관하여 필요한 사항을 정함을 목적으로 한다.
+]]></조문내용><조문내용><![CDATA[제2조(적용범위) 이 고시는 하이코리아(www.hikorea.go.kr)와 유학생정보시스템(fims.hikorea.go.kr) 전자민원창구를 통해 제공하는 업무에 대하여 적용한다.
+]]></조문내용><조문내용><![CDATA[제3조(용어의 정의) 이 고시에서 사용하는 용어의 정의는 다음과 같다.
+  1. "하이코리아"란 외국인을 위한 전자정부 홈페이지(이하 ‘하이코리아’)를 말한다.
+  2. "유학생정보시스템"란 각 대학에 재학 중인 외국인유학생 관리를 목적으로 구축된 시스템을 말한다.
+  3. "전자민원 담당기관의 장"이란 전자민원 업무를 수행하는 청장ㆍ사무소장ㆍ출장소장을 말한다.
+]]></조문내용><조문내용><![CDATA[제4조(전자민원 대상 업무) 하이코리아 또는 유학생정보시스템을 통하여 전자민원 신청을 할 수 있는 대상 업무는 별표와 같다.
+]]></조문내용><조문내용><![CDATA[제5조 삭제 <2019. 3. 25.>
+]]></조문내용><조문내용><![CDATA[제6조(전자민원 신청가능시간) 민원인이 전자민원을 신청할 수 있는 시간은 원칙적으로 「국가공무원 복무규정」제9조에 따른 근무시간으로 한다. 다만, 법무부장관은 필요하다고 인정하는 경우 전자민원 신청가능시간을 달리 정할 수 있다.
+]]></조문내용><조문내용><![CDATA[제7조(전자민원의 접수) ① 전자민원의 접수 시점은 다른 법령에 특별한 규정이 있는 경우를 제외하고는 해당 민원이 전자민원창구에 파일로 정상적으로 등록되었음이 확인된 때로 한다.
+  ② 전자민원 담당기관의 장은 제1항에 따라 전자민원이 정상적으로 접수된 경우, 민원인에 대하여 별지 제1호서식의 전자민원 접수증을 전자적 방법으로 교부한다.
+  ③ 제1항에 따라 접수된 전자민원에 보완이 필요한 경우에, 전자민원 담당기관의 장은 상당한 기간을 정하여 문서 또는 구술 등으로 민원인에게 보완을 요구하여야 한다. 이 경우, 민원인이 기간 내에 보완하지 아니한 경우에는 접수된 민원을 허가하지 아니할 수 있다.
+  ④ 제3항에도 불구하고, 민원인이 보완 요구 기간 내에 보완을 할 수 없음을 이유로 보완에 필요한 기간을 분명하게 밝혀 기간 연장을 요청하는 경우에는 보완 기간을 다시 정할 수 있다. 이 경우, 민원인의 보완 기간 연장 요청은 2회로 한정한다.
+]]></조문내용><조문내용><![CDATA[제8조(전자민원 처리결과의 통지) ① 전자민원 담당기관의 장은 전자민원창구를 통하여 접수된 민원에 대한 처리 결과를 전자문서로 통지하되, 허가 또는 수리의 통지를 하는 경우에는 별지 제2호서식의 전자민원 허가(수리)확인서를 전자적 방법으로 교부함으로써 통지한다.
+  ② 제1항에 따른 전자민원 허가(수리)확인서를 소지한 민원인이 청ㆍ사무소 또는 출장소를 방문하여 여권 등에 허가인의 날인 또는 허가 및 신고사항 스티커의 부착을 요청하는 경우, 청장ㆍ사무소장 또는 출장소장은 관할구역에 관계없이 허가인을 날인하거나 허가 및 신고사항 스티커를 부착하여 줄 수 수 있으며, 시ㆍ군ㆍ구 및 읍ㆍ면ㆍ동사무소를 방문하여 외국인등록증(거소신고증 포함)에 체류지변경(국내거소이전) 신고  사항 기재를 요청하는 경우 시ㆍ군ㆍ구 및 읍ㆍ면ㆍ동사무소장은 관할구역에 관계 없이 신고사항을 기재하여 줄 수 있다.
+  ③ 전자민원 담당기관의 장은 전자민원창구를 통하여 신청한 민원을 반려하거나, 허가 또는 수리하지 아니하는 때에는 전자적 방법으로 신청인에게 통지한다. 다만, 허가 또는 수리하지 아니하는 경우에는 별지 제3호서식의 전자민원 불허(불수리)통지서를 전자적 방법으로 교부함으로써 통지한다. 이 경우 전자적 방법으로 통지한 사실을 즉시 신청인에게 전자우편이나 문자메시지 등의 방법으로 안내해야 한다.
+  ④ 제3항 본문에 따라 통지하는 경우에는 신청인이 전자민원창구를 통하여 전자문서를 확인했을 때에 통지를 받은 것으로 본다.
+]]></조문내용><조문내용><![CDATA[제9조(전자민원 수수료 납부 및 반환) ① 전자민원에 의한 수수료는 「출입국관리법」 제73조에 따라 신용카드, 계좌이체 등 법무부장관이 정하는 전자적 방법으로 납부할 수 있다.
+  ② 전자민원 담당기관의 장은 민원인이 제1항에 따라 수수료를 납부하는 경우에, 수수료 외에 전자적 납부 처리에 소요되는 별도의 업무처리비용을 민원인에게 청구할 수 있다.
+  ③ 전자민원 담당기관의 장은 민원이 정상적으로 접수되지 않았거나 전자민원 수수료가 잘못 납부된 경우 등 필요하다고 인정하는 경우에는 민원인의 신청을 받아 수수료를 반환할 수 있다.
+]]></조문내용><조문내용><![CDATA[제10조(전자민원 처리결과의 효력) 전자민원창구를 통해 전자민원 담당기관의 장이 허가 또는 수리한 전자민원은 체류지를 관할하는 청ㆍ사무소 또는 출장소장이 허가 또는 수리한 것과 동일한 효력을 갖는다.
+]]></조문내용><조문내용><![CDATA[제11조(재검토 기한) 법무부장관은 이 고시에 대하여 「훈령ㆍ예규 등의 발령 및 관리에 관한 규정」에 따라 2019년 1월 1일 기준으로 매 3년이 되는 시점(매 3년 째의 12월 31일까지를 말한다)마다 그 타당성을 검토하여 개선 등의 조치를 하여야 한다.
+]]></조문내용><부칙>
+<부칙공포일자>20230811</부칙공포일자><부칙공포번호>2023-389</부칙공포번호><부칙내용 ><![CDATA[부칙 <제2023-389호, 2023. 8. 11.>
+제1조(시행일) 이 고시는 2023년 8월 11일부터 시행한다.]]></부칙내용><부칙공포일자>20250408</부칙공포일자><부칙공포번호>2025-112</부칙공포번호><부칙내용 ><![CDATA[부칙 <제2025-112호, 2025. 4. 8.>
+제1조(시행일) 이 고시는 2025년 4월 8일부터 시행한다.]]></부칙내용></부칙><별표>
+<별표단위 별표키="000000">
+<별표번호>0000</별표번호>
+<별표가지번호>00</별표가지번호>
+<별표구분>별표</별표구분>
+<별표제목><![CDATA[전자민원 대상 업무]]></별표제목>
+<별표서식파일링크>/LSW/flDownload.do?flSeq=151064269</별표서식파일링크>
+<별표서식PDF파일링크>/LSW/flDownload.do?flSeq=151064273</별표서식PDF파일링크>
+<별표내용><![CDATA[【별표】전자민원 대상 업무]]>
+<![CDATA[]]>
+<![CDATA[?? 하이코리아]]>
+<![CDATA[]]>
+<![CDATA[┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┯━━━━━━━━━━━━━━━━━━━┓]]>
+<![CDATA[]]>
+<![CDATA[┃전자민원 대상 업무                                                          │신청 가능 체류자격                    ┃]]>
+<![CDATA[]]>
+<![CDATA[┠───┬───────────────┬──────────────────┤                                      ┃]]>
+<![CDATA[]]>
+<![CDATA[┃구 분 │대분류(근거법령)              │소분류                              │                                      ┃]]>
+<![CDATA[]]>
+<![CDATA[┣━━━┿━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━┫]]>
+<![CDATA[]]>
+<![CDATA[┃모든  │체류기간연장허가              │단기체류자격 체류기간연장허가       │모든 체류자격                         ┃]]>
+<![CDATA[]]>
+<![CDATA[┃자격  │(「출입국관리법」제25조)      ├──────────────────┼───────────────────┨]]>
+<![CDATA[]]>
+<![CDATA[┃      │                              │등록(거소)외국인 체류기간연장       │모든 체류자격                         ┃]]>
+<![CDATA[]]>
+<![CDATA[┃신청  │                              │허가                                │※ 단, 아래 체류자격은 제외           ┃]]>
+<![CDATA[]]>
+<![CDATA[┃가능  │                              │                                    │┌───────────────┐    ┃]]>
+<![CDATA[]]>
+<![CDATA[┃      │                              │                                    ││         <제외 대상>          │    ┃]]>
+<![CDATA[]]>
+<![CDATA[┃      │                              │                                    ││기술연수(D-3), 기업투자(D-8), │    ┃]]>
+<![CDATA[]]>
+<![CDATA[┃      │                              │                                    ││특정활동(E-7), 거주(F-2),     │    ┃]]>
+<![CDATA[]]>
+<![CDATA[┃      │                              │                                    ││결혼이민(F-6), 기타(G-1)      │    ┃]]>
+<![CDATA[]]>
+<![CDATA[┃      │                              │                                    ││방문동거(F-1) 일부            │    ┃]]>
+<![CDATA[]]>
+<![CDATA[┃      │                              │                                    │└───────────────┘    ┃]]>
+<![CDATA[]]>
+<![CDATA[┃      │                              ├──────────────────┼───────────────────┨]]>
+<![CDATA[]]>
+<![CDATA[┃      │                              │등록(거소)외국인 및 단기체류자의    │모든 체류자격                         ┃]]>
+<![CDATA[]]>
+<![CDATA[┃      │                              │출국을 위한 체류기간연장허가        │                                      ┃]]>
+<![CDATA[]]>
+<![CDATA[┃      ├───────────────┼──────────────────┼───────────────────┨]]>
+<![CDATA[]]>
+<![CDATA[┃      │재입국허가                    │재입국허가                          │모든 체류자격                         ┃]]>
+<![CDATA[]]>
+<![CDATA[┃      │(「출입국관리법」제30조)      │                                    │                                      ┃]]>
+<![CDATA[]]>
+<![CDATA[┃      ├───────────────┼──────────────────┼───────────────────┨]]>
+<![CDATA[]]>
+<![CDATA[┃      │외국인등록사항변경신고        │여권번호·발급일자·유효기간의      │모든 체류자격                         ┃]]>
+<![CDATA[]]>
+<![CDATA[┃      │(「출입국관리법」제35조제2호) │변경                                │                                      ┃]]>
+<![CDATA[]]>
+<![CDATA[┃      ├───────────────┼──────────────────┼───────────────────┨]]>
+<![CDATA[]]>
+<![CDATA[┃      │체류지·거소지 변경신고       │체류지·거소지 변경(이전) 신고      │모든 체류자격                         ┃]]>
+<![CDATA[]]>
+<![CDATA[┃      │(「출입국관리법」제36조,      │                                    │                                      ┃]]>
+<![CDATA[]]>
+<![CDATA[┃      │ 「재외동포법」제11조)        │                                    │                                      ┃]]>
+<![CDATA[]]>
+<![CDATA[┣━━━┿━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━━━━━┫]]>
+<![CDATA[]]>
+<![CDATA[┃일부  │체류자격변경허가              │등록외국인의                        │일반연수(D-4)→유학(D-2)              ┃]]>
+<![CDATA[]]>
+<![CDATA[┃자격  │(「출입국관리법」 제24조)     │체류자격변경허가                    │방문취업(H-2)→재외동포               ┃]]>
+<![CDATA[]]>
+<![CDATA[┃      │                              │- 허가에 따르는 외국인등록증        │(F-4-24,25,27,28)                     ┃]]>
+<![CDATA[]]>
+<![CDATA[┃신청  │                              │발급 또는 거소신고·거소증발급      │비전문취업(E-9), 선원취업(E-10),      ┃]]>
+<![CDATA[]]>
+<![CDATA[┃가능  │                              │포함                                │방문취업(H-2) → 숙련기능인력(E-7-4), ┃]]>
+<![CDATA[]]>
+<![CDATA[┃      │                              │                                    │지역특화 숙련기능인력(E-7-4R)         ┃]]>
+<![CDATA[]]>
+<![CDATA[┃      ├───────────────┼──────────────────┼───────────────────┨]]>
+<![CDATA[]]>
+<![CDATA[┃      │근무처변경허가                │근무처변경허가                      │비전문취업(E-9)                       ┃]]>
+<![CDATA[]]>
+<![CDATA[┃      │(「출입국관리법」제21조)      │                                    │                                      ┃]]>
+<![CDATA[]]>
+<![CDATA[┃      ├───────────────┼──────────────────┼───────────────────┨]]>
+<![CDATA[]]>
+<![CDATA[┃      │체류자격외활동허가            │시간제취업허가                      │유학(D-2),일반연수(D-4)               ┃]]>
+<![CDATA[]]>
+<![CDATA[┃      │(「출입국관리법」제20조)      ├──────────────────┼───────────────────┨]]>
+<![CDATA[]]>
+<![CDATA[┃      │                              │국내 체류외국인 가사·육아분야 활동 │유학(D-2), 구직(D-10-1), 결혼         ┃]]>
+<![CDATA[]]>
+<![CDATA[┃      │                              │ 1) 체류자격 외 활동허가            │이민자 가족(F-1-5), 동반(F-3)         ┃]]>
+<![CDATA[]]>
+<![CDATA[┃      │                              │ 2) 활동개시신고                    │                                      ┃]]>
+<![CDATA[]]>
+<![CDATA[┃      ├───────────────┼──────────────────┼───────────────────┨]]>
+<![CDATA[]]>
+<![CDATA[┃      │고용·연수외국인 변동사유     │고용·연수외국인 변동사유           │기술연수(D-3),교수(E-1)~선원취업      ┃]]>
+<![CDATA[]]>
+<![CDATA[┃      │발생신고                      │(퇴직·이탈 등)                     │(E-10), 방문취업(H-2)                 ┃]]>
+<![CDATA[]]>
+<![CDATA[┃      │(「출입국관리법」제19조)      │                                    │                                      ┃]]>
+<![CDATA[]]>
+<![CDATA[┃      ├───────────────┼──────────────────┼───────────────────┨]]>
+<![CDATA[]]>
+<![CDATA[┃      │외국인등록사항변경신고        │취업개시 및 근무처변경신고          │방문취업(H-2)                         ┃]]>
+<![CDATA[]]>
+<![CDATA[┃      │(「출입국관리법」제35조제3호) │                                    │                                      ┃]]>
+<![CDATA[]]>
+<![CDATA[┗━━━┷━━━━━━━━━━━━━━━┷━━━━━━━━━━━━━━━━━━┷━━━━━━━━━━━━━━━━━━━┛]]>
+<![CDATA[]]>
+<![CDATA[]]>
+<![CDATA[]]>
+<![CDATA[?? 유학생정보시스템]]>
+<![CDATA[]]>
+<![CDATA[┏━━━━━━━━━━━━━━━━━━━━━━━━━━┯━━━━━━━━━━━━┓]]>
+<![CDATA[]]>
+<![CDATA[┃전자민원 대상 업무                                  │신청 가능 체류자격      ┃]]>
+<![CDATA[]]>
+<![CDATA[┠──────────────┬───────────┤                        ┃]]>
+<![CDATA[]]>
+<![CDATA[┃대분류(근거법령)            │소분류                │                        ┃]]>
+<![CDATA[]]>
+<![CDATA[┠──────────────┼───────────┼────────────┨]]>
+<![CDATA[]]>
+<![CDATA[┃외국인유학생 변동신고       │ 외국인유학생 변동신고│유학(D-2), 일반연수(D-4)┃]]>
+<![CDATA[]]>
+<![CDATA[┃(「출입국관리법」 제19조의4)│                      │                        ┃]]>
+<![CDATA[]]>
+<![CDATA[┗━━━━━━━━━━━━━━┷━━━━━━━━━━━┷━━━━━━━━━━━━┛]]>
+<![CDATA[]]>
+<![CDATA[]]>
+</별표내용>
+</별표단위>
+<별표단위 별표키="000100">
+<별표번호>0001</별표번호>
+<별표가지번호>00</별표가지번호>
+<별표구분>별지</별표구분>
+<별표제목><![CDATA[전자민원 접수증]]></별표제목>
+<별표서식파일링크>/LSW/flDownload.do?flSeq=151064245</별표서식파일링크>
+<별표서식PDF파일링크>/LSW/flDownload.do?flSeq=151064249</별표서식PDF파일링크>
+<별표내용><![CDATA[【별지 서식 1호】전자민원 접수증]]>
+<![CDATA[]]>
+<![CDATA[┌─────────────────────────────────────────────────────────┐]]>
+<![CDATA[]]>
+<![CDATA[│                                                                                                                  │]]>
+<![CDATA[]]>
+<![CDATA[│  법무부                    Korea Immigration Service                                                             │]]>
+<![CDATA[]]>
+<![CDATA[│  출입국·외국인정책본부    Ministry of Justice                                                                   │]]>
+<![CDATA[]]>
+<![CDATA[│────────────────────────────                                                          │]]>
+<![CDATA[]]>
+<![CDATA[│                                                                                                                  │]]>
+<![CDATA[]]>
+<![CDATA[│┌───────────────┐                                                                                │]]>
+<![CDATA[]]>
+<![CDATA[││전자민원 접수증               │                                                                                │]]>
+<![CDATA[]]>
+<![CDATA[││(E-certificate of Application)│                                                                                │]]>
+<![CDATA[]]>
+<![CDATA[│└───────────────┘                                                                                │]]>
+<![CDATA[]]>
+<![CDATA[│                                                                                                                  │]]>
+<![CDATA[]]>
+<![CDATA[│ □ 민원인 정보(Applicant Information)                                                                            │]]>
+<![CDATA[]]>
+<![CDATA[│   ? 국적(Nationality)                                                                                           │]]>
+<![CDATA[]]>
+<![CDATA[│   ? 성명(Full name)                                                                                             │]]>
+<![CDATA[]]>
+<![CDATA[│   ? 성별(Sex)                                                                                                   │]]>
+<![CDATA[]]>
+<![CDATA[│   ? 생년월일(Date of Birth)                                                                                     │]]>
+<![CDATA[]]>
+<![CDATA[│   ? 외국인등록번호(Alien Registration No.)                                                                      │]]>
+<![CDATA[]]>
+<![CDATA[│                                                                                                                  │]]>
+<![CDATA[]]>
+<![CDATA[│ □ 신청민원 종류(Type of e-Application)                                                                          │]]>
+<![CDATA[]]>
+<![CDATA[│    :                                                                                                             │]]>
+<![CDATA[]]>
+<![CDATA[│                                                                                                                  │]]>
+<![CDATA[]]>
+<![CDATA[│ □ 접수일자(Date of Application)                                                                                 │]]>
+<![CDATA[]]>
+<![CDATA[│    :                                                                                                             │]]>
+<![CDATA[]]>
+<![CDATA[│신청 민원이 상기와 같이 접수되었음을 확인합니다.                                                                  │]]>
+<![CDATA[]]>
+<![CDATA[│(We hereby certify that your application has been received as above.)                                             │]]>
+<![CDATA[]]>
+<![CDATA[│처리결과는 본인이 회원가입 시 등록한 E-mail 주소로 발송됩니다.                                                    │]]>
+<![CDATA[]]>
+<![CDATA[│(The outcome of application will be notified to your  email address provided at the time of                       │]]>
+<![CDATA[]]>
+<![CDATA[│lodgement.)                                                                                                       │]]>
+<![CDATA[]]>
+<![CDATA[│                                                                                                                  │]]>
+<![CDATA[]]>
+<![CDATA[│Chief, OO Immigration Office                                                                                      │]]>
+<![CDATA[]]>
+<![CDATA[│OO출입국·외국인청(사무소·출장소)장                                                                              │]]>
+<![CDATA[]]>
+<![CDATA[│┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓│]]>
+<![CDATA[]]>
+<![CDATA[│┃□ 공지사항(Note)                                                                                             ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃? 심사 중 체류기간이 만료되어도 심사가 완료될 때까지는 기존 체류자격으로 체류할 수 있습니다.                 ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃(You are qualified to stay in Korea with your existing status without regard to its expiration date until     ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃your application is concluded.)                                                                               ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃? 심사가 완료되기 전에 담당자에게 연락 없이 출국하는 경우 허가여부 결정 없이 심사가 종결될                   ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃수 있으니 유의하시기 바랍니다.                                                                                ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃(Please Note that if you depart without notifying the officer in charge of your application, your             ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃application may be terminated without permission.)                                                            ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃? 접수증은 온라인 민원접수에 대한 사실만을 증명합니다. 체류기간 연장 등 허가를 받은 후                       ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃출입국할 시에는 반드시 ‘전자민원 허가확인서’를 출력하여 심사관에게 제시하셔야 합니다.                       ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃(e-Certificate of application verifies on-line application recode only. You must print out a "Certificate of  ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃permission/Acceptance for e-Application" and present it to relevant officer when crossing Korea’s border     ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃after receiving any permission such as extension of stay)                                                     ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃※ 하이코리아 웹주소:www.hikorea.go.kr  외국인종합안내센터(Foreigner Complex Counseling Center)☎1345         ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛│]]>
+<![CDATA[]]>
+<![CDATA[└─────────────────────────────────────────────────────────┘]]>
+<![CDATA[]]>
+<![CDATA[]]>
+</별표내용>
+</별표단위>
+<별표단위 별표키="000200">
+<별표번호>0002</별표번호>
+<별표가지번호>00</별표가지번호>
+<별표구분>별지</별표구분>
+<별표제목><![CDATA[전자민원 허가(수리)확인서]]></별표제목>
+<별표서식파일링크>/LSW/flDownload.do?flSeq=151064251</별표서식파일링크>
+<별표서식PDF파일링크>/LSW/flDownload.do?flSeq=151064255</별표서식PDF파일링크>
+<별표내용><![CDATA[【별지 서식 2호】전자민원 허가(수리)확인서]]>
+<![CDATA[]]>
+<![CDATA[┌─────────────────────────────────────────────────────┐]]>
+<![CDATA[]]>
+<![CDATA[│                                                                                                          │]]>
+<![CDATA[]]>
+<![CDATA[│  법무부                    Ministry of Justice                                                           │]]>
+<![CDATA[]]>
+<![CDATA[│  출입국·외국인정책본부    Korea Immigration Service                                                     │]]>
+<![CDATA[]]>
+<![CDATA[│────────────────────────────                                                  │]]>
+<![CDATA[]]>
+<![CDATA[│                                                                                                          │]]>
+<![CDATA[]]>
+<![CDATA[│┌────────────────────────────┐                                              │]]>
+<![CDATA[]]>
+<![CDATA[││전자민원 허가·수리확인서                               │                                              │]]>
+<![CDATA[]]>
+<![CDATA[││(Certificate of Permission/Acceptance for e-Application)│                                              │]]>
+<![CDATA[]]>
+<![CDATA[│└────────────────────────────┘                                              │]]>
+<![CDATA[]]>
+<![CDATA[│                                                                                                          │]]>
+<![CDATA[]]>
+<![CDATA[│ □ 민원인 정보(Applicant Information)                                                                    │]]>
+<![CDATA[]]>
+<![CDATA[│   ? 국적(Nationality)                                                                                   │]]>
+<![CDATA[]]>
+<![CDATA[│   ? 성명(Full name)                                                                                     │]]>
+<![CDATA[]]>
+<![CDATA[│   ? 성별(Sex)                                                                                           │]]>
+<![CDATA[]]>
+<![CDATA[│   ? 생년월일(Date of Birth)                                                                             │]]>
+<![CDATA[]]>
+<![CDATA[│   ? 외국인등록번호(Alien Registration No.)                                                              │]]>
+<![CDATA[]]>
+<![CDATA[│                                                                                                          │]]>
+<![CDATA[]]>
+<![CDATA[│ □ 허가·수리내용(Permission/Acceptance Details)                                                         │]]>
+<![CDATA[]]>
+<![CDATA[│   ? 허가·수리번호(Permission/Acceptance No.)                                                           │]]>
+<![CDATA[]]>
+<![CDATA[│   ? 민원종류(Application Type)                                                                          │]]>
+<![CDATA[]]>
+<![CDATA[│   ? 유효기간(Valid Until)                                                                               │]]>
+<![CDATA[]]>
+<![CDATA[│   ? 발급일자(Date of Permission/Acceptance)                                                             │]]>
+<![CDATA[]]>
+<![CDATA[│                                                                                                          │]]>
+<![CDATA[]]>
+<![CDATA[│상기 민원이 전자민원 창구를 통해 허가되었음을 확인합니다.                                                 │]]>
+<![CDATA[]]>
+<![CDATA[│(We hereby certify that the above permission has been granted through e-Application Service.)             │]]>
+<![CDATA[]]>
+<![CDATA[│                                                                                                          │]]>
+<![CDATA[]]>
+<![CDATA[│Chief, OO Immigration Office                                                                              │]]>
+<![CDATA[]]>
+<![CDATA[│OO출입국·외국인청(사무소·출장소)장                                                                      │]]>
+<![CDATA[]]>
+<![CDATA[│┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓│]]>
+<![CDATA[]]>
+<![CDATA[│┃ □ 공지사항(Note)                                                                                    ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃   ? 전자민원의 효력(Validation of Permission for e-Application)                                     ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃    - 하이코리아 전자민원 창구를 통해 허가받은 민원은 사무소를 방문하여 허가받은 것과 동일한          ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃효력을 갖습니다.(All permissions/acceptances granted through the Hi-Korea’s e-application            ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃service are equally valid as those granted through a physical visit to Immigration Office.)           ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃   ※ 동 확인서를 여권과 함께 소지하시고, 필요할 경우 관계 공무원에게 제시하시기 바랍니다.(Please     ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃keep this certificate with your passport and present it to the relevant immigration                   ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃officer when needed.)                                                                                 ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃   ※ 만일 외국인등록증 상에 허가(신고)사항 기재를 원하는 경우 가까운 출입국·외국인청(사무소·출장   ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃소)을 방문하시기를 바라며, 체류지(국내거소) 기재를 원할 때는 가까운 출입국·외국인청(사무소·         ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃출장소) 이나 시·군·구 또는 읍·면·동사무소를 방문하시기를 바랍니다. (If you wish to include        ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃your Permission(Acceptance) details on your Residence Card, please visit the nearest                  ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃immigration office. For including your residence address (domestic residence), please                 ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃visit the nearest immigration office, municipal office or community office.)                          ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃   ? 전자민원 확인서 발급조회(Confirmation or Certificate Issuance)                                  ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃    - 하이코리아 전자민원 창구를 통해 전자민원 확인서의 발급 여부를 확인할 수 있습니다.(You           ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃may verify this certificate on the Hi-Korea website.)                                                 ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃※ 하이코리아 웹주소:www.hikorea.go.kr  외국인종합안내센터(Foreigner Complex Counseling Center)☎1345 ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛│]]>
+<![CDATA[]]>
+<![CDATA[└─────────────────────────────────────────────────────┘]]>
+<![CDATA[]]>
+<![CDATA[]]>
+</별표내용>
+</별표단위>
+<별표단위 별표키="000300">
+<별표번호>0003</별표번호>
+<별표가지번호>00</별표가지번호>
+<별표구분>별지</별표구분>
+<별표제목><![CDATA[가사·육아분야 체류자격 외 활동허가 전자민원 허가확인서]]></별표제목>
+<별표서식파일링크>/LSW/flDownload.do?flSeq=151064257</별표서식파일링크>
+<별표서식PDF파일링크>/LSW/flDownload.do?flSeq=151064261</별표서식PDF파일링크>
+<별표내용><![CDATA[【별지 서식 3호】가사ㆍ육아분야 체류자격 외 활동허가 전자민원 허가확인서]]>
+<![CDATA[]]>
+<![CDATA[┌─────────────────────────────────────────────────────┐]]>
+<![CDATA[]]>
+<![CDATA[│                                                                                                          │]]>
+<![CDATA[]]>
+<![CDATA[│  법무부                    Ministry of Justice                                                           │]]>
+<![CDATA[]]>
+<![CDATA[│  출입국·외국인정책본부    Korea Immigration Service                                                     │]]>
+<![CDATA[]]>
+<![CDATA[│────────────────────────────                                                  │]]>
+<![CDATA[]]>
+<![CDATA[│                                                                                                          │]]>
+<![CDATA[]]>
+<![CDATA[│┌────────────────────────────┐                                              │]]>
+<![CDATA[]]>
+<![CDATA[││전자민원 허가확인서                                     │                                              │]]>
+<![CDATA[]]>
+<![CDATA[││(Certificate of Permission/Acceptance for e-Application)│                                              │]]>
+<![CDATA[]]>
+<![CDATA[│└────────────────────────────┘                                              │]]>
+<![CDATA[]]>
+<![CDATA[│                                                                                                          │]]>
+<![CDATA[]]>
+<![CDATA[│ □ 민원인 정보(Applicant Information)                                                                    │]]>
+<![CDATA[]]>
+<![CDATA[│   ? 국적(Nationality)                                                                                   │]]>
+<![CDATA[]]>
+<![CDATA[│   ? 성명(Full name)                                                                                     │]]>
+<![CDATA[]]>
+<![CDATA[│   ? 성별(Sex)                                                                                           │]]>
+<![CDATA[]]>
+<![CDATA[│   ? 생년월일(Date of Birth)                                                                             │]]>
+<![CDATA[]]>
+<![CDATA[│   ? 외국인등록번호(Alien Registration No.)                                                              │]]>
+<![CDATA[]]>
+<![CDATA[│                                                                                                          │]]>
+<![CDATA[]]>
+<![CDATA[│ □ 허가·수리내용(Permission/Acceptance Details)                                                         │]]>
+<![CDATA[]]>
+<![CDATA[│   ? 허가·수리번호(Permission/Acceptance No.)                                                           │]]>
+<![CDATA[]]>
+<![CDATA[│   ? 민원종류(Application Type) 가사·육아(만6세 이상) 활동, 구체적 허가조건은 붙임 참고                 │]]>
+<![CDATA[]]>
+<![CDATA[│   ? 유효기간(Valid Until)                                                                               │]]>
+<![CDATA[]]>
+<![CDATA[│   ? 발급일자(Date of Permission/Acceptance)                                                             │]]>
+<![CDATA[]]>
+<![CDATA[│                                                                                                          │]]>
+<![CDATA[]]>
+<![CDATA[│상기 민원이 전자민원 창구를 통해 허가되었음을 확인합니다.                                                 │]]>
+<![CDATA[]]>
+<![CDATA[│(We hereby certify that the above permission has been granted through e-Application Service.)             │]]>
+<![CDATA[]]>
+<![CDATA[│                                                                                                          │]]>
+<![CDATA[]]>
+<![CDATA[│Chief, OO Immigration Office                                                                              │]]>
+<![CDATA[]]>
+<![CDATA[│OO출입국·외국인청(사무소·출장소)장                                                                      │]]>
+<![CDATA[]]>
+<![CDATA[│┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓│]]>
+<![CDATA[]]>
+<![CDATA[│┃ □ 공지사항(Note)                                                                                    ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃   ? 전자민원의 효력(Validation of Permission for e-Application)                                     ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃    - 하이코리아 전자민원 창구를 통해 허가받은 민원은 사무소를 방문하여 허가받은 것과 동일한          ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃효력을 갖습니다.(All permissions/acceptances granted through the Hi-Korea’s                          ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃e-application service are equally valid as those granted through a physical visit to                  ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃Immigration Office.)                                                                                  ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃   ※ 동 확인서를 여권과 함께 소지하시고, 필요할 경우 관계 공무원에게 제시하시기 바랍니다.(Please     ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃keep this certificate with your passport and present it to the relevant immigration                   ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃officer when needed.)                                                                                 ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃   ※ 만일 외국인등록증상에 허가사항의 기재를 원하시는 경우에는 가까운 출입국·외국인청(사무소·      ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃출장소)을 방문하시기 바랍니다.(If you want your Alien Registration Card to be renewed,                ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃please just visit nearby Immigration Office.)                                                         ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃   ? 전자민원 확인서 발급조회(Confirmation or Certificate Issuance)                                  ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃    - 하이코리아 전자민원 창구를 통해 전자민원 확인서의 발급여부를 확인할 수 있습니다.(You            ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃may verify this certificate on the Hi-Korea website.)                                                 ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃※ 하이코리아 웹주소:www.hikorea.go.kr  외국인종합안내센터(Foreigner Complex Counseling Center)☎1345 ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛│]]>
+<![CDATA[]]>
+<![CDATA[└─────────────────────────────────────────────────────┘]]>
+<![CDATA[]]>
+<![CDATA[]]>
+</별표내용>
+</별표단위>
+<별표단위 별표키="000400">
+<별표번호>0004</별표번호>
+<별표가지번호>00</별표가지번호>
+<별표구분>별지</별표구분>
+<별표제목><![CDATA[전자민원 불허(불수리)통지서]]></별표제목>
+<별표서식파일링크>/LSW/flDownload.do?flSeq=151064263</별표서식파일링크>
+<별표서식PDF파일링크>/LSW/flDownload.do?flSeq=151064267</별표서식PDF파일링크>
+<별표내용><![CDATA[【별지 서식 4호】전자민원 불허(불수리)통지서]]>
+<![CDATA[]]>
+<![CDATA[┌─────────────────────────────────────────────────────┐]]>
+<![CDATA[]]>
+<![CDATA[│                                                                                                          │]]>
+<![CDATA[]]>
+<![CDATA[│  법무부                    Ministry of Justice                                                           │]]>
+<![CDATA[]]>
+<![CDATA[│  출입국·외국인정책본부    Korea Immigration Service                                                     │]]>
+<![CDATA[]]>
+<![CDATA[│────────────────────────────                                                  │]]>
+<![CDATA[]]>
+<![CDATA[│                                                                                                          │]]>
+<![CDATA[]]>
+<![CDATA[│┌───────────────────────────┐                                                │]]>
+<![CDATA[]]>
+<![CDATA[││전자민원 불허·불수리통지서                           │                                                │]]>
+<![CDATA[]]>
+<![CDATA[││(Disapproval/Non Acceptance Notice for e-Application) │                                                │]]>
+<![CDATA[]]>
+<![CDATA[│└───────────────────────────┘                                                │]]>
+<![CDATA[]]>
+<![CDATA[│                                                                                                          │]]>
+<![CDATA[]]>
+<![CDATA[│ □ 민원인 정보(Applicant Information)                                                                    │]]>
+<![CDATA[]]>
+<![CDATA[│   ? 국적(Nationality)                                                                                   │]]>
+<![CDATA[]]>
+<![CDATA[│   ? 성명(Full name)                                                                                     │]]>
+<![CDATA[]]>
+<![CDATA[│   ? 성별(Sex)                                                                                           │]]>
+<![CDATA[]]>
+<![CDATA[│   ? 생년월일(Date of Birth)                                                                             │]]>
+<![CDATA[]]>
+<![CDATA[│   ? 외국인등록번호(Alien Registration No.)                                                              │]]>
+<![CDATA[]]>
+<![CDATA[│                                                                                                          │]]>
+<![CDATA[]]>
+<![CDATA[│ □ 신청민원 종류(Type of e-Application)                                                                  │]]>
+<![CDATA[]]>
+<![CDATA[│    :                                                                                                     │]]>
+<![CDATA[]]>
+<![CDATA[│                                                                                                          │]]>
+<![CDATA[]]>
+<![CDATA[│ □ 불허사유(Reasons for Disapproval/Non Acceptance)                                                      │]]>
+<![CDATA[]]>
+<![CDATA[│    :                                                                                                     │]]>
+<![CDATA[]]>
+<![CDATA[│                                                                                                          │]]>
+<![CDATA[]]>
+<![CDATA[│ □ 출국기한(Deadline for Departure)                                                                      │]]>
+<![CDATA[]]>
+<![CDATA[│    :                                                                                                     │]]>
+<![CDATA[]]>
+<![CDATA[│                                                                                                          │]]>
+<![CDATA[]]>
+<![CDATA[│「「출입국관리법」 시행령」   조에 따라 상기 신청 민원에 대하여                                           │]]>
+<![CDATA[]]>
+<![CDATA[│허가·수리하지 아니하기로 결정하였음을 통보합니다.                                                        │]]>
+<![CDATA[]]>
+<![CDATA[│(In accordance with Article   of the Enforcement Decree of the Immigration Act,                           │]]>
+<![CDATA[]]>
+<![CDATA[│we notify that your e-Application has been denied.)                                                       │]]>
+<![CDATA[]]>
+<![CDATA[│                                                                                                          │]]>
+<![CDATA[]]>
+<![CDATA[│Chief, OO Immigration Office                                                                              │]]>
+<![CDATA[]]>
+<![CDATA[│OO출입국·외국인청(사무소·출장소)장                                                                      │]]>
+<![CDATA[]]>
+<![CDATA[│┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓│]]>
+<![CDATA[]]>
+<![CDATA[│┃□ 공지사항(Note)                                                                                     ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃?귀하는 위 처분에 대하여 이의가 있을 때에는 이 통지서를 받은 날부터 90일 이내에 행정심판 또는        ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃행정소송을 제기할 수 있습니다.                                                                        ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃ (A person who has an objection to the above disposition may file an administrative appeal or an      ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃administrative litigation within 90 days after receiving the disapproval notice.)                     ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃      ※ 행정심판을 청구할 때에는 온라인행정심판(www.simpan.go.kr), 행정소송을 청구할 때에는 전자     ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃소송(ecfs.scourt.go.kr)을 통하여 온라인으로도 청구할 수 있습니다.                                     ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃      (※ You may file an administrative appeal online (www.simpan.go.kr) and an administrative       ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃litigation on the Internet (ecfs.scourt.go.kr))                                                       ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┃※ 하이코리아 웹주소:www.hikorea.go.kr  외국인종합안내센터(Foreigner Complex Counseling Center)☎1345 ┃│]]>
+<![CDATA[]]>
+<![CDATA[│┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛│]]>
+<![CDATA[]]>
+<![CDATA[└─────────────────────────────────────────────────────┘]]>
+<![CDATA[]]>
+<![CDATA[]]>
+</별표내용>
+</별표단위>
+</별표>
+<개정문>
+<개정문내용>
+<![CDATA[⊙법무부고시 제2025-112호]]>
+<![CDATA[]]>
+<![CDATA[  「출입국관리법」시행령 제94조의3(전자민원창구) 제2항의 전자민원창구의 설치ㆍ운영 및 민원업무의 처리절차 등에 필요한 사항을 다음과 같이 개정하여 고시합니다.]]>
+<![CDATA[]]>
+<![CDATA[    2025년 4월 8일]]>
+<![CDATA[]]>
+<![CDATA[        법무부장관]]>
+<![CDATA[]]>
+<![CDATA[]]>
+<![CDATA[]]>
+<![CDATA[전자민원창구 운영에 관한 고시]]>
+<![CDATA[]]>
+<![CDATA[]]>
+<![CDATA[]]>
+<![CDATA[[본문 생략]]]>
+<![CDATA[]]>
+<![CDATA[]]>
+<![CDATA[]]>
+<![CDATA[          부칙]]>
+<![CDATA[]]>
+<![CDATA[제1조(시행일) 이 고시는 2025년 4월 8일부터 시행한다.]]>
+<![CDATA[]]>
+</개정문내용>
+</개정문>
+<제개정이유>
+<제개정이유내용>
+<![CDATA[◇ 제ㆍ개정 이유]]>
+<![CDATA[]]>
+<![CDATA[  ○ ‘국내 체류외국인 가사ㆍ육아분야’ 활동 허가 신청 및 ‘지역특화 숙련기능인력(E-7-4R)’ 제도를 전자민원 방식으로 시행하게 됨에 따라 전자민원 대상 업무를 추가하고 관련 서식 정비]]>
+<![CDATA[]]>
+<![CDATA[  ○ 민원인 편의 및 업무 효율성 제고를 위해 전자민원 처리결과의 통지 절차 명확화]]>
+<![CDATA[]]>
+<![CDATA[]]>
+<![CDATA[]]>
+<![CDATA[◇ 주요내용]]>
+<![CDATA[]]>
+<![CDATA[  가. 전자민원 대상 업무 추가 및 관련 서식 개정]]>
+<![CDATA[]]>
+<![CDATA[    ○ 【별표】를 개정하여 전자민원 대상 업무에 "지역특화 숙련 기능인력(E-7-4R) 체류자격변경 허가" 및 "국내 체류외국인 가사ㆍ육아분야 체류자격 외 활동허가, 활동개시신고"를 추가]]>
+<![CDATA[]]>
+<![CDATA[    ○ 【별지】 서식 3호를 ‘가사ㆍ육아분야 체류자격 외 활동 전자민원 허가확인서’를 신설하고, 종전 서식 3호는 서식 4호로 이동]]>
+<![CDATA[]]>
+<![CDATA[  나. 체류지(국내거소) 이기(移記) 규정 마련]]>
+<![CDATA[]]>
+<![CDATA[    ○ 제8조(전자민원 처리결과의 통지) 제2항 단서 규정을 신설하여, 전자민원으로 체류지(국내거소)변경신고를 한 경우 시ㆍ군ㆍ구 및 읍ㆍ면ㆍ동에서 외국인등록증(거소신고증 포함)에 신고사항 이기할 수 있도록 함]]>
+<![CDATA[]]>
+<![CDATA[  다. 처리결과의 전자적 통지방식 개선]]>
+<![CDATA[]]>
+<![CDATA[    ○ 전자민원 처리결과를 전자적 방식으로 통지할 경우 통지한 사실을 즉시 신청인에게 전자우편이나 문자메시지 등으로 안내하고, 신청인이 전자민원창구를 통하여 전자문서를 확인했을 때 통지를 받은 것으로 보도록 함]]>
+<![CDATA[]]>
+</제개정이유내용>
+</제개정이유>
+<첨부파일>
+<첨부파일명><![CDATA[[법무부고시-112호] 전자민원창구 운영에 관한 고시 전문.hwp]]>
+</첨부파일명>
+<첨부파일링크>http://law.go.kr/flDownload.do?flSeq=151063701
+</첨부파일링크>
+<첨부파일명><![CDATA[[법무부고시-112호] 전자민원창구 운영에 관한 고시 전문.pdf]]>
+</첨부파일명>
+<첨부파일링크>http://law.go.kr/flDownload.do?flSeq=151063705
+</첨부파일링크>
+<첨부파일명><![CDATA[제개정이유서(전자민원창구 운영에 관한 고시).hwp]]>
+</첨부파일명>
+<첨부파일링크>http://law.go.kr/flDownload.do?flSeq=151063743
+</첨부파일링크>
+<첨부파일명><![CDATA[제개정이유서(전자민원창구 운영에 관한 고시).pdf]]>
+</첨부파일명>
+<첨부파일링크>http://law.go.kr/flDownload.do?flSeq=151063747
+</첨부파일링크>
+</첨부파일>
+</AdmRulService>
+
