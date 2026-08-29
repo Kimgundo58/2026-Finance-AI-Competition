@@ -9,7 +9,7 @@ XML로 받는 이유: scripts/stage0_extract.py::extract_xml() 이 이미 이 �
 조 단위로 파싱한다. JSON을 쓰면 동등한 파서를 새로 짜야 하고, 단일 원소가
 배열이 아닌 객체로 오는 함정까지 따로 처리해야 한다.
 
-실행:
+실행 (환경변수 LAW_GO_KR_OC 에 law.go.kr 신청 ID 필요):
     python Law_Crawling.py --healthcheck     OC 키 동작 확인만
     python Law_Crawling.py --list            md 파싱 결과만 확인 (호출 없음)
     python Law_Crawling.py                   전체 수집 (현행 + 시점본)
@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import os
 import re
 import sys
 import time
@@ -42,7 +43,12 @@ CACHE_PATH = ROOT / "법령 PDF" / "_law_cache.json"
 REPORT_PATH = ROOT / "법령 PDF" / "_law_report.json"
 DROP_PATH = ROOT / "법령 PDF" / "_law_delegated_dropped.json"
 
-OC = "Dogun5578_OPENAPI"
+# law.go.kr OPEN API 신청 ID. 공개 저장소에 개인 ID를 남기지 않으려고 환경변수로 뺐다.
+#   PowerShell:  $env:LAW_GO_KR_OC = "<신청ID>"
+#   bash:        export LAW_GO_KR_OC='<신청ID>'
+# 비어 있으면 Api() 생성 시점에 죽는다 — OC 가 틀리면 API 가 HTTP 200 에
+# 빈 결과를 돌려주기 때문에(§12 함정) 조용한 0건으로 새는 걸 막아야 한다.
+OC = os.environ.get("LAW_GO_KR_OC", "")
 BASE = "https://www.law.go.kr/DRF"
 TIMEOUT = 30
 SLEEP_SEC = 0.7
@@ -209,9 +215,24 @@ def load_master(md_path: Path = MD_PATH) -> list[dict]:
 
 
 # ── HTTP ─────────────────────────────────────────────────────────
+def require_oc() -> str:
+    """OC 없이 부르면 여기서 죽인다.
+
+    law.go.kr 은 OC 가 비었거나 틀려도 HTTP 200 에 빈 결과를 준다(§12 함정).
+    그대로 두면 파싱이 조용히 0건으로 끝나 수집 실패를 못 알아챈다.
+    """
+    if not OC:
+        raise SystemExit(
+            "환경변수 LAW_GO_KR_OC 가 비어 있다. law.go.kr OPEN API 신청 ID를 넣어라." \
+            + "\n  PowerShell:  $env:LAW_GO_KR_OC = '<신청ID>'" \
+            + "\n  bash:        export LAW_GO_KR_OC='<신청ID>'"
+        )
+    return OC
+
+
 class Api:
-    def __init__(self, oc: str = OC):
-        self.oc = oc
+    def __init__(self, oc: str = ""):
+        self.oc = oc or require_oc()
         self.s = requests.Session()
         self.s.headers.update(HEADERS)
         self.calls = 0

@@ -55,7 +55,7 @@ def on_disk_admruls() -> list[dict]:
 
 def versions(name: str, adm_id: str) -> list[dict]:
     """nw=2 → 현행 + 연혁 전체. 같은 행정규칙ID 인 것만 남긴다."""
-    r = requests.get(SEARCH, params={"OC": L.OC, "type": "XML", "target": "admrul",
+    r = requests.get(SEARCH, params={"OC": L.require_oc(), "type": "XML", "target": "admrul",
                                      "query": name, "nw": "2", "display": "100"}, timeout=30)
     root = ET.fromstring(r.text)
     out = []
@@ -78,7 +78,7 @@ def main() -> None:
                     help="판정 인덱스 제외분의 구판까지 받는다 (기본은 편입분만)")
     args = ap.parse_args()
 
-    api = L.Api(L.OC)
+    api = L.Api()
     rules = on_disk_admruls()
     n_all = len(rules)
     # 판정 인덱스에서 뺀 규범(타부처 보조금 규정 등)은 구판도 받지 않는다.
