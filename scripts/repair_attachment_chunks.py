@@ -32,7 +32,7 @@ def main():
     with psycopg.connect(DSN) as conn:
         arts = conn.execute("""
             SELECT a.article_id, a.doc_id, a.조번호, a.조제목, a.본문, a.페이지,
-                   d.layer, d.domain, d.기관ID, d.apply_mode, d.version, d.status
+                   d.layer, d.기관ID, d.parse_quality, d.version, d.status
             FROM doc_articles a JOIN documents d ON d.doc_id = a.doc_id
             WHERE d.index_target AND d.layer <> '사례'
               AND a.조번호 ~ '^(붙임|별표|별지|서식)'
@@ -46,10 +46,10 @@ def main():
 
         rows = []
         for (aid, doc_id, 조번호, 조제목, 본문, 페이지,
-             layer, domain, 기관, apply_mode, version, status) in arts:
+             layer, 기관, parse_quality, version, status) in arts:
             사업명 = _사업명(doc_id, layer)
             for 항호, txt in merge_tiny(chunk_article(본문, 조번호)):
-                rows.append((doc_id, aid, layer, domain, 기관, apply_mode, version,
+                rows.append((doc_id, aid, layer, 기관, parse_quality, version,
                              status, 조번호, 조제목, 항호, 페이지, 사업명, txt))
 
         print(f"재청킹: {before} → {len(rows)}개")
@@ -64,9 +64,9 @@ def main():
         with conn.cursor() as cur:
             cur.executemany("""
                 INSERT INTO chunks
-                  (doc_id, article_id, layer, domain, 기관ID, apply_mode, version, status,
+                  (doc_id, article_id, layer, 기관ID, parse_quality, version, status,
                    조번호, 조제목, 항호, 페이지, 사업명, text, embedding)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             """, [(*r, _v(v)) for r, v in zip(rows, vecs)])
         conn.commit()
 

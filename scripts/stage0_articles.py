@@ -48,7 +48,12 @@ def _page_of(offset: int, offsets: dict[int, int]) -> int | None:
 # 부칙 경계 — 이후의 제N조는 본칙과 번호가 겹친다
 RE_BUCHIK = re.compile(r"(?:^|\n)\s*부\s{0,4}칙\s*(?=[<(\n])")
 # 붙임/별표 섹션 헤더 (줄머리 + 제목이 같은 줄에 옴)
-RE_ATTACH = re.compile(r"(?:^|\n)[ \t]*[\[【]?\s*(붙임|별표|별지|서식)\s*(\d*)\s*[\]】][ \t]*([^\n]{0,60})")
+RE_ATTACH = re.compile(r"(?:^|\n)[ \t]*[\[【]?\s*(붙임|별표|별지|서식|참고)\s*(\d*)\s*[\]】][ \t]*([^\n]{0,60})")
+# 참고 를 빠뜨리면 부칙 컷이 연쇄로 깨진다. 실측(창업중심대학 2025):
+#   [참고1] 이하 28,000자가 본문에 남아 전체 길이를 부풀렸고, 부칙 위치가
+#   14,305/44,107 = 32% 로 계산돼 아래 40% 임계에 미달했다. 부칙이 분리되지 않아
+#   부칙 제1조(시행일)가 본칙 제1조(목적)를 덮어써 한 조가 28,178자가 됐다.
+#   rule_base.md §5 — [참고N] 에 비목 카탈로그·증빙 매핑이 있어 룰 소스이기도 하다.
 
 
 def _cut_sections(text: str) -> tuple[str, str | None, list[tuple[str, str]]]:
@@ -72,6 +77,28 @@ def _cut_sections(text: str) -> tuple[str, str | None, list[tuple[str, str]]]:
     return body, None, attachments
 
 
+# 인용 표기를 조 헤딩으로 오인하지 않게 거른다.
+#   실측: 예비/초기창업 세부관리기준 제30조 본문에
+#     "① 창업기업의 권리 의무 이전은 지침 제65조(권리 의무 이전)에 따른다."
+#   가 있어 `제65조(권리 의무 이전)` 이 34번째 조로 잡혔다. 뒤 조를 전부 삼켜
+#   본문 7,220자가 됐고 단조성 검증도 깨졌다.
+#   조 헤딩은 줄머리에 오고, 인용은 앞에 규범어가 붙는다.
+RE_CITE_PREFIX = re.compile(
+    r"(?:(지침|요령|관리기준|기준|법|법률|시행령|시행규칙|규정|규칙|조례)"
+    r"|[」』〉›])\s*$")
+# 닫는 인용부호도 접두로 본다 — 「중소기업창업 지원법」제43조 (재도전 2025 실측)
+
+
+def _is_citation(text: str, start: int) -> bool:
+    """이 위치의 `제N조(...)` 가 조 헤딩이 아니라 본문 속 인용인가.
+
+    판정은 **규범어 접두 하나로만** 한다. "줄머리가 아니면 인용" 규칙도 넣어봤으나
+    과잉 차단이었다 — 실측에서 조 36개가 21개로 줄었다. 조 헤딩을 놓치는 것이
+    인용을 하나 더 잡는 것보다 훨씬 나쁘다.
+    """
+    return bool(RE_CITE_PREFIX.search(text[max(0, start - 14):start]))
+
+
 def split_articles(text: str, page_offsets: dict[int, int] | None = None) -> tuple[list[dict], str]:
     """반환: (조 리스트, 사용한 전략 이름)"""
     text = _clean(text)
@@ -80,7 +107,7 @@ def split_articles(text: str, page_offsets: dict[int, int] | None = None) -> tup
     본칙, 부칙, 붙임들 = _cut_sections(text)
 
     # ── 1순위: 제N조(제목) ──────────────────────────────────────
-    ms = list(RE_JO.finditer(본칙))
+    ms = [m for m in RE_JO.finditer(본칙) if not _is_citation(본칙, m.start())]
     if len(ms) >= 5:
         arts = _build(본칙, ms, page_offsets, titled=True)
         # 부칙의 제N조는 본칙과 번호가 겹치므로 별도 라벨을 붙인다

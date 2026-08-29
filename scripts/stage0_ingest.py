@@ -12,6 +12,8 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 
+from index_guard import reject_reason
+
 import psycopg
 from stage0_extract import extract
 from stage0_articles import split_articles, validate, find_xrefs, sanitize
@@ -113,12 +115,19 @@ def main():
                 continue
 
             # 인덱싱 대상 판정
-            index_target = bool(f.get("index")) or layer == "L4"
+            index_target = bool(f.get("index"))
             # 골든셋 격리 — 단 case_index 를 겸하는 문서(연구재단 QA사례집)는
             # 파일 통째로 빼면 안 된다. Q&A 단위로 홀드아웃을 떼는 것이 맞다(§8.1).
             # ⚠️ 골든셋 확정 후 해당 Q&A 를 case_chunks 에서 삭제할 것.
             if "golden_set" in roles and "case_index" not in roles:
                 index_target = False
+            # 최종 게이트 — 경로·레이어 블랙리스트(scripts/index_guard.py).
+            # 여기까지 오면 위 조건들과 무관하게 무조건 거부된다.
+            if index_target:
+                why = reject_reason(rel, layer)
+                if why is not None:
+                    index_target = False
+                    report["플래그"].append((doc_id, f"인덱스 거부: {why}"))
 
             try:
                 kind, payload = extract(path)
@@ -137,16 +146,15 @@ def main():
                     continue
 
                 quality = "high" if strategy == "xml_native" else v["quality"]
-                apply_mode = "compare" if quality == "low" else "apply"
 
                 conn.execute("""
                     INSERT INTO documents
                       (doc_id, layer, domain, 기관ID, doc_type, version, 시행일,
-                       status, apply_mode, parse_quality, src_path, roles, index_target)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                       status, parse_quality, src_path, roles, index_target)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 """, (doc_id, layer, derive_domain(rel, layer), derive_기관ID(rel, layer),
                       f.get("doc_type"), f.get("version"), _date(f.get("시행일")),
-                      f.get("status") or "reference", apply_mode, quality,
+                      f.get("status") or "reference", quality,
                       rel, roles, index_target))
 
                 rows = [(doc_id, a["조번호"], a.get("조제목"), a.get("조번호_int"),
