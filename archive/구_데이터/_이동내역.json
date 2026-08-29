@@ -1,0 +1,27 @@
+[
+  {
+    "from": "법령 PDF/통계_시장규모",
+    "to": "_폐기/통계_시장규모",
+    "files": 8,
+    "why": "시장 통계 — 판정과 무관"
+  },
+  {
+    "from": "규정문서",
+    "to": "_폐기/규정문서",
+    "files": 7,
+    "why": "세부관리기준 HWP 2종이 2026 창진원/ 과 MD5 동일"
+  },
+  {
+    "from": "kosmes_data",
+    "to": "_폐기/kosmes_data",
+    "files": 1,
+    "why": "kosmes_faq.json 이 2026 폴더와 MD5 동일"
+  },
+  {
+    "from": "데이터셋_활용정리.md",
+    "to": "_폐기/구문서/데이터셋_활용정리.md",
+    "files": 1,
+    "when": "2026-08-27",
+    "why": "구 74파일 데이터셋·구 L1~L5 계층 기준. 레이어 정의가 현행(L1중기부/L2창진원/L3주관기관)과 전면 불일치. 대체: 2026_Finance_DATA_FOR_RAG/DATASET_STRUCTURE.md + 프로젝트설명.md §5"
+  }
+]
