@@ -2,6 +2,12 @@
 """Stage 0-d : 평문 → 조(條) 단위 재조립 + 검증 게이트 V1~V6.
 
 파이프라인 문서 §2.3(3단 fallback) / §2.4(검증 게이트) 구현.
+
+전략 4종 (앞에서부터 시도)
+    jo_titled         제N조(제목)          법령·지침·규정·규칙 (대부분)
+    outline_numbered  제N장 > N. > 가.     TIPS 총괄 운영지침 계열 (조 체계 아님)
+    jo_bare / jang    제N조 / 제N장        구조 약함
+    paragraph         빈 줄 2개            구조 없음 → 판정 인덱스 제외
 """
 from __future__ import annotations
 import re
@@ -45,36 +51,102 @@ def _page_of(offset: int, offsets: dict[int, int]) -> int | None:
     return best
 
 
+# ── 섹션 경계 ───────────────────────────────────────────────────
 # 부칙 경계 — 이후의 제N조는 본칙과 번호가 겹친다
 RE_BUCHIK = re.compile(r"(?:^|\n)\s*부\s{0,4}칙\s*(?=[<(\n])")
-# 붙임/별표 섹션 헤더 (줄머리 + 제목이 같은 줄에 옴)
-RE_ATTACH = re.compile(r"(?:^|\n)[ \t]*[\[【]?\s*(붙임|별표|별지|서식|참고)\s*(\d*)\s*[\]】][ \t]*([^\n]{0,60})")
-# 참고 를 빠뜨리면 부칙 컷이 연쇄로 깨진다. 실측(창업중심대학 2025):
-#   [참고1] 이하 28,000자가 본문에 남아 전체 길이를 부풀렸고, 부칙 위치가
-#   14,305/44,107 = 32% 로 계산돼 아래 40% 임계에 미달했다. 부칙이 분리되지 않아
-#   부칙 제1조(시행일)가 본칙 제1조(목적)를 덮어써 한 조가 28,178자가 됐다.
-#   rule_base.md §5 — [참고N] 에 비목 카탈로그·증빙 매핑이 있어 룰 소스이기도 하다.
+
+# 붙임/별표/참고 섹션 헤더. 괄호는 [] 【】 <> 세 종류가 실측된다.
+#   [참고1] · 【붙임 1】 · [별지 제①호] · [별지서식] · < 붙임1 > · < 별첨2-1 >
+# 여는 괄호를 **필수**로 둔다. 없으면 본문 문장이 걸린다.
+# 닫는 괄호 뒤 구두점도 막는다 — TIPS 별첨1 의 제재사유 표에 `<붙임1>, 운영사가 …`
+# 같은 표 행이 있어 별첨1 이 세 조각으로 쪼개졌다. 표제 뒤에는 제목이나 줄바꿈이 온다.
+RE_ATTACH = re.compile(
+    r"(?:^|\n)[ \t]*[\[【<]\s*(붙임|별표|별지|서식|참고|별첨)\s*([^\]】>\n]{0,12}?)\s*[\]】>]"
+    r"[ \t]*(?![,、。·;:])([^\n]{0,60})")
+
+# 목차의 점선 지도(leader dots)
+RE_DOTS = re.compile(r"·{5,}[^\n]*")
+
+# 원문자 → 아라비아 숫자.  [별지 제①호] (모두의창업)
+_CIRCLED = {chr(0x2460 + i): str(i + 1) for i in range(20)}
 
 
-def _cut_sections(text: str) -> tuple[str, str | None, list[tuple[str, str]]]:
-    """본칙 / 부칙 / [(붙임라벨, 본문)] 으로 分割."""
-    half = int(len(text) * 0.45)
-    attach_starts = [m for m in RE_ATTACH.finditer(text) if m.start() >= half]
+def _cut_toc(text: str) -> int:
+    """목차 끝 오프셋. 없으면 0.
 
-    body_end = attach_starts[0].start() if attach_starts else len(text)
-    attachments = []
-    for i, m in enumerate(attach_starts):
-        end = attach_starts[i + 1].start() if i + 1 < len(attach_starts) else len(text)
-        label = f"{m.group(1)}{m.group(2) or (i + 1)}"
-        seg = text[m.start():end].strip()
-        if len(seg) >= 80:
-            attachments.append((label, seg))
+    점선 지도가 10회 이상 나오고 마지막이 앞 30% 안이면 그때까지가 목차다.
+    실측: TIPS 96회(6%) · 도약 51회(17%) · 모두의창업 38회(7%), 나머지 5건은 0회.
+    목차를 남기면 개요형(`N.`)에서 표제 번호가 본문과 두 번 돌아 분해가 깨진다.
+    """
+    dots = list(RE_DOTS.finditer(text))
+    if len(dots) >= 10 and dots[-1].start() < len(text) * 0.30:
+        return dots[-1].end()
+    return 0
 
-    body = text[:body_end]
-    bm = RE_BUCHIK.search(body)
-    if bm and bm.start() > len(body) * 0.4:
-        return body[:bm.start()], body[bm.start():], attachments
-    return body, None, attachments
+
+def _find_buchik(text: str) -> int | None:
+    """부칙 시작 오프셋. 줄머리 마커 + **뒤 300자에 '시행' 언명**이 있는 첫 마커.
+
+    위치 비율이나 조 개수로 거르던 옛 가드는 둘 다 틀린다:
+      - 비율: 붙임이 길면 부칙이 앞으로 밀린다 (초격차 27% · 창업중심대학 32%)
+      - 조 개수: TIPS 부칙은 `제N조` 가 아니라 `1. 동 지침은 …부터 시행한다` 다
+    실측 8건에서 후보 17개 전부가 진짜 부칙이었고 오탐은 0이다.
+    """
+    for m in RE_BUCHIK.finditer(text):
+        if "시행" in text[m.end():m.end() + 300]:
+            return m.start()
+    return None
+
+
+def _attach_label(kind: str, raw: str, seq: int) -> str:
+    """[별지 제①호] → 별지1 · [별지서식] → 별지서식 · < 붙임2-1 > → 붙임2"""
+    s = "".join(_CIRCLED.get(c, c) for c in raw).strip()
+    d = re.search(r"\d+", s)
+    if d:
+        return f"{kind}{d.group(0)}"
+    return f"{kind}{s}" if s else f"{kind}{seq}"
+
+
+def _cut_sections(text: str) -> tuple[str, str | None, list[tuple[str, str]], int]:
+    """(본칙, 부칙, [(붙임라벨, 본문)], 본칙_시작오프셋) 으로 분할.
+
+    순서가 중요하다. **부칙을 먼저 찾고, 붙임은 부칙 뒤에서만 찾는다.**
+    실측 근거 — 8건 전수에서 RE_ATTACH 후보의 부칙 앞/뒤 분포:
+        부칙 뒤 21건: 전부 진짜 섹션 헤더
+        부칙 앞  4건: 전부 본문 속 참조 (`[별지2]을 준수하여 …`,
+                     `[붙임] 1. 국가연구개발과제 포함)의 …`)
+    옛 코드는 "문서 길이의 45% 이후" 로 걸렀고 두 방향으로 다 틀렸다:
+        놓침 — 창업중심대학 [참고1] 이 33% 라 섹션이 안 됐다.
+               부칙 제1조가 5,314자로 부풀며 **비목 정의·집행기준(룰 소스)을 삼켰다**
+        오인 — 모두의창업 본문의 `[별지2]을 준수하여…`(56%)가 섹션으로 잡혀
+               부칙까지 통째로 들어간 23,729자짜리 가짜 붙임이 만들어졌다
+    """
+    base = _cut_toc(text)
+    body_all = text[base:]
+
+    b = _find_buchik(body_all)
+    scan_from = b if b is not None else int(len(body_all) * 0.45)
+    starts = [m for m in RE_ATTACH.finditer(body_all) if m.start() >= scan_from]
+
+    attachments, used = [], {}
+    kept_first = None
+    for i, m in enumerate(starts):
+        end = starts[i + 1].start() if i + 1 < len(starts) else len(body_all)
+        seg = body_all[m.start():end].strip()
+        if len(seg) < 80:                     # 표제만 있고 내용이 없으면 섹션이 아니다
+            continue
+        label = _attach_label(m.group(1), m.group(2) or "", i + 1)
+        used[label] = used.get(label, 0) + 1  # TIPS 는 [별지1] 이 세 번 나온다
+        if used[label] > 1:
+            label = f"{label}[{used[label]}]"
+        if kept_first is None:
+            kept_first = m.start()
+        attachments.append((label, seg))
+
+    body_end = kept_first if kept_first is not None else len(body_all)
+    if b is not None:
+        return body_all[:b], body_all[b:body_end], attachments, base
+    return body_all[:body_end], None, attachments, base
 
 
 # 인용 표기를 조 헤딩으로 오인하지 않게 거른다.
@@ -99,34 +171,44 @@ def _is_citation(text: str, start: int) -> bool:
     return bool(RE_CITE_PREFIX.search(text[max(0, start - 14):start]))
 
 
+# ── 개요형 (TIPS 계열) ──────────────────────────────────────────
+RE_OUTLINE = re.compile(r"(?:^|\n)[ \t]*(\d{1,2})\.[ \t]*([^\n]{1,40})")
+
+
+def _outline_headings(body: str) -> list[re.Match]:
+    """`N.` 표제만 고른다.
+
+    중첩 열거도 표기가 같아서(`1. 과제수행과 관련이 없거나 …`) 정규식으로는 못 가른다.
+    **번호 단조성**으로 가른다 — 표제 번호는 장을 넘어 이어지고, 중첩 열거는 1부터 다시 돈다.
+    실측(TIPS 2026): 후보 335개 → 표제 35개(1..35, 역전 0). 목차와 정확히 일치한다.
+    """
+    out, last = [], 0
+    for m in RE_OUTLINE.finditer(body):
+        n = int(m.group(1))
+        if last < n <= last + 3:   # 결번 허용 3 — 조판 사고로 표제 하나를 놓쳐도 회복한다
+            out.append(m)
+            last = n
+    return out
+
+
 def split_articles(text: str, page_offsets: dict[int, int] | None = None) -> tuple[list[dict], str]:
     """반환: (조 리스트, 사용한 전략 이름)"""
     text = _clean(text)
     page_offsets = dict(sorted((page_offsets or {}).items()))
 
-    본칙, 부칙, 붙임들 = _cut_sections(text)
+    본칙, 부칙, 붙임들, base = _cut_sections(text)
 
     # ── 1순위: 제N조(제목) ──────────────────────────────────────
     ms = [m for m in RE_JO.finditer(본칙) if not _is_citation(본칙, m.start())]
     if len(ms) >= 5:
-        arts = _build(본칙, ms, page_offsets, titled=True)
-        # 부칙의 제N조는 본칙과 번호가 겹치므로 별도 라벨을 붙인다
-        if 부칙:
-            off = len(본칙)
-            bms = list(RE_JO.finditer(부칙)) or list(RE_JO_BARE.finditer(부칙))
-            if bms:
-                for a in _build(부칙, bms, {}, titled=bool(RE_JO.search(부칙))):
-                    a["조번호"] = "부칙 " + a["조번호"]
-                    a["조번호_int"] = None      # 단조성 검증에서 제외
-                    arts.append(a)
-            else:
-                arts.append({"조번호": "부칙", "조제목": None, "조번호_int": None,
-                             "본문": 부칙.strip(), "페이지": None})
-        # 붙임/별표는 각각 독립 조로 (룰 소스의 실체가 여기 있다)
-        for label, seg in 붙임들:
-            arts.append({"조번호": label, "조제목": seg.split("\n", 1)[0][:60],
-                         "조번호_int": None, "본문": seg, "페이지": None})
-        return arts, "jo_titled"
+        arts = _build(본칙, ms, page_offsets, titled=True, base=base)
+        return arts + _tail(부칙, 붙임들), "jo_titled"
+
+    # ── 개요형: 제N장 > N. > 가. (TIPS 총괄 운영지침) ───────────
+    oms = _outline_headings(본칙)
+    if len(oms) >= 10 and int(oms[-1].group(1)) >= 10:
+        arts = _build_outline(본칙, oms, page_offsets, base)
+        return arts + _tail(부칙, 붙임들), "outline_numbered"
 
     # ── 1순위 보조: 제목 없는 제N조 ─────────────────────────────
     ms = list(RE_JO_BARE.finditer(text))
@@ -164,26 +246,92 @@ def split_articles(text: str, page_offsets: dict[int, int] | None = None) -> tup
     return arts, "paragraph"
 
 
-def _build(text, ms, page_offsets, titled: bool) -> list[dict]:
-    arts, seen = [], set()
+def _tail(부칙: str | None, 붙임들: list[tuple[str, str]]) -> list[dict]:
+    """부칙 + 붙임/별표를 각각 독립 조로. 룰 소스의 실체가 붙임 쪽에 있다."""
+    arts: list[dict] = []
+    if 부칙:
+        bms = list(RE_JO.finditer(부칙)) or list(RE_JO_BARE.finditer(부칙))
+        if bms:
+            for a in _build(부칙, bms, {}, titled=bool(RE_JO.search(부칙))):
+                a["조번호"] = "부칙 " + a["조번호"]
+                a["조번호_int"] = None          # 단조성 검증에서 제외
+                arts.append(a)
+        else:
+            # TIPS 부칙은 `1. 동 지침은 …부터 시행한다` 라 조 패턴이 없다
+            arts.append({"조번호": "부칙", "조제목": None, "조번호_int": None,
+                         "본문": 부칙.strip(), "페이지": None})
+    for label, seg in 붙임들:
+        arts.append({"조번호": label, "조제목": seg.split("\n", 1)[0][:60],
+                     "조번호_int": None, "본문": seg, "페이지": None})
+    return arts
+
+
+def _build_outline(text, ms, page_offsets, base: int = 0) -> list[dict]:
+    """개요형 표제 → 조 레코드.
+
+    조번호는 문서가 스스로를 인용하는 표기를 그대로 쓴다 —
+    TIPS 부칙이 *"이 지침 7.(사업신청·접수), 9.(창업기업 선정평가) 중 나"* 라고 쓴다.
+    `제7조` 로 바꿔 적으면 인용이 원문과 어긋난다 (구현.md 원칙 4: 인용은 추출이다).
+    """
+    arts = []
+    for i, m in enumerate(ms):
+        end = ms[i + 1].start() if i + 1 < len(ms) else len(text)
+        n = int(m.group(1))
+        arts.append({
+            "조번호": f"{n}.",
+            "조제목": m.group(2).strip() or None,
+            "조번호_int": n,
+            "본문": text[m.start():end].strip(),
+            "페이지": _page_of(base + m.start(), page_offsets),
+        })
+    return arts
+
+
+def _build(text, ms, page_offsets, titled: bool, base: int = 0) -> list[dict]:
+    """조 헤딩 매치 → 조 레코드.
+
+    같은 조번호가 두 번 나오는 경우가 두 가지인데 처리가 정반대다.
+      목차 중복    조제목이 같다   → 긴 쪽 하나만 남긴다
+      원문 오류    조제목이 다르다 → **둘 다 남긴다.** 뒤엣것에 `[2]` 를 붙인다
+    실측(창업중심대학 2025): 원문에 제35조가 둘이다 —
+    제35조(이의신청) 과 제35조(권리 의무 이전). 옛 코드는 조번호만으로 묶어
+    긴 쪽 본문을 채택했고, 그 결과 **조제목은 '이의신청' 인데 본문은 '권리 의무 이전'**
+    인 레코드가 만들어졌다. 이의신청 조문은 코퍼스에서 통째로 사라졌다.
+    DB 는 UNIQUE(doc_id, 조번호) 라 접미 없이는 둘을 같이 넣을 수도 없다.
+    """
+    arts: list[dict] = []
+    by_key: dict[tuple[str, str | None], dict] = {}
+    dup_count: dict[str, int] = {}
     for i, m in enumerate(ms):
         end = ms[i + 1].start() if i + 1 < len(ms) else len(text)
         num, branch = m.group(1), m.group(2)
         조번호 = f"제{num}조" + (f"의{branch}" if branch else "")
-        if 조번호 in seen:                       # 목차 중복·재등장 → 긴 쪽 채택
-            prev = next(a for a in arts if a["조번호"] == 조번호)
-            body = text[m.start():end].strip()
+        조제목 = m.group(3).strip() if titled else None
+        body = text[m.start():end].strip()
+
+        key = (조번호, 조제목)
+        if key in by_key:                      # 목차 중복 — 긴 쪽 채택
+            prev = by_key[key]
             if len(body) > len(prev["본문"]):
                 prev["본문"] = body
             continue
-        seen.add(조번호)
-        arts.append({
-            "조번호": 조번호,
-            "조제목": (m.group(3).strip() if titled else None),
+
+        dup_count[조번호] = dup_count.get(조번호, 0) + 1
+        표기 = 조번호 if dup_count[조번호] == 1 else f"{조번호}[{dup_count[조번호]}]"
+        rec = {
+            "조번호": 표기,
+            "조제목": 조제목,
             "조번호_int": int(num),
-            "본문": text[m.start():end].strip(),
-            "페이지": _page_of(m.start(), page_offsets),
-        })
+            "본문": body,
+            "페이지": _page_of(base + m.start(), page_offsets),
+        }
+        if dup_count[조번호] > 1:
+            rec["원문_조번호중복"] = 조번호
+            for a in arts:                     # 첫 번째에도 표시해 둔다
+                if a["조번호"] == 조번호:
+                    a["원문_조번호중복"] = 조번호
+        by_key[key] = rec
+        arts.append(rec)
     return arts
 
 
@@ -197,11 +345,24 @@ def validate(arts: list[dict], strategy: str) -> dict:
         flags.append(f"V2:조_개수_부족({len(arts)})")
 
     # V1 조 번호 단조 증가
-    nums = [a["조번호_int"] for a in arts if a.get("조번호_int") is not None]
-    breaks = [(nums[i], nums[i + 1]) for i in range(len(nums) - 1) if nums[i + 1] < nums[i]]
+    #   원문이 조번호를 중복시켜 생긴 역전은 파싱 실패가 아니다. 따로 센다 —
+    #   섞어 세면 진짜 조판 사고(컬럼 혼입)를 이 소음에 묻어버린다.
+    dup = {a["원문_조번호중복"] for a in arts if a.get("원문_조번호중복")}
+    seq = [a for a in arts if a.get("조번호_int") is not None]
+    breaks, src = [], []
+    for i in range(len(seq) - 1):
+        a, b = seq[i], seq[i + 1]
+        if b["조번호_int"] < a["조번호_int"]:
+            pair = (a["조번호_int"], b["조번호_int"])
+            if a.get("원문_조번호중복") or b.get("원문_조번호중복"):
+                src.append(pair)
+            else:
+                breaks.append(pair)
     if breaks:
         s = ", ".join(f"{a}→{b}" for a, b in breaks[:3])
         flags.append(f"V1:조번호_비단조({len(breaks)}건: {s})")
+    if dup:
+        flags.append(f"원문오류:조번호_중복({', '.join(sorted(dup))})")
 
     # V3 빈 조 비율
     empty = sum(1 for a in arts if len(a["본문"]) < 50)
