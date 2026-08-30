@@ -40,17 +40,25 @@
 ### 2-1. 스키마 2분할
 
 ```
-schema corpus   공개 규범. 전 사용자 공통. RLS 없음
-schema tenant   사용자 것. org 별 격리.   RLS 필수
+schema corpus      공개 규범·룰·refs. 전 사용자 공통. RLS 없음
+schema tenant      사용자 것 (L3·계정·F축·판정로그). org 별 격리. RLS 필수
+schema eval        골든셋. 🔴 Supabase 로 올리지 않는다 (덤프 대상 제외)
+schema extensions  pgvector. Supabase 와 같은 배치 — 덤프가 그대로 복원된다
+schema public      비워둔다
 ```
 
-정책이 필요한 것만 한 스키마에 모아 전부 건다 — 벡터 검색에 정책 평가가 붙지 않는다.
+정책이 필요한 것만 tenant 한 곳에 모아 전부 건다 — 벡터 검색에 정책 평가가 붙지 않는다.
+
+🔴 **`public` 을 비우는 것이 골든셋 방어의 2차선이다.** Supabase 에서 `public` 은 PostgREST 가
+자동으로 REST API 로 노출하는 스키마다 — anon 키만 있으면 `GET /rest/v1/golden_set` 이 된다.
+`index_guard.py` 는 인덱스 투입을 막지 API 노출을 막지 않는다. 골든셋은 앱이 런타임에 읽지
+않으므로 `eval` 로 빼고 **덤프에서 제외**한다 (설정으로 막는 것보다 안 올리는 게 낫다).
 
 ### 2-2. corpus (정본 DDL: `db/init/01_schema.sql`)
 
 | 테이블 | 내용 | 비고 |
 |---|---|---|
-| `documents` | 문서 대장 | `index_target` · `extraction`(native/dedupe/hancom/**vlm**) · `parse_quality` |
+| `documents` | 문서 대장 | `index_target` · `retrieval_scope`(§4-2) · `extraction`(native/dedupe/hancom/**vlm**) · `parse_quality` |
 | `doc_articles` | 조 단위 원문 | diff 전용 문서도 여기까지 |
 | `chunks` | **판정 인덱스 (A등급)** | `vector(1024)` · `적용대상` 컬럼 · `text` 는 원문 그대로(가공 금지) |
 | `case_chunks` | **사례 인덱스 (B등급)** | 물리 분리. 판단불가 경로 전용 — 검색 함수는 `chunks` 만 SELECT |
@@ -58,8 +66,10 @@ schema tenant   사용자 것. org 별 격리.   RLS 필수
 | `refs` | 참조 그래프 (조→조 엣지) | resolved / shifted / dangling |
 | `chunk_terms` / `chunk_len` / `term_df` | BM25 역색인 (§2-4) | |
 | `item_alias` | 상품명 → 비목 별칭 | 컨펌 로그로 성장 |
-| `decisions` | 판정 로그 | `전제`·`검색스냅샷`(S번호 매핑)·`코퍼스버전` 포함 — 재현성의 근거 |
-| `golden_set` | 평가 정답지 | **인덱스 투입 금지** |
+| `xref_mismatch` | 크로스 레퍼런스 불일치 | §3-3 |
+
+`decisions`(판정 로그)는 corpus 가 아니라 **tenant** 다 — `전제`·`검색스냅샷` 에 F축 흔적이
+남는다. `golden_set` 은 **eval**. 정본 DDL 은 `db/init/01_schema.sql`.
 
 **ANN 인덱스(HNSW/IVFFlat) 없음** — 근사 검색의 리콜 손실 = 인용 누락 = 오답. 1만 청크 초과 시 재검토.
 
@@ -379,10 +389,31 @@ L3 조항(30~80개)을 수천 개짜리 풀과 경쟁시키면 밀려서 안 뽑
 ```sql
 WHERE status = 'active'
   AND parse_quality = 'high'
+  AND retrieval_scope = '진입점'          -- 아래 참조
   AND layer IN ('L1','L2')
-  AND 적용대상 IN ('창업기업','공통')
+  AND 적용대상 IN ('창업기업','공통')      -- NULL 은 통과하지 못한다. 아래
   AND (사업명 IS NULL OR :사업 = ANY(사업명))
 ```
+
+🔴 **`적용대상` 은 적재 시점에 NULL 이 남아 있으면 안 된다.** SQL 의 `NULL` 은 `IN` 을
+통과하지 못하므로 비워 둔 조는 조용히 검색에서 사라진다. Stage 0.5 태깅은 현행 9문서
+422조만 걸고, 나머지 L1·L2 264문서 23,324조는 태깅 대상이 아니다 — 「산업안전보건법
+시행규칙」에 주관기관/창업기업 구분은 존재하지 않는다. 그래서 **태깅 대상 밖과 부칙·붙임의
+기본값은 `공통`** 이다. 태깅 대상 **안**의 NULL 만 2단 LLM 대기이고, 그것만 인덱스에서
+제외한다. Stage 2 는 `tag_apply_target.적용대상_of()` 를 거쳐 둘을 가른다.
+
+**`retrieval_scope` — 검색 진입점과 폐포 도착지를 가른다.** `index=true` 229 규범의 조 수를
+실측하면 재정경제부 5,819 · 법무부 4,734(민법 1,193 · 상법 1,184 · 형사소송법 610) 인데
+중기부 소관은 866 이다. 세법·민상법은 세부관리기준이 인용하니 **코퍼스에 있어야** 하지만,
+그건 refs 폐포의 **도착지**이지 검색 **진입점**이 아니다 (§0 — RAG 의 역할은 참조 해소).
+
+- `폐포전용` 문서도 `doc_articles` + `refs` 에는 전량 들어간다. 인용은 정상 작동한다 —
+  검색이 아니라 참조로 온다
+- 좁히기를 **적재가 아니라 필터로** 한다. 임베딩에서 빼면 되돌리는 데 재임베딩이 든다
+- 기본값은 넓은 쪽(`진입점`). 조용히 좁아지는 방향(근거 누락)이 위험하다
+- 값 부여 기준은 **미확정** — 골든셋 검색 15문항 Recall@5 로 A/B 후 확정 (§5)
+- ⚠️ 부처 메타데이터는 관련성의 대리 지표가 못 된다 — 국고보조금 통합관리지침·보조금법은
+  기획예산처 소관이지만 적대적 골든셋 A26 의 정답 근거다
 
 임베딩 코사인 top-50 + BM25 top-50 → RRF → **top-5** (L3 가 별도 유입되므로 8이 아니라 5).
 
@@ -431,7 +462,8 @@ def rrf(dense_ranked, sparse_ranked, w_dense=0.6, w_sparse=0.4):
 
 | # | 항목 | 조건 |
 |---|---|---|
-| 1 | 청킹 기본 단위 조 vs 항 | 재인덱싱 전 확정 |
+| 1 | 청킹 기본 단위 조 vs 항 | **조 기준 + 900토큰 초과 시 항 으로 확정**(2026-08-31). 인용 검증 단위가 조라서 `chunks.text` 와 어긋나지 않는다 |
+| 1-b | `retrieval_scope` 값 부여 기준 | 골든셋 Recall@5 A/B (§4-2) |
 | 2 | 1만 청크 초과 시 ANN | **발동했다.** 실측 L1·L2 조문 19,660조 → 약 22,400청크(첨부 제외). 적재 후 정확검색 지연을 재고 결정 |
 | 3 | L3 원본 보관 여부 | 재파싱 수요 vs 저장 최소화 |
 | 4 | Supabase 무료 티어 한도 | 벡터 22,400 × 1024 float4 ≈ 92MB + 본문·refs. 500MB 안에 드는지 적재 후 실측 |

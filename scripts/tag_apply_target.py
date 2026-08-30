@@ -1,9 +1,14 @@
 # -*- coding: utf-8 -*-
 """Stage 0.5 : 적용대상 태깅 -> `_apply_target.json`.
 
-값은 `주관기관 | 창업기업 | 공통 | 혼재` 넷이다 (`chunks.적용대상`).
+값은 `주관기관 | 창업기업 | 공통` 셋이다 (`chunks.적용대상`).
 우리 사용자는 창업기업이므로 검색이 `적용대상 IN ('창업기업','공통')` 으로 걸린다.
 이 필터가 없으면 "노트북 사도 되나요?" 에 주관기관 전담인력 규정이 섞여 나온다.
+
+🔴 **NULL 두 종류를 섞으면 안 된다.** 태깅 대상 **밖**(법령 264문서 23,324조)은 값이
+없는 게 아니라 기본값 `공통` 이다 — NULL 로 두면 `IN` 을 통과하지 못해 조용히 검색에서
+빠진다. 태깅 대상 **안**의 NULL 만 2단 LLM 대기이고 그것만 인덱스에서 제외한다.
+Stage 2 는 반드시 `적용대상_of()` 를 거친다.
 
 🔴 **`RAG.md` §3 의 "절(節) 헤딩이 이미 적용대상을 선언한다" 는 전제는 틀렸다** (2026-08-30 실측).
 7개 사업의 장 제목을 전수로 뽑아 보면 총칙 / 추진체계 / 선정 / 협약 / 사업운영 …
@@ -37,15 +42,28 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="repla
                               line_buffering=True)
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "scripts"))
+import index_guard                                          # noqa: E402
+
 DATA = ROOT / "2026_Finance_DATA_FOR_RAG"
 S0 = DATA / "_stage0_articles.json"
 OUT = DATA / "_apply_target.json"
 TODO = DATA / "_apply_target_todo.json"
 
-# 태깅 대상. 법령 219건에는 걸지 않는다 —
+# 태깅 대상. 법령 229건에는 걸지 않는다 —
 # 「산업안전보건법 시행규칙」 390조에 주관기관/창업기업 구분은 존재하지 않는다.
 대상_포함 = ("세부관리기준", "관리기준", "통합관리지침", "운영지침")
 대상_제외 = ("별지서식", "모집공고", "공고문", "현황", "신청서")
+
+# 🔴 **태깅 대상 밖 문서의 기본값** (2026-08-30 결정).
+#   태깅하지 않는다는 것과 값이 없다는 것은 다르다. 검색 필터가
+#   `적용대상 IN ('창업기업','공통')` 이고 SQL 의 NULL 은 IN 을 통과하지 못하므로,
+#   NULL 로 두면 **법령 229건 약 19,200조가 조용히 검색에서 빠진다.**
+#   조용히 빠지는 것은 근거 누락 = 오답이라 가장 나쁜 실패다.
+#   일반 법령에는 주체 구분이 애초에 존재하지 않으므로 `공통` 이 맞다.
+#   태깅 **대상 안**에서의 NULL 은 의미가 다르다 — 2단 LLM 대기이고, 그대로 두면
+#   주관기관 규정이 창업기업 판정에 섞이므로 Stage 2 가 인덱스에 올리지 않는다.
+대상밖_기본값 = "공통"
 
 # 🔴 **현행/구판 구분이 파이프라인 어디에도 없다.** `documents.status` 가 스키마에는
 # 있는데 Stage 0 이 채우지 않는다. 구판까지 태깅하면 판정 인덱스에 안 들어갈 것을
@@ -76,6 +94,29 @@ def is_target(doc_id: str, 현행만: bool = True) -> bool:
     if not any(k in doc_id for k in 대상_포함):
         return False
     return doc_id in 현행 if 현행만 else True
+
+
+def 태그맵(tags: list[dict]) -> dict[tuple[str, str], str | None]:
+    """`_apply_target.json` 의 `tags` 를 `(doc_id, 조번호) -> 적용대상` 으로 뒤집는다."""
+    return {(t["doc_id"], t["조번호"]): t["적용대상"] for t in tags}
+
+
+def 적용대상_of(doc_id: str, 조번호: str,
+                맵: dict[tuple[str, str], str | None]) -> str | None:
+    """Stage 2 가 청크 1건의 `적용대상` 을 정하는 단일 진입점.
+
+    반환이 None 이면 **인덱스에 올리지 않는다** (2단 LLM 대기).
+
+        태깅 대상 밖  -> '공통'            주체 구분이 존재하지 않는 규범
+        태깅 대상 안  -> 태그값 또는 None  None = LLM 대기
+        부칙·붙임      -> '공통'            본칙이 아니라 태깅에서 빠졌다.
+                                          시행일·경과조치는 누구에게나 적용된다
+    """
+    if not is_target(doc_id):
+        return 대상밖_기본값
+    if (doc_id, 조번호) not in 맵:
+        return 대상밖_기본값                # 부칙·붙임 (조번호_int 가 None 이라 제외됨)
+    return 맵[(doc_id, 조번호)]
 
 
 def 결정(조제목: str | None, 본문: str) -> tuple[str | None, str, float]:
@@ -142,16 +183,40 @@ def main() -> None:
     for k, c in Counter(t["doc_id"] for t in todo).most_common():
         print(f"   {c:>3}  {k[:56]}")
 
+    # 태깅 대상 밖이 얼마나 되는가. 기본값을 안 주면 이 만큼이 검색에서 사라진다.
+    밖_문서 = 밖_조 = 0
+    for doc_id, d in stage0.items():
+        if doc_id in docs or index_guard.reject_reason(d.get("path", ""), d.get("layer")):
+            continue
+        if d.get("layer") not in ("L1", "L2"):
+            continue                          # 사례는 case_chunks 라 이 필터를 안 탄다
+        밖_문서 += 1
+        밖_조 += sum(1 for a in (d.get("articles") or []) if not a.get("삭제"))
+    print(f"\n태깅 대상 밖 (L1·L2): 문서 {밖_문서}  조 {밖_조}"
+          f"  -> 기본값 '{대상밖_기본값}'")
+
     if args.stats:
         return
     OUT.write_text(json.dumps({
         "생성": "scripts/tag_apply_target.py",
-        "값": ["주관기관", "창업기업", "공통", "혼재"],
-        "주의": ("1단(결정적)만 채운 상태다. `적용대상=null` 인 행은 2단(LLM) 대기다. "
-                 "Stage 2 는 null 을 인덱스에 올리지 않는다 — 필터가 안 걸리면 "
-                 "주관기관 규정이 창업기업 판정에 섞인다."),
+        "값": ["주관기관", "창업기업", "공통"],
+        "기본값": {
+            "값": 대상밖_기본값,
+            "적용": "태깅 대상 밖 문서 전부 + 태깅 대상 안의 부칙·붙임",
+            "근거": ("일반 법령에는 주체 구분이 애초에 존재하지 않는다. NULL 로 두면 "
+                     "검색 필터 `적용대상 IN ('창업기업','공통')` 을 통과하지 못해 "
+                     "조용히 빠진다 — 근거 누락은 오답이다."),
+            "규모": {"문서": 밖_문서, "조": 밖_조},
+            "해석기": "scripts/tag_apply_target.py::적용대상_of",
+        },
+        "주의": ("1단(결정적)만 채운 상태다. `적용대상=null` 인 행은 2단(LLM) 대기이고 "
+                 "**태깅 대상 안에서만 발생한다** — Stage 2 는 이 null 을 인덱스에 "
+                 "올리지 않는다. 필터가 안 걸리면 주관기관 규정이 창업기업 판정에 섞인다. "
+                 "태깅 대상 **밖**은 null 이 아니라 위 `기본값` 이다. 둘을 섞지 말 것 — "
+                 "`적용대상_of()` 를 거치면 구분된다."),
         "요약": {"문서": len(docs), "조": n, "결정": n - len(todo), "미결": len(todo),
-                 "판정경로": dict(경로), "값분포": dict(값)},
+                 "판정경로": dict(경로), "값분포": dict(값),
+                 "대상밖_문서": 밖_문서, "대상밖_조": 밖_조},
         "tags": tagged,
     }, ensure_ascii=False, indent=1), encoding="utf-8")
     TODO.write_text(json.dumps({
