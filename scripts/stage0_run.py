@@ -36,7 +36,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import pdftext                                    # noqa: E402  문자중복/다단 해소
 from index_guard import reject_reason            # noqa: E402
 from stage0_extract import extract               # noqa: E402
-from stage0_articles import split_articles, validate, sanitize, is_deleted  # noqa: E402
+from stage0_articles import split_articles, validate, sanitize, is_deleted, _clean  # noqa: E402
 
 DATASET = ROOT / "2026_Finance_DATA_FOR_RAG"
 LAWDIR = ROOT / "법령 PDF"
@@ -135,8 +135,37 @@ def 대상수집(only: str | None) -> list[dict]:
 RE_조번호_INT = re.compile(r"제\s*(\d+)\s*조")
 
 
-def 분해(path: Path) -> tuple[list[dict], str]:
-    """XML 은 law.go.kr 구조 그대로, PDF 는 pdftext -> split_articles."""
+RE_PARA = re.compile(r"\n{2,}")
+
+
+def 분해(path: Path, layer: str | None = None) -> tuple[list[dict], str]:
+    """XML 은 law.go.kr 구조 그대로, PDF 는 pdftext -> split_articles.
+
+    🔴 **사례 레이어에는 조 분해를 태우지 않는다** (2026-08-30).
+    사례집·재결례집·판례는 조 체계 문서가 아니라 Q&A / 사건 단위다. 그런데
+    `split_articles` 를 태우면 **본문에 인용된 타 법령 조문을 그 문서의 조로 잡는다.**
+    실측:
+        사례집_권익위재결례집_1        첫 조 = `제382조의3(이사의 충실의무)`  <- 상법 조문
+        사례집_KISTEP_판례조사분석      첫 조 = `제35조(연구개발과제의 성실 수행)` <- 혁신법 조문
+        사례집_한국연구재단_QA사례집    첫 조 = `제73조(사전 승인 대상)`        <- 인용 규정
+    셋 다 `quality=high` 로 나와서, 그대로 두면 **남의 법 조문이 사례집 doc_id 를 달고
+    조 단위로 인덱스에 들어간다.** 인용하면 출처가 틀린 답이 된다.
+
+    사례는 `case_chunks`(B등급) 로 가고 청킹 단위는 Q&A 다 (`RAG.md` §1·§2-2).
+    Stage 0 에서는 단락 분할까지만 하고 `parse_quality='low'` 로 두어
+    판정 인덱스에서 자동으로 빠지게 한다.
+    """
+    if layer == "사례":
+        if path.suffix.lower() == ".pdf":
+            text, _ = pdftext.extract_meta(path)
+        else:
+            _, payload = extract(path)
+            text = payload[0] if isinstance(payload, tuple) else str(payload)
+        paras = [p.strip() for p in RE_PARA.split(_clean(text)) if len(p.strip()) >= 100]
+        return ([{"조번호": f"단락{i+1:03d}", "조제목": None, "조번호_int": None,
+                  "본문": sanitize(p), "페이지": None} for i, p in enumerate(paras)],
+                "case_paragraph")
+
     if path.suffix.lower() == ".xml":
         # XML 은 이미 조 단위다. split_articles 를 태우면 오히려 깨진다 (실측: 조 0개).
         _, payload = extract(path)
@@ -194,7 +223,7 @@ def main() -> None:
     for i, t in enumerate(targets, 1):
         p: Path = t["path"]
         try:
-            arts, strat = 분해(p)
+            arts, strat = 분해(p, layer=t["layer"])
         except Exception as e:                      # noqa: BLE001
             report["실패"].append({"doc_id": t["doc_id"], "layer": t["layer"],
                                    "path": str(p), "오류": f"{type(e).__name__}: {e}"[:200]})
