@@ -110,7 +110,7 @@ python tests/test_index_guard.py
 - GraphRAG / KAG · agentic multi-hop · v1 리랭커 · 멀티 에이전트 오케스트레이션
 - LLM 에 function calling 개방 (호출 수 고정 · 지연 예측 · 재현성)
 - 별표 · 한도표를 RAG 에 투입 (숫자 비교는 코드가)
-- 실시간 HWP 파싱 (한컴오피스로 1회 수동 변환)
+- L1·L2 조달분 HWP 자동 파싱 (한컴오피스로 1회 수동 변환 유지. **L3 사용자 업로드는 HWPX·HWP 파서 채택** — 2026-08-30)
 
 파인튜닝은 조건부 — 검증 사다리(`LLM.md` §6) 후 격차가 남을 때만, 표적은 판정 캘리브레이션.
 
