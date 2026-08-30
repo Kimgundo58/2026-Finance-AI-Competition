@@ -31,6 +31,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import pdftext  # noqa: E402  문자중복 레이어 + 2단 조판 자동 처리
 from stage0_articles import split_articles  # noqa: E402  섹션분리 + 3단 fallback
+from scope import 범위밖_조                   # noqa: E402  모두의창업 제3편 로컬트랙 컷
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace", line_buffering=True)
 
@@ -252,9 +253,13 @@ def main() -> None:
         # 문서 전체가 아니라 **조 단위**로 스캔한다. src_조번호 가 비면
         # RAG.md §4-3 참조 폐포 SQL 의 `(src_doc_id, src_조번호)` 조인이 성립하지 않는다.
         # 폐지 조문은 참조 원천이 아니다 — 효력이 없으므로 따라가면 안 된다.
+        # 범위 밖(모두의창업 제3편 로컬트랙)은 참조도 수집하지 않는다.
+        # 위임 계통이 다르므로(상위가 신사업창업사관학교 운영지침) 이 조들의 참조를 폐포에
+        # 남겨두면 일반·기술트랙 판정에서 범위 밖 규범이 딸려온다. 2026-08-31 추가.
+        밖 = 범위밖_조(stem, arts)
         edges = []
         for a in arts:
-            if a.get("삭제"):
+            if a.get("삭제") or a["조번호"] in 밖:
                 continue
             edges += scan(a["본문"], stem, corpus, src_조번호=a["조번호"])
         # 레이어를 엣지에 붙인다. dangling 비율을 레이어별로 봐야 신호가 산다 —
