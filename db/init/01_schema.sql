@@ -7,6 +7,9 @@
 --    구 표기의 L3(공고·세부관리기준)와 현 L3(주관기관 규정)는 **의미가 다르다.**
 --    구 L4·L5 로 적재된 기존 데이터가 있으면 재적재해야 한다.
 --    이 파일을 고쳤으면 반드시  docker compose down -v  후  up -d  (init 은 최초 1회만 실행됨)
+--
+-- 2026-08-30 개정 (RAG.md §2-2-b): chunks.적용대상 추가 · chunk_terms/chunk_len/term_df 신설(BM25)
+--    · decisions 에 전제/검색스냅샷/코퍼스버전 추가. tenant 스키마(사용자 축)는 RAG.md §2-3 DDL 이 정본.
 
 CREATE EXTENSION IF NOT EXISTS vector;
 
@@ -75,7 +78,10 @@ CREATE TABLE chunks (
     항호        TEXT,
     페이지      INT,
     사업명      TEXT[],          -- NULL 이면 전 사업 공통
+    -- Stage 0.5 태깅이 채운다. 검색은 항상 적용대상 IN ('창업기업','공통') 필터 (2026-08-30 추가)
+    적용대상    TEXT CHECK (적용대상 IN ('주관기관','창업기업','공통') OR 적용대상 IS NULL),
     text        TEXT NOT NULL,   -- 원문 그대로. 인용 검증 대상이므로 절대 가공 금지
+                                 -- 임베딩·BM25 입력은 text 가 아니라 [컨텍스트 헤더]+text (RAG.md §3-5)
     embedding   vector(1024)     -- KURE-v1
 );
 -- pre-filter 가 검색보다 먼저 (구버전·타사업·타기관 차단)
@@ -184,6 +190,27 @@ COMMENT ON COLUMN refs.관계 IS
   '미규정위임 = "이 지침에서 정하지 아니한 사항은 ~에 따름". 건국대 지침 실측 문형. 게이팅(파이프라인 §6.2)의 근거가 된다.';
 
 -- ════════════════════════════════════════════════════════════════
+-- 5-d. BM25 역색인 (2026-08-30 추가 — RAG.md §2-5-1)
+--      kiwipiepy 분석은 앱이 하고, DB 는 결과 토큰을 세고 정렬만 한다.
+--      재인덱싱 = TRUNCATE; INSERT; REFRESH MATERIALIZED VIEW; COMMIT (트랜잭션 하나)
+-- ════════════════════════════════════════════════════════════════
+CREATE TABLE chunk_terms (
+    chunk_id BIGINT NOT NULL REFERENCES chunks(chunk_id) ON DELETE CASCADE,
+    term     TEXT   NOT NULL,
+    tf       INT    NOT NULL,
+    PRIMARY KEY (chunk_id, term)
+);
+CREATE INDEX ix_terms_term ON chunk_terms (term);
+
+CREATE TABLE chunk_len (
+    chunk_id BIGINT PRIMARY KEY REFERENCES chunks(chunk_id) ON DELETE CASCADE,
+    dl       INT NOT NULL
+);
+
+CREATE MATERIALIZED VIEW term_df AS
+    SELECT term, count(*)::int AS df FROM chunk_terms GROUP BY term;
+
+-- ════════════════════════════════════════════════════════════════
 -- 6. item_alias : 상품명 → 비목 매핑 사전. 여기만 벡터가 필요.
 -- ════════════════════════════════════════════════════════════════
 CREATE TABLE item_alias (
@@ -214,7 +241,11 @@ CREATE TABLE decisions (
     인용        JSONB,
     해야할일    JSONB,
     지연ms      JSONB,           -- 단계별 소요시간
-    모델        JSONB            -- {정규화: ..., 조립: ...}
+    모델        JSONB,           -- {정규화: ..., 조립: ...}
+    -- 2026-08-30 추가 — 재현성: 이 세 컬럼이 없으면 "판정 이력을 나중에 설명" 이 불가능하다
+    전제        JSONB,           -- LLM 출력 [1겹] 전제[] (LLM.md §3-4)
+    검색스냅샷  JSONB,           -- S번호→(chunk_id|article_id, 항호) 매핑 + top-k 목록 (LLM.md §3-7)
+    코퍼스버전  TEXT             -- 판정 시점의 인덱스 버전 스탬프
 );
 CREATE INDEX ix_decisions_time ON decisions (created_at DESC);
 
