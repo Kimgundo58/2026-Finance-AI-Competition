@@ -336,6 +336,20 @@ def _build(text, ms, page_offsets, titled: bool, base: int = 0) -> list[dict]:
 
 
 # ── 검증 게이트 V1~V6 ───────────────────────────────────────────
+# 폐지된 조. 법령 XML 은 조를 지우지 않고 자리만 남긴다.
+#   `제11조 삭제 <2003.8.26>` · `제3조 삭제<2016.2.12>`
+RE_DELETED = re.compile(r"^제\s*[\d]+\s*조(?:의\s*\d+)?\s*삭\s*제\s*[<(]")
+
+
+def is_deleted(art: dict) -> bool:
+    """폐지 조문인가. 빈 조(추출 실패)와 구분해야 한다.
+
+    효력이 없으므로 판정 인덱스에도 넣지 않는다 — 폐지된 조를 근거로 인용하면 오답이다.
+    Stage 2 가 이 판정으로 걸러낸다.
+    """
+    return bool(RE_DELETED.match((art.get("본문") or "").strip()))
+
+
 def validate(arts: list[dict], strategy: str) -> dict:
     """반환: {ok, quality, flags[]}"""
     flags = []
@@ -365,9 +379,17 @@ def validate(arts: list[dict], strategy: str) -> dict:
         flags.append(f"원문오류:조번호_중복({', '.join(sorted(dup))})")
 
     # V3 빈 조 비율
-    empty = sum(1 for a in arts if len(a["본문"]) < 50)
-    if arts and empty / len(arts) > 0.10:
-        flags.append(f"V3:빈조_과다({empty}/{len(arts)})")
+    #   삭제 조문(`제11조 삭제 <2003.8.26>`)은 빈 조가 아니라 **원문 사실**이다.
+    #   법령 XML 은 폐지된 조를 자리만 남겨 두므로 이걸 세면 오탐이 쏟아진다 —
+    #   실측: L1 219건의 빈 조 1,964개 중 1,667개(85%)가 삭제 조문이었고
+    #   V3 경고 46건이 전부 여기서 나왔다. V3 는 **텍스트 추출 실패**를 잡는 검사다.
+    deleted = sum(1 for a in arts if is_deleted(a))
+    live = [a for a in arts if not is_deleted(a)]
+    empty = sum(1 for a in live if len(a["본문"]) < 50)
+    if live and empty / len(live) > 0.10:
+        flags.append(f"V3:빈조_과다({empty}/{len(live)})")
+    if deleted:
+        flags.append(f"참고:삭제조({deleted})")
 
     # 구조 품질
     if strategy == "paragraph":

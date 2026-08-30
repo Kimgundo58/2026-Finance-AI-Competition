@@ -14,3 +14,17 @@ scripts/_test_out.txt
 # UI 프로토타입 — 푸시하지 않음 (사용자 요청)
 관리자_프로토타입*.html
 *프로토타입*.html
+
+# ── Stage 0 파생물 ──────────────────────────────────────────────
+# 조 본문 전량 덤프(74MB). 원본 코퍼스를 JSON 으로 복제한 것이라 저장소에 두지 않는다.
+# `python scripts/stage0_run.py` 로 언제든 재생성된다. 메타데이터는 _stage0_report.json 에 있다.
+2026_Finance_DATA_FOR_RAG/_stage0_articles.json
+
+# 파서 진단·측정의 **중간 산출물**만 제외한다. 검증 스크립트(*.py)는 문서가
+# 실행 명령으로 참조하므로 저장소에 남긴다.
+scripts/_work/_text_cache/
+scripts/_work/_refs_*.json
+scripts/_work/_precedence_prev.json
+scripts/_work/_cdu.txt
+scripts/_work/_붙임2_*.txt
+scripts/_work/_stage0_articles_before.py
