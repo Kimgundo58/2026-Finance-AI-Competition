@@ -73,29 +73,79 @@ def squash(t: str) -> tuple[str, list[int]]:
     return "".join(buf), idx
 
 
+# 규범명 정규화. 세 가지를 걷어내야 코퍼스와 대조가 된다 (2026-08-30).
+#   약칭 괄호  「중소기업창업 지원사업 운영요령(이하 "운영요령"이라 한다)」
+#   파일명 구분자  L1_중소기업창업_지원사업_통합관리지침_제14차개정_20251223
+#   판본 꼬리표    …_제14차개정_20251223 · (제2024-101호)(20241206)
+# 이걸 안 하면 **코퍼스에 있는 규범도 dangling 으로 샌다.** 실측: 현행 9문서가 인용한
+# dangling 34종 중 4종이 실제로는 보유분이었다.
+RE_약칭 = re.compile(r"\s*[(（]\s*이하[^)）]*[)）]\s*")
+RE_판본꼬리 = re.compile(r"(_제\d+차[^_]*)?(_?\d{8})?$")
+
+
+def norm_규범(s: str) -> str:
+    s = RE_약칭.sub("", s or "")
+    s = re.sub(r"^L\d_", "", s)                    # 파일명 레이어 접두
+    s = RE_판본꼬리.sub("", s)
+    s = re.sub(r"[(（][^)）]*[)）]", "", s)          # 남은 괄호 주석(호수·시행일)
+    s = re.sub(r"[(（][^)）]*$", "", s)             # 닫히지 않은 꼬리 (조판으로 잘린 경우)
+    # 공백·언더스코어·가운뎃점. 가운뎃점은 코드포인트가 갈린다 —
+    # 인용은 `·`(U+00B7), 법령 제명은 `ㆍ`(U+318D) 다. 눈으로는 같아 보여서
+    # 「대·중소기업 상생협력 촉진에 관한 법률」이 계속 dangling 이었다.
+    s = re.sub(r"[\s_·ㆍ‧․∙⋅•\-—]", "", s)
+    return s.strip("「」『』‘’\"'.,")
+
+
 def load_corpus_names() -> dict[str, str]:
     """코퍼스가 보유한 규범명 → 파일 경로. 해소 가능 여부의 판정 기준."""
     names = {}
     src = ROOT / "법령 PDF" / "_law_sources.json"
     if src.exists():
         for k in json.loads(src.read_text(encoding="utf-8")):
-            names[re.sub(r"\s+", "", k)] = f"법령 PDF/L1_법령/{k}"
+            names[norm_규범(k)] = f"법령 PDF/L1_법령/{k}"
     # 중기부·창진원 배포본
     for f in (ROOT / "2026_Finance_DATA_FOR_RAG").rglob("*.pdf"):
-        names.setdefault(re.sub(r"\s+", "", f.stem), str(f.relative_to(ROOT)))
+        names.setdefault(norm_규범(f.stem), str(f.relative_to(ROOT)))
     return names
+
+
+# 인용 표기 -> 코퍼스의 실제 제명 (2026-08-30 실측).
+# 🔴 이게 없으면 **가진 법도 참조가 안 이어진다.** 세부관리기준이 「근로자직업능력개발법」
+#    이라고 쓸 때 우리는 「국민 평생 직업능력 개발법」으로 갖고 있어서, 참조 폐포가
+#    거기서 끊긴다 — RAG 가 그 법을 못 가져온다는 뜻이다.
+#    수집 단계(`fetch_missing_norms.py`)와 같은 실측표다.
+별칭 = {
+    # 제명 개정 — 세부관리기준이 구 제명으로 인용한다
+    "근로자직업능력개발법": "국민평생직업능력개발법",
+    # 약칭 인용 — 정식 제명이 훨씬 길다
+    "외부감사법시행령": "주식회사등의외부감사에관한법률시행령",
+    "외부감사법": "주식회사등의외부감사에관한법률",
+    # 원문 오기 — 그런 이름의 규범은 없다
+    "중소기업기술개발지원사업관리지침": "중소기업기술개발지원사업운영요령",
+    "중소기업지원사업운영요령": "중소기업창업지원사업운영요령",
+    # 조판 사고 — 다른 컬럼 글자가 끼어들었다
+    "공공기관의운영에관한비율법률": "공공기관의운영에관한법률",
+}
 
 
 def resolve_규범(name: str, corpus: dict[str, str]) -> tuple[str, str | None]:
     """규범명이 코퍼스에 있나. (해소상태, 경로)"""
-    key = re.sub(r"\s+", "", name)
+    key = norm_규범(name)
+    if not key or len(key) < 4:
+        return "dangling", None
+    key = 별칭.get(key, key)
     if key in corpus:
         return "resolved", corpus[key]
-    # 부분 일치 (「…법」 vs 「…법률」 등)
+    # 부분 일치 (「…법」 vs 「…법률」, 파일명에 판본이 더 붙은 경우 등).
+    # 짧은 쪽이 긴 쪽에 통째로 들어가야 한다 — 길이 차 상한은 두되,
+    # 파일명 쪽이 길어지는 경우가 많아 비대칭으로 잡는다.
+    best = None
     for k, v in corpus.items():
-        if key and (key in k or k in key) and abs(len(k) - len(key)) < 6:
-            return "resolved", v
-    return "dangling", None
+        if key in k or k in key:
+            gap = abs(len(k) - len(key))
+            if gap <= 12 and (best is None or gap < best[0]):
+                best = (gap, v)
+    return ("resolved", best[1]) if best else ("dangling", None)
 
 
 def scan(text: str, doc_id: str, corpus: dict[str, str],
