@@ -97,10 +97,23 @@ def norm(name: str) -> str:
     return s.replace("·", "").replace("‧", "").replace("․", "")
 
 
-def 사업_of(doc_id: str) -> str | None:
+def 사업_of(doc_id: str, sec_title: str = "") -> str | None:
+    """사업명. 범위 밖이면 None (호출부가 버린다).
+
+    🔴 **모두의창업은 일반·기술트랙만 다룬다** (`CLAUDE.md` 사업 스코프).
+    세부관리기준이 제1편 총칙 / 제2편 일반·기술트랙 / 제3편 로컬트랙 구조인데
+    로컬트랙은 상위 규범이 통합관리지침이 아니라 「신사업창업사관학교 운영지침」이라
+    위임 계통이 다르다. 비목 체계도 갈린다 — 일반·기술트랙(별지1·2)은 기간 비목 계열,
+    로컬트랙(별지4)은 회계 세목 코드 계열(`임차료(07)`·`무형자산(01)`)이다.
+    **로컬트랙 비목을 남겨두면 일반·기술트랙 판정에 범위 밖 후보가 뜬다** —
+    `build_precedence.스코프_컷` 과 같은 이유로 여기서 버린다.
+    """
     for k, v in 사업_키워드:
-        if k in doc_id:
-            return v
+        if k not in doc_id:
+            continue
+        if v == "모두의 창업 프로젝트" and "로컬" in sec_title:
+            return None
+        return v
     return None
 
 
@@ -192,7 +205,7 @@ def 사업확장(tables: dict, secinfo: dict) -> tuple[list[dict], list[str]]:
         si = secinfo.get((doc_id, sec), {})
         if not is_비목표(t, si.get("조제목", "")):
             continue
-        biz = 사업_of(doc_id)
+        biz = 사업_of(doc_id, si.get("조제목", ""))
         if not biz:
             continue
         대상 = 대상_of(si.get("조제목", ""), si.get("본문머리", ""))
@@ -301,10 +314,29 @@ def main() -> None:
     미적용 = [f"{d}/{k}" for d, k in 적용 if (d, k) not in 본 and k not in
               {v["enum"] for v in vocab}]
 
+    # 교차확인: 근거 판본이 2개 이상인가. 한 판본의 표 한 칸만 근거인 비목은
+    # 조판 사고와 구분이 안 된다 — 실제로 초격차 구판 [참고5] 한 곳에서만 나오는
+    # `업무추진비`·`운영비` 는 현행 2024·2025 판본에서는 주관기관 비목이다.
+    # `rule_base.md` §6 의 "verified=false 룰 단독으로 가능 판정 금지" 와 같은 취지.
+    for v in vocab:
+        v["교차확인"] = v["층"] == "기간" or len(v["근거"]) >= 2
+        if not v["교차확인"]:
+            v["검수필요"] = "근거 판본 1개 — 조판 사고와 구분 불가. 원문 확인 후 승격"
+
     창업 = [v for v in vocab if v["적용대상"] == "창업기업"]
+    enum = [v["enum"] for v in 창업 if v["교차확인"]]
+    대기 = [v["enum"] for v in 창업 if not v["교차확인"]]
+
     doc = {
         "생성": "scripts/build_item_vocab.py",
         "사양": "rule_base.md §1-b",
+        "코퍼스_스냅샷": {
+            "문서수": len(arts),
+            "표수": len(tables.get("tables", [])),
+            "주의": ("이 어휘집은 위 코퍼스에서 뽑은 것이다. L2 세부관리기준이 늘거나 "
+                     "Stage 0 를 다시 돌리면 재실행해야 한다. L1 법령만 늘어난 경우는 "
+                     "기간 어휘(통합관리지침 제37~45조)가 그대로면 영향 없다."),
+        },
         "주의": ("`층=기간` 은 전 사업 공통(사업스코프 빈 배열). `층=사업별` 은 해당 사업만. "
                  "🔴 `적용대상` 이 enum 의 일부다 — 우리 사용자는 창업기업이므로 "
                  "guided_json enum 은 `적용대상=창업기업` 만 쓴다. 주관기관 비목은 "
@@ -317,8 +349,11 @@ def main() -> None:
             "미상": sum(1 for v in vocab if v["적용대상"] == "미상"),
             "기간": sum(1 for v in vocab if v["층"] == "기간"),
             "사업별": sum(1 for v in vocab if v["층"] == "사업별"),
+            "enum_확정": len(enum),
+            "enum_검수대기": len(대기),
         },
-        "guided_json_enum": [v["enum"] for v in 창업],
+        "guided_json_enum": enum,
+        "enum_검수대기": 대기,
         "적용대상_미상_섹션": sorted(set(미상)),
         "파편병합_미적용": 미적용,
         "커버리지_대조": 대조(vocab),
@@ -332,16 +367,20 @@ def main() -> None:
     print(f"          (기간 {s['기간']} / 사업별 {s['사업별']})\n")
     for v in vocab:
         scope = ",".join(v["사업스코프"]) or "전사업"
-        print(f"  [{v['적용대상']:<4}|{v['층']:<3}] {v['enum'][:22]:<24} "
-              f"{scope[:40]:<42} 근거{len(v['근거']):>2}")
+        mark = "  " if v["교차확인"] else "🟡"
+        print(f"  {mark}[{v['적용대상']:<4}|{v['층']:<3}] {v['enum'][:20]:<22} "
+              f"{scope[:44]:<46} 근거{len(v['근거']):>2}")
     if 미상:
         print("\n!! 적용대상 미상 섹션:")
         for m in sorted(set(미상)):
             print(f"   {m}")
     if 미적용:
         print(f"\n!! 파편병합 맵이 안 걸렸다 (재파싱으로 사고가 사라졌나?): {미적용}")
-    print("\nguided_json enum (창업기업):")
-    print("  " + ", ".join(doc["guided_json_enum"]))
+    print(f"\nguided_json enum (창업기업 · 교차확인 {len(enum)}):")
+    print("  " + ", ".join(enum))
+    if 대기:
+        print(f"\n🟡 검수대기 {len(대기)} (근거 판본 1개 — enum 미투입):")
+        print("  " + ", ".join(대기))
     chk = doc["커버리지_대조"]
     print("\n커버리지 대조:", json.dumps({k: v for k, v in chk.items()
                                        if k != "우리에게_없음"}, ensure_ascii=False))

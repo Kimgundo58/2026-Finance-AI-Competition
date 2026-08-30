@@ -86,7 +86,8 @@ CREATE TABLE tenant.l3_documents (
     시행일       DATE,
     status       TEXT NOT NULL CHECK (status IN ('active','superseded')),
     extraction   TEXT NOT NULL DEFAULT 'native'
-                 CHECK (extraction IN ('native','dedupe','hancom','vlm')),
+                 CHECK (extraction IN ('native','dedupe','hancom','vlm','hwpx','hwp')),
+                 -- 'hwpx'/'hwp': L3 사용자 업로드 파서 경로 (2026-08-30 채택)
     파싱품질     TEXT NOT NULL CHECK (파싱품질 IN ('pass','warn','fail')),
     dangling수   INT NOT NULL DEFAULT 0,   -- 업로드 시점에 알린다 (판정 시점 아님)
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -237,7 +238,7 @@ ORDER BY score DESC LIMIT 50;
 ## 3. 인덱싱 파이프라인 (오프라인)
 
 ```
-원문 (XML / PDF / HWP→PDF)
+원문 (XML / PDF / HWP→PDF · L3 업로드는 HWPX/HWP 직파싱)
   ├─ Stage 0    파싱·조 분해            → corpus.doc_articles
   ├─ Stage 0.5  적용대상 태깅           → corpus.chunks.적용대상
   │              절(節) 헤딩이 선언하면 상속, LLM 은 절 밖 조문만
@@ -253,6 +254,18 @@ ORDER BY score DESC LIMIT 50;
 
 **텍스트 추출은 반드시 `scripts/pdftext.py::extract()` 경유** (문자중복 레이어 dedupe ·
 다단/4분면 좌표 컬럼 분리 내장). `pdfplumber.extract_text()` 직접 호출 금지 — 훅이 경고한다.
+
+**L3 사용자 업로드는 HWPX·HWP 도 받는다** (2026-08-30 채택 — 조달분 L1·L2 의 한컴 수동
+변환 원칙과 별개다).
+
+| L3 포맷 | 추출 | 비고 |
+|---|---|---|
+| HWPX | zip/XML 직파싱 | 최우선 — 논리 구조가 있어 PDF 좌표 재조립보다 정확. `.hwp` 확장자여도 실제 HWPX 인 경우가 많다(매직바이트로 판별) |
+| HWP 5.0 | `scripts/hwp_extract.py` 계열 텍스트 추출 | 표 정밀도 낮음 — L3 는 조문 텍스트 위주라 허용. `extraction='hwp'` 태깅 |
+| PDF | `pdftext.py::extract()` | 기존 경로 |
+| 배포용(DRM) HWP | 파싱 실패 처리 | PDF 변환 후 재업로드 안내 |
+
+추출 이후는 포맷 공통 — Step 1 섹션 분리부터 게이트 V1~V4 까지 동일하게 탄다.
 
 **Step 1 — 섹션 분리 (선행 필수). 순서: 목차 컷 → 부칙 → 붙임(부칙 뒤에서만).**
 
@@ -313,6 +326,8 @@ ORDER BY score DESC LIMIT 50;
 | 병합 | 50자 미만 청크 → 직전에 병합 |
 | 오버랩 | 없음 — 조 경계가 의미 경계 |
 | 표 | 청크에 넣지 않음 → 룰 테이블 (`rule_base.md`) |
+| 첨부(별표·별지·서식·붙임) | 청크에 넣지 않음 — 표와 같은 취급. 실측 4,141건 28.9M자로 L1·L2 본문의 74%인데 대부분 세무 서식·감독 표다 |
+| 범위 컷 | 모두의창업 **제3편(로컬트랙)은 청크에서 제외**. `doc_articles` 에는 남긴다 — 조회 키가 `사업명` 이라 남겨두면 일반·기술트랙 판정에 딸려온다 |
 | Stage 2 게이트 | 임베딩 직전 전 청크 토크나이즈 — **1,024토큰 초과 0건** 확인 |
 
 임계가 문자수가 아니라 **토큰수**인 이유: 잘림 방지. 한국어 3,000자 ≈ 1,500~2,000토큰이라
@@ -417,7 +432,7 @@ def rrf(dense_ranked, sparse_ranked, w_dense=0.6, w_sparse=0.4):
 | # | 항목 | 조건 |
 |---|---|---|
 | 1 | 청킹 기본 단위 조 vs 항 | 재인덱싱 전 확정 |
-| 2 | 1만 청크 초과 시 ANN | 실측 |
-| 3 | Stage 0 표 추출 미구현 | `[참고N]`·`[붙임2]` 표 → 룰 재료. `extract_tables()` 경로 신설 |
-| 4 | L3 원본 보관 여부 | 재파싱 수요 vs 저장 최소화 |
-| 5 | Supabase 무료 티어 한도 | 벡터 1만 × 1024 ≈ 40MB. 확인 |
+| 2 | 1만 청크 초과 시 ANN | **발동했다.** 실측 L1·L2 조문 19,660조 → 약 22,400청크(첨부 제외). 적재 후 정확검색 지연을 재고 결정 |
+| 3 | L3 원본 보관 여부 | 재파싱 수요 vs 저장 최소화 |
+| 4 | Supabase 무료 티어 한도 | 벡터 22,400 × 1024 float4 ≈ 92MB + 본문·refs. 500MB 안에 드는지 적재 후 실측 |
+| 5 | **스키마가 `public` 에 있다** | Supabase 는 `public` 을 PostgREST 로 자동 노출한다 — anon 키로 `golden_set` 이 읽힌다. §2-1 대로 `corpus`/`tenant` 로 옮기고 `public` 은 비운다 |
