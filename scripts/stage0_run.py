@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import re
 import sys
 import time
 from collections import Counter
@@ -32,9 +33,10 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="repla
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
+import pdftext                                    # noqa: E402  문자중복/다단 해소
 from index_guard import reject_reason            # noqa: E402
 from stage0_extract import extract               # noqa: E402
-from stage0_articles import split_articles, validate, sanitize   # noqa: E402
+from stage0_articles import split_articles, validate, sanitize, is_deleted, _clean  # noqa: E402
 
 DATASET = ROOT / "2026_Finance_DATA_FOR_RAG"
 LAWDIR = ROOT / "법령 PDF"
@@ -130,23 +132,73 @@ def 대상수집(only: str | None) -> list[dict]:
     return targets, skipped
 
 
-def 분해(path: Path) -> tuple[list[dict], str]:
-    """extract 계약: ('articles', list) 또는 ('text', (str, offsets))."""
-    kind, payload = extract(path)
-    if kind == "articles":
-        # XML 은 law.go.kr 구조를 그대로 따 이미 조 단위다. split_articles 를 태우면
-        # 오히려 깨진다 (실측: 조 0개). 필드명만 맞춘다.
+RE_조번호_INT = re.compile(r"제\s*(\d+)\s*조")
+
+
+RE_PARA = re.compile(r"\n{2,}")
+
+
+def 분해(path: Path, layer: str | None = None) -> tuple[list[dict], str]:
+    """XML 은 law.go.kr 구조 그대로, PDF 는 pdftext -> split_articles.
+
+    🔴 **사례 레이어에는 조 분해를 태우지 않는다** (2026-08-30).
+    사례집·재결례집·판례는 조 체계 문서가 아니라 Q&A / 사건 단위다. 그런데
+    `split_articles` 를 태우면 **본문에 인용된 타 법령 조문을 그 문서의 조로 잡는다.**
+    실측:
+        사례집_권익위재결례집_1        첫 조 = `제382조의3(이사의 충실의무)`  <- 상법 조문
+        사례집_KISTEP_판례조사분석      첫 조 = `제35조(연구개발과제의 성실 수행)` <- 혁신법 조문
+        사례집_한국연구재단_QA사례집    첫 조 = `제73조(사전 승인 대상)`        <- 인용 규정
+    셋 다 `quality=high` 로 나와서, 그대로 두면 **남의 법 조문이 사례집 doc_id 를 달고
+    조 단위로 인덱스에 들어간다.** 인용하면 출처가 틀린 답이 된다.
+
+    사례는 `case_chunks`(B등급) 로 가고 청킹 단위는 Q&A 다 (`RAG.md` §1·§2-2).
+    Stage 0 에서는 단락 분할까지만 하고 `parse_quality='low'` 로 두어
+    판정 인덱스에서 자동으로 빠지게 한다.
+    """
+    if layer == "사례":
+        if path.suffix.lower() == ".pdf":
+            text, _ = pdftext.extract_meta(path)
+        else:
+            _, payload = extract(path)
+            text = payload[0] if isinstance(payload, tuple) else str(payload)
+        paras = [p.strip() for p in RE_PARA.split(_clean(text)) if len(p.strip()) >= 100]
+        return ([{"조번호": f"단락{i+1:03d}", "조제목": None, "조번호_int": None,
+                  "본문": sanitize(p), "페이지": None} for i, p in enumerate(paras)],
+                "case_paragraph")
+
+    if path.suffix.lower() == ".xml":
+        # XML 은 이미 조 단위다. split_articles 를 태우면 오히려 깨진다 (실측: 조 0개).
+        _, payload = extract(path)
         arts = []
         for a in payload:
+            조번호 = a.get("조번호") or a.get("조문번호") or ""
+            n = a.get("조번호_int")
+            if n is None:
+                # 🔴 `extract_xml()` 은 이 키를 주지 않는다. 그대로 두면 법령 219건
+                #    22,551조 전부 None 이 되어 V1 단조성 검증이 무력화되고
+                #    `ix_articles_doc (doc_id, 조번호_int)` 정렬도 의미를 잃는다.
+                m = RE_조번호_INT.search(조번호)
+                n = int(m.group(1)) if m else None
             arts.append({
-                "조번호": a.get("조번호") or a.get("조문번호") or "",
+                "조번호": 조번호,
                 "조제목": a.get("조제목") or a.get("조문제목"),
-                "조번호_int": a.get("조번호_int"),
+                "조번호_int": n,
                 "본문": sanitize(a.get("본문") or a.get("조문내용") or ""),
                 "페이지": None,
             })
         return arts, "xml_native"
-    text, offsets = payload
+
+    # 🔴 PDF 는 반드시 `pdftext.extract_meta()` 를 탄다.
+    #    `stage0_extract.extract_pdf()` 는 문자중복 레이어를 해소하지 않는다.
+    #    실측 사고: 통합관리지침 제14차가 `"창창업업기기업업등등"` 상태로 들어와
+    #    `제\d+조` 가 하나도 안 걸리고 `outline_numbered` 로 떨어졌다 — 조 86개가 30개가 됐다.
+    #    이 문서는 판정 최상위 근거다 (CLAUDE.md 파싱 함정).
+    #    2단·4분면 조판 해소도 이 경로에만 있다.
+    if path.suffix.lower() == ".pdf":
+        text, meta = pdftext.extract_meta(path)
+        return split_articles(text, meta.get("page_offsets") or {})
+
+    _, (text, offsets) = extract(path)
     return split_articles(text, offsets)
 
 
@@ -171,20 +223,32 @@ def main() -> None:
     for i, t in enumerate(targets, 1):
         p: Path = t["path"]
         try:
-            arts, strat = 분해(p)
+            arts, strat = 분해(p, layer=t["layer"])
         except Exception as e:                      # noqa: BLE001
             report["실패"].append({"doc_id": t["doc_id"], "layer": t["layer"],
                                    "path": str(p), "오류": f"{type(e).__name__}: {e}"[:200]})
             print(f"[{i:>3}/{len(targets)}] !! {t['doc_id'][:52]}  {type(e).__name__}")
             continue
 
+        # 폐지 조문을 표시해 둔다. Stage 2 가 인덱스에서 뺀다 —
+        # 효력 없는 조를 근거로 인용하면 오답이다.
+        n_del = 0
+        for a in arts:
+            if is_deleted(a):
+                a["삭제"] = True
+                n_del += 1
+
         v = validate(arts, strat)
+        # `참고:` 접두 플래그는 사실 기록이지 경고가 아니다. 경고 집계에서 뺀다 —
+        # 섞으면 진짜 파싱 실패가 소음에 묻힌다.
+        경고 = [f for f in v["flags"] if not f.startswith("참고:")]
         rec = {"doc_id": t["doc_id"], "layer": t["layer"], "strategy": strat,
-               "조": len(arts), "최장": max((len(a["본문"]) for a in arts), default=0),
+               "조": len(arts), "삭제조": n_del,
+               "최장": max((len(a["본문"]) for a in arts), default=0),
                "quality": v["quality"], "flags": v["flags"]}
         articles[t["doc_id"]] = {**rec, "path": str(p.relative_to(ROOT)),
                                  "규범": t.get("규범"), "articles": arts}
-        (report["게이트경고"] if v["flags"] else report["성공"]).append(rec)
+        (report["게이트경고"] if 경고 else report["성공"]).append(rec)
         strat_c[strat] += 1
         layer_c[t["layer"]] += 1
         총조 += len(arts)
