@@ -43,7 +43,8 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="repla
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
-import index_guard                                          # noqa: E402
+import index_guard
+from scope import 범위밖_조                                          # noqa: E402
 
 DATA = ROOT / "2026_Finance_DATA_FOR_RAG"
 S0 = DATA / "_stage0_articles.json"
@@ -86,6 +87,67 @@ RE_창업 = re.compile(r"창업기업|창업자|진출자|도전자|입주기업
 
 # 본문 주어 판별 구간. 조 첫머리에 주어가 온다.
 HEAD = 200
+
+# ── 절(節) 상속 (2026-08-31 구현) ─────────────────────────────────────────────
+# `RAG.md` §3 에 "절 헤딩이 선언하면 상속, LLM 은 절 밖 조문만" 이라고 명세돼 있었는데
+# 구현이 빠져 있었다. 조문 재조립이 조 단위라 절 헤딩은 **앞 조 본문 꼬리**에 붙어 온다:
+#   "...심의결과를 전문기관의 장에게 보고하여야 한다. 제 4 장 협 약 < 제 1 절 주관기관 >"
+#
+# 🔴 우선순위는 조제목 > 절 > 본문주어 다. 실측 근거:
+#   조제목 경로 96건 중 절이 값을 주는 49건 -> 충돌 0
+#   본문주어 경로 151건 중 절이 값을 주는 70건 -> 충돌 9 (13%)
+#   충돌 9건 전수 확인 결과 **9건 중 8건은 절이 맞고 본문주어가 틀렸다** (1건 판단보류).
+#   대표: 통합관리지침 제37조(재료비)가 '주관기관' 으로 태깅돼 있었다. 본문에
+#   "전문기관의 장 또는 주관기관의 장의 사전승인" 이 나와서다. 재료비는 창업기업등
+#   비목(제36~45조)이고, 이대로 인덱싱하면 "재료 사도 되나요?" 에 재료비 조항이
+#   검색 필터에서 빠진다. 창업도약 제31조·모두의창업 제34조도 같은 재료비 조항이었다.
+RE_절장 = re.compile("[<〈]?\s*제\s*(\d+)\s*(절|장)\s*[>〉]?\s*([^<>\n]{0,22})")
+RE_절_공통 = re.compile(r"공통")
+# 절 이름 전용 보강. 절 헤딩은 주체를 **선언**하므로 본문주어보다 어휘를 넓게 잡아도 안전하다.
+# (RE_주관 을 넓히면 본문주어 판정까지 흔들리므로 절 전용으로 분리한다)
+#   "< 제1절 창업중심대학 >" — 창업중심대학이 그 사업의 주관기관이다
+RE_절_주관 = re.compile(RE_주관.pattern + r"|창업중심대학|전담기관|주관대학")
+
+
+def 절값(꼬리: str) -> str | None:
+    """절 헤딩의 이름에서 적용대상을 읽는다. 못 읽으면 None (상속을 끊는다)."""
+    if RE_절_공통.search(꼬리):
+        return "공통"
+    주, 창 = bool(RE_절_주관.search(꼬리)), bool(RE_창업.search(꼬리))
+    if 주 and not 창:
+        return "주관기관"
+    if 창 and not 주:
+        return "창업기업"
+    return None
+
+
+def 절_상속(articles: list[dict]) -> dict[str, str | None]:
+    """조번호 -> 그 조가 속한 절의 적용대상. 장이 바뀌면 상속을 끊는다."""
+    out: dict[str, str | None] = {}
+    state: str | None = None
+    for a in articles:
+        out[a["조번호"]] = state              # 조 **시작 시점**의 절 상태
+        for m in RE_절장.finditer(a.get("본문") or ""):
+            state = None if m.group(2) == "장" else 절값(m.group(3))
+    return out
+
+
+# 범위 밖 구간(모두의창업 제3편 로컬트랙) 컷은 `scripts/scope.py` 가 정본이다.
+# build_refs 와 같은 컷을 써야 해서 공용 모듈로 뺐다 (2026-08-31).
+
+
+# ── 2단 결과 병합 (2026-08-31) ────────────────────────────────────────────────
+# 1단(결정적: 조제목 > 절 상속 > 본문주어)이 못 가른 조를 사람/LLM 이 판단한 결과.
+# 파일이 없으면 그냥 건너뛴다 — 1단만으로도 파이프라인은 돈다.
+# `verified=false` 다. 룰과 같은 취급 — 이 태그만으로 "가능" 을 만들지 않는다.
+STAGE2 = ROOT / "2026_Finance_DATA_FOR_RAG" / "_apply_target_2단.json"
+
+
+def 이단맵() -> dict[tuple[str, str], dict]:
+    if not STAGE2.exists():
+        return {}
+    d = json.loads(STAGE2.read_text(encoding="utf-8"))
+    return {(r["doc_id"], r["조번호"]): r for r in d.get("items", [])}
 
 
 def is_target(doc_id: str, 현행만: bool = True) -> bool:
@@ -159,22 +221,53 @@ def main() -> None:
     경로 = Counter()
     값 = Counter()
 
+    범위밖 = 이단적용 = 0
+    뒤집힘: list[dict] = []
+    이단 = 이단맵()
     for doc_id, d in docs.items():
-        for a in d.get("articles") or []:
+        arts = d.get("articles") or []
+        절 = 절_상속(arts)
+        밖 = 범위밖_조(doc_id, arts)
+        for a in arts:
             if a.get("삭제"):
                 continue
             if a.get("조번호_int") is None:
                 continue                      # 부칙·붙임은 본칙이 아니다
+            if a["조번호"] in 밖:
+                범위밖 += 1
+                continue                      # 로컬트랙 — 태깅도 인덱싱도 하지 않는다
             val, path, conf = 결정(a.get("조제목"), a.get("본문") or "")
+            # 조제목(0.95)은 그대로 두고, 그 아래는 절 상속이 이긴다 (근거는 위 주석)
+            j = 절[a["조번호"]]
+            if path != "조제목" and j is not None:
+                if val is not None and val != j:
+                    뒤집힘.append({"doc_id": doc_id, "조번호": a["조번호"],
+                                   "조제목": a.get("조제목"), "전": val,
+                                   "후": j, "전_경로": path})
+                val, path, conf = j, "절상속", 0.90
+            검수 = False
+            if val is None:
+                r = 이단.get((doc_id, a["조번호"]))
+                if r:
+                    val, path, conf = r["적용대상"], "2단", 0.70
+                    검수 = bool(r.get("검수필요"))
+                    이단적용 += 1
             경로[path] += 1
             rec = {"doc_id": doc_id, "조번호": a["조번호"], "조제목": a.get("조제목"),
                    "적용대상": val, "판정경로": path, "확신도": conf}
+            if 검수:
+                rec["검수필요"] = True
             if val is None:
                 todo.append({**rec, "본문": (a.get("본문") or "")[:1200]})
             else:
                 값[val] += 1
             tagged.append(rec)
 
+    print(f"범위밖(로컬트랙) 제외: {범위밖}조")
+    print(f"절 상속이 본문주어를 뒤집은 건: {len(뒤집힘)}")
+    for r in 뒤집힘:
+        print(f"   {r['doc_id'][:30]}|{r['조번호']} '{r['조제목']}'  {r['전']} -> {r['후']}")
+    print(f"2단 병합: {이단적용}조 (파일 {'있음' if 이단 else '없음'})")
     print("판정경로:", dict(경로))
     print("결정값  :", dict(값))
     n = len(tagged)
@@ -200,6 +293,9 @@ def main() -> None:
     OUT.write_text(json.dumps({
         "생성": "scripts/tag_apply_target.py",
         "값": ["주관기관", "창업기업", "공통"],
+        "범위밖": {"제외조": 범위밖,
+                   "근거": "모두의 창업 제3편 로컬트랙 — 위임 계통이 다르다 (CLAUDE.md 사업 스코프)"},
+        "절상속_뒤집음": 뒤집힘,
         "기본값": {
             "값": 대상밖_기본값,
             "적용": "태깅 대상 밖 문서 전부 + 태깅 대상 안의 부칙·붙임",
