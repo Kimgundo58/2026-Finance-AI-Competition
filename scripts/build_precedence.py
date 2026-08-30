@@ -85,6 +85,29 @@ def load_text(stem: str) -> tuple[str, str]:
     return "", ""
 
 
+# 사업 안에서 우리가 다루지 않는 구간. 여기서 잘라내지 않으면 **범위 밖 룰이
+# 판정 경로로 들어온다** — precedence 조회 키가 `사업명` 이라 같은 사업의 다른 트랙
+# 룰이 함께 걸린다.
+#   모두의 창업 프로젝트: 제1편 총칙 / 제2편 일반·기술트랙 / 제3편 로컬트랙
+#   우리 범위는 **일반·기술트랙**이다 (데이터셋 폴더도 `모두의 창업 (일반-기술)`).
+#   로컬트랙은 상위 규범이 통합관리지침이 아니라 「신사업창업사관학교 운영지침」이라
+#   계통 자체가 다르다.
+# 목차에도 같은 문자열이 있으므로 **마지막 매치**를 쓴다. 목차 표기는 `제3편 로컬트랙`,
+# 본문 헤딩은 `제 3 편 로컬트랙` 으로 자간이 벌어진다.
+범위밖_구간 = {
+    "모두의 창업 프로젝트": re.compile(r"(?:^|\n)\s*제\s*3\s*편\s*로컬트랙"),
+}
+
+
+def 스코프_컷(biz: str, raw: str) -> str:
+    """범위 밖 편(篇)을 잘라낸다. 해당 사업이 없으면 원문 그대로."""
+    pat = 범위밖_구간.get(biz)
+    if not pat:
+        return raw
+    ms = list(pat.finditer(raw))
+    return raw[:ms[-1].start()] if ms else raw
+
+
 def norm(t: str) -> str:
     return re.sub(r"\s+", " ", t)
 
@@ -110,6 +133,7 @@ def main() -> None:
         if not raw:
             misses.append((biz, stem, "파일 없음"))
             continue
+        raw = 스코프_컷(biz, raw)
         t = norm(raw)
         sq, imap = squash(t)
 
