@@ -137,6 +137,46 @@ RE_조번호_INT = re.compile(r"제\s*(\d+)\s*조")
 
 RE_PARA = re.compile(r"\n{2,}")
 
+# 사례 단위 상한. Stage 2 청킹 임계(3,000자)와 맞춘다.
+사례_최대 = 3000
+사례_최소 = 100
+
+
+def _사례_분할(text: str) -> list[str]:
+    """사례 문서를 다루기 좋은 크기로 자른다.
+
+    🔴 빈 줄만으로 자르면 안 된다. PDF 텍스트에는 빈 줄이 거의 없어서
+    실측(권익위재결례집)에서 **한 단락이 222,683자**가 나왔다 — 문서 하나가 통째로
+    단락 하나다. 그 상태로는 Stage 0 산출물이 아무 쓸모가 없다.
+
+    빈 줄 분할을 먼저 시도하고, 상한을 넘는 덩어리는 **줄 단위로 다시 묶어** 자른다.
+    사례는 판정 근거가 아니라 B등급 참고 자료이고 최종 청킹 단위(Q&A)는 Stage 2 가
+    정하므로, 여기서는 "덩어리가 과하게 크지 않을 것" 까지만 보장한다.
+    """
+    out: list[str] = []
+    for block in RE_PARA.split(text):
+        block = block.strip()
+        if len(block) < 사례_최소:
+            continue
+        if len(block) <= 사례_최대:
+            out.append(block)
+            continue
+        buf: list[str] = []
+        size = 0
+        for line in block.split("\n"):
+            if size + len(line) > 사례_최대 and buf:
+                out.append("\n".join(buf))
+                buf, size = [], 0
+            buf.append(line)
+            size += len(line) + 1
+        if buf:
+            tail = "\n".join(buf).strip()
+            if len(tail) >= 사례_최소:
+                out.append(tail)
+            elif out:
+                out[-1] += "\n" + tail
+    return out
+
 
 def 분해(path: Path, layer: str | None = None) -> tuple[list[dict], str]:
     """XML 은 law.go.kr 구조 그대로, PDF 는 pdftext -> split_articles.
@@ -161,7 +201,7 @@ def 분해(path: Path, layer: str | None = None) -> tuple[list[dict], str]:
         else:
             _, payload = extract(path)
             text = payload[0] if isinstance(payload, tuple) else str(payload)
-        paras = [p.strip() for p in RE_PARA.split(_clean(text)) if len(p.strip()) >= 100]
+        paras = _사례_분할(_clean(text))
         return ([{"조번호": f"단락{i+1:03d}", "조제목": None, "조번호_int": None,
                   "본문": sanitize(p), "페이지": None} for i, p in enumerate(paras)],
                 "case_paragraph")

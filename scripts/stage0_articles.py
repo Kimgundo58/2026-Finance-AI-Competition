@@ -161,14 +161,36 @@ RE_CITE_PREFIX = re.compile(
 # 닫는 인용부호도 접두로 본다 — 「중소기업창업 지원법」제43조 (재도전 2025 실측)
 
 
-def _is_citation(text: str, start: int) -> bool:
+# 닫는 괄호 뒤에 **띄어쓰기 없이** 붙는 조사. 조 헤딩이면 여기서 문장이 시작하므로
+# 공백이 오거나 `①` 이 온다.
+#   인용  `제65조(제재 및 환수)에 따른다`      -> `)` 뒤 `에`
+#   헤딩  `제65조(제재 및 환수) ① 전문기관의`  -> `)` 뒤 공백
+# `이 / 가 / 은 / 는 / 도` 는 뺀다. 실측에 `제1조(시행일)이 기준은 …`(초격차) 처럼
+# 지시어로 시작하는 헤딩이 있어 넣으면 진짜 조를 놓친다.
+RE_CITE_SUFFIX = re.compile(r"^(?:에서|에도|으로|부터|까지|에|와|과|의|를|을|로|및)")
+
+
+def _is_citation(text: str, start: int, end: int | None = None) -> bool:
     """이 위치의 `제N조(...)` 가 조 헤딩이 아니라 본문 속 인용인가.
 
-    판정은 **규범어 접두 하나로만** 한다. "줄머리가 아니면 인용" 규칙도 넣어봤으나
-    과잉 차단이었다 — 실측에서 조 36개가 21개로 줄었다. 조 헤딩을 놓치는 것이
-    인용을 하나 더 잡는 것보다 훨씬 나쁘다.
+    두 방향을 본다.
+
+    **앞** — 규범어 접두 (`지침 제65조…` · `「…법」제43조`).
+    "줄머리가 아니면 인용" 규칙도 넣어봤으나 과잉 차단이었다 — 실측에서 조 36개가
+    21개로 줄었다. 조 헤딩을 놓치는 것이 인용을 하나 더 잡는 것보다 훨씬 나쁘다.
+
+    **뒤** — 닫는 괄호에 붙어 나오는 조사 (2026-08-30 추가).
+    앞만 보면 규범어 없는 인용을 못 잡는다. 실측 사고(통합관리지침 제14차):
+        제56조(특별평가) ③ … 환수 및 제재 처분은 제65조(제재 및 환수)에 따른다.
+    이 인용이 조 헤딩으로 잡혀 **제56조가 ④항을 잃고 503자로 잘렸고**, 제65조가
+    제56조와 제57조 사이에 끼어 조번호가 65 -> 57 로 역전됐다.
+    이 문서는 판정 최상위 근거다.
     """
-    return bool(RE_CITE_PREFIX.search(text[max(0, start - 14):start]))
+    if RE_CITE_PREFIX.search(text[max(0, start - 14):start]):
+        return True
+    if end is not None and RE_CITE_SUFFIX.match(text[end:end + 3]):
+        return True
+    return False
 
 
 # ── 개요형 (TIPS 계열) ──────────────────────────────────────────
@@ -199,7 +221,7 @@ def split_articles(text: str, page_offsets: dict[int, int] | None = None) -> tup
     본칙, 부칙, 붙임들, base = _cut_sections(text)
 
     # ── 1순위: 제N조(제목) ──────────────────────────────────────
-    ms = [m for m in RE_JO.finditer(본칙) if not _is_citation(본칙, m.start())]
+    ms = [m for m in RE_JO.finditer(본칙) if not _is_citation(본칙, m.start(), m.end())]
     if len(ms) >= 5:
         arts = _build(본칙, ms, page_offsets, titled=True, base=base)
         return arts + _tail(부칙, 붙임들), "jo_titled"
