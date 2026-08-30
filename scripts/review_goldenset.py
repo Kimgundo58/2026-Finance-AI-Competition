@@ -193,8 +193,11 @@ def 검수1(item: dict, arts: dict, tbls: dict, 세트: str) -> dict:
             one["섹션_실재"] = sec
             if sec is None:
                 r["경고"].append(f"C2 조/섹션으로 해소 안 됨: {raw!r}")
-        if 원문:
-            v = 원문검증(doc, tbls.get(doc_id, []), 원문)
+        # 근거가 여러 개면 원문도 근거별로 붙는다 (`apply_goldenset_fixes.py` 가 쪼갠다).
+        # 근거별 원문이 있으면 그것을, 없으면 문항 공통 원문을 쓴다.
+        이_원문 = g.get("원문") or 원문
+        if 이_원문:
+            v = 원문검증(doc, tbls.get(doc_id, []), 이_원문)
             one["원문검증"] = v
             s = v["상태"]
             if s == "🔴 미발견":
@@ -221,7 +224,14 @@ def 검수1(item: dict, arts: dict, tbls: dict, 세트: str) -> dict:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--brief", action="store_true")
+    ap.add_argument("--fixed", action="store_true",
+                    help="원본 대신 `_골든셋_수정본.json` 을 검수한다 (수정 효과 확인)")
     args = ap.parse_args()
+
+    sets, out = SETS, OUT
+    if args.fixed:
+        sets = [("수정본", DATA / "_골든셋_스테이징" / "_골든셋_수정본.json")]
+        out = DATA / "_골든셋_스테이징" / "_골든셋_검수_수정본.json"
 
     arts = json.loads(ART.read_text(encoding="utf-8"))
     tbls: dict[str, list] = {}
@@ -232,13 +242,13 @@ def main() -> None:
             tbls.setdefault(t["doc_id"], []).append((t.get("섹션"), flat))
 
     결과 = []
-    for 세트, path in SETS:
+    for 세트, path in sets:
         if not path.exists():
             print(f"!! 없음: {path}")
             continue
         gs = json.loads(path.read_text(encoding="utf-8"))
         for it in gs["문항"]:
-            결과.append(검수1(it, arts, tbls, 세트))
+            결과.append(검수1(it, arts, tbls, it.get("_세트") or 세트))
 
     등급 = {}
     for r in 결과:
@@ -265,13 +275,13 @@ def main() -> None:
             print(f"        - {w}")
 
     if not args.brief:
-        OUT.write_text(json.dumps({
+        out.write_text(json.dumps({
             "생성": "scripts/review_goldenset.py",
             "성격": "기계 검수 결과. verified 를 바꾸지 않는다 — 사람 검수의 입력이다",
             "요약": {"문항": len(결과), "등급별": 등급, "경고코드별": 코드},
             "결과": 결과,
         }, ensure_ascii=False, indent=1), encoding="utf-8")
-        print(f"\n-> {OUT.relative_to(ROOT)}")
+        print(f"\n-> {out.relative_to(ROOT)}")
 
 
 if __name__ == "__main__":
