@@ -76,7 +76,11 @@ def load_text(stem: str) -> tuple[str, str]:
             sys.path.insert(0, str(Path(__file__).resolve().parent))
             import pdftext
             # 문자중복 레이어 자동 해소 (창업도약 2022년판 등이 해당)
-            t, _ = pdftext.extract(f, max_pages=8)
+            # 🔴 max_pages=8 이었다. 적용범위 조가 앞에만 있다는 전제였는데 틀렸다 —
+            #    모두의창업은 제2편(일반·기술트랙)/제3편(로컬트랙) 구조라
+            #    **제53조에 로컬트랙 전용 적용범위**가 따로 있고, 그게 통째로 누락됐다.
+            #    로컬트랙의 상위 규범은 통합관리지침이 아니라 「신사업창업사관학교 운영지침」이다.
+            t, _ = pdftext.extract(f)
             return t, str(f.relative_to(ROOT))
     return "", ""
 
@@ -109,9 +113,11 @@ def main() -> None:
         t = norm(raw)
         sq, imap = squash(t)
 
-        m3 = P_L3.search(sq)
-        m1 = P_L1.search(sq)
-        if not (m3 or m1):
+        m3s = list(P_L3.finditer(sq))
+        m1s = list(P_L1.finditer(sq))
+        m3 = m3s[0] if m3s else None
+        m1 = m1s[0] if m1s else None
+        if not (m3s or m1s):
             misses.append((biz, path, "우선순위 문형 미발견"))
             continue
 
@@ -121,25 +127,39 @@ def main() -> None:
             hits = re.findall(r"제(\d+)조\(([^)]{2,20})\)", head)
             return f"제{hits[-1][0]}조({hits[-1][1]})" if hits else ""
 
+        def 우선규범(sq: str, pos: int) -> str | None:
+            """어느 규범이 우선하는가. 「…」 안의 이름을 앞에서 되짚는다.
+
+            L1>L2 를 뭉뚱그리면 안 된다 — 모두의창업 로컬트랙의 상위는
+            통합관리지침이 아니라 「신사업창업사관학교 운영지침」이다.
+            """
+            head = sq[max(0, pos - 120):pos + 40]
+            names = re.findall(r"[「『]([^」』]{4,45})[」』]", head)
+            return names[-1] if names else None
+
         def 원문(m) -> str:
             """공백제거 매치를 원문 구간으로 되돌린다."""
             a, b = imap[m.start()], imap[m.end() - 1] + 1
             return norm(t[a:b])
 
-        if m3:
+        # 한 문서에 적용범위 조가 여럿일 수 있다 (편/트랙 구조). 전수로 낸다.
+        for m in m3s:
             rules.append({
                 "사업명": biz, "우선계층": "L2", "열위계층": "L3", "범위": "all",
-                "근거": [{"doc": path, "조번호": 조번호(m3.start())}],
-                "원문": 원문(m3),
+                "근거": [{"doc": path, "조번호": 조번호(m.start())}],
+                "원문": 원문(m),
                 "해석": "주관기관 규정이 더 엄격해도 세부관리기준이 이긴다",
                 "verified": False,
             })
-        if m1:
+        for m in m1s:
+            상위 = 우선규범(sq, m.start())
             rules.append({
                 "사업명": biz, "우선계층": "L1", "열위계층": "L2", "범위": "unspecified_only",
-                "근거": [{"doc": path, "조번호": 조번호(m1.start())}],
-                "원문": 원문(m1),
-                "해석": "지침·운영요령이 우선. 지침에 없거나 사업 특성상 달리 정한 것만 L2",
+                "우선규범": 상위,
+                "근거": [{"doc": path, "조번호": 조번호(m.start())}],
+                "원문": 원문(m),
+                "해석": (f"{상위 or '지침·운영요령'} 이 우선. 거기 없거나 사업 특성상 "
+                        "달리 정한 것만 이 관리기준"),
                 "verified": False,
             })
 

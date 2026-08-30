@@ -39,7 +39,12 @@
 | 가중치 | RunPod Network Volume 상주 (재다운로드 방지) |
 | 워밍업 | 기동 후 더미 1회 (guided_json 첫 호출은 스키마 컴파일이 붙는다) |
 
-GPU: 8B/14B → RTX 4090(24GB), 32B AWQ → A40(48GB).
+GPU: 8B/14B → RTX 4090(24GB) 로컬. **32B AWQ → A100 SXM(80GB) @ EUR-IS-1** (RunPod).
+
+⚠️ **A40(48GB) 는 폐기**(2026-08-30). A40 이 있는 DC 는 CA-MTL-1·EU-SE-1 둘뿐인데
+**둘 다 네트워크 볼륨을 지원하지 않아** 위 표의 "가중치 볼륨 상주" 와 동시에 성립하지 않는다.
+EUR-IS-1 은 A100 SXM 과 RTX PRO 6000(96GB)이 함께 있어 볼륨을 옮기지 않고 GPU 만 갈아탈 수 있다.
+DC 교차표·명령·비용·함정은 **`GPU Guideline.md`** 가 정본.
 
 ## 2. 어댑터
 
