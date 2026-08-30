@@ -176,61 +176,48 @@ def main() -> None:
         if must not in corpus:
             print(f"  ! 경고: 코퍼스에 '{must}' 가 없다 — 해소가 dangling 으로 샌다")
 
-    import pdfplumber
-    docs: list[tuple[str, Path]] = []
-    for base in (ROOT / "_hwp변환" / "2026_Finance_DATA_FOR_RAG",
-                 ROOT / "2026_Finance_DATA_FOR_RAG",
-                 ROOT / "_hwp변환" / "건국대학교 레퍼런스"):
-        if not base.exists():
-            continue
-        for f in sorted(base.rglob("*.pdf")):
-            if any(x in f.parts for x in ("_골든셋", "_정리보류", "PMS", "사례집")):
-                continue
-            if args.src and args.src not in str(f):
-                continue
-            docs.append((f.stem, f))
-
-    # 같은 stem 이 변환본·원본에 둘 다 있으면 변환본 하나만
-    uniq: dict[str, Path] = {}
-    for stem, f in docs:
-        uniq.setdefault(stem, f)
+    # 🔴 2026-08-30 — 입력을 PDF 에서 **Stage 0 산출물**로 바꿨다.
+    #    이전에는 여기서 PDF 를 다시 파싱했다. 세 가지가 문제였다:
+    #      1. 법령 XML 219건이 대상에서 통째로 빠졌다 (`*.pdf` 만 훑었다).
+    #         법령 간 상호참조가 없으면 참조 폐포가 L2 안에서 끝난다 — RAG 의 존재 이유가 반토막
+    #      2. Stage 0 이 이미 판 것을 다시 판다. 6분이 통째로 중복이다
+    #      3. 두 곳의 파싱 결과가 어긋날 수 있다. 실제로 `max_pages=60` 때문에
+    #         긴 문서는 뒷부분 참조가 수집되지 않았다
+    #    `데이터 전처리 파이프라인.md` §2 가 "0.7 은 Stage 0 산출물만 읽는다" 로 정한 그대로다.
+    S0 = ROOT / "2026_Finance_DATA_FOR_RAG" / "_stage0_articles.json"
+    if not S0.exists():
+        sys.exit(f"Stage 0 산출물이 없다: {S0}\n  먼저 `python scripts/stage0_run.py` 를 돌릴 것")
+    stage0 = json.loads(S0.read_text(encoding="utf-8"))
 
     all_edges, per_doc, skipped, deduped = [], {}, [], []
     strat_count = Counter()
-    total = len(uniq)
-    for n, (stem, f) in enumerate(uniq.items(), 1):
-        try:
-            with pdfplumber.open(f) as probe:
-                npages = len(probe.pages)
-            if npages > 60:
-                skipped.append("%s (%d쪽 중 60쪽만)" % (stem[:50], npages))
-            # 문자중복 레이어(제14차 지침 등)를 자동 감지·해소한다
-            text, was_dup = pdftext.extract(f, max_pages=60)
-            if was_dup:
-                deduped.append(stem[:60])
-        except Exception as exc:                                   # noqa: BLE001
-            print("  x %s - %s" % (stem[:50], exc), flush=True)
+    items = [(k, v) for k, v in stage0.items() if not args.src or args.src in k]
+    total = len(items)
+    for n, (stem, d) in enumerate(items, 1):
+        arts = d.get("articles") or []
+        strategy = d.get("strategy") or "?"
+        if not arts:
+            skipped.append("%s (조 0개)" % stem[:50])
             continue
-        if len(text) < 300:
-            skipped.append("%s (텍스트레이어 없음 -> 판독 대상)" % stem[:50])
-            continue
-        # 🔴 2026-08-28 수정 — 문서 전체가 아니라 **조 단위**로 스캔한다.
-        #    이전에는 src_조번호 가 비어 있어 RAG.md §4-3 참조 폐포 SQL 의
-        #    `WHERE (src_doc_id, src_조번호) IN :진입점` 조인이 성립하지 않았다.
-        #    또 seen 중복제거가 문서 단위라 같은 참조가 여러 조에 있으면 1건만 남았다.
-        arts, strategy = split_articles(text)
-        if arts:
-            edges = []
-            for a in arts:
-                edges += scan(a["본문"], stem, corpus, src_조번호=a["조번호"])
-        else:                       # 조 구조가 없는 문서(별지서식 등)는 종전대로
-            edges = scan(text, stem, corpus)
-            strategy = "문서전체"
+        # 문서 전체가 아니라 **조 단위**로 스캔한다. src_조번호 가 비면
+        # RAG.md §4-3 참조 폐포 SQL 의 `(src_doc_id, src_조번호)` 조인이 성립하지 않는다.
+        # 폐지 조문은 참조 원천이 아니다 — 효력이 없으므로 따라가면 안 된다.
+        edges = []
+        for a in arts:
+            if a.get("삭제"):
+                continue
+            edges += scan(a["본문"], stem, corpus, src_조번호=a["조번호"])
+        # 레이어를 엣지에 붙인다. dangling 비율을 레이어별로 봐야 신호가 산다 —
+        # L1 법령끼리의 인용은 코퍼스 경계(219 규범) 밖으로 나가면 당연히 dangling 이고
+        # 그게 전체의 40%다. 뭉뚱그리면 L2 의 진짜 해소 실패가 묻힌다.
+        lay = d.get("layer")
+        for e in edges:
+            e["src_layer"] = lay
         all_edges += edges
         per_doc[stem] = len(edges)
         strat_count[strategy] += 1
-        print("  [%3d/%d] %4d엣지  조%-3d %-12s %s"
-              % (n, total, len(edges), len(arts), strategy, stem[:44]), flush=True)
+        if n % 25 == 0 or n == total:
+            print("  [%3d/%d] 누적 %d엣지" % (n, total, len(all_edges)), flush=True)
 
     st = Counter(e["해소상태"] for e in all_edges)
     rel = Counter(e["관계"] for e in all_edges)
@@ -240,6 +227,10 @@ def main() -> None:
         "문서수": len(per_doc),
         "엣지수": len(all_edges),
         "해소상태": dict(st),
+        "해소상태_레이어별": {
+            lay: dict(Counter(e["해소상태"] for e in all_edges if e.get("src_layer") == lay))
+            for lay in sorted({e.get("src_layer") for e in all_edges} - {None})
+        },
         "관계": dict(rel),
         "주의": ("dangling 은 '코퍼스에 없다'는 뜻이고, 그 자체가 판정 불가 신호다. "
                  "업로드 시점 A1 화면에 노출해 사용자가 해당 문서를 올리게 유도한다."),

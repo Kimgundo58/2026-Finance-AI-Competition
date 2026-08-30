@@ -74,7 +74,7 @@ schema tenant   사용자 것.  org 별로 격리.              RLS 필수
 | `chunks` | **판정 인덱스 (A등급)** | `vector(1024)` |
 | `case_chunks` | **사례 인덱스 (B등급)** | `vector(1024)` |
 | `rules` / `precedence_rules` | [`rule_base.md`] 참조 | |
-| `refs` | 참조 그래프 1,136 엣지 | |
+| `refs` | 참조 그래프 **27,963 엣지** (271문서) | |
 | `item_alias` | 상품명 -> 비목 별칭 사전 | |
 | `golden_set` | 평가용. **인덱스 투입 금지** | |
 
@@ -398,11 +398,13 @@ DB 를 Supabase 로 빼는 이상 앱 서버에 Postgres 를 얹을 이유도 �
   |    TIPS 는 조 체계가 아님 -> outline_numbered 전략 (1. -> 가. -> 1))
   |
   +- Stage 0.5  적용대상 태깅                     -> corpus.chunks.적용대상
-  |    {주관기관 | 창업기업 | 공통}
-  |    절(節) 헤딩이 이미 선언한다 -> LLM 은 절 밖 조문만
+  |    {주관기관 | 창업기업 | 공통 | 혼재}
+  |    🔴 "절 헤딩이 선언한다" 는 틀렸다 (2026-08-30 실측) -- 장 제목은 절차 구분이다
+  |    조제목/본문 주어로 59% 결정, 나머지는 LLM
   |
   +- Stage 0.7  참조 그래프 (정규식)              -> corpus.refs
-  |    1,288 엣지 / resolved 1,059 / shifted 41 / dangling 188   (2026-08-30)
+  |    27,963 엣지 / resolved 16,656 / shifted 46 / dangling 11,261  (2026-08-30 전 코퍼스)
+  |    L2 는 resolved 76%. L1 dangling 42% 는 코퍼스 경계(219 규범) 밖 인용이다
   |
   +- Stage 0.8  우선순위 조항                     -> corpus.precedence_rules
   |    -> rule_base.md
