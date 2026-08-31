@@ -17,12 +17,26 @@ RAG 의 존재 이유가 이것이다 (구현.md 원칙 5). 사용자 문서가
     python scripts/build_refs.py                  전체
     python scripts/build_refs.py --src 창진원      일부만
     python scripts/build_refs.py --show 예비창업    결과 확인
+
+🔴 **`dst_doc_id` 를 여기서 `doc_id` 로 정규화하지 않는다 — 일부러가 아니라 아직 안 한 것이다.**
+   현재 이 스크립트는 dst 에 세 갈래를 그대로 넣는다:
+     · 파일 경로 (`법령 PDF/L1_법령/법인세법시행령`)  ← 177행 계열
+     · 약칭 (`L1_통합관리지침_제14차`)                ← 196·201행 계열
+     · 정상 doc_id
+   그래서 적재하면 resolved 의 절반이 `documents` 에 없는 dst 를 가리키고,
+   **refs 폐포가 `폐포전용` 문서에 도달하지 못한다** (2026-08-31 실측: 도달 0건).
+   `RAG.md` §4-2 의 `retrieval_scope` 재태깅이 이 폐포를 안전망으로 전제하므로 치명적이다.
+
+   ⚠️ **이 스크립트를 다시 돌려 적재했다면 반드시 이어서 실행할 것:**
+       PYTHONIOENCODING=utf-8 python scripts/normalize_refs.py --apply
+   멱등이고, 매칭 실패는 조용히 넘기지 않고 목록으로 보고한다.
 """
 from __future__ import annotations
 
 import argparse
 import io
 import json
+import os
 import re
 import sys
 from collections import Counter, defaultdict
@@ -98,13 +112,40 @@ def norm_규범(s: str) -> str:
 
 
 def load_corpus_names() -> dict[str, str]:
-    """코퍼스가 보유한 규범명 → 파일 경로. 해소 가능 여부의 판정 기준."""
-    names = {}
+    """코퍼스가 보유한 규범명 → **doc_id**. 해소 가능 여부의 판정 기준.
+
+    🔴 2026-08-31 수정 — 값을 **파일 경로에서 `doc_id` 로 바꿨다.**
+
+    초판은 `법령 PDF/L1_법령/법인세법시행령` 같은 경로를 돌려줬고 그게 그대로
+    `refs.dst_doc_id` 에 들어갔다. `documents.doc_id` 는 `L1_법인세법시행령_20260227`
+    이라 **조인이 안 된다.** 실측 결과 resolved 17,386건 중 8,668건(50%)이 이 상태였고,
+    그래서 **refs 폐포가 `폐포전용` 문서에 도달하지 못했다** (도달 0건).
+    `RAG.md` §4-2 의 `retrieval_scope` 재태깅이 이 폐포를 안전망으로 전제하므로 치명적이다.
+
+    DB 를 읽어 실제 `doc_id` 를 쓴다. DB 가 없으면 경로로 되돌아가되 **경고한다** —
+    그 산출물은 적재 후 `normalize_refs.py --apply` 를 반드시 태워야 한다.
+    """
+    names: dict[str, str] = {}
+    try:
+        import psycopg
+        dsn = os.environ.get("SUDDOE_DSN", "postgresql://postgres:devpw@localhost:5432/suddoe")
+        with psycopg.connect(dsn, connect_timeout=5) as conn:
+            for (doc_id,) in conn.execute("SELECT doc_id FROM corpus.documents").fetchall():
+                # doc_id 는 `L1_<제명>_<날짜>` 또는 제명 그대로다. 둘 다 제명으로 접어 등록한다.
+                몸통 = doc_id[3:] if doc_id.startswith("L1_") else doc_id
+                if len(몸통) > 9 and 몸통[-8:].isdigit() and 몸통[-9] == "_":
+                    몸통 = 몸통[:-9]
+                names.setdefault(norm_규범(몸통), doc_id)
+                names.setdefault(norm_규범(doc_id), doc_id)
+        return names
+    except Exception as e:
+        print(f"⚠️ documents 를 못 읽어 파일 경로로 대체한다 ({type(e).__name__}). "
+              f"적재 후 반드시 `python scripts/normalize_refs.py --apply` 를 돌릴 것.")
+
     src = ROOT / "법령 PDF" / "_law_sources.json"
     if src.exists():
         for k in json.loads(src.read_text(encoding="utf-8")):
             names[norm_규범(k)] = f"법령 PDF/L1_법령/{k}"
-    # 중기부·창진원 배포본
     for f in (ROOT / "2026_Finance_DATA_FOR_RAG").rglob("*.pdf"):
         names.setdefault(norm_규범(f.stem), str(f.relative_to(ROOT)))
     return names
@@ -115,6 +156,10 @@ def load_corpus_names() -> dict[str, str]:
 #    이라고 쓸 때 우리는 「국민 평생 직업능력 개발법」으로 갖고 있어서, 참조 폐포가
 #    거기서 끊긴다 — RAG 가 그 법을 못 가져온다는 뜻이다.
 #    수집 단계(`fetch_missing_norms.py`)와 같은 실측표다.
+# 통합관리지침 제14차의 실제 doc_id. 약칭("L1_통합관리지침_제14차")을 넣으면
+# documents 와 조인이 안 된다 — 위 load_corpus_names 주석 참조.
+지침_DOCID = "L1_중소기업창업_지원사업_통합관리지침_제14차개정_20251223"
+
 별칭 = {
     # 제명 개정 — 세부관리기준이 구 제명으로 인용한다
     "근로자직업능력개발법": "국민평생직업능력개발법",
@@ -193,12 +238,13 @@ def scan(text: str, doc_id: str, corpus: dict[str, str],
                             현행 = [k for k, v in 지침_조제목["제14차"].items() if v == tbl[조]]
                             if 현행:
                                 e.update(해소상태="shifted",
-                                         dst_doc_id="L1_통합관리지침_제14차",
+                                         # 약칭이 아니라 실제 doc_id 를 쓴다 (위 주석)
+                                         dst_doc_id=지침_DOCID,
                                          dst_조번호=f"제{현행[0]}조",
                                          보정근거=f"{판} 조번호로 표기됨 → 조제목 '{tbl[조]}' 로 재매칭")
                                 break
                     else:
-                        e.update(해소상태="resolved", dst_doc_id="L1_통합관리지침_제14차")
+                        e.update(해소상태="resolved", dst_doc_id=지침_DOCID)
                 elif target == "요령":
                     # 「중소기업창업 지원사업 운영요령」(중기부고시 2024-101). 코퍼스에 있다.
                     e.update(해소상태="resolved",

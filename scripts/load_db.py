@@ -143,6 +143,56 @@ def main() -> None:
             VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""", golds)
         conn.commit()
 
+    # ════════════════════════════════════════════════════════════════════════
+    # 🔴 후처리 3종 — 이걸 빼면 적재할 때마다 조용히 되돌아간다
+    #
+    #   위 INSERT 는 JSON 산출물의 값을 그대로 넣는다. 그런데 아래 셋은 JSON 이 아니라
+    #   **적재 후 별도 스크립트가 실측으로 정하는 값**이라, TRUNCATE 재적재를 하면
+    #   전부 초기값으로 돌아간다. 에러가 안 나므로 알아채기 어렵다:
+    #
+    #     extraction        전부 native  -> 스캔 판독본이 A등급 인용 가능해진다
+    #     retrieval_scope   전부 진입점  -> 민상법·세법이 검색 후보로 돌아온다
+    #                                       (실측: RRF hit@5 49.2% -> 44.6% 로 떨어진다)
+    #     refs.dst_doc_id   파일경로/약칭 -> refs 폐포가 폐포전용 문서에 도달 못 한다
+    #     version/시행일/doc_type  전부 NULL -> 판정 응답의 **버전스탬프**를 못 만든다
+    #                       (LLM.md §3-4 [2겹]. 이 아래 INSERT 가 하드코딩 None 을 넣는다)
+    #
+    #   자동 실행하지 않고 **안내만 한다** — 각 스크립트가 판단(분류 기준)을 담고 있어
+    #   무인 실행하면 근거 없이 값이 바뀐다. 대신 현재 상태를 재서 빠졌으면 크게 알린다.
+    # ════════════════════════════════════════════════════════════════════════
+    with psycopg.connect(DSN) as conn:
+        native = conn.execute(
+            "SELECT count(*) FROM corpus.documents WHERE extraction='native'").fetchone()[0]
+        전체 = conn.execute("SELECT count(*) FROM corpus.documents").fetchone()[0]
+        진입점 = conn.execute(
+            "SELECT count(*) FROM corpus.documents WHERE retrieval_scope='진입점'").fetchone()[0]
+        경로형 = conn.execute("""SELECT count(*) FROM corpus.refs r
+            WHERE dst_doc_id IS NOT NULL AND NOT EXISTS
+              (SELECT 1 FROM corpus.documents d WHERE d.doc_id = r.dst_doc_id)""").fetchone()[0]
+        버전없음 = conn.execute(
+            "SELECT count(*) FROM corpus.documents WHERE version IS NULL").fetchone()[0]
+
+    할일 = []
+    if native == 전체:
+        할일.append(("extraction 이 전부 native", "python scripts/retag_extraction.py --apply"))
+    if 진입점 == 전체:
+        할일.append(("retrieval_scope 가 전부 진입점", "python scripts/retag_scope.py"))
+    if 경로형:
+        할일.append((f"refs.dst_doc_id 미해소 {경로형:,}건",
+                     "python scripts/normalize_refs.py --apply"))
+    if 버전없음 == 전체:
+        할일.append(("documents.version 이 전부 NULL (판정 응답의 버전스탬프를 못 만든다)",
+                     "python scripts/backfill_doc_meta.py --apply"))
+    if 할일:
+        print("\n" + "=" * 68)
+        print("🔴 후처리가 남았다. 이 상태로 두면 조용히 틀린다:")
+        for 무엇, 명령 in 할일:
+            print(f"   · {무엇}")
+            print(f"       PYTHONIOENCODING=utf-8 {명령}")
+        print("=" * 68)
+    else:
+        print("\n후처리 3종 모두 반영돼 있다 (extraction · retrieval_scope · refs.dst_doc_id)")
+
     print(f"index_guard 거부 {len(skipped)}건")
     for d, w in skipped[:5]:
         print(f"   {d[:44]} : {w}")
