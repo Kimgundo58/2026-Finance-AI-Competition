@@ -11,7 +11,8 @@
       {
         "matcher": "Bash",
         "hooks": [
-          { "type": "command", "command": "python .claude/hooks/check_bash_encoding.py" }
+          { "type": "command", "command": "python .claude/hooks/check_bash_encoding.py" },
+          { "type": "command", "command": "python .claude/hooks/guard_gpu.py" }
         ]
       },
       {
@@ -26,6 +27,13 @@
         "matcher": "Write|Edit",
         "hooks": [
           { "type": "command", "command": "python .claude/hooks/check_pdf_extract.py" }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "python .claude/hooks/guard_gpu.py" }
         ]
       }
     ]
