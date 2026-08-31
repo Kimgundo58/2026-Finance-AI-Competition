@@ -195,8 +195,13 @@ CREATE TABLE tenant.f_profile (
     사업명          TEXT NOT NULL,
     협약시작일      DATE,
     협약종료일      DATE,
-    정부지원_현금   NUMERIC, 정부지원_현물 NUMERIC,   -- F1 = 재원 x 형태 4분면
-    자기부담_현금   NUMERIC, 자기부담_현물 NUMERIC,
+    -- 🔴 현물 2컬럼 DROP (2026-08-31 · db/init/04_agent.sql D1-a).
+    --    현물 계상은 지출이 아니다 — 이 서비스는 "이 돈 써도 되나"를 판정한다.
+    --    현물은 협약 시점에 산정되는 회계 항목이지 집행 승인 대상이 아니다.
+    --    손실 1건: 자기부담금 구성비율 검증(현금 5% 이상 / 현물 20% 이하 등)이
+    --    불가능해졌다. 되살리려면 현물 총액 1컬럼만 다시 두면 된다.
+    정부지원_현금   NUMERIC,
+    자기부담_현금   NUMERIC,
     과업범위요약    TEXT,          -- F2. 원문은 저장하지 않는다
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (org_id, 사업명)
@@ -208,14 +213,15 @@ CREATE TABLE tenant.f_exec (
     profile_id  UUID NOT NULL REFERENCES tenant.f_profile(profile_id) ON DELETE CASCADE,
     비목        TEXT NOT NULL,                 -- 비목 어휘집 enum (rule_base.md §1-b)
     재원        TEXT NOT NULL CHECK (재원 IN ('정부지원','자기부담')),
-    형태        TEXT NOT NULL CHECK (형태 IN ('현금','현물')),
+    -- 🔴 형태 DROP (2026-08-31 D1-a). 현물 집행은 판정 대상이 아니다.
+    --    집계 축은 재원 하나로 줄었다.
     거래처      TEXT,                          -- 동일 거래처 누적(2천만원 심의)용
     인력역할    TEXT,                          -- 인별월별 집계용. 이름 아님
     귀속월      DATE,
     금액        NUMERIC NOT NULL,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE INDEX ix_exec_agg ON tenant.f_exec (profile_id, 비목, 재원, 형태);
+CREATE INDEX ix_exec_agg ON tenant.f_exec (profile_id, 비목, 재원);   -- 형태 제거로 재생성
 
 -- F4 인력. 참여율 상한이 소속기관 유형(100%/130%)으로 갈린다.
 CREATE TABLE tenant.f_personnel (
