@@ -29,7 +29,17 @@ BLOCKED_PATHS: tuple[str, ...] = (
     "_범위밖_보류/",
 )
 
-BLOCKED_LAYERS: frozenset[str] = frozenset({"L4", "L5"})
+# 🔴 2026-08-31 L3 추가 (E 세션 BLOCKED · A 처리).
+#    `CLAUDE.md` 의 "L3 는 다른 테이블이라 누수가 구조적으로 불가능하다" 는 L3 가
+#    `corpus.chunks` 에 **절대 안 들어갈 때만** 참이다. 그전까지는 어떤 인제스천 경로가
+#    layer='L3' 로 태깅해 `stage0_ingest` 를 태우면 `index_target=True` 로 통과했다.
+#    현재 chunks 는 L1 20,030 · L2 495 로 깨끗해서 **지표에 안 나타나는 무음 구멍**이었다.
+BLOCKED_LAYERS: frozenset[str] = frozenset({"L3", "L4", "L5"})
+
+# 같은 거부라도 이유가 다르다. L4·L5 는 "남의 규정이라 테스트 전용" 이고,
+# L3 는 "우리 기관 규정이지만 **가는 테이블이 다르다**" 이다. 한 문장으로 뭉치면
+# 나중에 이 메시지를 본 사람이 L3 를 통과시키려 든다.
+_거부문구 = {"L3": "레이어 `L3` 는 tenant.l3_articles 로 간다 — 검색 인덱스 대상이 아니다"}
 
 
 def reject_reason(path: str, layer: str | None = None) -> str | None:
@@ -39,7 +49,8 @@ def reject_reason(path: str, layer: str | None = None) -> str | None:
         if seg in norm:
             return f"경로 블랙리스트 `{seg}`"
     if layer and layer.upper() in BLOCKED_LAYERS:
-        return f"레이어 `{layer}` 는 판정 인덱스 대상이 아니다 (테스트 전용)"
+        return _거부문구.get(layer.upper(),
+                            f"레이어 `{layer}` 는 판정 인덱스 대상이 아니다 (테스트 전용)")
     return None
 
 
