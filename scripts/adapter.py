@@ -45,7 +45,10 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 
-DSN = os.environ.get("SUDDOE_DSN", "postgresql://postgres:devpw@localhost:5432/suddoe")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _lib import db  # noqa: E402
+
+DSN = db.DSN
 
 
 class RoutingBlocked(RuntimeError):
@@ -195,8 +198,7 @@ class AnthropicAPI(제공자):
 def _사고기록(종류: str, 상세: dict, dsn: str | None = None) -> None:
     """`tenant.incidents` 에 남긴다. 🔴 기록 실패가 차단을 삼키면 안 된다."""
     try:
-        import psycopg
-        with psycopg.connect(dsn or DSN, connect_timeout=3) as conn:
+        with db.connect(dsn, connect_timeout=3) as conn:
             conn.execute(
                 'INSERT INTO tenant.incidents ("종류", "상세") VALUES (%s, %s::jsonb)',
                 (종류, json.dumps(상세, ensure_ascii=False)))

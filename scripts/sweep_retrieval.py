@@ -42,10 +42,11 @@ import time
 import psycopg
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _lib import db  # noqa: E402
 import eval_store  # noqa: E402
 import retrieve  # noqa: E402
 
-DSN = eval_store.DSN
+DSN = db.DSN
 
 W_그리드 = [0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
 RRFK_그리드 = [5, 10, 20, 60, 120]

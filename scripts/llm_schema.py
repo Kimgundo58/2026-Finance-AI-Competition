@@ -77,11 +77,8 @@ def 체크코드_enum(dsn: str | None = None, 사업명: str | None = None) -> l
        호출자가 인자를 빠뜨린 순간 조용히 예전 버그로 돌아간다. 좁은 쪽이 안전하다 —
        남의 사업 항목을 제안하는 것보다 항목이 모자란 게 낫다.
     """
-    import os
-    import psycopg
-    d = dsn or os.environ.get("SUDDOE_DSN",
-                              "postgresql://postgres:devpw@localhost:5432/suddoe")
-    with psycopg.connect(d) as conn:
+    from _lib import db
+    with db.connect(dsn) as conn:
         return [r[0] for r in conn.execute(
             'SELECT code FROM corpus.check_items '
             'WHERE "사업명" IS NULL OR "사업명" = %s ORDER BY code', [사업명]).fetchall()]

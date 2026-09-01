@@ -43,15 +43,15 @@ import traceback
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Optional
 
-import psycopg
-
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _lib import db, paths                                           # noqa: E402
+paths.ensure_on_path()
 from assemble_context import 조립                                    # noqa: E402
 from llm_schema import 판정_스키마, 체크코드_enum                      # noqa: E402
 from llm_validate import 검증, f_경로집합                              # noqa: E402
 from normalize_run import LLM실패, llm_호출, 정규화                     # noqa: E402
 
-DSN = os.environ.get("SUDDOE_DSN", "postgresql://postgres:devpw@localhost:5432/suddoe")
+DSN = db.DSN
 
 # ════════════════════════════════════════════════════════════════════════════
 # 임계치 — 🔴 전부 미결 항목이다 (`서비스 아키텍쳐.md` §11 임계치 대장 #7)
@@ -432,7 +432,7 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool 
         # 🔴 autocommit. (4) LLM 호출이 30초를 넘길 수 있는데 그동안 읽기 트랜잭션을
         #    붙들고 있으면 다른 세션의 DDL·VACUUM 이 막힌다. 쓰기는 단문 INSERT 하나뿐이라
         #    문장 단위 원자성으로 충분하다.
-        conn = conn or psycopg.connect(DSN, connect_timeout=5, autocommit=True)
+        conn = conn or db.connect(connect_timeout=5, autocommit=True)
     except Exception as e:
         # `Agent.md` §8: DB 연결 실패 → 503. 판정을 추측으로 만들지 않는다.
         return _빈응답("판단불가", "데이터베이스에 연결할 수 없어 판정을 내리지 않았습니다.",
@@ -683,7 +683,7 @@ def _병렬_l3(org_id, 사업명):
     try:
         # 🔴 autocommit. 읽기 트랜잭션을 붙들면 다른 세션의 DDL 과 교착난다
         #    (2026-08-31 8세션 병렬 중 DeadlockDetected 실측 — C 세션 보고).
-        with psycopg.connect(DSN, connect_timeout=5, autocommit=True) as c:
+        with db.connect(connect_timeout=5, autocommit=True) as c:
             return _l3로드(c.cursor(), org_id, 사업명), None
     except Exception as e:
         return [], f"{type(e).__name__}: {e}"
@@ -691,7 +691,7 @@ def _병렬_l3(org_id, 사업명):
 
 def _병렬_검색(질문, 사업명, top_k):
     try:
-        with psycopg.connect(DSN, connect_timeout=5, autocommit=True) as c:
+        with db.connect(connect_timeout=5, autocommit=True) as c:
             return _검색(c.cursor(), 질문, 사업명, top_k=top_k), None
     except Exception as e:
         return {"top5": [], "폐포": [], "참조사슬": [], "게이트값": 0.0,
@@ -814,7 +814,7 @@ def main() -> None:
 
     if a.golden:
         워밍업()
-        with psycopg.connect(DSN, autocommit=True) as conn:
+        with db.connect(autocommit=True) as conn:
             # 🔴 D2 이후: 공통 27문항은 `사업명 IS NULL` + `적용범위` 에 원표기가 있다.
             #    사업명='공통...' 을 기대하는 코드는 그 자리에서 0건이 된다.
             컬럼 = {r[0] for r in conn.execute(

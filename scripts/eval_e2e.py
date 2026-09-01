@@ -42,9 +42,10 @@ import traceback
 import psycopg
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _lib import db  # noqa: E402
 import eval_store  # noqa: E402
 
-DSN = eval_store.DSN
+DSN = db.DSN
 
 판정4 = ("가능", "조건부", "불가", "판단불가")
 

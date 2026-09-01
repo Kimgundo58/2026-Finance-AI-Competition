@@ -33,9 +33,10 @@ import os
 import re
 import sys
 
-import psycopg
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _lib import db  # noqa: E402
 
-DSN = os.environ.get("SUDDOE_DSN", "postgresql://postgres:devpw@localhost:5432/suddoe")
+DSN = db.DSN
 
 # ── B0 시스템 지시 — 🔴 고정 문구. 가변 값을 넣지 마라 (prefix 캐시가 깨진다) ──
 B0 = """당신은 창업지원금 지출의 사전 승인 여부를 판정한다.
@@ -258,7 +259,7 @@ def main() -> None:
                     help="판정층 격리 모드 — 검색 대신 정답 근거를 넣는다 (D6)")
     a = ap.parse_args()
 
-    with psycopg.connect(DSN) as conn:
+    with db.connect() as conn:
         cur = conn.cursor()
         cur.execute("SELECT 질문, 사업명, 정답판정 FROM eval.golden_set WHERE gold_id=%s",
                     (a.gold_id,))

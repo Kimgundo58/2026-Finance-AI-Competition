@@ -31,9 +31,11 @@ import statistics
 import sys
 import time
 
-import psycopg
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _lib import db, paths                                           # noqa: E402
+paths.ensure_on_path()
 
-DSN = os.environ.get("SUDDOE_DSN", "postgresql://postgres:devpw@localhost:5432/suddoe")
+DSN = db.DSN
 
 # ── (3)-b pre-filter — 평가와 실전이 같은 집합을 봐야 한다 ────────────────────
 FILTER = """embedding IS NOT NULL AND status='active' AND parse_quality='high'
@@ -157,7 +159,7 @@ def 토큰화(texts: list[str]) -> list[list[str]]:
     """
     global _토큰화, _stdout보관
     if _토큰화 is None:
-        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        paths.ensure_on_path()
         원래 = sys.stdout
         from stage2_bm25 import 토큰화 as _t
         if sys.stdout is not 원래:
@@ -334,7 +336,7 @@ def main() -> None:
 
     # 🔴 읽기 전용인데도 트랜잭션을 붙들면 다른 세션의 DDL 과 교착이 난다
     #    (2026-08-31 8세션 병렬 중 DeadlockDetected 실측). autocommit 으로 푼다.
-    with psycopg.connect(DSN, autocommit=True) as conn:
+    with db.connect(autocommit=True) as conn:
         cur = conn.cursor()
         if a.bench:
             _p50(cur, 기록=a.기록)

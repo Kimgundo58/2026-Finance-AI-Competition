@@ -26,8 +26,9 @@ import os
 import sys
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-if ROOT not in sys.path:
-    sys.path.insert(0, ROOT)
+sys.path.insert(0, ROOT)
+from _lib import db, paths                                           # noqa: E402
+paths.ensure_on_path()
 
 판단불가 = "판단불가"
 
@@ -136,11 +137,8 @@ def 유사사례(cur, 질문: str, *, k: int = 3, 판정: str) -> list[dict]:
 # ── 자기 점검 (F5·F7) ────────────────────────────────────────────────────────
 def _selftest() -> int:
     """`판정` 게이트와 분리 불변식을 스스로 검사한다. 회귀에서 이걸 돌린다."""
-    import psycopg
-    dsn = os.environ.get("SUDDOE_DSN",
-                         "postgresql://postgres:devpw@localhost:5432/suddoe")
     실패 = 0
-    with psycopg.connect(dsn) as conn, conn.cursor() as cur:
+    with db.connect() as conn, conn.cursor() as cur:
         # ① 게이트 — 판단불가 아닌 판정은 전부 거부
         for p in ("가능", "조건부", "", "판단 불가", "불가"):
             try:
@@ -278,10 +276,7 @@ def _f7() -> int:
             print(f"  ✓ 분리 — {파일} 에 `{금지}` 없음")
 
     # ② 게이트 — 4-way 중 판단불가 외 전부 거부. ①과 달리 실행으로 본다
-    import psycopg
-    dsn = os.environ.get("SUDDOE_DSN",
-                         "postgresql://postgres:devpw@localhost:5432/suddoe")
-    with psycopg.connect(dsn) as conn, conn.cursor() as cur:
+    with db.connect() as conn, conn.cursor() as cur:
         for p in ("가능", "조건부", "불가"):
             try:
                 유사사례(cur, "테스트", 판정=p)

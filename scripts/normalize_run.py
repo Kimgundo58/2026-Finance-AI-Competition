@@ -47,9 +47,10 @@ import urllib.request
 from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _lib import db  # noqa: E402
 from llm_schema import 비목_enum  # noqa: E402
 
-DSN = os.environ.get("SUDDOE_DSN", "postgresql://postgres:devpw@localhost:5432/suddoe")
+DSN = db.DSN
 VLLM = os.environ.get("VLLM_URL", "http://localhost:8000")
 MODEL = os.environ.get("VLLM_MODEL", "Qwen/Qwen3-32B-AWQ")
 MODEL_1 = os.environ.get("VLLM_MODEL_1", "")     # 슬롯 ① 을 다른 모델로 돌릴 때만
@@ -295,8 +296,7 @@ def main() -> None:
     a = ap.parse_args()
 
     if a.golden:
-        import psycopg
-        with psycopg.connect(DSN) as conn:
+        with db.connect() as conn:
             rows = conn.execute("SELECT gold_id, 질문 FROM eval.golden_set "
                                 "ORDER BY gold_id").fetchall()
         for gid, q in rows:
