@@ -116,13 +116,17 @@ def main() -> None:
     by = {}
     for r in 유효:
         by.setdefault(r["사업명"], []).append(r["평균커버리지"])
+    # 🔴 `사업명 IS NULL` 은 L1 공통행이다(9행). None 을 그대로 포맷하면 TypeError 로
+    #    **여기서 스크립트가 죽어** 뒤의 «임계 미만 문장» 목록이 통째로 안 나온다
+    #    (2026-09-01 실측 — 검수 재료를 뽑으려다 걸렸다). 이름을 붙여 센다.
     for k, v in sorted(by.items(), key=lambda x: sum(x[1]) / len(x[1])):
-        print(f"   {k:<22} {sum(v)/len(v):.3f}  ({len(v)}행)")
+        print(f"   {(k or 'L1공통(사업명 NULL)'):<22} {sum(v)/len(v):.3f}  ({len(v)}행)")
 
     if 낮은것:
         print(f"\n== 임계 미만 문장 — 사람이 원문과 대조할 순서 (낮은 것부터)")
-        for c, 사업, 비목, 축, s in sorted(낮은것):
-            print(f"   {c:.2f}  {사업[:10]:<10} {비목[:12]:<12} {축:<12} {s[:72]}")
+        for c, 사업, 비목, 축, s in sorted(낮은것, key=lambda x: (x[0], x[1] or "", x[2] or "")):
+            print(f"   {c:.2f}  {(사업 or 'L1공통')[:10]:<10} {(비목 or '-')[:12]:<12} "
+                  f"{축:<12} {s[:72]}")
 
     if a.json:
         with open(a.json, "w", encoding="utf-8") as f:
