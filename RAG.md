@@ -24,7 +24,9 @@
 |---|---|---|
 | L1 | `2026_Finance_DATA_FOR_RAG/중기부/` + `법령 PDF/L1_법령/` 중 `index:true` (219 규범) | O |
 | L2 | `2026_Finance_DATA_FOR_RAG/창진원/` 세부관리기준 (41) | O |
-| B급 | `사례집/` + `kosmes_faq.json` | O — **사례 인덱스** (판단불가 경로 전용) |
+| B급 | `사례집/` 중 **4문서** | O — **사례 인덱스** `case_chunks` 193행 (판단불가 경로 전용) |
+| — | `kosmes_faq.json` 194건 | ❌ **미투입.** 크롤링만 하고 적재기가 이 경로를 안 탄다 (2026-09-01 오너 확정: 안 쓴다) |
+| — | `사례집/_부정행위사례집_OCR.json` 42건 | ❌ 미투입. `stage2_cases.py` 가 커버리지 측정용으로만 연다 |
 | L3 | 사용자 업로드 | O — 해당 org 전용, `tenant` 스키마 |
 | — | `PMS/` 매뉴얼 42건 | X — 규범이 아님. F축 입력 UX 설계 자료 |
 | — | 별표 PDF 103건 | 판정 유효 4건만 |
@@ -32,7 +34,7 @@
 
 - 레이어는 **발행주체** 기준 — 법률·시행령·행정규칙은 누가 참조하든 L1. 조달 경로는
   `_law_sources.json` 의 `sources` 배열이 별도로 든다
-- 거부는 문장이 아니라 코드다 — `scripts/index_guard.py` (`stage0_ingest.py` 가 `index_target`
+- 거부는 문장이 아니라 코드다 — `scripts/index_guard.py` (`load_db.py` 가 `index_target`
   직전에 통과). 회귀 테스트 `tests/test_index_guard.py`. **새 인덱싱 경로는 반드시 이 게이트를 태운다**
 
 ## 2. 저장소 — Supabase

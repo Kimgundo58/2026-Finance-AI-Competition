@@ -66,7 +66,8 @@ class 슬롯:
     설명: str
     f_axis: bool
     기본모델: str
-    max_tokens: int = 1500
+    # 🔴 1500 -> 3000 (2026-09-01 격상). 실전 1차에서 판단불가 5건이 전부 잘림이었다.
+    max_tokens: int = 3000
     판정회수: bool = True      # "판정 1건 = LLM 2회" 셈에 들어가는가
 
 
