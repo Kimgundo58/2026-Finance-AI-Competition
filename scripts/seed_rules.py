@@ -1664,7 +1664,7 @@ def main():
 
         # 🔴 개수만 세면 안 된다. 2차 검수가 `count(DISTINCT 비목)=10` 만 보고
         #    "용어 사전과 정확히 일치" 로 판정했는데 실제로는 2종의 문자열이 달랐다.
-        #    기준 문서(guided_json_enum)과 **집합 비교**한다.
+        #    기준 문서(guided_json_enum)와 **집합 비교**한다.
         db비목 = {r[0] for r in conn.execute("SELECT DISTINCT 비목 FROM rules").fetchall()}
         정본 = 기준문서_비목_enum()
         print(f"== 비목 집합 대조 (정본 {len(정본)}종 / DB {len(db비목)}종)")
