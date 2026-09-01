@@ -55,7 +55,7 @@
 1. **코드가 기준인 것** — 문서와 어긋나면 코드를 믿는다
    `scripts/pdftext.py` · `db/init/01_schema.sql` · `scripts/index_guard.py` ·
    `법령 PDF/_law_sources.json` · `2026_Finance_DATA_FOR_RAG/_refs.json` ·
-   `_precedence_rules.json`
+   `2026_Finance_DATA_FOR_RAG/_precedence_rules.json`
 2. **실측이 기준인 것** — 수치는 DB 와 SessionStart 훅이 이긴다
 3. 그 밖은 `0_현황.md`
 
