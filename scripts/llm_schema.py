@@ -1,18 +1,18 @@
 # -*- coding: utf-8 -*-
-"""LLM 출력 스키마 2겹. 정본은 `LLM.md` §3-4.
+"""LLM 출력 스키마 2겹. 기준 문서는 `LLM.md` §3-4.
 
 [1겹] LLM 출력      — vLLM `guided_json` 강제 대상. LLM 이 채운다
 [2겹] 최종 응답     — (5) 검증·강등기가 변환·보강해 화면과 `tenant.decisions` 로
 
 🔴 **폐쇄 목록을 이 파일에 박지 않는다.**
    `비목` enum 은 `_비목_어휘집.json` 의 `guided_json_enum` 을 **실행 시점에** 읽는다
-   (`rule_base.md` §1-b — 정본은 파일이다). 여기에 복사하면 어휘집이 바뀌어도
+   (`rule_base.md` §1-b — 기준 문서는 파일이다). 여기에 복사하면 용어 사전이 바뀌어도
    조용히 옛 목록으로 강제하고, `rules.비목` 조인이 끊긴다.
    같은 이유로 F 필드 경로는 `tenant` 실제 컬럼에서 만든다 (`llm_validate.py`).
 
 실행:
     PYTHONIOENCODING=utf-8 python scripts/llm_schema.py          # 스키마 실물 출력
-    PYTHONIOENCODING=utf-8 python scripts/llm_schema.py --slot 1 # ① 정규화 슬롯만
+    PYTHONIOENCODING=utf-8 python scripts/llm_schema.py --slot 1 # ① 정규화 호출 자리만
 """
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ S번호_PATTERN = r"^S\d{2,3}$"      # 조립기가 B1→B2→B3 통합 연번�
 
 
 def 비목_enum(경로: Path | None = None) -> list[str]:
-    """`_비목_어휘집.json` 의 guided_json_enum. 비목 폐쇄 목록의 유일한 정본."""
+    """`_비목_어휘집.json` 의 guided_json_enum. 비목 폐쇄 목록의 유일한 기준 문서."""
     p = 경로 or 어휘집_경로
     v = json.loads(p.read_text(encoding="utf-8"))
     대기 = v.get("enum_검수대기") or []
@@ -57,10 +57,10 @@ def 비목_enum(경로: Path | None = None) -> list[str]:
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# [1겹] guided_json — ④-b 판정 조립 슬롯
+# [1겹] guided_json — ④-b 판정 조립 호출 자리
 # ════════════════════════════════════════════════════════════════════════════
 def 체크코드_enum(dsn: str | None = None, 사업명: str | None = None) -> list[str]:
-    """`corpus.check_items.code` 중 **이 사업에 해당하는 것만**. 해야할일 폐쇄 목록의 정본.
+    """`corpus.check_items.code` 중 **이 사업에 해당하는 것만**. 해야할일 폐쇄 목록의 기준 문서.
 
     이 테이블의 존재 이유가 **안정 식별자**다(`02_frontend.sql`). 열어 두면 LLM 이
     "과업 범위 확정"/"계약 범위 명확화" 를 매번 다르게 뱉고, 재판정 때 사용자가
@@ -142,10 +142,10 @@ def 판정_스키마(s번호들: list[str] | None = None,
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# [1겹] guided_json — ① 정규화 슬롯
+# [1겹] guided_json — ① 정규화 호출 자리
 # ════════════════════════════════════════════════════════════════════════════
 def 정규화_스키마(비목목록: list[str] | None = None) -> dict[str, Any]:
-    """자연어 → JSON. `비목` 이 어휘집 enum 으로 닫히는 유일한 슬롯이다.
+    """자연어 → JSON. `비목` 이 용어 사전 enum 으로 닫히는 유일한 호출 자리이다.
 
     ⚠️ `비목` 은 인자로 받지 않으면 **실행 시점에 파일을 읽는다.** 하드코딩 금지.
     """
@@ -179,7 +179,7 @@ class 인용:
     doc_id: Optional[str] = None                # 코드 — s맵 → DB
     조번호: Optional[str] = None                # 코드
     조제목: Optional[str] = None                # 코드
-    항호: Optional[str] = None                  # 코드 (s맵 값이 정본)
+    항호: Optional[str] = None                  # 코드 (s맵 값이 기준 문서)
     원문: Optional[str] = None                  # 코드 — S번호 → DB 원문 치환. **생성 금지**
     원문범위: Optional[str] = None              # 코드 — '항' | '조전체' | '청크'. 아래 주석
     version: Optional[str] = None               # 코드 — documents.version
