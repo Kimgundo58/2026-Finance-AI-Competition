@@ -3,7 +3,7 @@
 
 오늘의 목표가 이 파일이다: **judge_cli 한 줄로 끝까지 돌고, 지표가 남는다.**
 `orchestrate.판정()` 은 dict 를 돌려주는 라이브러리이고, 여기는 그걸 사람이 읽는
-화면으로 바꾼다. UI 보다 CLI 판정기가 먼저다 (`CLAUDE.md` — 판정 품질이 골든셋을
+화면으로 바꾼다. UI 보다 CLI 판정기가 먼저다 (`CLAUDE.md` — 판정 품질이 정답셋을
 못 넘으면 UI 는 의미가 없다).
 
     PYTHONIOENCODING=utf-8 python scripts/judge_cli.py "맥북 250만원 사도 되나요"
@@ -42,7 +42,7 @@ def 출력(r: dict, *, 상세: bool = True) -> None:
     print(_헤드(r))
 
     if r.get("갈래"):
-        # 게이트 C — "비목을 고르세요" 로 문제를 되돌려주지 않는다.
+        # 통과 조건 C — "비목을 고르세요" 로 문제를 되돌려주지 않는다.
         # 각 선택의 판정 결과를 나란히 보여주고 고르게 한다 (`Agent.md` §3 C).
         print("\n  비목이 갈립니다. 각각의 판정은 이렇습니다 —")
         for g in r["갈래"]:

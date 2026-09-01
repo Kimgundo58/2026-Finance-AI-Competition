@@ -393,7 +393,7 @@ def 영향_레코드(conn, 신doc: str, 구doc: str, 쌍: dict, 변경: dict) ->
 
 
 def 어휘집_트리거(변경조: list[tuple[dict, dict]], 신doc: str, 구doc: str) -> list[dict]:
-    """비목 어휘집 재검수 트리거 (`Agent.md` §9 A4 마지막 줄)."""
+    """비목 용어 사전 재검수 트리거 (`Agent.md` §9 A4 마지막 줄)."""
     맞은비목 = {}
     for 쌍, 변경 in 변경조:
         if not 변경["본문변경"] or not 쌍["신"]:
@@ -841,7 +841,7 @@ def 실행_db(conn, 줄, 스캔한신doc: set[str] | None = None) -> list[dict]:
 def 실행_xml(conn, 줄, 한도: int | None) -> list[dict]:
     쌍목록 = xml_계보()
     줄(f"\n■ 법령 연혁 XML — 현행 대비 직전 판이 있는 법령 {len(쌍목록)}건")
-    # 우리 코퍼스가 실제로 참조하는 법령만 본다. 944건 전부 파싱하면 수분이 날아가고,
+    # 우리 규정 모음이 실제로 참조하는 법령만 본다. 944건 전부 파싱하면 수분이 날아가고,
     # 아무도 인용하지 않는 법령의 개정은 recheck 대상이 아니다.
     참조되는 = {r[0] for r in conn.execute("""
         SELECT DISTINCT dst_doc_id FROM corpus.refs

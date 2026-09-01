@@ -109,7 +109,7 @@ def 적재(rows: list[dict]) -> None:
 
 
 def verify() -> None:
-    """SQL BM25 와 `bm25s` 의 top-20 겹침률. 골든셋 평가보다 **먼저** 한다."""
+    """SQL BM25 와 `bm25s` 의 top-20 겹침률. 정답셋 평가보다 **먼저** 한다."""
     try:
         import bm25s
     except ImportError:
