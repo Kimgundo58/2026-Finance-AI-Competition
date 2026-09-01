@@ -45,7 +45,7 @@ OUT_JSONL = ROOT / "scripts" / "_work" / "_stage2_chunks.jsonl"
 
 MODEL = "nlpai-lab/KURE-v1"
 MAX_TOK = 900          # 분할 임계. 헤더 ~50토큰 마진 포함해 1,024 아래를 지킨다 (§3-4)
-GATE_TOK = 1024        # 통과 조건. 헤더+본문이 이걸 넘으면 꼬리가 임베딩에서 잘린다
+GATE_TOK = 1024        # 게이트. 헤더+본문이 이걸 넘으면 꼬리가 임베딩에서 잘린다
 MIN_CHARS = 50         # 이 아래는 직전 조각에 병합 — **같은 조 안에서만**
 
 # ── 제외 대상 ────────────────────────────────────────────────────────────────
@@ -257,7 +257,7 @@ def main() -> None:
         """).fetchall()
 
         for doc_id, layer, 기관, pq, ver, status, scope, src in docs:
-            # 🔴 새 인덱싱 경로는 반드시 이 통과 조건을 태운다 (CLAUDE.md)
+            # 🔴 새 인덱싱 경로는 반드시 이 게이트을 태운다 (CLAUDE.md)
             index_guard.assert_indexable(src or doc_id, layer)
             통계["문서"] += 1
 
@@ -311,7 +311,7 @@ def main() -> None:
                     임베딩입력.append(f"{h}\n{txt}")
                     통계["청크"] += 1
 
-        # ── 통과 조건: 1,024토큰 초과 0건 ───────────────────────────────────────
+        # ── 게이트: 1,024토큰 초과 0건 ───────────────────────────────────────
         print("게이트: 헤더+본문 토큰 검사...", flush=True)
         길이 = []
         for i in range(0, len(임베딩입력), 500):
