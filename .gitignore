@@ -47,3 +47,10 @@ scripts/_work/_rrf_tune_cache.pkl
 
 # 스크린샷
 *.png
+
+# 세션 전용 하네스 (프론트-백엔드 간극 세션) — 로컬 전용
+.claude/settings.local.json
+.claude/_fe_be_session.json
+
+# 백업 산출물
+*.bak

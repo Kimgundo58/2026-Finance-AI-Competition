@@ -29,6 +29,9 @@ CREATE TABLE IF NOT EXISTS corpus.check_items (
     항목          TEXT NOT NULL,              -- 기본 문안. LLM 이 다듬되 code 는 유지한다
     설명          TEXT,
     기본_오프셋일 INT,                        -- 집행일 기준 며칠 전. 코드가 초기 due_date 를 계산
+    -- 캘린더 배지. 🔴 기본값 '기타' 라 코드가 새로 늘어도 조용히 틀리지 않는다.
+    --    정본은 이 컬럼이다 — 서버가 항목 텍스트로 분류하면 마스터가 늘 때 갱신이 빠진다.
+    유형          TEXT NOT NULL DEFAULT '기타' CHECK (유형 IN ('기타','계약','비교견적')),
     근거          JSONB,                      -- [{doc_id, 조번호}]
     verified      BOOLEAN NOT NULL DEFAULT false,
     검수자        TEXT,

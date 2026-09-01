@@ -59,12 +59,23 @@ def 비목_enum(경로: Path | None = None) -> list[str]:
 # ════════════════════════════════════════════════════════════════════════════
 # [1겹] guided_json — ④-b 판정 조립 슬롯
 # ════════════════════════════════════════════════════════════════════════════
-def 체크코드_enum(dsn: str | None = None) -> list[str]:
-    """`corpus.check_items.code` 전부. 해야할일 폐쇄 목록의 정본.
+def 체크코드_enum(dsn: str | None = None, 사업명: str | None = None) -> list[str]:
+    """`corpus.check_items.code` 중 **이 사업에 해당하는 것만**. 해야할일 폐쇄 목록의 정본.
 
     이 테이블의 존재 이유가 **안정 식별자**다(`02_frontend.sql`). 열어 두면 LLM 이
     "과업 범위 확정"/"계약 범위 명확화" 를 매번 다르게 뱉고, 재판정 때 사용자가
     체크해 둔 진행상황이 code 로 이어지지 않는다.
+
+    🔴 **사업명으로 걸러야 한다.** `사업명 IS NULL` = 전 사업 공통(38행),
+       그 밖은 해당 사업 전용(14행)이다 — `02_frontend.sql:26`.
+       안 거르면 52개가 통째로 guided_json enum 에 들어가서, 예비창업패키지 판정에
+       LLM 이 `기장대행한도_재도전`·`자격증응시료아님_초격차` 를 고를 수 있다.
+       인덱스를 `(사업명, 비목, 구분)` 로 만들어 놓고 그 키로 조회하지 않던 구멍이었다
+       (2026-09-01 실측 · 오너 지시).
+
+    🔴 **사업명을 안 주면 공통 38개만 준다.** 전체를 주는 쪽을 기본값으로 두면
+       호출자가 인자를 빠뜨린 순간 조용히 예전 버그로 돌아간다. 좁은 쪽이 안전하다 —
+       남의 사업 항목을 제안하는 것보다 항목이 모자란 게 낫다.
     """
     import os
     import psycopg
@@ -72,7 +83,8 @@ def 체크코드_enum(dsn: str | None = None) -> list[str]:
                               "postgresql://postgres:devpw@localhost:5432/suddoe")
     with psycopg.connect(d) as conn:
         return [r[0] for r in conn.execute(
-            "SELECT code FROM corpus.check_items ORDER BY code").fetchall()]
+            'SELECT code FROM corpus.check_items '
+            'WHERE "사업명" IS NULL OR "사업명" = %s ORDER BY code', [사업명]).fetchall()]
 
 
 def 판정_스키마(s번호들: list[str] | None = None,
@@ -214,9 +226,11 @@ def main() -> None:
     ap.add_argument("--s", nargs="*", help="S번호 집합을 주면 인용을 그 안으로 닫는다")
     ap.add_argument("--codes", action="store_true",
                     help="check_items.code 로 해야할일을 닫는다 (DB 조회)")
+    ap.add_argument("--program", help="사업명. 이걸 줘야 그 사업 전용 code 가 붙는다 "
+                                      "(안 주면 전 사업 공통 code 만)")
     a = ap.parse_args()
-    s = 정규화_스키마() if a.slot == "1" else 판정_스키마(a.s or None,
-                                                    체크코드_enum() if a.codes else None)
+    s = 정규화_스키마() if a.slot == "1" else 판정_스키마(
+        a.s or None, 체크코드_enum(사업명=a.program) if a.codes else None)
     print(json.dumps(s, ensure_ascii=False, indent=2))
 
 

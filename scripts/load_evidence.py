@@ -182,22 +182,75 @@ def 읽기() -> list[dict]:
         return list(csv.DictReader(f))
 
 
+# ── 패키지 정규화 ──────────────────────────────────────────────────────
+# 🔴 CSV `패키지` 열은 사람이 쓴 산문이라 `programs.사업명` 과 조인되지 않는다.
+#    실측(2026-09-01): 그대로 넣으면 124행 중 50행(40.3%)만 붙는다.
+#      · '초격차 스타트업'        42행 — 정본은 '초격차 스타트업 프로젝트' (표기차)
+#      · '7개 패키지 공통'        23행 — 사업 열거가 아니라 문장
+#      · '7개 패키지 공통 + TIPS'  7행
+#      · '초격차 스타트업 + TIPS'  2행 — 배열 마지막 원소에 " + TIPS" 가 붙어 오염
+#    해소 사전은 **문자열로 적지 않고 `corpus.programs` 에서 만든다.** 여기에 이름을
+#    다시 쓰면 표기가 갈려 같은 사고가 재발한다 — 별칭도 programs.별칭 이 정본이다.
+def _패키지_해소기(cur):
+    """corpus.programs 로 만든 «CSV 표기 -> 사업명 리스트» 해소 함수를 돌려준다."""
+    cur.execute('SELECT "사업명", "별칭", "비목계통", "활성" FROM corpus.programs')
+    정본: dict[str, str] = {}
+    창업, RND = [], []
+    for 사업명, 별칭, 계통, 활성 in cur.fetchall():
+        정본[사업명] = 사업명
+        for a in (별칭 or []):
+            정본[a] = 사업명
+        if 활성:
+            (창업 if 계통 == "창업" else RND).append(사업명)
+    # "7개 패키지" 는 창업 계통 전부를 가리킨다. 7이 아니면 전제가 깨진 것이니 멈춘다.
+    if len(창업) != 7:
+        sys.exit(f"🔴 창업 계통 사업이 {len(창업)}개다 — CSV 의 '7개 패키지 공통' 을 펼 수 없다")
+
+    def 해소(tok: str) -> list[str] | None:
+        t = tok.strip()
+        if t.endswith("+ TIPS"):                       # 배열 원소에 붙어 온 꼬리
+            앞 = 해소(t[: -len("+ TIPS")].strip())
+            return None if 앞 is None else 앞 + RND
+        if t in ("7개 패키지 공통", "7개 패키지"):
+            return list(창업)
+        return [정본[t]] if t in 정본 else None
+
+    def 정규화(toks: list[str]) -> list[str]:
+        out: list[str] = []
+        for t in toks:
+            r = 해소(t)
+            if r is None:
+                # 조용히 넘기면 조인이 다시 40% 로 떨어진다. 새 표기가 들어오면 멈춘다.
+                sys.exit(f"🔴 패키지 표기를 programs 로 못 푼다: {t!r} — programs.별칭 에 등록하고 다시 돌려라")
+            for x in r:
+                if x not in out:                       # 순서 보존 dedupe
+                    out.append(x)
+        return out
+
+    return 정규화
+
+
 def 적재(rows: list[dict]) -> None:
     with psycopg.connect(DSN) as conn:
         with conn.cursor() as cur:
             # 한 트랜잭션. 중간 상태가 화면에 노출되지 않는다.
+            정규화 = _패키지_해소기(cur)          # TRUNCATE 전에 programs 를 읽는다
             cur.execute("TRUNCATE corpus.evidence_sources;")
             with cur.copy("""COPY corpus.evidence_sources
                              (증빙명, 해당비목, 패키지, 세부정보, 발급처) FROM STDIN""") as cp:
                 for r in rows:
                     cp.write_row((
                         r["증빙서류이름"].strip(),
-                        쪼개기(r.get("해당 비목", "")),
-                        쪼개기(r.get("패키지", "")),
+                        쪼개기(r.get("해당 비목", "")),   # 원문 보존 — 되돌릴 원본이다
+                        정규화(쪼개기(r.get("패키지", ""))),
                         (r.get("세부 정보") or "").strip() or None,
                         (r.get("관련 서식·시스템") or "").strip() or None,
                     ))
         conn.commit()
+        # 🔴 TRUNCATE 가 파생 2컬럼을 비웠다. 같은 트랜잭션 밖에서 곧바로 되채운다 —
+        #    이걸 빼면 재적재할 때마다 해당비목_정본 이 조용히 사라진다.
+        _n, _빔 = 파생컬럼_채우기()
+        print(f"파생 컬럼 재계산 {_n}행 · 해당비목_정본 빈 배열 {_빔}행 (R&D·주관기관·비목아님)")
         n, 비목없음, 발급처없음 = conn.execute("""
             SELECT count(*),
                    count(*) FILTER (WHERE 해당비목 = '{}'),
@@ -230,16 +283,55 @@ def 대조() -> None:
         print(f"        {x[:78]}")
 
 
-def 비목매핑(적용: bool = False) -> None:
-    """해당비목 → 정본 10종 매핑 커버리지. **DB 를 쓰지 않는다.**
+def 파생컬럼_채우기() -> tuple[int, int]:
+    """`해당비목` 원문 -> `해당비목_정본`·`해당비목_분류` 를 다시 계산해 적재한다.
 
-    `해당비목` 은 CSV 원문 그대로 남는다 (원본 보존). 정규화 결과를 적재하려면
-    `해당비목_정본 TEXT[]`·`해당비목_분류 TEXT[]` 컬럼이 필요한데 스키마는
-    이 세션 소유가 아니다 — 오너 결정 대기.
+    🔴 이 함수가 없으면 `적재()` 의 TRUNCATE 가 파생 2컬럼을 비우고 아무도 안 채운다.
+       실제로 2026-09-01 에 그렇게 날아갔다 (52행 -> 124행 전부 빈 배열). 컬럼은
+       `02_frontend.sql:64` 에 있는데 쓰기 경로만 코드에 없었던 것이다.
+
+    ⚠️ **이 함수의 산출은 손으로 채워져 있던 52행과 같지 않다 — 125행 중 73행이다.**
+       분류기가 사람이 비워둔 것까지 매핑하기 때문이고, 재계산과 DB 저장값의 불일치는
+       0 이다(2026-09-01 실측). 즉 여기서 보증되는 것은 «CSV 원문에서 결정적으로
+       재생산된다» 이지 «손으로 채운 원본과 일치한다» 가 아니다. 52 를 복구 성공의
+       기준선으로 삼지 마라.
+
+    `해당비목` 원문은 건드리지 않는다 — 되돌릴 원본이다.
+    빈 `해당비목_정본` 은 결손이 아니다: TIPS·R&D 계통과 주관기관 비목은 창업 10종에
+    매핑하지 않기로 한 결정의 결과다 (`audit_db.py:123` 이 같은 근거를 든다).
+    """
+    정본 = 정본_비목_enum()
+    with psycopg.connect(DSN) as conn:
+        rows = conn.execute("SELECT 증빙명, 해당비목 FROM corpus.evidence_sources").fetchall()
+        갱신 = []
+        for 증빙명, 해당비목 in rows:
+            매핑, 분류 = [], []
+            for 원문 in (해당비목 or []):
+                v, tag = 정본비목(원문, 정본)
+                if v and v not in 매핑:
+                    매핑.append(v)
+                if tag not in 분류:
+                    분류.append(tag)
+            갱신.append((매핑, 분류, 증빙명))
+        with conn.cursor() as cur:
+            cur.executemany("""UPDATE corpus.evidence_sources
+                                  SET 해당비목_정본 = %s, 해당비목_분류 = %s
+                                WHERE 증빙명 = %s""", 갱신)
+        conn.commit()
+        빔 = sum(1 for m, _, _ in 갱신 if not m)
+    return len(갱신), 빔
+
+
+def 비목매핑(적용: bool = False) -> None:
+    """해당비목 → 정본 10종 매핑 커버리지 리포트. 기본은 **DB 를 쓰지 않는다.**
+
+    `해당비목` 은 CSV 원문 그대로 남는다 (원본 보존).
+    `적용=True` 면 파생 2컬럼(`해당비목_정본`·`해당비목_분류`)만 다시 채운다.
     """
     import collections
     if 적용:
-        sys.exit("🔴 적용 경로는 없다. 컬럼 2개 신설이 선행돼야 한다 (본문 주석 참조).")
+        n, 빔 = 파생컬럼_채우기()
+        print(f"파생 2컬럼 재적재 {n}행 · 해당비목_정본 빈 배열 {빔}행 (R&D·주관기관·비목아님)")
 
     정본 = 정본_비목_enum()
     with psycopg.connect(DSN) as conn:
@@ -289,7 +381,12 @@ def main() -> None:
     ap.add_argument("--diff", action="store_true", help="적재하지 않고 rules.증빙 과 대조만")
     ap.add_argument("--map", action="store_true",
                     help="적재하지 않고 해당비목 -> 정본 10종 매핑 커버리지만 (DB 쓰기 없음)")
+    ap.add_argument("--map-apply", action="store_true",
+                    help="해당비목_정본·해당비목_분류 파생 2컬럼만 다시 채운다")
     a = ap.parse_args()
+    if a.map_apply:
+        비목매핑(적용=True)
+        return
     if a.map:
         비목매핑()
         return

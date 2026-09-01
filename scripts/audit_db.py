@@ -112,6 +112,17 @@ NULL_정상 = {
     ("tenant.decisions", "org_id"): "골든셋 평가는 기관 미지정으로 돈다. L3 경로를 탈 때만 붙는다",
     ("tenant.decisions", "기관id"): "org_id 와 한 쌍. 위와 같은 건",
     #
+    # 🔴 게스트 버킷. 로그인이 아직 없어서 `server/routes_plans.py::_org조건()` 이
+    #    "org_id 가 안 오면 `org_id IS NULL` 행만" 으로 격리한다. 즉 이 NULL 은 결손이
+    #    아니라 **격리에 쓰이는 값**이다 (ai-14 · 레인 A, 2026-09-01).
+    #    ⚠️ 예외는 이 표 하나에만 건다. `tenant.decisions`·`tenant.l3_documents` 의
+    #       org_id NULL 은 계속 물어야 한다 — 거기는 격리 키로 쓰이지 않는다.
+    #    🔴 **지울 날:** 로그인(`tenant.accounts` 배선)이 닫히면 게스트 버킷이 사라진다.
+    #       그때 이 줄을 지우고 NOT NULL 로 조인다. 그 전까지는 `POST /api/guest` 가
+    #       발급한 `guest_<uuid4>` 가 붙은 행이 정상이고, NULL 은 **구 클라이언트**다.
+    ("tenant.expense_plans", "org_id"): "게스트 버킷. _org조건() 이 이 값으로 격리한다 — "
+                                        "로그인 배선이 닫히면 이 예외를 지운다",
+    #
     # (나) 🔴 표본 1이라 판정 유보 — **실전 E2E 후 반드시 다시 볼 것**
     #     비목이 실전에서도 전부 NULL 이면 그건 B 의 비목확정()이 배선되지 않았다는 뜻이고
     #     신뢰등급이 전부 NULL 이면 A 의 등급 부여가 안 걸린다는 뜻이다. 둘 다 버그 신호다.
@@ -146,9 +157,12 @@ NULL_정상 = {
         (SELECT 1 FROM corpus.documents d WHERE d.doc_id=c.doc_id)""", 0),
     ("doc_articles -> documents 고아", """SELECT count(*) FROM corpus.doc_articles a WHERE NOT EXISTS
         (SELECT 1 FROM corpus.documents d WHERE d.doc_id=a.doc_id)""", 0),
+    # 2026-09-01: 기대치 42 -> 0. `build_refs.py` 약칭 해소 뒤 dst 가 붙은 참조는
+    # 전부 실재 문서를 가리킨다. 42 를 남겨두면 **개선이 🔴 문제로 보고된다.**
+    # (미해소 자체는 dst_doc_id IS NULL 로 남지 그 수는 이 계약이 세는 값이 아니다)
     ("refs.dst 미해소 (경로/약칭)", """SELECT count(*) FROM corpus.refs r
         WHERE dst_doc_id IS NOT NULL AND NOT EXISTS
-        (SELECT 1 FROM corpus.documents d WHERE d.doc_id=r.dst_doc_id)""", 42),
+        (SELECT 1 FROM corpus.documents d WHERE d.doc_id=r.dst_doc_id)""", 0),
     ("rules 근거 조가 실재 안 함", """SELECT count(*) FROM corpus.rules, jsonb_array_elements(근거) e
         WHERE NOT EXISTS (SELECT 1 FROM corpus.doc_articles a
                            WHERE a.doc_id=e->>'doc_id' AND a.조번호=e->>'조번호')""", 0),

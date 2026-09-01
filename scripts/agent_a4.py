@@ -618,6 +618,45 @@ def 치유(conn, dry: bool, 줄) -> None:
         """, (qid,)).fetchone()
         (쌍둥이있음 if n else 고아).append(qid)
 
+    # ⓪ 재지정 — 고아라도 `(사업명, 비목)` 으로 현재 룰이 **유일하게** 특정되면 되살린다.
+    #
+    # 🔴 2026-09-01 실측으로 갈래를 하나 더 냈다. 재적재 후 죽은 306행 중 고아 10행이
+    #    전부 A2(STRICTER_L3 7) · A5(ORG_ANSWER 3) 였다. 이 둘은 A4 가 다시 발행하지
+    #    않으므로 **영원히 쌍둥이가 안 생긴다.** 그대로 두면 "근거가 사라졌다" 는
+    #    사유로 기각되는데, 실제로 사라진 건 근거가 아니라 **대리키**다.
+    #    10행 전부 `(사업명, 비목)` 이 현재 룰 1건에 정확히 붙었다.
+    # 🔴 **2건 이상 붙으면 재지정하지 않는다.** 어느 룰인지 모르는 채 이어붙이면
+    #    큐가 엉뚱한 룰을 가리키고, 그건 기각보다 나쁘다 — 틀린 좌표는 조용하다.
+    재지정: list[tuple[int, str]] = []
+    남은고아: list[int] = []
+    for qid in 고아:
+        r = conn.execute('SELECT "사업명", "비목" FROM corpus.recheck_queue WHERE queue_id=%s',
+                         (qid,)).fetchone()
+        m = conn.execute("""
+            SELECT rule_id FROM corpus.rules
+             WHERE "사업명" IS NOT DISTINCT FROM %s AND "비목" IS NOT DISTINCT FROM %s
+        """, r).fetchall() if r else []
+        if len(m) != 1:
+            남은고아.append(qid)
+            continue
+        # uq_recheck_key 충돌 예방. 예외로 잡지 않고 미리 본다 — 배치 중간에서 터지면
+        # 앞의 DELETE 만 커밋되고 뒤가 안 돈다.
+        충돌 = conn.execute("""
+            SELECT 1 FROM corpus.recheck_queue a, corpus.recheck_queue b
+             WHERE a.queue_id = %s AND b.queue_id <> a.queue_id AND b."대상id" = %s
+               AND b."종류"     IS NOT DISTINCT FROM a."종류"
+               AND b."사유코드"  IS NOT DISTINCT FROM a."사유코드"
+               AND b."대상종류"  IS NOT DISTINCT FROM a."대상종류"
+               AND b.doc_id     IS NOT DISTINCT FROM a.doc_id
+               AND b."조번호"    IS NOT DISTINCT FROM a."조번호"
+               AND b."구doc_id" IS NOT DISTINCT FROM a."구doc_id"
+               AND b."구조번호"  IS NOT DISTINCT FROM a."구조번호"
+             LIMIT 1
+        """, (qid, str(m[0][0]))).fetchone()
+        (남은고아 if 충돌 else 재지정).append(qid if 충돌 else (qid, str(m[0][0])))
+    고아 = 남은고아
+
+    줄(f"    ⓪ (사업명,비목)으로 현재 룰이 유일하게 잡혀 재지정할 것 {len(재지정)}행")
     줄(f"    ① 살아있는 쌍둥이가 있어 지울 것 {len(쌍둥이있음)}행")
     줄(f"    ② 근거가 사라져 '기각' 으로 닫을 것 {len(고아)}행")
     if dry:
@@ -627,6 +666,15 @@ def 치유(conn, dry: bool, 줄) -> None:
     if 쌍둥이있음:
         conn.execute("DELETE FROM corpus.recheck_queue WHERE queue_id = ANY(%s)",
                      (쌍둥이있음,))
+    for qid, rid in 재지정:
+        conn.execute("""
+            UPDATE corpus.recheck_queue
+               SET "대상id" = %s,
+                   "상세" = "상세" || jsonb_build_object(
+                       '재지정', 'corpus.rules 재적재로 rule_id 가 갈렸다. '
+                                '(사업명,비목)이 현재 룰 1건에 유일하게 붙어 이어붙였다')
+             WHERE queue_id = %s
+        """, (rid, qid))
     if 고아:
         conn.execute("""
             UPDATE corpus.recheck_queue
@@ -679,20 +727,70 @@ def 조정(conn, dry: bool, 줄, 스캔한신doc: set[str] | None = None,
             if (사유, doc, 조, 구doc, 구조) not in 발행열쇠:
                 닫을.append(qid)
 
-    if not 닫을:
+    # ③ 조제목 대조로 «의도된 인용» 을 걸러낸다 (2026-09-01 신설)
+    #
+    # BASIS_RENUMBERED 는 `_근거조회(신doc, 구조번호)` 로 잡는다 — 근거가 «신판 문서 +
+    # 구판 번호» 면 조회는 성공하는데 엉뚱한 조를 가리키기 때문이다. 그런데 그 조합은
+    # **개정 후에 근거를 새로 적은 경우와 구별이 안 된다.** 재도전성공패키지처럼 이미
+    # 2026년판 좌표로 정정해 둔 룰이 통째로 다시 걸린다 (2026-09-01 실측 169행 중 160행).
+    #
+    # 판별자는 **조제목**이다. 룰이 적어둔 좌표의 조제목이 그 룰의 `비목` 을 담고 있으면
+    # 그 인용은 의도된 것이다 — 「제16조 인건비」 를 근거로 둔 인건비 룰이 그렇다.
+    # 🔴 **비목이 NULL 이거나 조제목이 비목명이 아니면 닫지 않는다.** 「제36조 창업기업등
+    #    사업비 비목」 같은 일반조는 이 방법으로 판별되지 않는다 (실측 잔여 9행).
+    #    판별 못 한 것을 닫으면 진짜 낡은 좌표가 조용히 사라진다 — 기본값은 '대기' 다.
+    # 🔴 공백·가운뎃점을 접어서 비교한다. `특허권등무형자산취득비`(비목) 와
+    #    `특허권 등 무형자산 취득비`(조제목) 는 같은 말이다 — 접지 않으면 11행을 놓친다.
+    조제목닫을: list[int] = []
+    _접기 = lambda s: re.sub(r"[\s·,()]", "", s or "")
+    for qid, 대상종류, 대상id, 비목, doc, in_조 in conn.execute("""
+        SELECT queue_id, "대상종류", "대상id", "비목", doc_id, "조번호"
+          FROM corpus.recheck_queue
+         WHERE "사유코드" IN ('BASIS_RENUMBERED', 'BASIS_DELETED')
+           AND "상태" = '대기' AND "처리자" IS NULL AND "비목" IS NOT NULL
+    """).fetchall():
+        표 = {"rule": ('corpus.rules', 'rule_id::text'),
+             "check_item": ('corpus.check_items', 'code')}.get(대상종류)
+        if not 표:
+            continue
+        g = conn.execute(f'SELECT "근거" FROM {표[0]} WHERE {표[1]} = %s', (대상id,)).fetchone()
+        좌표 = [x.get("조번호") for x in ((g and g[0]) or []) if x.get("doc_id") == doc]
+        if not 좌표:
+            continue
+        제목들 = [r[0] for r in conn.execute("""
+            SELECT "조제목" FROM corpus.doc_articles
+             WHERE doc_id = %s AND "조번호" = ANY(%s)""", (doc, 좌표)).fetchall()]
+        if any(_접기(비목) in _접기(t) for t in 제목들):
+            조제목닫을.append(qid)
+
+    if not 닫을 and not 조제목닫을:
         줄("  큐 조정: 해소된 항목 없음")
         return
-    줄(f"  큐 조정: 해소된 항목 {len(set(닫을))}행 → '반영' 으로 닫는다")
+    if 닫을:
+        줄(f"  큐 조정: 해소된 항목 {len(set(닫을))}행 → '반영' 으로 닫는다")
+    if 조제목닫을:
+        줄(f"  큐 조정: 조제목이 비목과 맞아 «의도된 인용» 으로 판정 "
+           f"{len(set(조제목닫을))}행 → '반영'")
     if dry:
         줄("    --dry 라 손대지 않았다")
         return
-    conn.execute("""
-        UPDATE corpus.recheck_queue
-           SET "상태" = '반영', "처리자" = 'H-A4자동조정', "처리일" = current_date,
-               "상세" = "상세" || jsonb_build_object(
-                   '해소', '재실행에서 더 이상 감지되지 않는다. 원본이 고쳐졌거나 근거가 바뀌었다')
-         WHERE queue_id = ANY(%s)
-    """, (list(set(닫을)),))
+    if 닫을:
+        conn.execute("""
+            UPDATE corpus.recheck_queue
+               SET "상태" = '반영', "처리자" = 'H-A4자동조정', "처리일" = current_date,
+                   "상세" = "상세" || jsonb_build_object(
+                       '해소', '재실행에서 더 이상 감지되지 않는다. 원본이 고쳐졌거나 근거가 바뀌었다')
+             WHERE queue_id = ANY(%s)
+        """, (list(set(닫을)),))
+    if 조제목닫을:
+        conn.execute("""
+            UPDATE corpus.recheck_queue
+               SET "상태" = '반영', "처리자" = 'H-조제목대조', "처리일" = current_date,
+                   "상세" = "상세" || jsonb_build_object(
+                       '해소', '근거 좌표의 조제목이 이 룰의 비목과 같다 — 개정 후 좌표로 '
+                              '이미 정정된 «의도된 인용» 이다. 구판 번호의 잔재가 아니다')
+             WHERE queue_id = ANY(%s)
+        """, (list(set(조제목닫을)),))
     conn.commit()
 
 
