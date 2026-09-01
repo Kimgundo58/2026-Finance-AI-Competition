@@ -89,7 +89,10 @@ CREATE TABLE corpus.documents (
     extraction    TEXT NOT NULL DEFAULT 'native'
                   CHECK (extraction IN ('native','dedupe','hancom','vlm')),
     src_path      TEXT NOT NULL,
-    roles         TEXT[] NOT NULL DEFAULT '{}',   -- judgment_index | rule_source | diff_only ...
+    -- 🔴 `roles TEXT[]` 삭제 (2026-09-01). `index_target` 의 완전한 복사본이었다 —
+    --    적재기가 `['judgment_index'] if index_target else []` 로 넣었을 뿐이고,
+    --    주석이 예고한 rule_source·diff_only 를 쓰는 코드는 끝내 없었다.
+    --    같은 사실을 두 컬럼에 적어 두면 필터를 어느 쪽으로 걸지가 매번 흔들린다.
     index_target  BOOLEAN NOT NULL DEFAULT FALSE, -- chunks 에 넣을 문서인가
     -- 2026-08-31 추가 (서문 (3)). 검색 진입점인가, 참조 폐포의 도착지일 뿐인가.
     --   진입점    = 임베딩·BM25 검색 후보. RAG.md §4-2 pre-filter 통과
@@ -368,7 +371,9 @@ CREATE TABLE tenant.l3_documents (
     -- 조달분(L1·L2)의 한컴 1회 수동 변환 원칙과는 별개다 — RAG.md §3-1
     extraction   TEXT NOT NULL DEFAULT 'native'
                  CHECK (extraction IN ('native','dedupe','hancom','vlm','hwpx','hwp')),
-    파싱품질     TEXT NOT NULL CHECK (파싱품질 IN ('pass','warn','fail')),
+    -- 🔴 '대기' = 접수만 됐고 파싱 평가 전. 접수 시점에 'warn' 을 넣으면 «평가했는데
+    --    미심쩍다» 와 «아직 안 봤다» 가 같은 값이 되어 구분이 영원히 사라진다.
+    파싱품질     TEXT NOT NULL CHECK (파싱품질 IN ('대기','pass','warn','fail')),
     dangling수   INT NOT NULL DEFAULT 0,   -- 업로드 시점에 알린다 (판정 시점 아님)
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
