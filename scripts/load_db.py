@@ -36,7 +36,7 @@ DSN = os.environ.get("SUDDOE_DSN", "postgresql://postgres:devpw@localhost:5432/s
 현행 = {
     "예비창업패키지 세부관리기준(2025년)",
     "초기창업패키지 세부관리기준(2025년)",
-    "재도전성공패키지 세부관리기준(2025년)",
+    "2026년 재도전성공패키지 세부관리기준(11차 개정)",   # 2026-09-01 판본 역전 교정
     "창업도약패키지 세부관리기준(2025년)",
     "창업중심대학 세부관리기준2025년 개정",
     "초격차 스타트업 프로젝트 세부관리기준(제10차)",
@@ -89,7 +89,7 @@ def main() -> None:
         index_target = status == "active" and layer in ("L1", "L2")
         docs.append((doc_id, layer, "창업지원사업", None, None, None, None, status,
                      "high" if quality == "high" else "low",
-                     "native", path, ["judgment_index"] if index_target else [],
+                     "native", path,
                      index_target,
                      # 좁히기는 골든셋 Recall@5 A/B 후에 한다. 지금은 전부 진입점.
                      "진입점"))
@@ -112,21 +112,40 @@ def main() -> None:
               bool(r.get("verified")), r.get("검수자"), r.get("검수일"))
              for r in prec["rules"]]
 
+    # 🔴 `대상`·`평가범위`·`채점모드` 를 반드시 같이 넣는다 (2026-09-01).
+    #    이 셋이 빠져 있어서 «대상='주관기관' 16문항은 평가 범위 밖» 이라는
+    #    초안 메타의 확정 사항이 DB 에 도달하지 못했고, `eval_store.평가대상()` 이
+    #    범위밖 문항까지 채점 분모에 넣고 있었다. 창업팀 전용 서비스인데 주관기관
+    #    문항 21% 로 점수를 재던 셈이다 — 검색 hit@5 미스의 큰 덩어리가 이것이었다.
     golds = [(x.get("_세트") or "본세트", str(x["no"]), x.get("사업"), x["질문"],
               x["정답_판정"], json.dumps(x.get("정답_근거"), ensure_ascii=False),
               x.get("근거_원문"), json.dumps(x.get("해야할일"), ensure_ascii=False),
-              bool(x.get("verified")), x.get("검수자"))
+              bool(x.get("verified")), x.get("검수자"),
+              x.get("비목"), x.get("대상"), x.get("평가범위"), x.get("채점모드"))
              for x in gold["문항"]]
 
     with psycopg.connect(DSN) as conn, conn.cursor() as cur:
+        # 🔴 **Stage 2 이후에는 이 스크립트를 돌리면 안 된다** (2026-09-01).
+        #    아래 `TRUNCATE corpus.documents CASCADE` 가 chunks 를 FK CASCADE 로 같이 지운다
+        #    = 임베딩 2만여 건이 날아가고 GPU 팟을 다시 열어야 한다. 에러가 안 나므로
+        #    돌린 사람은 다음 검색이 0건 나올 때까지 모른다.
+        #    골든셋만 갱신하려는 것이면 `_work/_골든셋_재적재.py` 를 쓴다.
+        n청크 = cur.execute("SELECT count(*) FROM corpus.chunks").fetchone()[0]
+        if n청크 and "--청크삭제승인" not in sys.argv:
+            sys.exit(
+                f"\n🔴 corpus.chunks 에 {n청크:,}건이 있다. 이대로 진행하면 "
+                f"TRUNCATE ... CASCADE 로 **전부 지워지고 임베딩을 다시 계산해야 한다.**\n"
+                "   · 골든셋만 갱신하려면  : python scripts/_work/_골든셋_재적재.py --commit\n"
+                "   · 정말 전체 재적재라면 : 이 명령에 --청크삭제승인 을 붙인다 "
+                "(그 뒤 stage2_chunk → 임베딩까지 다시 돌려야 한다)\n")
         cur.execute("TRUNCATE corpus.documents CASCADE;")
         cur.execute("TRUNCATE corpus.refs;")
         cur.execute("TRUNCATE corpus.precedence_rules;")
         cur.execute("TRUNCATE eval.golden_set;")
         cur.executemany("""INSERT INTO corpus.documents
             (doc_id, layer, domain, 기관ID, doc_type, version, 시행일, status,
-             parse_quality, extraction, src_path, roles, index_target, retrieval_scope)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""", docs)
+             parse_quality, extraction, src_path, index_target, retrieval_scope)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""", docs)
         cur.executemany("""INSERT INTO corpus.doc_articles
             (doc_id, 조번호, 조제목, 조번호_int, 본문, 페이지, 삭제)
             VALUES (%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING""", arts)
@@ -139,8 +158,9 @@ def main() -> None:
              verified, 검수자, 검수일)
             VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""", precs)
         cur.executemany("""INSERT INTO eval.golden_set
-            (세트, no, 사업명, 질문, 정답판정, 정답근거, 근거원문, 해야할일, verified, 검수메모)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""", golds)
+            (세트, no, 사업명, 질문, 정답판정, 정답근거, 근거원문, 해야할일, verified, 검수메모,
+             비목, 대상, 평가범위, 채점모드)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""", golds)
         conn.commit()
 
     # ════════════════════════════════════════════════════════════════════════
