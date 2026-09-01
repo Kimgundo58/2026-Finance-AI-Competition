@@ -345,7 +345,11 @@ def _실_동기화(plan_id: int, body: 할일동기화, org_id: str | None = Non
     # ③ 코드 소멸 — 이번 회차에 안 나온 ai 행만 지운다 (출처='user' 는 애초에 후보 밖)
     사라진 = [r[0] for r in 기존 if r[1] == "ai" and r[0] not in 살아남은]
     if 사라진:
-        _실행('DELETE FROM tenant.plan_tasks WHERE task_id = ANY(%s)', (사라진,))
+        # 🔴 `plan_id` 를 한 번 더 건다. 위에서 계획 소유를 확인했고 `사라진` 도 그 계획의
+        #    행에서만 나오므로 지금은 없어도 같은 결과지만, task_id 만으로 지우는 DELETE 는
+        #    호출 경로가 하나만 바뀌어도 남의 행을 지우는 문장이 된다 (2026-09-02 정밀검토).
+        _실행('DELETE FROM tenant.plan_tasks WHERE task_id = ANY(%s) AND plan_id = %s',
+             (사라진, plan_id))
 
     return 할일동기화응답(
         생성=생성, 갱신=갱신, 보존_user=보존u, 보존_날짜수정=보존날짜,
@@ -373,8 +377,17 @@ def _실_추가(plan_id: int, body: 할일생성, org_id: str | None = None) -> 
 
 
 def _실_수정(plan_id: int, task_id: int, body: 할일수정, org_id: str | None = None) -> 할일:
-    조건, org인자 = _org조건(org_id, "t")
+    """🔴 소유 판정의 «기준»은 계획이다 — 할일이 아니다 (2026-09-02 정밀검토에서 맞췄다).
+
+    처음엔 `plan_tasks.org_id` 로 봤는데, `_실_추가`·`_실_동기화` 는 `expense_plans.org_id`
+    로 본다. **같은 쓰기 3경로가 서로 다른 기준을 쓰면** 두 값이 어긋나는 날
+    「추가는 되는데 수정은 404」 같은 게 나온다. 지금은 두 쓰기가 다 계획의 org 를
+    복사해 넣어서 어긋난 행이 0이지만(실측), 기준이 둘인 것 자체가 부채다.
+    → 셋 다 계획을 기준으로 통일한다. 할일이 그 계획 것인지는 `t.plan_id` 가 잡는다.
+    """
+    조건, org인자 = _org조건(org_id, "p")
     존재 = _질의(f'SELECT 1 FROM tenant.plan_tasks t '
+                f'JOIN tenant.expense_plans p ON p.plan_id = t.plan_id '
                 f'WHERE t.task_id = %s AND t.plan_id = %s AND {조건}',
                 (task_id, plan_id, *org인자))
     if not 존재:
