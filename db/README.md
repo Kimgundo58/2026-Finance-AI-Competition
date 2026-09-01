@@ -143,7 +143,7 @@
 ```
 corpus.documents        283      corpus.chunks        20,518
 corpus.doc_articles  26,301      corpus.chunk_terms  1,148,718
-corpus.refs          44,855      corpus.rules             72
+corpus.refs          44,865      corpus.rules             72
 corpus.precedence_rules   8      corpus.case_chunks      193
 tenant.decisions         73      tenant.l3_articles       17
 eval.golden_set          77      eval.runs               188
