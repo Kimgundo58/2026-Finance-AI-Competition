@@ -145,7 +145,7 @@ def 절_상속(articles: list[dict]) -> dict[str, str | None]:
     return out
 
 
-# 범위 밖 구간(모두의창업 제3편 로컬트랙) 컷은 `scripts/scope.py` 가 정본이다.
+# 범위 밖 구간(모두의창업 제3편 로컬트랙) 컷은 `scripts/scope.py` 가 기준 문서이다.
 # build_refs 와 같은 컷을 써야 해서 공용 모듈로 뺐다 (2026-08-31).
 
 

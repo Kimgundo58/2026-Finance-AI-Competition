@@ -42,8 +42,8 @@
    실측 결과 2건. 분리가 깨끗하다 (0.500 / 0.507  vs  나머지 전부 <= 0.017):
        L1_중소기업창업_지원사업_통합관리지침_제14차개정_20251223   dup=0.500  index_target=true
        창업도약패키지 지원사업 세부관리기준(2022년)                dup=0.507  index_target=false
-   `CLAUDE.md` 가 적어둔 중복 3건 중 세 번째(초기창업 질의응답집 별첨4)는 골든셋이라
-   인덱스 투입 금지 대상 — `corpus.documents` 에 없다. 그래서 3이 아니라 2가 맞다.
+   `CLAUDE.md` 가 적어둔 중복 3건 중 세 번째(초기창업 질의응답집 별첨4)는 정답셋이라
+   검색 대상에 넣기 금지 대상 — `corpus.documents` 에 없다. 그래서 3이 아니라 2가 맞다.
 
 3. **hancom** — `_hwp변환/` 아래 경로. `convert_hwp.py` 가 원본 트리를 그대로 미러링하므로
    `_hwp변환/<원본경로>.pdf` 옆에 같은 이름의 `.hwp`/`.hwpx` 가 있어야 한다.
@@ -127,7 +127,7 @@ def classify(rel: str, scan: dict[str, dict]) -> tuple[str, str]:
     key = rel.lower()
     path = ROOT / rel
 
-    # 1. vlm — 스캔 대장 등재
+    # 1. vlm — 스캔 목록 등재
     if key in scan:
         d = scan[key]
         return "vlm", ("스캔대장 등재 (%s, %d쪽, 표본 %.1f자/쪽)"
@@ -206,7 +206,7 @@ def main() -> None:
                 print("  %s\n            %s" % (p["doc_id"][:60], p["why"]))
             print()
 
-        # ── parse_quality 영향 게이트 ───────────────────────────────────────
+        # ── parse_quality 영향 통과 조건 ───────────────────────────────────────
         vlm_ids = [p["doc_id"] for p in vlm]
         hit = 0
         if vlm_ids:
@@ -247,7 +247,7 @@ def main() -> None:
                 UPDATE corpus.documents SET parse_quality = 'low'
                 WHERE doc_id = ANY(%s) AND parse_quality <> 'low'
             """, (vlm_ids,)).rowcount
-            # 위 게이트가 0을 보장하므로 실질 no-op 이다. 그래도 남겨 둔다 —
+            # 위 통과 조건이 0을 보장하므로 실질 no-op 이다. 그래도 남겨 둔다 —
             # 나중에 vlm 문서가 인덱싱되면 chunks 사본도 같이 내려가야 하고,
             # 그때 이 스크립트가 유일한 갱신 경로가 된다.
             n_chunk = conn.execute("""

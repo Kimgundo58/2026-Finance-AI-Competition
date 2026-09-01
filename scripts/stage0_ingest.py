@@ -116,12 +116,12 @@ def main():
 
             # 인덱싱 대상 판정
             index_target = bool(f.get("index"))
-            # 골든셋 격리 — 단 case_index 를 겸하는 문서(연구재단 QA사례집)는
+            # 정답셋 격리 — 단 case_index 를 겸하는 문서(연구재단 QA사례집)는
             # 파일 통째로 빼면 안 된다. Q&A 단위로 홀드아웃을 떼는 것이 맞다(§8.1).
-            # ⚠️ 골든셋 확정 후 해당 Q&A 를 case_chunks 에서 삭제할 것.
+            # ⚠️ 정답셋 확정 후 해당 Q&A 를 case_chunks 에서 삭제할 것.
             if "golden_set" in roles and "case_index" not in roles:
                 index_target = False
-            # 최종 게이트 — 경로·레이어 블랙리스트(scripts/index_guard.py).
+            # 최종 통과 조건 — 경로·레이어 블랙리스트(scripts/index_guard.py).
             # 여기까지 오면 위 조건들과 무관하게 무조건 거부된다.
             if index_target:
                 why = reject_reason(rel, layer)
