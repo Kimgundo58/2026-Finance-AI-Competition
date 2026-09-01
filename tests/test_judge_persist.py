@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-"""`/api/judge` 저장 배선 테스트.   **[레인 C 소유]**
+"""`/api/judge` 저장 배선 테스트.   **[판정 저장 배선]**
 
 `server/main.py::judge()` 의 `gen()` 이 `결과` 다음 · `완료` 앞에 `저장` 이벤트를
 정확히 한 번 흘리는지, `decision_id` 가 `결과` 에는 안 실리고 `저장` 에만 실리는지,
 저장이 실패해도(예외·`plan_id` 없음·캐시 적중) 스트림이 안 죽는지를 검증한다.
 
-🔴 `server/persist.py` (레인 A 소유) 는 아직 없다 — `main.py` 는 그래서
+🔴 `server/persist.py` 는 2026-09-01 에 들어왔다 — `main.py` 는 그래서
    모듈 상단이 아니라 `gen()` 안에서 지연 import 한다(2026-09-01 ai-14 정정,
    이유: `_실_판정` 이 `orchestrate` 를 지연 import 하는 것과 같은 결. 저장 계층은
    판정 스트림의 부수 효과라 그게 없다고 앱 전체가 못 뜨면 의존 방향이 거꾸로다).
@@ -127,7 +127,7 @@ def test_결과에는_decision_id가_없다(monkeypatch):
 
 
 # ════════════════════════════════════════════════════════════════════
-# `server/persist.py` (레인 A) — 2026-09-01 반영됨, xfail 걷어냄
+# `server/persist.py` — 2026-09-01 반영됨, xfail 걷어냄
 # ════════════════════════════════════════════════════════════════════
 
 def test_저장_성공하면_계약대로_담긴다():
@@ -140,12 +140,12 @@ def test_저장_성공하면_계약대로_담긴다():
 
 
 # ════════════════════════════════════════════════════════════════════
-# 레인 A 대기분 — MOCK=False + `_실_판정` 가짜값(decision_id=777) 과
+# MOCK=False + `_실_판정` 가짜값(decision_id=777) 과
 # 실제 plan_id=1 행이 같이 존재해야 참이라 여전히 xfail 이다.
 # ════════════════════════════════════════════════════════════════════
 
 
-@pytest.mark.xfail(reason="레인 A 의 server/persist.py 대기 — 들어오면 초록", strict=False)
+@pytest.mark.xfail(reason="실 plan_id 행 + GPU 판정이 있어야 참이 된다", strict=False)
 def test_저장_이벤트에_decision_id가_실제로_채워진다(monkeypatch):
     monkeypatch.setattr(main, "MOCK", False)
 

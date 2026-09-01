@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""레인 A — 지출계획 `_실_*` 네 함수 테스트.
+"""지출계획 — 지출계획 `_실_*` 네 함수 테스트.
 
     PYTHONIOENCODING=utf-8 python -m pytest tests/test_plans.py -q
 
