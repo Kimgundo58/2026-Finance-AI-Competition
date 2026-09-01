@@ -200,28 +200,88 @@ def test_게스트_목록에_기관_계획이_없다(세계):
 # ② 통계 — 🔴 목록을 걸러도 집계에서 새면 남의 «규모» 가 샌다
 # ════════════════════════════════════════════════════════════════════
 
+def _맞대보기(이름: str, api호출, sql호출) -> None:
+    """API 집계와 «같은 경계» SQL 집계를 맞댄다 — 동시 작업에 안 흔들리게.
+
+    🔴 이 DB 는 여러 세션이 같이 쓴다. 두 값을 따로 재면 그 «사이» 에 남이 행을
+    만들거나 지워서, 격리가 멀쩡한데도 어긋난 것처럼 보인다(실제로 두 번 겪었다).
+    그래서 **SQL → API → SQL** 순으로 재고 API 가 두 SQL 값 사이에 있으면 통과한다.
+    아무도 안 건드린 조용한 순간엔 두 SQL 이 같으므로 **정확한 등호와 같은 강도**다.
+    누수가 있으면 API 가 두 값보다 «크게» 나오므로 여전히 잡힌다.
+    """
+    앞 = sql호출()
+    api = api호출()
+    뒤 = sql호출()
+    낮, 높 = min(앞, 뒤), max(앞, 뒤)
+    assert 낮 <= api <= 높, (
+        f"{이름}: API {api} 가 같은 경계 SQL [{낮}, {높}] 밖이다 — "
+        f"API 가 크면 남의 것이 섞인 것이다")
+
+
+def _SQL건수(org_id) -> int:
+    with _접속() as c:
+        if org_id is None:
+            행 = c.execute("SELECT count(*) FROM tenant.expense_plans "
+                           "WHERE org_id IS NULL").fetchone()
+        else:
+            행 = c.execute("SELECT count(*) FROM tenant.expense_plans "
+                           "WHERE org_id = %s::uuid", (org_id,)).fetchone()
+    return int(행[0])
+
+
 def test_통계_건수가_자기_것만_센다(세계):
-    A, B = _통계(세계.A), _통계(세계.B)
-    assert A["전체"] - 세계.기준선["A"]["전체"] == len(세계.A계획)
-    assert B["전체"] - 세계.기준선["B"]["전체"] == len(세계.B계획)
+    """🔴 증분으로 재지 않는다 — 금액합계와 같은 이유다.
+
+    처음엔 `after − before == 내가 만든 수` 로 썼는데, 다른 세션이 같은 기관에
+    계획을 만들면 흔들린다(실제로 흔들렸다). **같은 경계로 짠 SQL 집계와 맞대보는
+    것**이 원래 재려던 성질이고, 누수가 있으면 API 쪽이 커진다."""
+    for 이름, org in (("A", 세계.A), ("B", 세계.B), ("게스트", None)):
+        _맞대보기(이름 + " 건수", lambda: _통계(org)["전체"], lambda: _SQL건수(org))
+    assert set(세계.A계획) <= _목록id(세계.A)
+    assert set(세계.B계획) <= _목록id(세계.B)
+
+
+def _SQL금액합(org_id) -> float:
+    """API 와 «같은 경계» 로 DB 에서 직접 집계한다."""
+    with _접속() as c:
+        if org_id is None:
+            행 = c.execute('SELECT coalesce(sum("금액"),0) FROM tenant.expense_plans '
+                           "WHERE org_id IS NULL").fetchone()
+        else:
+            행 = c.execute('SELECT coalesce(sum("금액"),0) FROM tenant.expense_plans '
+                           "WHERE org_id = %s::uuid", (org_id,)).fetchone()
+    return float(행[0])
 
 
 def test_통계_금액합계에_남의_금액이_안_섞인다(세계):
-    """건수가 맞아도 합계가 새는 회귀가 따로 있다 — 집계 쿼리는 WHERE 를 빠뜨리기 쉽다."""
-    A증분 = _통계(세계.A)["금액합계"] - 세계.기준선["A"]["금액합계"]
-    B증분 = _통계(세계.B)["금액합계"] - 세계.기준선["B"]["금액합계"]
-    게증분 = _통계(None)["금액합계"] - 세계.기준선["게스트"]["금액합계"]
-    assert A증분 == 3_000_000.0, f"A 금액합계 증분이 {A증분} — 남의 금액이 섞였다"
-    assert B증분 == 500_000.0, f"B 금액합계 증분이 {B증분}"
-    assert 게증분 == 700_000.0, f"게스트 금액합계 증분이 {게증분}"
+    """건수가 맞아도 합계가 새는 회귀가 따로 있다 — 집계 쿼리는 WHERE 를 빠뜨리기 쉽다.
+
+    🔴 증분(after − before)으로 재지 않는다. **게스트 버킷은 다른 세션도 쓰는 공용
+    자리**라 그 사이에 행이 늘거나 줄면 증분이 흔들린다(실제로 700,000 을 기대한
+    자리에 600,000 이 나왔다 — 격리가 깨진 게 아니라 동시 작업이 있었던 것).
+    대신 **API 집계와 같은 경계로 DB 를 직접 집계해 맞대본다** — 이게 원래 재려던
+    성질이다. 누수가 있으면 API 쪽이 더 커진다."""
+    for 이름, org in (("A", 세계.A), ("B", 세계.B), ("게스트", None)):
+        _맞대보기(이름 + " 금액합계",
+                lambda: _통계(org)["금액합계"], lambda: _SQL금액합(org))
+
+    # 내가 만든 금액이 내 집계에 실제로 반영돼 있는지 — 「항상 0」 으로 통과하는 걸 막는다
+    assert _통계(세계.A)["금액합계"] >= 3_000_000.0
 
 
 def test_통계는_목록과_같은_경계를_쓴다(세계):
-    """목록엔 안 뜨는데 통계엔 세어지는 어긋남을 잡는다."""
+    """목록엔 안 뜨는데 통계엔 세어지는 어긋남을 잡는다.
+
+    🔴 목록과 통계를 **한 번의 응답에서** 꺼내 맞댄다. 따로 두 번 부르면 그 사이에
+    다른 세션이 행을 만들어 둘이 어긋날 수 있다 — 격리가 아니라 시점 차이로 빨개진다."""
     for org, 내계획 in ((세계.A, 세계.A계획), (세계.B, 세계.B계획)):
-        보임 = _목록id(org)
+        p = {"org_id": org, "크기": 100}
+        j = client.get("/api/plans", params=p).json()
+        보임 = {x["plan_id"] for x in j["항목"]}
         assert set(내계획) <= 보임
-        assert _통계(org)["전체"] >= len(보임)
+        assert j["통계"]["전체"] == j["건수"] == len(보임), (
+            f"같은 응답 안에서 통계 {j['통계']['전체']} · 건수 {j['건수']} · "
+            f"항목 {len(보임)} 이 어긋난다 — 목록과 집계가 다른 경계를 쓰고 있다")
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -323,30 +383,63 @@ def test_게스트가_기관_계획에_판정을_못_붙인다(세계):
 # ⑥ L3 문서
 # ════════════════════════════════════════════════════════════════════
 
-def test_남의_L3_문서는_404(세계):
-    if not (세계.A문서 and 세계.B문서):
-        pytest.skip("l3_documents 에 A·B 각각의 문서가 없다")
-    r = client.get(f"/api/l3/{세계.A문서}", params={"org_id": 세계.B})
-    assert r.status_code == 404, f"🔴 B 가 A 의 L3 문서를 읽었다: {r.text[:200]}"
+# 🔴 여기서 내 예측이 틀렸다. 기록해 둔다.
+#
+#   예측: `_실_상태` 의 `(%s IS NULL OR org_id = %s)` 는 org_id 를 안 보내면
+#         필터가 꺼지니 게스트가 남의 문서를 읽는다 — 격리 구멍이다.
+#   실측: 게스트도 404 다. 대신 **주인도 404 다.**
+#
+#   원인은 격리가 아니라 SQL 이다. `%s IS NULL` 에만 쓰인 파라미터는 Postgres 가
+#   타입을 못 정한다 — psycopg 가 세 파라미터를 따로 보내서 $2 가 `$2 IS NULL`
+#   한 곳에만 나오기 때문이다:
+#       IndeterminateDatatype: could not determine data type of parameter $2
+#   `_질의` 가 예외를 조용히 삼켜 빈 리스트를 주고, 그걸 코드가 404 로 바꾼다.
+#
+#   → 즉 **실 경로에서 `GET /api/l3/{doc_id}` 는 누구에게나 항상 404 다.**
+#     격리 구멍이 아니라 그 엔드포인트가 통째로 안 도는 것이고, 격리는
+#     «막혀서» 가 아니라 «아무것도 안 나와서» 지켜지는 것처럼 보인다.
+#     조율 세션에 보고했다. 소유는 레인 C(`routes_l3.py`).
+
+def _L3_조회가능() -> bool:
+    """주인이 자기 문서를 실제로 읽을 수 있나. 못 읽으면 격리 검증이 무의미하다."""
+    with _접속() as c:
+        행 = c.execute("SELECT doc_id, org_id FROM tenant.l3_documents LIMIT 1").fetchall()
+    if not 행:
+        return False
+    doc, org = str(행[0][0]), str(행[0][1])
+    return client.get(f"/api/l3/{doc}", params={"org_id": org}).status_code == 200
 
 
-def test_자기_L3_문서는_보인다(세계):
+@pytest.mark.xfail(reason="🔴 `routes_l3._실_상태` 의 SQL 이 IndeterminateDatatype 으로 "
+                          "터지고 `_질의` 가 삼켜서, 실 경로 L3 조회가 주인에게도 항상 "
+                          "404 다. 격리 문제가 아니라 엔드포인트 고장. 조율 세션에 보고함",
+                   strict=False)
+def test_L3_조회경로가_살아있다(세계):
     if not 세계.A문서:
         pytest.skip("A 의 L3 문서가 없다")
     r = client.get(f"/api/l3/{세계.A문서}", params={"org_id": 세계.A})
     assert r.status_code == 200, r.text
 
 
-@pytest.mark.xfail(reason="🔴 격리 구멍 — `_실_상태` 의 `(%s IS NULL OR org_id = %s)` 는 "
-                          "org_id 를 안 보내면 필터가 통째로 꺼진다. 조율 세션에 보고함",
-                   strict=False)
-def test_게스트가_기관_L3_문서를_못_읽는다(세계):
-    """계획은 `org_id=None` 을 «게스트 버킷» 으로 좁히는데, L3 만 «필터 해제» 로 넓다.
+def test_남의_L3_문서는_404(세계):
+    """🔴 조회 경로가 죽어 있으면 이 테스트는 «격리된다» 가 아니라 «아무것도 안 나온다»
+    를 보는 것이라, 통과해도 아무 뜻이 없다. 그래서 살아있을 때만 센다."""
+    if not (세계.A문서 and 세계.B문서):
+        pytest.skip("l3_documents 에 A·B 각각의 문서가 없다")
+    if not _L3_조회가능():
+        pytest.skip("L3 조회 경로가 통째로 404 라 격리를 검증할 수 없다 (위 xfail 참조)")
+    r = client.get(f"/api/l3/{세계.A문서}", params={"org_id": 세계.B})
+    assert r.status_code == 404, f"🔴 B 가 A 의 L3 문서를 읽었다: {r.text[:200]}"
 
-    같은 `None` 이 한쪽에선 좁히고 한쪽에선 여는 게 이 구멍의 뿌리다.
-    doc_id 는 uuid 라 추측이 어렵지만, 추측 난이도는 경계가 아니다."""
+
+def test_게스트가_기관_L3_문서를_못_읽는다(세계):
+    """계획은 `org_id=None` 을 «게스트 버킷» 으로 좁히는데 L3 는 «필터 해제» 로 넓다 —
+    같은 `None` 이 한쪽에선 좁히고 한쪽에선 연다. 지금은 SQL 고장에 가려 안 보이지만,
+    **고장을 고치면 이 구멍이 드러난다.** 그때 이 테스트가 잡는다."""
     if not 세계.A문서:
         pytest.skip("A 의 L3 문서가 없다")
+    if not _L3_조회가능():
+        pytest.skip("L3 조회 경로가 통째로 404 라 격리를 검증할 수 없다 (위 xfail 참조)")
     assert client.get(f"/api/l3/{세계.A문서}").status_code == 404
 
 

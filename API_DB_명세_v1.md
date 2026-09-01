@@ -11,7 +11,7 @@
 > PYTHONIOENCODING=utf-8 python db/tools/gen_api_db_spec.py     # 저장소 루트에서
 > ```
 >
-> 생성 시각 `2026-09-01T16:13:38+09:00` · 소스 `server.main:app` · `localhost:5432/suddoe` · 생성기 `db/tools/gen_api_db_spec.py`
+> 생성 시각 `2026-09-01T16:27:05+09:00` · 소스 `server.main:app` · `localhost:5432/suddoe` · 생성기 `db/tools/gen_api_db_spec.py`
 
 
 ## 0. 두 문서를 어떻게 나눠 읽는가
