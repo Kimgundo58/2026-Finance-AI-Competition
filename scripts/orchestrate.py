@@ -780,7 +780,7 @@ def _마무리(conn, cur, 응답: dict, *, 기록: bool, 닫기: bool,
     return 응답
 
 
-_코퍼스버전: str | None = None
+_규정모음버전: str | None = None
 
 
 def 코퍼스버전(cur) -> str:
@@ -788,12 +788,12 @@ def 코퍼스버전(cur) -> str:
 
     🔴 함수·변수 이름의 «코퍼스» 는 그대로 둔다 — `eval.runs` 에 그 키로 들어간다.
     """
-    global _코퍼스버전
-    if _코퍼스버전 is None:
+    global _규정모음버전
+    if _규정모음버전 is None:
         d, c = cur.execute("SELECT (SELECT count(*) FROM corpus.documents WHERE status='active'), "
                            "(SELECT count(*) FROM corpus.chunks)").fetchone()
-        _코퍼스버전 = f"docs{d}/chunks{c}"
-    return _코퍼스버전
+        _규정모음버전 = f"docs{d}/chunks{c}"
+    return _규정모음버전
 
 
 # ════════════════════════════════════════════════════════════════════════════
