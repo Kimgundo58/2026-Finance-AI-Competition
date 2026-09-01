@@ -1,0 +1,66 @@
+{
+ "예비창업 2025": {
+  "gutter": null,
+  "jo": 34,
+  "inv": 9,
+  "maxlen": 7229,
+  "sec": 8.5,
+  "dedupe": false
+ },
+ "초기창업 2025": {
+  "gutter": null,
+  "jo": 33,
+  "inv": 8,
+  "maxlen": 6261,
+  "sec": 7.1,
+  "dedupe": false
+ },
+ "재도전 2025": {
+  "gutter": 421.528053301975,
+  "jo": 40,
+  "inv": 6,
+  "maxlen": 1711,
+  "sec": 3.6,
+  "dedupe": false
+ },
+ "창업중심대학": {
+  "gutter": 421.59021899999993,
+  "jo": 44,
+  "inv": 3,
+  "maxlen": 15384,
+  "sec": 13.0,
+  "dedupe": false
+ },
+ "도약 2025": {
+  "gutter": null,
+  "jo": 55,
+  "inv": 4,
+  "maxlen": 6844,
+  "sec": 15.2,
+  "dedupe": false
+ },
+ "초격차 제10차": {
+  "gutter": 297.65999999999997,
+  "jo": 31,
+  "inv": 3,
+  "maxlen": 13965,
+  "sec": 44.5,
+  "dedupe": false
+ },
+ "모두의창업": {
+  "gutter": null,
+  "jo": 98,
+  "inv": 1,
+  "maxlen": 18980,
+  "sec": 33.9,
+  "dedupe": false
+ },
+ "TIPS 2026": {
+  "gutter": null,
+  "jo": 82,
+  "inv": 7,
+  "maxlen": 27305,
+  "sec": 84.6,
+  "dedupe": false
+ }
+}

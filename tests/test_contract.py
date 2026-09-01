@@ -620,9 +620,23 @@ def test_실판정이_터져도_4way_밖으로_안_나간다(monkeypatch):
     ("GET", "/api/profile"), ("PUT", "/api/profile"),
 }
 
-# 🔴 계약 문서에는 «✅ 동결» 로 있는데 **서버에는 없는** 것. 아래 전용 테스트가 본다.
-#    여기 넣어두면 「늘어남」 검사가 나중에 이게 살아났을 때 오탐하지 않는다.
-계약_보류 = {("POST", "/api/guest")}
+# 계약에도 서버에도 없지만, 생겼을 때 「늘어남」 검사가 오탐하지 않도록 비워 둔 자리.
+#
+# 🔴 2026-09-02 (BE) — `("POST","/api/guest")` 를 뺐다. 이 주석은 그 전까지
+#    "계약 문서에는 «✅ 동결» 로 있는데 서버에는 없는 것" 이라고 적혀 있었는데,
+#    **그 문장은 이미 사실이 아니었다.** 계약 v1.0.1 이 §2-1 을 「미결 — 게스트끼리
+#    서로 보인다」로 다시 쓰면서 §1 표의 행도 뺐고, 전용 xfail 테스트도 그때 지워졌다.
+#    즉 계약은 게스트 발급을 **동결한 적이 없는 상태**가 됐는데 이 집합만 남아 있었다.
+#    남겨두면 다음 사람이 "계약이 동결했다"를 다시 사실로 읽는다.
+#
+#    게스트 발급을 다시 칠 때 알아야 할 실측 (2026-09-02, expense_plans 에 실제 INSERT):
+#      guest_<hex>  → InvalidTextRepresentation (org_id 가 uuid 타입이라 거부)
+#      orgs 없는 uuid → ForeignKeyViolation
+#      NULL          → OK (지금의 공용 게스트 버킷)
+#    타입·FK 는 orgs·l3_documents·l3_articles·decisions·plan_tasks 의 RLS
+#    (`org_isolation USING (org_id = tenant.current_org())`)와 묶여 있어
+#    **로그인 설계와 분리해서 못 바꾼다.**
+계약_보류: set[tuple[str, str]] = set()
 
 
 def _실제_엔드포인트() -> set[tuple[str, str]]:

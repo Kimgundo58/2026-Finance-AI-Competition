@@ -18,6 +18,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from ._common import MOCK, _질의, _실행
 from .models import L3업로드응답
+from .routes_plans import _org조건
 from . import mock_data
 
 router = APIRouter(prefix="/api/l3", tags=["L3 업로드"])
@@ -108,12 +109,31 @@ def _실_상태(doc_id: str, org_id: str | None) -> L3업로드응답:
     자체는 그대로다 — 파생 근거만 정확해지는 것이다 (2026-09-01 ai-14 후속 지시).
     dangling 상세(조·참조·사유)는 저장할 테이블이 아직 없다 — 자리만 두고 비워 둔다
     (`routes_l3.py` 상단 주석 · 실제 채우기는 파서 연결 후).
+
+    🔴 2026-09-02 수정 — 이 함수는 그 전까지 **주인에게도 항상 404** 였다.
+       **관측**: 옛 SQL 은 `WHERE doc_id = %s AND (%s IS NULL OR org_id = %s)` 였다.
+       실제로 태워 보니(psycopg 직접 호출) org_id 를 **str** 로 넘기면 org 를 줬든
+       None 이든 둘 다 `IndeterminateDatatype: could not determine data type of
+       parameter $2` 로 죽었다. `uuid.UUID` 객체로 넘기면 성공했다.
+       **추론**: `%s` 가 `... IS NULL` 자리에만 나와 Postgres 가 타입을 못 정한다 —
+       컬럼 비교(`org_id = %s`)와 달리 타입 문맥이 없다. HTTP 경로는 쿼리 파라미터를
+       항상 str 로 주므로 실서버에서는 100% 죽었고, `_질의` 가 예외를 삼켜 빈 리스트를
+       주는 바람에 호출부가 그걸 404 로 바꿨다 — **격리가 막은 게 아니라 고장이었다.**
+       (인수인계 기록 `백엔드_동결상태_0901.md` 는 "쿼리 자체가 매번 죽는다"고만 적었는데,
+        정확히는 «str 로 바인딩될 때» 다. uuid 객체면 살아서, 원인을 좁히는 데 이 구분이 필요하다.)
+
+       고칠 길이 둘이었다. 캐스트(`%s::text IS NULL`)도 실측으로 되살아나지만,
+       그러면 **org_id 없는 게스트가 남의 기관 L3 를 읽는다** (`NULL → 조건 통과` —
+       이것도 태워서 확인했다). 그래서 `_org조건()` 파이썬 분기를 쓴다:
+       `l3_documents.org_id` 는 NOT NULL 이라 게스트(`org_id IS NULL`)는 0행 → 404 다.
+       판정 경로가 이미 쓰는 관용구와 같아지는 것은 덤이다.
     """
+    조건, org인자 = _org조건(org_id, "d")
     행 = _질의(
-        """SELECT "원본파일명", "파싱품질", "dangling수"
-           FROM tenant.l3_documents
-           WHERE doc_id = %s AND (%s IS NULL OR org_id = %s)""",
-        (doc_id, org_id, org_id),
+        f'SELECT d."원본파일명", d."파싱품질", d."dangling수" '
+        f'FROM tenant.l3_documents d '
+        f'WHERE d.doc_id = %s AND {조건}',
+        (doc_id, *org인자),
     )
     if not 행:
         raise HTTPException(404, f"L3 문서 {doc_id} 을(를) 찾을 수 없습니다")

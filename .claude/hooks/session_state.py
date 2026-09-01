@@ -15,7 +15,28 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def worklog_head(n: int = 3) -> list[str]:
-    """작업 현황.md 의 최근 일자 헤딩 n개."""
+    """최근 작업 일자와 그 날의 첫 항목들.
+
+    기록은 `docs/기록/YYYY-MM-DD.md` 로 날짜당 한 벌이다 (2026-09-02 분할).
+    분할 전 저장소에서도 돌게 `작업 현황.md` 를 대체 경로로 남겨둔다.
+    """
+    d = ROOT / "docs" / "기록"
+    if d.is_dir():
+        # `2026-09-01.md` 만. `2026-08-31_축별보고.md` 는 일자 기록이 아니다
+        일자 = sorted((p for p in d.glob("20??-??-??.md")), reverse=True)
+        out = []
+        for f in 일자[:n]:
+            for line in f.read_text(encoding="utf-8", errors="replace").splitlines():
+                if line.startswith("## "):
+                    제목 = line[3:].strip()
+                    # 절 제목이 이미 날짜로 시작하면 파일명과 겹친다
+                    if 제목.startswith(f.stem):
+                        제목 = 제목[len(f.stem):].lstrip(" ·-—")
+                    out.append(f"{f.stem} · {제목}" if 제목 else f.stem)
+                    break
+        if out:
+            return out
+
     f = ROOT / "작업 현황.md"
     if not f.exists():
         return []
@@ -51,7 +72,7 @@ def main() -> None:
 
     log = worklog_head()
     if log:
-        print("\n### 작업 현황.md 최근 항목")
+        print("\n### 최근 작업 기록")
         for line in log:
             print(f"- {line}")
 
@@ -72,7 +93,8 @@ def main() -> None:
     if st:
         print(f"\n### git — 미커밋 {len(st.splitlines())}건 (브랜치 {git('branch', '--show-current')})")
 
-    print("\n상세 진척은 `작업 현황.md` 최상단, 점검 절차는 `확인_가이드.md` §4.")
+    print("\n읽기 순서는 `docs/README.md`, 지금 상태는 `docs/0_현황.md`, "
+          "미결은 `docs/9_미결.md`, 점검 절차는 `docs/8_운영/8-2_점검_절차.md`.")
 
 
 if __name__ == "__main__":

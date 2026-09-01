@@ -1,0 +1,98 @@
+{
+  "_주석": "2026-09-02 밤 정리 작업 레인. 등록된 세션만 가둔다 — 미등록 세션은 통과. 해제는 이 파일을 지우면 된다.",
+  "중앙": "760ffe1d-83a6-47f8-ae39-02c6ad799919",
+  "중앙이름": "ai-ae",
+  "브랜치": "cleanup/docs-py-2026-09-02",
+  "규칙": {
+    "git": "git 쓰기(add/commit/mv/checkout)는 중앙만 한다. 6세션 동시 add 는 인덱스 잠금이 충돌한다",
+    "pytest": "전체 pytest 는 중앙만 돌린다. DB 를 공유해 위양성이 난다",
+    "기록": "실제 구현.md 쓰기 금지 (W1 이 분할 중). 레인 기록은 docs/기록/_레인_*.md"
+  },
+  "기준선": {
+    "태그": "baseline-0902-정리전",
+    "pytest": "134 passed · 2 skipped · 6 xfailed",
+    "db": "chunks=20525 refs=44865 articles=26304 rules=72 prec=8 golden=113 decisions=73 l3art=17"
+  },
+  "레인": {
+    "백엔드": {
+      "이름": "백엔드 구현 (BE=ai-c7 지휘 · B1=ai-31 실행)",
+      "sessions": {
+        "ai-c7": "f3a6edb6-89eb-4d31-922e-2841a85b3ed7",
+        "ai-31": "9f007313-b088-4b17-a92e-a5c5fe492605"
+      },
+      "owns": [
+        "server/",
+        "db/init/",
+        "tests/",
+        "docs/7_백엔드/",
+        "docs/기록/_레인_BE.md",
+        "docs/기록/_레인_B1.md"
+      ]
+    },
+    "W1": {
+      "이름": "기록 12,000줄 날짜별 분할 → Agent 실험 (ai-e5)",
+      "sessions": { "ai-e5": "18881039-5e1a-4e9f-8d8f-eb5062e085bf" },
+      "owns": [
+        "docs/기록/",
+        "실제 구현.md",
+        "결과보고.md",
+        "작업 현황.md",
+        "0831_최종구현.md"
+      ]
+    },
+    "W2": {
+      "이름": "docs/1~4 신설 → 문서 용어 치환 (ai-8a)",
+      "sessions": { "ai-8a": "0b31598e-5e15-4fa1-a992-27bdf6444385" },
+      "owns": [
+        "docs/1_배경/",
+        "docs/2_구조/",
+        "docs/3_데이터/",
+        "docs/4_검색/",
+        "docs/기록/_레인_W2.md"
+      ]
+    },
+    "W3": {
+      "이름": "scripts/_lib 공통모듈 → 코드 용어 치환 (ai-68)",
+      "sessions": { "ai-68": "0eaf5382-d928-4936-9c3f-6a0310dde1f5" },
+      "owns": [
+        "scripts/_lib/",
+        "docs/기록/_레인_W3.md",
+        "scripts/orchestrate.py",
+        "scripts/retrieve.py",
+        "scripts/eval_store.py",
+        "scripts/rule_lookup.py",
+        "scripts/llm_schema.py",
+        "scripts/seed_rules.py",
+        "scripts/load_db.py",
+        "scripts/l3_load.py",
+        "scripts/build_refs.py",
+        "scripts/stage2_chunk.py",
+        "scripts/stage2_bm25.py",
+        "scripts/normalize_run.py",
+        "scripts/llm_validate.py",
+        "scripts/build_index.py",
+        "scripts/assemble_context.py",
+        "scripts/agent_a4.py",
+        "scripts/agent_a2.py",
+        "scripts/case_search.py",
+        "scripts/judge_run.py",
+        "scripts/adapter.py",
+        "scripts/eval_e2e.py",
+        "scripts/sweep_retrieval.py",
+        "scripts/eval_retrieval.py"
+      ]
+    },
+    "W4": {
+      "이름": "_work 아카이브 이관 → docs/5·6·8 신설 (ai-5e)",
+      "sessions": { "ai-5e": "c182f0b9-22bc-4e4d-a502-9ea46d8dbeed" },
+      "owns": [
+        "scripts/_work/",
+        "archive/",
+        "docs/5_룰/",
+        "docs/6_LLM/",
+        "docs/8_운영/",
+        "docs/기록/_레인_W4.md"
+      ]
+    }
+  }
+}
