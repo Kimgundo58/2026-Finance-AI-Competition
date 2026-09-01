@@ -399,6 +399,18 @@ def test_게스트가_기관_계획에_판정을_못_붙인다(세계):
 #     격리 구멍이 아니라 그 엔드포인트가 통째로 안 도는 것이고, 격리는
 #     «막혀서» 가 아니라 «아무것도 안 나와서» 지켜지는 것처럼 보인다.
 #     조율 세션에 보고했다. 소유는 레인 C(`routes_l3.py`).
+#
+# ✅ 2026-09-02 (BE) 고쳤다 — 위 진단에 **한 곳을 더 좁혔다.**
+#   위 기록은 "쿼리가 매번 죽는다"고 적었는데, 실제로 태워 보니 갈린다:
+#     org_id 를 `uuid.UUID` 객체로 넘기면 **성공**하고, **str** 로 넘기면 죽는다.
+#   HTTP 쿼리 파라미터는 항상 str 이라 실서버에서는 100% 죽은 게 맞다 — 결론은
+#   같지만, 원인을 «파라미터 타입 문맥» 으로 좁혀야 고칠 자리가 보인다.
+#
+#   고친 방식: `_org조건()` 파이썬 분기(`routes_plans` 의 관용구)로 바꿨다.
+#   캐스트(`%s::text IS NULL`)도 실측으로 되살아나지만 그 길은 **위 «예측» 이
+#   말한 구멍을 진짜로 연다** — 게스트가 남의 기관 L3 를 읽는다(태워서 확인).
+#   분기 쪽은 `l3_documents.org_id` 가 NOT NULL 이라 게스트가 0행 → 404 다.
+#   그래서 아래 세 테스트가 이제 «아무것도 안 나와서» 가 아니라 «막혀서» 통과한다.
 
 def _L3_조회가능() -> bool:
     """주인이 자기 문서를 실제로 읽을 수 있나. 못 읽으면 격리 검증이 무의미하다."""
@@ -410,10 +422,6 @@ def _L3_조회가능() -> bool:
     return client.get(f"/api/l3/{doc}", params={"org_id": org}).status_code == 200
 
 
-@pytest.mark.xfail(reason="🔴 `routes_l3._실_상태` 의 SQL 이 IndeterminateDatatype 으로 "
-                          "터지고 `_질의` 가 삼켜서, 실 경로 L3 조회가 주인에게도 항상 "
-                          "404 다. 격리 문제가 아니라 엔드포인트 고장. 조율 세션에 보고함",
-                   strict=False)
 def test_L3_조회경로가_살아있다(세계):
     if not 세계.A문서:
         pytest.skip("A 의 L3 문서가 없다")
@@ -448,11 +456,16 @@ def test_게스트가_기관_L3_문서를_못_읽는다(세계):
 #     `POST/PATCH .../tasks` 와 `tasks:sync` 는 **org_id 를 아예 안 받는다.**
 #     호출자 신원이 없으니 아무나 남의 계획에 할일을 꽂고 남의 할일을 바꾼다.
 #     아래 셋은 «그래야 한다» 를 적어둔 것이라 지금은 xfail 이다.
+#
+# ✅ 2026-09-02 (BE) 셋 다 닫았다 — xfail 을 걷었다.
+#   세 엔드포인트가 `org_id` 쿼리 파라미터를 받고, 계획/할일을 `_org조건()` 으로
+#   좁힌 뒤에야 쓴다. 소유가 안 맞으면 404 다.
+#   🔴 같이 고친 것: `persist.py` 의 판정→저장 경로가 `동기화()` 를 **위치인자 2개**로
+#      부르고 있었다. org_id 를 안 넘기면 게스트 조건으로 떨어져 기관 계획의 저장이
+#      통째로 깨진다 — 그래서 그 호출부에 org_id 를 같이 실었다.
+#   ⚠️ 이건 «격리가 된다» 의 증거이지 «판정이 맞다» 의 증거가 아니다.
 # ════════════════════════════════════════════════════════════════════
 
-@pytest.mark.xfail(reason="🔴 격리 구멍 — `POST /api/plans/{id}/tasks` 가 org_id 를 "
-                          "받지 않는다. 남의 계획에 할일이 꽂힌다. 조율 세션에 보고함",
-                   strict=False)
 def test_남의_계획에_할일을_못_넣는다(세계):
     r = client.post(f"/api/plans/{세계.A계획[0]}/tasks",
                     params={"org_id": 세계.B},
@@ -460,9 +473,6 @@ def test_남의_계획에_할일을_못_넣는다(세계):
     assert r.status_code == 404, f"🔴 B 가 A 의 계획에 할일을 꽂았다: {r.status_code}"
 
 
-@pytest.mark.xfail(reason="🔴 격리 구멍 — `PATCH .../tasks/{tid}` 가 org_id 를 받지 "
-                          "않는다. 남의 할일 상태를 바꾼다. 조율 세션에 보고함",
-                   strict=False)
 def test_남의_할일을_못_고친다(세계):
     with _접속() as c:
         행 = c.execute("SELECT task_id FROM tenant.plan_tasks WHERE plan_id = %s",
@@ -474,9 +484,6 @@ def test_남의_할일을_못_고친다(세계):
     assert r.status_code == 404, f"🔴 B 가 A 의 할일을 고쳤다: {r.status_code}"
 
 
-@pytest.mark.xfail(reason="🔴 격리 구멍 — `tasks:sync` 가 org_id 를 받지 않는다. "
-                          "남의 계획의 ai 할일을 지우고 다시 쓴다. 조율 세션에 보고함",
-                   strict=False)
 def test_남의_계획을_동기화하지_못한다(세계):
     r = client.post(f"/api/plans/{세계.A계획[0]}/tasks:sync",
                     params={"org_id": 세계.B}, json={"해야할일": []})

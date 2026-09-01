@@ -77,6 +77,7 @@ def _실_저장(plan_id: int | None, body, out: dict,
     # ③ 할일 동기화 — routes_tasks.py 를 편집하지 않고 함수만 부른다.
     동기화결과 = _할일동기화(
         plan_id, 할일동기화(decision_id=decision_id, 해야할일=out.get("해야할일", [])),
+        org_id,
     )
 
     return {
