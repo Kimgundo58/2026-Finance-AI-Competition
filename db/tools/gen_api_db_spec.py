@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""`API_DB_명세_v1.md` 를 **실측에서 생성**한다. 손으로 베끼지 않는다.
+"""`docs/7_백엔드/API_DB_명세_v1.md` 를 **실측에서 생성**한다. 손으로 베끼지 않는다.
 
     PYTHONIOENCODING=utf-8 python <이 파일> [--out API_DB_명세_v1.md]
 
@@ -460,7 +460,7 @@ def db절() -> str:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--out", default=str(ROOT / "API_DB_명세_v1.md"))
+    ap.add_argument("--out", default=str(ROOT / "docs" / "7_백엔드" / "API_DB_명세_v1.md"))
     args = ap.parse_args()
 
     from server.main import app
