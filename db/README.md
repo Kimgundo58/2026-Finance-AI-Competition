@@ -141,8 +141,8 @@
 ### 지금 들어 있는 양 (2026-09-01 실측)
 
 ```
-corpus.documents        283      corpus.chunks        20,525
-corpus.doc_articles  26,301      corpus.chunk_terms  1,301,584
+corpus.documents        283      corpus.chunks        20,518
+corpus.doc_articles  26,301      corpus.chunk_terms  1,148,718
 corpus.refs          44,855      corpus.rules             72
 corpus.precedence_rules   8      corpus.case_chunks      193
 tenant.decisions         73      tenant.l3_articles       17
