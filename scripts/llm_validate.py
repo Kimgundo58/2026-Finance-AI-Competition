@@ -50,9 +50,10 @@ if (sys.stdout.encoding or "").lower().replace("-", "") != "utf8":
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # PYTHONPATH 없이 동작
+from _lib import db  # noqa: E402
 from llm_schema import 판정_ENUM, 미충족시_ENUM, 인용, 전제, 최종응답  # noqa: E402
 
-DSN = os.environ.get("SUDDOE_DSN", "postgresql://postgres:devpw@localhost:5432/suddoe")
+DSN = db.DSN
 
 # ════════════════════════════════════════════════════════════════════════════
 # F 필드 경로 — `tenant` 실제 컬럼에서 만든다 (하드코딩 금지)
@@ -69,11 +70,10 @@ _메타컬럼 = {"profile_id", "org_id", "exec_id", "person_id", "created_at", "
 
 def f_경로집합(dsn: str | None = None) -> set[str]:
     """허용되는 F 필드 경로 전체. DB 컬럼이 정본이다."""
-    import psycopg
     out: set[str] = {f"F5.{x}" for x in F5_항목}
     for 축, 컬럼 in F축_특례.items():
         out |= {f"{축}.{c}" for c in 컬럼}
-    with psycopg.connect(dsn or DSN) as conn:
+    with db.connect(dsn) as conn:
         for 축, t in F축_테이블.items():
             for (c,) in conn.execute(
                     "SELECT column_name FROM information_schema.columns "
@@ -114,14 +114,13 @@ def s번호_메타(s맵: dict, dsn: str | None = None) -> dict[str, dict]:
     §3-4 [2겹] `인용[].조번호·원문 | 코드 | S번호 → DB 원문 치환` 을 여기서 한다.
     반환 키: doc_id · 조번호 · 조제목 · 원문 · 원문범위 · version · extraction · 항호_DB
     """
-    import psycopg
     청크 = {sid: i for sid, (k, i, _) in s맵.items() if k == "chunk" and i is not None}
     조문 = {sid: i for sid, (k, i, _) in s맵.items() if k == "article" and i is not None}
     l3 = {sid: i for sid, (k, i, _) in s맵.items() if k == "l3" and i is not None}
     항호 = {sid: h for sid, (_, _, h) in s맵.items()}
     out: dict[str, dict] = {}
 
-    with psycopg.connect(dsn or DSN) as conn:
+    with db.connect(dsn) as conn:
         # chunk — 청크 자체가 이미 항 단위(§3-7)라 text 를 그대로 쓴다. 자르지 않는다.
         if 청크:
             m = {r[0]: r for r in conn.execute("""
@@ -177,9 +176,8 @@ def 사고기록(종류: str, 상세: dict, *, decision_id=None, org_id=None,
     """
     import json as _json
 
-    import psycopg
     try:
-        with psycopg.connect(dsn or DSN) as conn:
+        with db.connect(dsn) as conn:
             컬럼 = {r[0] for r in conn.execute(
                 "SELECT column_name FROM information_schema.columns "
                 "WHERE table_schema='tenant' AND table_name='incidents'").fetchall()}

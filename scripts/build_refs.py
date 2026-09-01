@@ -43,6 +43,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _lib import db  # noqa: E402
 import pdftext  # noqa: E402  문자중복 레이어 + 2단 조판 자동 처리
 from stage0_articles import split_articles  # noqa: E402  섹션분리 + 3단 fallback
 from scope import 범위밖_조                   # noqa: E402  모두의창업 제3편 로컬트랙 컷
@@ -172,9 +173,7 @@ def load_corpus_names() -> dict[str, str]:
     """
     names: dict[str, str] = {}
     try:
-        import psycopg
-        dsn = os.environ.get("SUDDOE_DSN", "postgresql://postgres:devpw@localhost:5432/suddoe")
-        with psycopg.connect(dsn, connect_timeout=5) as conn:
+        with db.connect(connect_timeout=5) as conn:
             for (doc_id,) in conn.execute("SELECT doc_id FROM corpus.documents").fetchall():
                 # doc_id 는 `L1_<제명>_<날짜>` 또는 제명 그대로다. 둘 다 제명으로 접어 등록한다.
                 몸통 = doc_id[3:] if doc_id.startswith("L1_") else doc_id

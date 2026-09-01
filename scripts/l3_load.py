@@ -47,7 +47,10 @@ from typing import Any
 if (sys.stdout.encoding or "").lower().replace("-", "") != "utf8":
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
-DSN = os.environ.get("SUDDOE_DSN", "postgresql://postgres:devpw@localhost:5432/suddoe")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _lib import db                                                   # noqa: E402
+
+DSN = db.DSN
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -506,8 +509,7 @@ def main() -> None:
     ap.add_argument("--사업명", default=None)
     a = ap.parse_args()
 
-    import psycopg
-    with psycopg.connect(DSN) as conn, conn.cursor() as cur:
+    with db.connect() as conn, conn.cursor() as cur:
         찾음 = org해소(cur, a.org)
         if not 찾음:
             print(f"🔴 기관을 못 찾았다: {a.org}")

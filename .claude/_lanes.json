@@ -44,11 +44,23 @@
       "이름": "docs/1~4 신설 → 문서 용어 치환 (ai-8a)",
       "sessions": { "ai-8a": "0b31598e-5e15-4fa1-a992-27bdf6444385" },
       "owns": [
-        "docs/1_배경/",
-        "docs/2_구조/",
-        "docs/3_데이터/",
-        "docs/4_검색/",
-        "docs/기록/_레인_W2.md"
+        "docs/",
+        "docs/기록/_레인_W2.md",
+        "README.md",
+        "프로젝트설명.md",
+        "서비스 아키텍쳐.md",
+        "RAG.md",
+        "rule_base.md",
+        "LLM.md",
+        "Agent.md",
+        "확인_가이드.md",
+        "법령_크롤링_현황.md",
+        "데이터 전처리 파이프라인.md",
+        "데이터 설명.md",
+        "GPU Guideline.md",
+        "룰테이블_검수가이드.md",
+        "입력_적법성_점검.md",
+        "API_DB_명세_v1.md"
       ]
     },
     "W3": {

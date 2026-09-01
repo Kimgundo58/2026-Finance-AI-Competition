@@ -39,7 +39,9 @@ from pathlib import Path
 from typing import Any, Iterable, Sequence
 
 ROOT = Path(__file__).resolve().parent.parent
-DSN = os.environ.get("SUDDOE_DSN", "postgresql://postgres:devpw@localhost:5432/suddoe")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _lib import db                                                   # noqa: E402
+DSN = db.DSN
 
 허용_강도 = {"불가": 3, "조건부": 2, "가능": 1}   # 클수록 엄격
 
@@ -1093,8 +1095,7 @@ def _connect():
     기다리면서 **8세션 전체의 rules 읽기가 멈췄다**. 읽기만 하는 커넥션은
     트랜잭션을 열지 않는다.
     """
-    import psycopg
-    return psycopg.connect(DSN, autocommit=True)
+    return db.connect(autocommit=True)
 
 
 def _self_test() -> int:

@@ -37,13 +37,12 @@ import re
 import sys
 from pathlib import Path
 
-import psycopg
-
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
+from _lib import db  # noqa: E402
 from agent_a4 import 적재, 접기                                   # noqa: E402
 
-DSN = os.environ.get("SUDDOE_DSN", "postgresql://postgres:devpw@localhost:5432/suddoe")
+DSN = db.DSN
 
 비목_ENUM = ("재료비", "외주용역비", "기계장치", "인건비", "지급수수료",
              "여비", "교육훈련비", "광고선전비", "특허권등무형자산취득비", "창업활동비")
@@ -228,7 +227,7 @@ def main() -> None:
         줄들.append(s)
 
     줄("A2 엄격조항 검토 — 🔴 엄격한 게 이기는 게 아니다. 우선순위를 같이 판정한다")
-    with psycopg.connect(DSN) as conn:
+    with db.connect() as conn:
         recs = 접기(실행(conn, a.org, 줄))
         줄("\n" + "=" * 74)
         줄(f"후보 {len(recs)}건")

@@ -62,12 +62,11 @@ import sys
 from difflib import SequenceMatcher, unified_diff
 from pathlib import Path
 
-import psycopg
-
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
+from _lib import db  # noqa: E402
 
-DSN = os.environ.get("SUDDOE_DSN", "postgresql://postgres:devpw@localhost:5432/suddoe")
+DSN = db.DSN
 
 # recheck_queue DDL 은 D 소유(D1-d)다. 아직 없으면 여기로 떨어뜨리고 계속 간다.
 FALLBACK = ROOT / "scripts" / "_work" / "_recheck_queue.json"
@@ -908,7 +907,7 @@ def main() -> None:
     a = ap.parse_args()
 
     if a.heal_only:
-        with psycopg.connect(DSN) as conn:
+        with db.connect() as conn:
             치유(conn, a.dry, print)
             조정(conn, a.dry, print)      # 열쇠 대조 없이 ACTIVE_NOT_LATEST 만
         return
@@ -920,7 +919,7 @@ def main() -> None:
         줄들.append(s)
 
     줄("A4 개정 대응 — 조 매칭(제목 주·번호 보조) → 본문 diff → 근거 역조회 → recheck_queue")
-    with psycopg.connect(DSN) as conn:
+    with db.connect() as conn:
         recs: list[dict] = []
         스캔한신doc: set[str] = set()
         if a.source in ("db", "both"):

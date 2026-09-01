@@ -37,10 +37,9 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import tag_apply_target as TAT                                       # noqa: E402
 import index_guard                                                   # noqa: E402
 from scope import 범위밖_조                                          # noqa: E402
+from _lib import db                                                  # noqa: E402
 
-import psycopg                                                       # noqa: E402
-
-DSN = os.environ.get("SUDDOE_DSN", "postgresql://postgres:devpw@localhost:5432/suddoe")
+DSN = db.DSN
 APPLY = ROOT / "2026_Finance_DATA_FOR_RAG" / "_apply_target.json"
 OUT_JSONL = ROOT / "scripts" / "_work" / "_stage2_chunks.jsonl"
 
@@ -248,7 +247,7 @@ def main() -> None:
     rows: list[tuple] = []
     임베딩입력: list[str] = []
 
-    with psycopg.connect(DSN) as conn:
+    with db.connect() as conn:
         docs = conn.execute("""
             SELECT doc_id, layer, 기관ID, parse_quality, version, status,
                    retrieval_scope, src_path

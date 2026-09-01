@@ -32,7 +32,10 @@ import io, json, os, sys
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 import psycopg
 
-DSN = os.environ.get("SUDDOE_DSN", "postgresql://postgres:devpw@localhost:5432/suddoe")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _lib import db                                                   # noqa: E402
+
+DSN = db.DSN
 
 # ════════════════════════════════════════════════════════════════════════════
 # doc_id 상수 — 🔴 전부 corpus.documents 의 PK 그대로다. 손으로 짓지 말 것.
@@ -1620,7 +1623,7 @@ def main():
         print("   구성만 보려면:  python scripts/seed_rules.py --dry")
         return 1
 
-    with psycopg.connect(DSN) as conn:
+    with db.connect() as conn:
         # 🔴 lock_timeout — TRUNCATE 는 AccessExclusiveLock 을 잡는다. 8세션이 한 DB 를 쓰는
         #    밤이라, 락을 못 잡고 무한정 기다리면 **내 대기가 그 뒤의 모든 rules 조회를
         #    줄세운다** (한번 배타락 요청이 큐에 서면 이후 읽기까지 그 뒤로 밀린다).

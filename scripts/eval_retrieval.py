@@ -47,9 +47,10 @@ import psycopg
 #    출력 인코딩은 PYTHONIOENCODING=utf-8 로 준다 (훅이 강제한다).
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _lib import db  # noqa: E402
 import retrieve  # noqa: E402  검색 구현 정본
 
-DSN = retrieve.DSN
+DSN = db.DSN
 
 
 def 정규화(s: str) -> str:
