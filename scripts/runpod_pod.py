@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """GPU 팟 열기·보기·닫기.
 
-`runpod_session` 스킬의 실행부. 스킬이 정본이고 여기는 그 절차를 코드로 굳힌 것뿐이다.
+`runpod_session` 스킬의 실행부. 스킬이 기준 문서이고 여기는 그 절차를 코드로 굳힌 것뿐이다.
 
 🔴 **RunPod 에는 서버측 자동종료가 없다** (2026-08-31 확인).
    `runpodctl 2.12.0` 의 `pod create` 에 `--terminate-after` / `--stop-after` 가 없고,
@@ -12,16 +12,16 @@
 
      1. 워치독  — `open` 이 떼어놓는 로컬 프로세스. N시간 뒤 `pod delete`.
                   🔴 PC 가 꺼지거나 절전에 들어가면 같이 죽는다. 그러면 팟은 계속 돈다
-     2. 대장    — `.claude/_runpod_open.json`. `ls` 가 여기와 실물을 대조한다
+     2. 목록    — `.claude/_runpod_open.json`. `ls` 가 여기와 실물을 대조한다
      3. 잔액    — 최후의 방어선. 크레딧이 떨어지면 RunPod 이 멈춘다.
                   손실 상한 = 남은 잔액이지, 무한이 아니다
 
-   1번을 믿지 마라. **작업이 끝나면 사람이 닫는 게 정본이다** (스킬 ④).
+   1번을 믿지 마라. **작업이 끝나면 사람이 닫는 게 기준 문서이다** (스킬 ④).
 
 사용:
     python scripts/runpod_pod.py ls
     python scripts/runpod_pod.py open --gpu "RTX 2000 Ada" --hours 1 --template-id <id>
-    python scripts/runpod_pod.py close            # 대장의 팟 전부
+    python scripts/runpod_pod.py close            # 목록의 팟 전부
     python scripts/runpod_pod.py close <pod-id>   # 하나만
 """
 from __future__ import annotations
@@ -39,7 +39,7 @@ from pathlib import Path
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
-# 대장 경로는 `runpod_session` 스킬 절대규칙 2 가 정본이다 — 프로젝트 안에 둔다.
+# 목록 경로는 `runpod_session` 스킬 절대규칙 2 가 기준 문서이다 — 프로젝트 안에 둔다.
 # 홈이 아니라 여기인 이유: 컨텍스트가 날아가도 리포를 열면 팟 id 가 보인다.
 LEDGER = Path(__file__).resolve().parent.parent / ".claude" / "_runpod_open.json"
 
@@ -81,7 +81,7 @@ def pods_live() -> list[dict]:
     return d if isinstance(d, list) else (d or {}).get("pods") or []
 
 
-# ── 대장 ────────────────────────────────────────────────────────────
+# ── 목록 ────────────────────────────────────────────────────────────
 
 def ledger_read() -> list[dict]:
     if not LEDGER.exists():
