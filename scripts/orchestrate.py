@@ -277,6 +277,29 @@ def b5_문장(cur, org_id) -> str | None:
     이름 = ("협약총액", "정부지원(현금)", "자기부담(현금)")
     return "\n".join(f"{n}: {v if v is not None else '미입력'}" for n, v in zip(이름, r))
 
+def b5_값(cur, org_id) -> dict | None:
+    """B5 의 **값**. `b5_문장` 의 문자열판이 아니라 층 B 대조용 원본이다 (ai-ba 패치).
+
+    🔴 반환값 셋을 갈라야 한다 — 뭉치면 게스트 가드가 조용히 꺼진다.
+        None   조회 자체를 못 했다(예외) = 모른다  -> 층 B 상태 규칙 무발효
+        {}     F축이 없다(게스트·미등록·전 NULL)   -> 최대 강도
+        {...}  실제 값
+
+    `b5_문장` 은 셋을 전부 None 으로 뭉갠다 — 프롬프트에 넣을 문자열이라 그래도 됐지만,
+    검증기는 «모른다» 와 «없다» 를 갈라야 하므로 함수를 합치지 않는다.
+    """
+    if not org_id:
+        return {}                       # 게스트. '모른다' 가 아니라 '없다' 다
+    try:
+        r = cur.execute("""SELECT 협약총액, 정부지원_현금, 자기부담_현금
+                             FROM tenant.f_profile WHERE org_id=%s LIMIT 1""",
+                        (org_id,)).fetchone()
+    except Exception:
+        return None                     # 모른다
+    if not r:
+        return {}
+    return {k: v for k, v in zip(("협약총액", "정부지원_현금", "자기부담_현금"), r)
+            if v is not None}
 
 # ════════════════════════════════════════════════════════════════════════════
 # (5) 전제 해소 3갈래 — `Agent.md` §4
@@ -379,6 +402,7 @@ def _빈응답(판정: str, 요약: str, **추가) -> dict:
 
 def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool = False,
        기관ID: str | None = None, top_k: int = 5, conn=None, 기록: bool = True,
+       plan_id: int | None = None,
        격리근거: list[dict] | None = None, 주입: str | None = None,
        게이트임계: float | None = None, 온도: float = 0.0,
        변형: str = "V0") -> dict:
@@ -386,6 +410,9 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool 
 
     `dry=True` : LLM 을 부르지 않는다. (1) 은 규칙 정규화, (4) 는 프롬프트 조립까지만.
                  **GPU 를 열기 전에 77문항이 끝까지 도는지** 보는 것이 목적이다.
+    `plan_id`  : 지출계획에 딸린 판정이면 그 id. `tenant.decisions.plan_id` 에 그대로
+                 들어간다 — 서버가 판정 직후 UPDATE 로 뒤에서 잇던 이음매를 없앤다.
+                 없으면 NULL(단건 판정). 컬럼이 없는 스키마에서는 조용히 빠진다.
     `주입`     : A10 fault injection. 'db'|'timeout'|'schema'|'empty'|'cite'
     """
     t0 = time.time()
@@ -463,7 +490,8 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool 
                        비목후보=후보[:2], 정규화=정규,
                        지연ms={**지연, "총": int((time.time() - t0) * 1000)})
             return _마무리(conn, cur, 응답, 기록=기록, 닫기=닫기, 질문=질문,
-                        사업명=사업명, org_id=org_id, 기관ID=기관ID)
+                        사업명=사업명, org_id=org_id, 기관ID=기관ID,
+                        plan_id=plan_id)
 
         # ── (2)-b L3 룰 조회 (먼저) · (2)-c 게이팅 ───────────────────────
         t = time.time()
@@ -488,7 +516,8 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool 
                        지연ms={**지연, "총": int((time.time() - t0) * 1000)},
                        모델={"호출수": 0 if dry else 1})
             return _마무리(conn, cur, 응답, 기록=기록, 닫기=닫기, 질문=질문,
-                        사업명=사업명, org_id=org_id, 기관ID=기관ID)
+                        사업명=사업명, org_id=org_id, 기관ID=기관ID,
+                        plan_id=plan_id)
 
         # ── (3)-a L3 통째 로드 ∥ (3)-b~e 검색 ────────────────────────────
         # 독립이라 병렬이다. L3 를 먼저 보는 것이 지연을 늘리지 않는다 (`Agent.md` §1).
@@ -532,7 +561,8 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool 
                        지연ms={**지연, "총": int((time.time() - t0) * 1000)},
                        모델={"호출수": 0 if dry else 1})
             return _마무리(conn, cur, 응답, 기록=기록, 닫기=닫기, 질문=질문,
-                        사업명=사업명, org_id=org_id, 기관ID=기관ID)
+                        사업명=사업명, org_id=org_id, 기관ID=기관ID,
+                        plan_id=plan_id)
 
         # ── (4) 판정 조립 ────────────────────────────────────────────────
         t = time.time()
@@ -568,7 +598,9 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool 
         try:
             if 주입 == "timeout":
                 raise LLM실패("read timeout(주입)")
-            코드들 = 체크코드_enum() or None
+            # 🔴 사업명을 넘긴다. 안 넘기면 52개 code 가 통째로 enum 에 들어가
+            #    이 사업과 무관한 해야할일(예: `기장대행한도_재도전`)이 제안된다.
+            코드들 = 체크코드_enum(사업명=사업명) or None
             스키마 = 판정_스키마(s번호들=list(s맵), 코드들=코드들)
             # 🔴 주입은 **제 단계까지 가야** 검증이 된다. vLLM 없이 (4) 를 지나려면
             #    LLM 출력을 합성하는 수밖에 없다. 둘 다 (6) 이 잡아야 하는 것들이다:
@@ -601,7 +633,10 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool 
                       체크코드=코드들,
                       현재기관=기관ID, 사업명=사업명,
                       dangling=검색결과["dangling"],
-                      l3게이팅=게이팅, 룰=룰, dsn=DSN)
+                      l3게이팅=게이팅, 룰=룰,
+                      # 층 B — 해야할일 설명 환각 대조. 추가 조회·추가 LLM 호출 0.
+                      f사실=b5_값(cur, org_id), 프롬프트=프롬프트,
+                      dsn=DSN)
         코드 = 응답.get("강등코드") or []
         잰다("검증", t)
         경로.append("6검증")
@@ -624,7 +659,8 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool 
                    모델={"호출수": 2, "변형": 변형, "정규화": 메타1.get("모델"),
                         "판정": 메타4.get("모델"), "판정지연ms": 메타4.get("지연ms")})
         return _마무리(conn, cur, 응답, 기록=기록, 닫기=닫기, 질문=질문,
-                    사업명=사업명, org_id=org_id, 기관ID=기관ID)
+                    사업명=사업명, org_id=org_id, 기관ID=기관ID,
+                    plan_id=plan_id)
 
     except 주입실패 as e:
         return _마무리(conn, None, _빈응답(
@@ -673,12 +709,14 @@ def _사례(cur, 질문, 판정값):
 
 
 def _마무리(conn, cur, 응답: dict, *, 기록: bool, 닫기: bool,
-          질문: str = "", 사업명=None, org_id=None, 기관ID=None) -> dict:
+          질문: str = "", 사업명=None, org_id=None, 기관ID=None,
+          plan_id=None) -> dict:
     """(7) decisions insert + 커밋 + 정리. 기록 실패가 판정을 죽이지 않는다."""
     try:
         if 기록 and cur is not None:
             행 = dict(
                 org_id=org_id, 사업명=사업명, 기관id=기관ID, 질문원문=질문,
+                plan_id=plan_id,
                 정규화=json.dumps(응답.get("정규화") or {}, ensure_ascii=False),
                 비목=응답.get("비목"),
                 금액=(응답.get("정규화") or {}).get("금액"),

@@ -150,12 +150,12 @@ def main():
                 conn.execute("""
                     INSERT INTO documents
                       (doc_id, layer, domain, 기관ID, doc_type, version, 시행일,
-                       status, parse_quality, src_path, roles, index_target)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                       status, parse_quality, src_path, index_target)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 """, (doc_id, layer, derive_domain(rel, layer), derive_기관ID(rel, layer),
                       f.get("doc_type"), f.get("version"), _date(f.get("시행일")),
                       f.get("status") or "reference", quality,
-                      rel, roles, index_target))
+                      rel, index_target))
 
                 rows = [(doc_id, a["조번호"], a.get("조제목"), a.get("조번호_int"),
                          a["본문"], a.get("페이지")) for a in arts]

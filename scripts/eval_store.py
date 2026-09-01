@@ -126,16 +126,40 @@ def 정답청크(cur, gold_id: int) -> set[int]:
     return {r[0] for r in cur.fetchall()}
 
 
-def 평가대상(cur, *, 세트: str | None = None) -> list[dict]:
-    """정답 청크가 고정된 문항만. 분모가 매 실행 흔들리지 않게 여기서 한 번에 정한다."""
+def 평가대상(cur, *, 세트: str | None = None, 범위밖포함: bool = False) -> list[dict]:
+    """정답 청크가 고정된 문항 중 **평가 범위 안**의 것만. 분모를 여기서 한 번에 정한다.
+
+    🔴 `평가범위='범위밖…'` 을 뺀다 (2026-09-01). `_골든셋_초안.json` 메타가
+       «창업팀 전용 전환을 확정했다. 따라서 대상='주관기관' 16문항은 평가 범위 밖이다»
+       라고 이미 결정해 놨는데, 그 축이 `load_db.py` INSERT 에서 빠져 DB 에 도달하지
+       못했고 여기서도 거르지 못했다. 그동안 **창업팀 전용 서비스를 주관기관 문항
+       21% 로 채점**하고 있었다.
+       그 16문항은 근거가 주관기관 운영비 조인데 검색 필터가
+       `적용대상 IN ('창업기업','공통')` 이라 **구조적으로 hit 이 불가능**하다 —
+       리랭커·가중·임베딩 무엇으로도 안 움직인다. 분모에 두면 영원히 못 넘는 벽이
+       «검색 성능» 으로 보고된다.
+       `범위밖포함=True` 는 센터 화면이 되살아날 때를 위한 문이다. 기본은 제외.
+
+    🔴 **`정답판정='판단불가'` 는 골든청크가 없어도 분모에 든다** (2026-09-01).
+       「골든청크가 고정된 것만 센다」는 조건이 **판단불가 문항을 구조적으로 배제**한다 —
+       규범에 답이 없다는 것이 정답인 문항은 고정할 청크가 애초에 없기 때문이다.
+       그 결과 오늘까지 채점 분모 65 의 정답 분포가 `불가 44 / 조건부 17 / 가능 4 /
+       **판단불가 0**` 이었다. 시스템의 기본값이 판단불가인데 그게 옳은 상황을 한 번도
+       묻지 않았고, 안전한 실패가 점수상 **처벌만** 받았다.
+       근거 청크가 없으므로 이 문항들의 인용적중은 채점하지 않는다 (`eval_e2e` 가 뺀다).
+    """
     cur.execute(
-        """SELECT g.gold_id, g.세트, g.사업명, g.적용범위, g.질문, g.정답판정, g.비목
+        """SELECT g.gold_id, g.세트, g.사업명, g.적용범위, g.질문, g.정답판정, g.비목,
+                  g.대상, g.평가범위, g.채점모드
              FROM eval.golden_set g
-            WHERE EXISTS (SELECT 1 FROM eval.golden_chunks gc
-                           WHERE gc.gold_id = g.gold_id AND gc.chunk_id IS NOT NULL)
+            WHERE (g.정답판정 = '판단불가'
+                   OR EXISTS (SELECT 1 FROM eval.golden_chunks gc
+                               WHERE gc.gold_id = g.gold_id AND gc.chunk_id IS NOT NULL))
               AND (%s::text IS NULL OR g.세트 = %s::text)
-            ORDER BY g.gold_id""", (세트, 세트))
-    cols = ("gold_id", "세트", "사업명", "적용범위", "질문", "정답판정", "비목")
+              AND (%s OR g.평가범위 IS NULL OR g.평가범위 NOT LIKE '범위밖%%')
+            ORDER BY g.gold_id""", (세트, 세트, 범위밖포함))
+    cols = ("gold_id", "세트", "사업명", "적용범위", "질문", "정답판정", "비목",
+            "대상", "평가범위", "채점모드")
     return [dict(zip(cols, r)) for r in cur.fetchall()]
 
 

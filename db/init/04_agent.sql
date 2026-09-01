@@ -101,7 +101,9 @@ ALTER TABLE tenant.decisions ADD COLUMN IF NOT EXISTS "강등코드" TEXT[] NOT 
 ALTER TABLE tenant.decisions ADD COLUMN IF NOT EXISTS "경로"     TEXT;
 ALTER TABLE tenant.decisions ADD COLUMN IF NOT EXISTS "실패단계" TEXT;
 
--- 강등코드 18종. 매핑표 밖의 코드는 거부한다 — 오타가 지표를 조용히 갈라놓지 못하게.
+-- 강등코드 22종. 매핑표 밖의 코드는 거부한다 — 오타가 지표를 조용히 갈라놓지 못하게.
+-- 2026-09-01: TASK_* 4종 추가 (18 → 22). `해야할일[].설명` 대조용이고 판정을 바꾸지 않는다
+-- (설명만 떨어뜨린다). 정본 철자는 `llm_validate.py` 에 박힌 문자열이다.
 ALTER TABLE tenant.decisions DROP CONSTRAINT IF EXISTS "decisions_강등코드_check";
 ALTER TABLE tenant.decisions
   ADD CONSTRAINT "decisions_강등코드_check"
@@ -110,7 +112,10 @@ ALTER TABLE tenant.decisions
     'PREMISE_NO_BASIS','PREMISE_BASIS_NOT_IN_MAP','PREMISE_ENUM','PREMISE_UNMAPPED',
     'NO_CITATION','VLM_DOWNGRADE','B_GRADE_DOWNGRADE','UNVERIFIED_RULE',
     'TASK_CODE_INVALID','L3_ONLY_DOWNGRADE','TENANT_LEAK','DANGLING_WARN',
-    'DOMAIN_WARN','PRECEDENCE_FLIP'
+    'DOMAIN_WARN','PRECEDENCE_FLIP',
+    -- 해야할일 대조 (llm_validate.py · ai-ba)
+    'TASK_STATE_UNSOURCED','TASK_STATE_MISMATCH',
+    'TASK_NUMBER_UNSOURCED','TASK_BASIS_NOT_IN_MAP'
   ]::text[]);
 
 CREATE INDEX IF NOT EXISTS "ix_decisions_경로" ON tenant.decisions ("경로");
