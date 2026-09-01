@@ -314,7 +314,7 @@ def _precedence(cur, 사업명: str | None) -> list[dict]:
 def _우선규범(cur, 사업명: str | None) -> str | None:
     """B6 — 초격차·모두의창업의 상위는 통합관리지침이 **아니다**.
 
-    `corpus.programs.우선규범` 이 기준 문서(D 적재). 없으면 precedence_rules 로 폴백한다.
+    `corpus.programs.우선규범` 이 기준 문서(D 적재). 없으면 precedence_rules 로 대체한다.
     """
     if not 사업명:
         return None
@@ -473,7 +473,7 @@ def 비목확정(cur, 품목: str | None, 사업명: str | None, *,
 
     # ── 비목 정본명·별칭 자체와의 일치 (용어 사전) ──────────────────────────────
     if not out:
-        for 비목, 신뢰도 in _어휘집_직결(cur, 품목n):
+        for 비목, 신뢰도 in _용어사전_직결(cur, 품목n):
             if 비목 not in 본:
                 out.append({"비목": 비목, "신뢰도": 신뢰도, "출처": "alias",
                             "매칭": 품목, "별칭사업명": None, "별칭출처": "item_vocab"})
@@ -501,7 +501,7 @@ def 비목확정(cur, 품목: str | None, 사업명: str | None, *,
     return sorted(out, key=lambda o: -o["신뢰도"])[:top_n]
 
 
-def _어휘집_직결(cur, 품목n: str) -> list[tuple[str, float]]:
+def _용어사전_직결(cur, 품목n: str) -> list[tuple[str, float]]:
     """품목이 비목 정본명·별칭·하위항목 그 자체일 때 (사용자가 비목명을 그대로 쓴 경우)."""
     try:
         cur.execute("SELECT 비목, 별칭, 하위항목 FROM corpus.item_vocab WHERE 계통='창업'")
@@ -1310,7 +1310,7 @@ def 비목추정_문장(cur, 문장: str, 사업명: str | None) -> list[dict]:
                 "WHERE 사업명 = %s OR 사업명 IS NULL", [사업명])
     어휘: list[tuple[str, str]] = list(cur.fetchall())
     # 비목 정본명 자체("인건비를 줘도 되나요")도 잡아야 한다 — `비목확정()` 의
-    # `_어휘집_직결` 과 같은 재료를 쓰지 않으면 대역이 실제보다 못해 보인다
+    # `_용어사전_직결` 과 같은 재료를 쓰지 않으면 대역이 실제보다 못해 보인다
     try:
         cur.execute("SELECT 비목, 별칭, 하위항목 FROM corpus.item_vocab WHERE 계통='창업'")
         for 비목, 별칭, 하위 in cur.fetchall():

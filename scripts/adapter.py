@@ -258,14 +258,14 @@ class LLMAdapter:
         return 살아있는[0]
 
     # ── 호출 ────────────────────────────────────────────────────────
-    def 호출(self, 슬롯이름: str, 프롬프트: str, 스키마: dict | None = None, *,
+    def 호출(self, 호출자리이름: str, 프롬프트: str, 스키마: dict | None = None, *,
              온도: float = 0.0, 타임아웃: int = 180,
              제공자강제: str | None = None) -> tuple[dict | str, dict]:
         try:
-            s = 슬롯표[슬롯이름]
+            s = 슬롯표[호출자리이름]
         except KeyError:
             raise LookupError(
-                f"모르는 슬롯 '{슬롯이름}'. 슬롯은 {list(슬롯표)} 뿐이다 — "
+                f"모르는 슬롯 '{호출자리이름}'. 슬롯은 {list(슬롯표)} 뿐이다 — "
                 f"function calling 미개방이라 슬롯이 늘어나면 호출 수 예측이 깨진다") from None
         p = self._고르기(s, 제공자강제)
         self.검사(s, p, 프롬프트)                      # 🔴 나가기 전에 반드시
@@ -277,9 +277,9 @@ class LLMAdapter:
 기본어댑터 = LLMAdapter()
 
 
-def 호출(슬롯이름: str, 프롬프트: str, 스키마: dict | None = None, **kw):
+def 호출(호출자리이름: str, 프롬프트: str, 스키마: dict | None = None, **kw):
     """모듈 수준 편의 함수. 오케스트레이터·서버가 이걸 쓴다."""
-    return 기본어댑터.호출(슬롯이름, 프롬프트, 스키마, **kw)
+    return 기본어댑터.호출(호출자리이름, 프롬프트, 스키마, **kw)
 
 
 # ────────────────────────────────────────────────────────────────────

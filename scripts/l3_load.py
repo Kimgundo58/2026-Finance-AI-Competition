@@ -90,7 +90,7 @@ def 사업비관련장(장: str | None) -> bool:
 # 🔴 DB 조회만 하면 안 된다. G 세션의 `TRUNCATE rules` 재적재 창(합류점 1) 처럼
 #    참조 테이블이 잠깐 비는 순간이 있고, 그때 비목이 0종이면 L3 룰이 **전건 무음 None**
 #    이 된다 — 판정은 계속 돌지만 L3 가 통째로 사라진 걸 아무도 모른다.
-_비목_폴백: dict[str, tuple[str, ...]] = {
+_비목_대체경로: dict[str, tuple[str, ...]] = {
     "재료비": ("재료 및 원료비", "원재료비", "재료"),
     "외주용역비": ("외주 용역비", "용역비", "외주"),
     "기계장치": ("기계장치비", "공구기구비", "비품비", "공구", "기구", "비품",
@@ -117,11 +117,11 @@ def 비목어휘(cur) -> dict[str, tuple[str, ...]]:
         rows = []
     if not rows:
         print("   ⚠️ corpus.item_vocab 조회 실패/0행 — 폴백 어휘 10종을 쓴다", file=sys.stderr)
-        return {k: v for k, v in _비목_폴백.items()}
+        return {k: v for k, v in _비목_대체경로.items()}
     vocab: dict[str, tuple[str, ...]] = {}
     for 비목, 별칭, 하위 in rows:
-        vocab[비목] = tuple(list(별칭) + list(하위) + list(_비목_폴백.get(비목, ())))
-    for k, v in _비목_폴백.items():          # 용어 사전에 없는 비목은 대체 경로로 메운다
+        vocab[비목] = tuple(list(별칭) + list(하위) + list(_비목_대체경로.get(비목, ())))
+    for k, v in _비목_대체경로.items():          # 용어 사전에 없는 비목은 대체 경로로 메운다
         vocab.setdefault(k, v)
     return vocab
 

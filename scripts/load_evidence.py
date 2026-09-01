@@ -74,7 +74,7 @@ def 쪼개기(s: str) -> list[str]:
 #    ALTER 하지 않았다 — 오너 결정 대기. `--map` 이 검수용 산출물만 만든다.
 
 _ROOT = ROOT
-_어휘집 = _ROOT / "2026_Finance_DATA_FOR_RAG" / "_비목_어휘집.json"
+_용어사전 = _ROOT / "2026_Finance_DATA_FOR_RAG" / "_비목_어휘집.json"
 
 # (2) 지급수수료 세목 — 접두사형("지급수수료-멘토링비")과 민낯형("멘토링비")이 섞여 있다.
 #     민낯형이 창업패키지 세목인지 TIPS 비목인지는 CSV `패키지` 열로 갈렸다:
@@ -118,10 +118,10 @@ _RND_비목 = {
 }
 
 
-def 정본_비목_enum() -> set[str]:
+def 기준문서_비목_enum() -> set[str]:
     """`_비목_어휘집.json` 의 guided_json_enum 10종. 비목 문자열의 유일한 기준 문서."""
     import json
-    with _어휘집.open(encoding="utf-8") as f:
+    with _용어사전.open(encoding="utf-8") as f:
         v = json.load(f)
     if v.get("enum_검수대기"):
         print(f"⚠️ 어휘집 enum_검수대기 {len(v['enum_검수대기'])}종 — 정본 확정 전이다")
@@ -146,7 +146,7 @@ def 정본비목(원문: str, 정본: set[str] | None = None) -> tuple[str | Non
 
     분류: 기준 문서 | 표기차이 | 지급수수료_세목 | R&D계통 | 주관기관비목 | 비목아님 | 미분류
     """
-    정본 = 정본 if 정본 is not None else 정본_비목_enum()
+    정본 = 정본 if 정본 is not None else 기준문서_비목_enum()
     s = (원문 or "").strip()
     if not s:
         return None, "비목아님"
@@ -300,7 +300,7 @@ def 파생컬럼_채우기() -> tuple[int, int]:
     빈 `해당비목_정본` 은 결손이 아니다: TIPS·R&D 계통과 주관기관 비목은 창업 10종에
     매핑하지 않기로 한 결정의 결과다 (`audit_db.py:123` 이 같은 근거를 든다).
     """
-    정본 = 정본_비목_enum()
+    정본 = 기준문서_비목_enum()
     with psycopg.connect(DSN) as conn:
         rows = conn.execute("SELECT 증빙명, 해당비목 FROM corpus.evidence_sources").fetchall()
         갱신 = []
@@ -333,7 +333,7 @@ def 비목매핑(적용: bool = False) -> None:
         n, 빔 = 파생컬럼_채우기()
         print(f"파생 2컬럼 재적재 {n}행 · 해당비목_정본 빈 배열 {빔}행 (R&D·주관기관·비목아님)")
 
-    정본 = 정본_비목_enum()
+    정본 = 기준문서_비목_enum()
     with psycopg.connect(DSN) as conn:
         rows = conn.execute(
             "SELECT 증빙명, 해당비목 FROM corpus.evidence_sources ORDER BY 증빙명").fetchall()

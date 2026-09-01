@@ -1484,7 +1484,7 @@ def 세목증빙(*세목: str) -> list[str]:
 L1_검수자 = "G세션-4단검증"
 
 
-def 정본_비목_enum() -> set[str]:
+def 기준문서_비목_enum() -> set[str]:
     """`_비목_어휘집.json` 의 guided_json_enum. 비목 문자열의 유일한 기준 문서."""
     p = (os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
          + "/2026_Finance_DATA_FOR_RAG/_비목_어휘집.json")
@@ -1531,7 +1531,7 @@ _증빙_별칭 = {
 }
 
 
-def 정본증빙(names: list[str]) -> list[str]:
+def 기준문서증빙(names: list[str]) -> list[str]:
     """배열 원소를 기준 문서 증빙명으로 바꾸고 중복을 없앤다 (등장 순서 유지).
 
     중복이 생기는 경우가 실제로 있다 — 근로소득원천징수영수증/부 2종이 CSV 한 행으로 접힌다.
@@ -1553,7 +1553,7 @@ def rows():
         승인, 조건 = it["사전승인"]
         근거 = [{"doc_id": 지침_DOC, "조번호": j} for j in it["L1근거"]]
         yield ("L1", None, None, it["비목"], it["허용"], 승인, 조건,
-               유형, 값, 단위, 정본증빙(it["증빙"]), it["금지예시"], it["허용예시"],
+               유형, 값, 단위, 기준문서증빙(it["증빙"]), it["금지예시"], it["허용예시"],
                json.dumps(근거, ensure_ascii=False),
                "창업지원사업", False, L1_검수자, 검수일)
 
@@ -1569,7 +1569,7 @@ def rows():
             # 오너 위임 검수를 받았더라도 verified 로 올리지 않는다 (아래 모두의창업 광고선전비).
             v = it.get("verified", verified)
             yield ("L2", None, 사업, it["비목"], it["허용"], 승인, 조건,
-                   유형, 값, 단위, 정본증빙(it["증빙"]), it["금지예시"], it["허용예시"],
+                   유형, 값, 단위, 기준문서증빙(it["증빙"]), it["금지예시"], it["허용예시"],
                    json.dumps(근거, ensure_ascii=False),
                    "창업지원사업", v,
                    검수자 if v else (L1_검수자 if 사업 == "재도전성공패키지" else None),
@@ -1590,7 +1590,7 @@ def _dry(data) -> int:
     for k in dup:
         print("   🔴", k)
 
-    정본 = 정본_비목_enum()
+    정본 = 기준문서_비목_enum()
     쓴것 = {r[3] for r in data}
     print(f"== [DRY] 비목 집합 대조 (정본 {len(정본)} / 사용 {len(쓴것)})")
     for x in sorted(쓴것 - 정본):
@@ -1666,7 +1666,7 @@ def main():
         #    "용어 사전과 정확히 일치" 로 판정했는데 실제로는 2종의 문자열이 달랐다.
         #    기준 문서(guided_json_enum)과 **집합 비교**한다.
         db비목 = {r[0] for r in conn.execute("SELECT DISTINCT 비목 FROM rules").fetchall()}
-        정본 = 정본_비목_enum()
+        정본 = 기준문서_비목_enum()
         print(f"== 비목 집합 대조 (정본 {len(정본)}종 / DB {len(db비목)}종)")
         if db비목 == 정본:
             print("   일치")

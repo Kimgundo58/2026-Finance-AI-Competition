@@ -404,7 +404,7 @@ CLOSURE: list[tuple[str, str, list[str]]] = [
       "L1_혁신도전형연구개발사업군의지정및분류기준등에관한고시_20250203"]),
 ]
 
-폐포전용_집합: dict[str, str] = {
+참조확장전용_집합: dict[str, str] = {
     d: 그룹 for 그룹, _근거, docs in CLOSURE for d in docs
 }
 
@@ -416,9 +416,9 @@ def main() -> None:
     a = ap.parse_args()
 
     # 하드코딩 목록 자체의 자기검증 — 중복 doc_id 는 근거가 둘이라는 뜻이다
-    if len(폐포전용_집합) != sum(len(d) for _, _, d in CLOSURE):
+    if len(참조확장전용_집합) != sum(len(d) for _, _, d in CLOSURE):
         sys.exit("CLOSURE 안에 중복 doc_id 가 있다.")
-    if 겹침 := set(KEEP) & set(폐포전용_집합):
+    if 겹침 := set(KEEP) & set(참조확장전용_집합):
         sys.exit(f"KEEP 과 CLOSURE 에 동시 등장: {겹침}")
 
     with psycopg.connect(DSN) as conn:
@@ -439,14 +439,14 @@ def main() -> None:
         cur.execute("SELECT doc_id FROM corpus.documents "
                     "WHERE layer='L1' AND status='active' ORDER BY doc_id")
         active_l1 = [r[0] for r in cur.fetchall()]
-        미분류 = [d for d in active_l1 if d not in KEEP and d not in 폐포전용_집합]
+        미분류 = [d for d in active_l1 if d not in KEEP and d not in 참조확장전용_집합]
         if 미분류:
             print("🔴 분류되지 않은 active L1 문서가 있다. KEEP 이나 CLOSURE 에 근거와 함께 "
                   "추가할 것:", file=sys.stderr)
             for d in 미분류:
                 print(f"    {d}", file=sys.stderr)
             sys.exit(1)
-        유령 = [d for d in (set(KEEP) | set(폐포전용_집합)) if d not in active_l1]
+        유령 = [d for d in (set(KEEP) | set(참조확장전용_집합)) if d not in active_l1]
         if 유령:
             print(f"⚠️  목록에는 있으나 DB active L1 에 없는 doc_id {len(유령)}건 "
                   "(개정으로 doc_id 가 바뀌었을 수 있다):")
@@ -461,10 +461,10 @@ def main() -> None:
         cur.execute("""SELECT d.doc_id, coalesce(c.n,0) FROM corpus.documents d
                        LEFT JOIN (SELECT doc_id, count(*) n FROM corpus.chunks GROUP BY 1) c
                               ON c.doc_id = d.doc_id
-                        WHERE d.doc_id = ANY(%s)""", (list(폐포전용_집합),))
+                        WHERE d.doc_id = ANY(%s)""", (list(참조확장전용_집합),))
         청크수 = dict(cur.fetchall())
 
-        print(f"\n폐포전용 {len(폐포전용_집합)}문서 "
+        print(f"\n폐포전용 {len(참조확장전용_집합)}문서 "
               f"/ {sum(청크수.values())}청크  (KEEP {len(KEEP)}문서)")
         for 그룹, _근거, docs in CLOSURE:
             print(f"  {그룹:24} {len(docs):3}문서 {sum(청크수.get(d,0) for d in docs):6}청크")
@@ -475,7 +475,7 @@ def main() -> None:
 
         cur.execute("UPDATE corpus.documents SET retrieval_scope='폐포전용' "
                     "WHERE doc_id = ANY(%s) AND retrieval_scope <> '폐포전용'",
-                    (list(폐포전용_집합),))
+                    (list(참조확장전용_집합),))
         print(f"\ndocuments UPDATE {cur.rowcount}건")
 
         # 🔴 chunks 는 documents 의 사본이다. 한쪽만 고치면 조용히 어긋난다 —
