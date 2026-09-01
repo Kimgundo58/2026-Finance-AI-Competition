@@ -22,16 +22,10 @@ python scripts/pick_gpu.py --min-vram 24
 
 ## 1. 확정 구성
 
-✅ **US-KS-2 · `suddoe-weights` · 50GB · 볼륨 id `fv5cl1y1ww`**
-
-| GPU | VRAM | 볼륨 되는 DC | $/h |
-|---|---:|---|---:|
-| L40S | 48 | EU-NL-1, US-TX-3 | 0.99 |
-| A100 SXM | 80 | EUR-IS-1, US-KS-2 등 | 1.59 |
-| RTX PRO 6000 | 96 | EUR-IS-1, US-NC-2 등 | 2.09 |
-
-모델 `Qwen/Qwen3-32B-AWQ`(4bit, 약20GB). US-KS-2 는 48GB+ 카드 5종이라 재고가 빠져도
-볼륨을 두고 갈아탈 수 있다. ⚠️ A40 은 폐기 — 볼륨 지원 DC(CA-MTL-1/EU-SE-1)가 없다.
+✅ **US-KS-2 · `suddoe-weights` · 50GB · 볼륨 id `fv5cl1y1ww`**. 모델
+`Qwen/Qwen3-32B-AWQ`(4bit, 약20GB). US-KS-2 는 48GB+ 카드 5종이라 재고가 빠져도 볼륨을
+두고 갈아탈 수 있다. ⚠️ A40 은 폐기 — 볼륨 지원 DC(CA-MTL-1/EU-SE-1)가 없다.
+GPU·DC 별 단가는 [[8-4_GPU_비용]].
 
 ## 2. 비용 가드 — 서버측 자동종료는 없다
 
@@ -93,8 +87,9 @@ vllm serve Qwen/Qwen3-32B-AWQ --reasoning-parser qwen3 --enable-prefix-caching \
 
 ## 참고
 
-전문·명령 전체는 [[부록/GPU_운영_전문]]. 사다리 정의는 [[6-1_호출_설계]].
+전문·명령 전체는 [[부록/GPU_운영_전문]]. 사다리 정의는 [[6-1_호출_설계]]. 비용·티어는
+[[8-4_GPU_비용]].
 
 ## 관련 문서
 
-[[6-1_호출_설계]] · [[8-1_실행_절차]]
+[[6-1_호출_설계]] · [[8-1_실행_절차]] · [[8-4_GPU_비용]]
