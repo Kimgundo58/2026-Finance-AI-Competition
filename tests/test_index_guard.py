@@ -16,12 +16,18 @@ BLOCKED = [
     ("법령 PDF/L1_법령/_범위밖_보류/고등교육법.xml", None),
     (r"archive\구_데이터\x.pdf", None),          # 윈도우 역슬래시
     ("2026_Finance_DATA_FOR_RAG/창진원/x.pdf", "L4"),  # 레이어로도 막힌다
+    # 🔴 L3 는 2026-08-31 부터 차단이다 (`index_guard.BLOCKED_LAYERS`).
+    #    L3 는 `corpus.chunks` 가 아니라 `tenant.l3_articles` 로 가고 검색 없이 통째로
+    #    로드된다 (CLAUDE.md 「인덱싱 코퍼스의 경계」). 판정 인덱스에 들어가는 순간
+    #    남의 기관 규정이 다른 기관 판정에 섞일 수 있어 구조적으로 막았다.
+    #    이 줄은 그때까지 ALLOWED 에 남아 있었다 — **테스트가 구 계약을 붙들고 있었고,
+    #    가드는 의도대로 동작하고 있었다** (2026-09-01, ai-14 가 발견해 넘김).
+    ("uploads/기관_KU/산학협력단_연구비규정.pdf", "L3"),
 ]
 
 ALLOWED = [
     ("2026_Finance_DATA_FOR_RAG/창진원/초기창업패키지_세부관리기준_2025.pdf", "L2"),
     ("법령 PDF/L1_법령/중소기업창업지원법.xml", "L1"),
-    ("uploads/기관_KU/산학협력단_연구비규정.pdf", "L3"),
 ]
 
 
