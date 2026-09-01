@@ -143,6 +143,10 @@ def main() -> None:
         총 = sum(n for _, n in 미해소)
         해소건 = sum(n for dst, n in 미해소 if dst in 매핑)
         print(f"미해소 dst {len(미해소)}종 / {총:,}건")
+        if not 총:
+            # 고칠 게 없는 것은 정상이다 — build_refs 가 처음부터 doc_id 로 넣으면 여기가 빈다.
+            print("  고칠 것이 없다. (build_refs.py 가 dst 를 doc_id 로 넣었다)")
+            return
         print(f"  매핑 성공   {len(매핑):3}종 / {해소건:,}건 ({해소건/총*100:.1f}%)")
         print(f"  모호(후보>1) {len(모호):3}종 / {sum(n for _,n,_ in 모호):,}건 — 손대지 않는다")
         print(f"  실패        {len(실패):3}종 / {sum(n for _,n in 실패):,}건 — 손대지 않는다")
