@@ -355,8 +355,15 @@ def scan(text: str, doc_id: str, corpus: dict[str, str],
                 e.update(관계="별표참조", dst_doc_id=doc_id,
                          dst_조번호=f"{m.group(1)}{m.group(2)}", 해소상태="resolved")
             elif kind == "미규정위임":
-                e.update(관계="미규정위임", 해소상태="resolved",
-                         보정근거="상위 규범으로 위임. 게이팅(파이프라인 §6.2)의 근거")
+                # 🔴 `resolved` 가 아니다 (2026-09-01 정정). "정하지 아니한 사항은 상위
+                #    규범에 따른다" 는 **어느 조인지 지목하지 않는다** — dst 가 비어 있다.
+                #    resolved 는 "대상이 코퍼스에 있고 조번호도 맞다" 는 뜻이므로 거짓말이었고,
+                #    실측 10건이 dst NULL 인 채 resolved 로 세어지고 있었다.
+                #    폐포 CTE 는 `dst_조번호 IS NOT NULL` 로 어차피 걸러내므로 판정 영향은 없다.
+                #    다만 업로드 시점 dangling 안내(CLAUDE.md)에서 이건 결손이 아니라
+                #    법령의 정상 문형이다 — 소비자는 `관계='미규정위임'` 으로 걸러 쓴다.
+                e.update(관계="미규정위임", 해소상태="dangling",
+                         보정근거="상위 규범으로 위임(조 미지정). 게이팅(파이프라인 §6.2)의 근거")
             else:  # 조 / 범위 / 약칭조 / 약칭범위
                 target = m.group(1)
                 조 = m.group(2)
