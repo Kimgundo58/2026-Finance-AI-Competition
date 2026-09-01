@@ -35,4 +35,4 @@
 | 게스트 격리 | `expense_plans.org_id` 가 uuid + `orgs` FK. 로그인 설계와 분리 불가 (`계약_정정_0902.md` §4) |
 | `PUT /api/profile` 쓰기 | `_실_프로필_저장` 이 스텁 그대로. 응답 모양만 동결 |
 | 조항별 해당/불해당 | 판정 출력에 필드가 없다. Agent 층 확장 필요 |
-| `decisions.plan_id` 실측 | GPU 팟이 있어야 참이 된다 |
+| `decisions.plan_id` 실측 | `persist.MOCK` 이 안 뒤집혀 목 분기를 탄다 (모듈 경계. **GPU 와 무관**) |
