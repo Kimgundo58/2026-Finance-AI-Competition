@@ -93,7 +93,7 @@ vllm serve Qwen/Qwen3-32B-AWQ --reasoning-parser qwen3 --enable-prefix-caching \
 
 ## 참고
 
-전문·명령 전체는 `GPU Guideline.md`. 사다리 정의는 [[6-1_호출_설계]].
+전문·명령 전체는 [[부록/GPU_운영_전문]]. 사다리 정의는 [[6-1_호출_설계]].
 
 ## 관련 문서
 
