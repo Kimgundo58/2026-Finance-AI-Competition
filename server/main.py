@@ -34,8 +34,10 @@
 """
 from __future__ import annotations
 
+import concurrent.futures
 import hashlib
 import json
+import logging
 import os
 import sys
 import time
@@ -45,29 +47,24 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import Body, FastAPI, Header, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+_log = logging.getLogger("suddoe.main")
+
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
+sys.path.insert(0, str(ROOT))          # `python server/main.py` 로도 server 패키지가 보이게
 
-DSN = os.environ.get("SUDDOE_DSN", "postgresql://postgres:devpw@localhost:5432/suddoe")
-MOCK = os.environ.get("SUDDOE_MOCK", "1") == "1"
-
-
-# ════════════════════════════════════════════════════════════════════
-# 상수 — DB 가 없어도 계약이 지켜지도록 코드에 한 벌 둔다
-# ════════════════════════════════════════════════════════════════════
-
-# `프론트 연동 사양.md` §9. 프론트 라벨을 이 문자열 그대로 맞춘다.
-비목_ENUM = ["재료비", "외주용역비", "기계장치", "인건비", "지급수수료",
-             "여비", "교육훈련비", "광고선전비", "특허권등무형자산취득비", "창업활동비"]
-
-# 창업활동비는 예비창업패키지에만 있다 (§9). 나머지 사업에서는 목록에서 뺀다.
-_창업활동비_사업 = {"예비창업패키지"}
-
-판정_ENUM = ("가능", "조건부", "불가", "판단불가")
+# 🔴 공용 정의는 `server/_common.py` · 계약은 `server/models.py` 가 정본이다 (Phase 0 동결).
+#    라우터가 main 을 import 하면 순환참조가 나서 밖으로 뺐다. 여기서 다시 정의하지 말 것.
+from server._common import (DSN, MOCK, _sse, _sse응답, _질의,      # noqa: E402
+                            비목_ENUM, 판정_ENUM, 창업활동비_사업 as _창업활동비_사업)
+from server.models import (F1, F3항, F4항, F5, 정규화요청,          # noqa: E402
+                           판정요청, 프로필)
+from server import routes_l3, routes_plans, routes_tasks           # noqa: E402
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -189,6 +186,11 @@ class 비용가드:
 
 가드 = 비용가드()
 
+# 🔴 실 판정(`_실_판정`)은 LLM 왕복이 껴서 초 단위로 블로킹한다 — SSE 연결에 그동안
+#    바이트가 하나도 안 나가면 프록시·게이트웨이 idle timeout 이 스트림을 끊는다
+#    (`X-Accel-Buffering: no` 는 버퍼링만 막지 idle 은 안 막는다). 10~15초 사이로 잡는다.
+_하트비트_주기초 = _int환경("SUDDOE_JUDGE_HEARTBEAT_SEC", 12)
+
 
 def _ip(req: Request) -> str:
     # 프록시 뒤일 수 있다. 신뢰 프록시가 정해지기 전이라 X-Forwarded-For 를 그대로 믿지 않고
@@ -197,58 +199,6 @@ def _ip(req: Request) -> str:
     return (xff.split(",")[0].strip() if xff else None) or (req.client.host if req.client else "?")
 
 
-# ════════════════════════════════════════════════════════════════════
-# 요청 스키마 (`프론트 연동 사양.md` §8)
-# ════════════════════════════════════════════════════════════════════
-
-class F5(BaseModel):
-    친족거래: bool = False
-    전직임직원업체: bool = False
-
-
-class 정규화요청(BaseModel):
-    질문: str = Field(min_length=1, max_length=2000)
-    사업명: str | None = None
-    f5: F5 = Field(default_factory=F5)
-
-
-class 판정요청(BaseModel):
-    정규화: dict[str, Any] = Field(default_factory=dict)
-    확정비목: str | None = None
-    사업명: str | None = None
-    org_id: str | None = None
-    f5: F5 = Field(default_factory=F5)
-
-
-class F1(BaseModel):
-    # 🔴 4칸이 아니라 2칸이다. 현물 제거(2026-08-31).
-    정부지원_현금: float = 0
-    자기부담_현금: float = 0
-    협약시작일: str | None = None
-    협약종료일: str | None = None
-
-
-class F3항(BaseModel):
-    비목: str
-    재원: Literal["정부지원", "자기부담"]
-    거래처: str | None = None          # 🔴 형태(현금/현물) 없음
-    인력역할: str | None = None
-    귀속월: str | None = None
-    금액: float = 0
-
-
-class F4항(BaseModel):
-    역할: str                          # 🔴 이름 칸은 만들지 않는다 (§7)
-    고용형태: str | None = None
-    타사업참여율: float = 0
-    소속기관유형: str | None = None
-    겸직: bool = False
-
-
-class 프로필(BaseModel):
-    f1: F1 = Field(default_factory=F1)
-    f3: list[F3항] = Field(default_factory=list)
-    f4: list[F4항] = Field(default_factory=list)
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -259,7 +209,7 @@ _목_정규화 = {
     "품목": "맥북", "금액": 2_500_000, "금액_추정여부": False,
     "용도": "디자이너 작업용",
     "비목후보": [{"비목": "기계장치", "신뢰도": 0.82}, {"비목": "재료비", "신뢰도": 0.31}],
-    "결제수단": None, "구매명의": None, "신청일": None, "비교견적": None,
+    "결제수단": None, "구매명의": None, "신청일": None, "비교견적": None, "하위항목": None,
 }
 
 # 🔴 4-way 를 전부 그려봐야 한다. 판단불가는 에러 화면이 아니라 정상 경로다 (§3).
@@ -357,21 +307,6 @@ _목_프로필 = {"f1": F1().model_dump(), "f3": [], "f4": []}
 
 
 # ════════════════════════════════════════════════════════════════════
-# SSE
-# ════════════════════════════════════════════════════════════════════
-
-def _sse(이름: str, 값: Any) -> str:
-    return f"event: {이름}\ndata: {json.dumps(값, ensure_ascii=False, default=str)}\n\n"
-
-
-def _sse응답(gen) -> StreamingResponse:
-    return StreamingResponse(gen, media_type="text/event-stream", headers={
-        "Cache-Control": "no-cache", "Connection": "keep-alive",
-        "X-Accel-Buffering": "no",           # nginx 뒤에서 SSE 가 버퍼링에 갇히는 걸 막는다
-    })
-
-
-# ════════════════════════════════════════════════════════════════════
 # 앱
 # ════════════════════════════════════════════════════════════════════
 
@@ -385,6 +320,13 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "OPTIONS"],
     allow_headers=["*"],
 )
+
+# ── 라우터 (Phase 0 분해) ────────────────────────────────────────────
+# 🔴 레인 소유가 갈린다. A=routes_plans · B=routes_tasks · C=routes_l3 + 아래 normalize.
+#    남의 라우터 파일을 고치지 말 것 — 훅이 막고, 막히기 전에 이미 충돌한다.
+app.include_router(routes_plans.router)
+app.include_router(routes_tasks.router)
+app.include_router(routes_l3.router)
 
 
 def _관리자(token: str | None) -> None:
@@ -442,7 +384,9 @@ def normalize(req: Request, body: 정규화요청):
         raise HTTPException(429, 사유)
 
     # F5 는 판정 후 폐기다. 캐시 열쇠에는 해시로만 들어간다
-    k = 비용가드.열쇠("normalize", body.질문.strip(), body.사업명,
+    # 🔴 폼 경로에서는 질문이 None 이다. 폼 값도 열쇠에 넣는다 (레인 C 가 이어받는다)
+    k = 비용가드.열쇠("normalize", (body.질문 or "").strip(),
+                     body.품목, body.금액, body.용도, body.사업명,
                      body.f5.친족거래, body.f5.전직임직원업체)
     캐시 = 가드.꺼내기(k)
 
@@ -453,12 +397,14 @@ def normalize(req: Request, body: 정규화요청):
             yield _sse("완료", {"캐시": True})
             return
         try:
-            out = _목_정규화 if MOCK else _실_정규화(body)
+            out = dict(_목_정규화) if MOCK else _실_정규화(body)
         except Exception as e:                                # noqa: BLE001
             # 🔴 모든 실패의 기본값은 판단불가다. 500 을 던지지 않는다
             yield _sse("오류", {"메시지": "정규화에 실패했습니다", "종류": type(e).__name__})
             yield _sse("완료", {"실패": True})
             return
+        # 목/실 공통 — 질문원문(합성 문장)을 싣는다. 저장·검색·표시 전용이다
+        out.setdefault("질문원문", _합성_질문(body))
         가드.넣기(k, out)
         for 필드 in ("품목", "금액", "금액_추정여부", "용도", "비목후보"):
             if 필드 in out:
@@ -469,15 +415,33 @@ def normalize(req: Request, body: 정규화요청):
     return _sse응답(gen())
 
 
+def _합성_질문(body: 정규화요청) -> str:
+    """폼 값을 문장으로 합성한다. `routes_plans._합성` 과 같은 문장 규칙.
+
+    ⚠️ 이 문장을 다시 LLM 입력으로 쓰지 않는다 (필드→문장→필드 왕복은 정보를 잃는다).
+       저장·검색·표시 전용이다.
+    """
+    if body.질문 and body.질문.strip():
+        return body.질문.strip()
+    사업 = f"{body.사업명}에서 " if body.사업명 else ""
+    만원 = f"{int(body.금액):,}원" if body.금액 is not None else ""
+    return f"{사업}{body.용도 or ''} {body.품목 or ''} {만원}을 사도 되나요?".strip()
+
+
 @app.post("/api/judge")
 def judge(req: Request, body: 판정요청, 목: str | None = None):
     """화면 4 → 5 / 6 / 7. SSE.
 
     이벤트 순서: `진행`* → `판정` → `해야할일` → `인용` → `전제` → `참조사슬`
-                → `결과`(전체 JSON) → `완료`
+                → `결과`(전체 JSON) → `저장`(계획 연결 결과) → `완료`
 
     목 모드에서 `?목=조건부|불가|판단불가` 로 4-way 를 전부 그려볼 수 있다.
     🔴 판단불가는 에러가 아니라 정상 경로다 — 빨간 화면이 아니라 화면 9 로 잇는다.
+    🔴 `저장` 은 부수 효과다 — `plan_id` 가 없거나 캐시 적중이거나 저장이 실패해도
+       스트림은 항상 `완료` 까지 간다 (`_판정_저장_시도` 참조).
+    🔴 실 판정 대기 중에는 `SUDDOE_JUDGE_HEARTBEAT_SEC`(기본 12초) 마다 SSE 주석
+       (`: keep-alive`)이 낀다 — EventSource 가 무시하는 라인이라 이벤트 목록·순서에는
+       안 잡힌다. 프록시·게이트웨이의 idle timeout 으로 스트림이 끊기는 걸 막는다.
     """
     ok, 사유 = 가드.통과(_ip(req))
     if not ok:
@@ -497,14 +461,39 @@ def judge(req: Request, body: 판정요청, 목: str | None = None):
             yield _sse("진행", {"단계": 단계, "설명": 설명})
         if 캐시 is not None:
             out = 캐시
+            # 저장 시점에 이미 벗겨낸 뒤에 캐시에 들어간다 — 안전망으로 한 번 더 확인
+            _decision_id = out.pop("decision_id", None)
+        elif MOCK:
+            out = _목_판정.get(목 or "가능", _목_판정["가능"])
+            _decision_id = out.pop("decision_id", None)
+            가드.넣기(k, out)
         else:
-            try:
-                out = _목_판정.get(목 or "가능", _목_판정["가능"]) if MOCK else _실_판정(body)
-            except Exception as e:                            # noqa: BLE001
-                # 🔴 실패해도 4-way 밖으로 나가지 않는다
-                out = {**_목_판정["판단불가"],
-                       "요약": "일시적인 오류로 판정하지 못했습니다. 주관기관 문의가 필요합니다.",
-                       "_오류": type(e).__name__}
+            # 🔴 별도 스레드에서 돌리고 짧은 주기로 폴링한다 — 대기 중에는 SSE 주석
+            #    (`: keep-alive`)만 흘린다. **새 이벤트 이름을 안 만든다** — 이벤트
+            #    목록·순서는 계약이고 D 의 테스트가 그대로 잠근다. 무한정 기다리되
+            #    흘리기만 한다 — 하트비트가 판정보다 먼저 포기하지 않는다.
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                future = ex.submit(_실_판정, body)
+                while True:
+                    try:
+                        out = future.result(timeout=_하트비트_주기초)
+                        break
+                    except concurrent.futures.TimeoutError:
+                        yield ": keep-alive\n\n"
+                    except Exception as e:                        # noqa: BLE001
+                        # 🔴 실패해도 4-way 밖으로 나가지 않는다 — 판정 어휘는 닫혀
+                        #    있다. `_오류` 는 계약 밖 키라 SSE 로는 안 내보낸다.
+                        #    대신 서버 로그에 남긴다 — 조용히 삼키면 실서버에서
+                        #    판단불가가 늘 때 원인을 못 찾는다 (2026-09-01 ai-14).
+                        _log.exception("judge 실패 — 판단불가로 닫음 (plan_id=%s)",
+                                       body.plan_id)
+                        out = {**_목_판정["판단불가"],
+                               "요약": "일시적인 오류로 판정하지 못했습니다. "
+                                       "주관기관 문의가 필요합니다."}
+                        break
+            # 🔴 decision_id 는 캐시에도 `결과` 응답에도 안 실린다 — 캐시에 박히면
+            #    다른 요청이 남의 계획에 그 판정을 저장하려 든다 (TENANT_LEAK 류).
+            _decision_id = out.pop("decision_id", None)
             가드.넣기(k, out)
         yield _sse("판정", {키: out.get(키) for 키 in
                           ("판정", "요약", "신뢰등급", "버전스탬프")})
@@ -515,6 +504,7 @@ def judge(req: Request, body: 판정요청, 목: str | None = None):
         if out.get("판정") == "판단불가" and out.get("문의초안"):
             yield _sse("문의초안", out["문의초안"])          # 화면 9
         yield _sse("결과", out)
+        yield _sse("저장", _판정_저장_시도(body, out, 캐시 is not None, _decision_id))
         yield _sse("완료", {"캐시": 캐시 is not None})
 
     return _sse응답(gen())
@@ -616,12 +606,10 @@ def admin_warmup(x_admin_token: str | None = Header(default=None)) -> dict:
         질문벡터("워밍업")
         결과["임베딩"] = f"{time.time() - t:.1f}초"
     except Exception as e:                                    # noqa: BLE001
-        try:
-            from orchestrate import _임베딩
-            _임베딩("워밍업")
-            결과["임베딩"] = f"{time.time() - t:.1f}초 (orchestrate 경유)"
-        except Exception as e2:                               # noqa: BLE001
-            결과["임베딩"] = f"실패 {type(e).__name__}/{type(e2).__name__}"
+        # 🔴 예전에는 `orchestrate._임베딩` 으로 되짚었다. 밑줄 심볼이라 Agent 쪽이
+        #    이름만 바꿔도 서버가 **기동 시점에** 죽는다 (2026-09-01 ai-25 경고).
+        #    파이프라인의 공개 표면(`retrieve.질문벡터` · `orchestrate.판정`)만 쓴다.
+        결과["임베딩"] = f"실패 {type(e).__name__}"
     t = time.time()
     try:
         from adapter import 호출
@@ -631,6 +619,21 @@ def admin_warmup(x_admin_token: str | None = Header(default=None)) -> dict:
         결과["vLLM"] = f"미가동 ({type(e).__name__})"
     가드.워밍업시각 = datetime.now(timezone.utc).isoformat()
     return {"워밍업": 결과, "시각": 가드.워밍업시각}
+
+
+@app.exception_handler(RequestValidationError)
+def _검증오류(req: Request, exc: RequestValidationError):
+    """422 도 같은 모양으로 돌려준다.
+
+    🔴 pydantic 기본 형식은 `{"detail":[{...}]}` 이라 프론트가 오류 렌더러를 두 벌
+       만들어야 한다. 계약상 모든 4xx·5xx 는 `{오류, 상태}` 다 (`models.오류응답`).
+    """
+    첫 = (exc.errors() or [{}])[0]
+    말 = str(첫.get("msg", "입력이 올바르지 않습니다")).replace("Value error, ", "")
+    자리 = [str(x) for x in (첫.get("loc") or []) if x != "body"]
+    return JSONResponse(status_code=422,
+                        content={"오류": 말, "상태": 422,
+                                 "필드": ".".join(자리) or None})
 
 
 @app.exception_handler(HTTPException)
@@ -644,23 +647,28 @@ def _http오류(req: Request, exc: HTTPException):
 # 실호출 경로 — A 의 모듈이 준비되면 여기만 산다
 # ════════════════════════════════════════════════════════════════════
 
-def _질의(sql: str, 인자: tuple = ()) -> list[tuple]:
-    """DB 가 없어도 서버는 떠야 한다. 실패하면 빈 리스트."""
-    try:
-        import psycopg
-        with psycopg.connect(DSN, connect_timeout=3) as conn:
-            return conn.execute(sql, 인자).fetchall()
-    except Exception:                                         # noqa: BLE001
-        return []
-
-
 def _실_정규화(body: 정규화요청) -> dict:
-    from normalize_run import 정규화
-    out, _메타 = 정규화(body.질문, 비목목록=비목_ENUM)
+    if body.질문 and body.질문.strip():
+        from normalize_run import 정규화
+        out, _메타 = 정규화(body.질문, 비목목록=비목_ENUM)
+    else:
+        # 🔴 폼 경로 — 품목·금액·용도가 이미 구조화돼 왔다. 다시 LLM 으로 뽑을 게 없다
+        #    (합성 문장을 되짚어 넣는 건 정보를 잃는다). 비목후보는 화면 9 에서
+        #    사용자가 직접 확정하므로 여기서 추측하지 않는다.
+        용도 = body.용도 or ""
+        if body.추가설명:
+            용도 = f"{용도} ({body.추가설명})".strip()
+        out = {"품목": body.품목, "금액": body.금액, "금액_추정여부": False,
+               "용도": 용도, "비목후보": []}
     out.setdefault("결제수단", None)
     out.setdefault("구매명의", None)
     out.setdefault("신청일", None)
     out.setdefault("비교견적", None)
+    # 🔴 자연어 경로(`normalize_run.정규화`)는 지급수수료류에서 하위항목을 뽑아 실을 수
+    #    있다 — 폼 경로는 못 뽑으니 없애지 말고 None 으로라도 키를 살린다. 경로마다
+    #    키가 있다 없다 하면 프론트가 `'하위항목' in 결과` 로 분기할 때 갈린다
+    #    (§8 「실서버로 갈아끼워도 프론트 코드는 한 줄도 안 바뀐다」, 2026-09-01 ai-14).
+    out.setdefault("하위항목", None)
     return out
 
 
@@ -672,7 +680,12 @@ def _실_판정(body: 판정요청) -> dict:
         조각 = [str(body.정규화.get(k)) for k in ("품목", "용도") if body.정규화.get(k)]
         금액 = body.정규화.get("금액")
         질문 = " ".join(조각) + (f" {금액}원" if 금액 else "")
-    r = orchestrate.판정(질문, 사업명=body.사업명, org_id=body.org_id)
+    # 🔴 plan_id 를 넘기면 decisions 행이 처음부터 plan_id 를 달고 태어난다 —
+    #    persist.py 의 「UPDATE 로 plan_id 잇기」가 필요 없어지는 방향
+    #    (orchestrate.py:405, 2026-09-01 ai-25 시그니처 확장 · ai-14 후속 지시).
+    #    🔴 그래도 persist.py 의 UPDATE 는 아직 걷어내지 마라 — 레인 A 소유이고,
+    #       실측으로 decisions.plan_id 가 채워지는 걸 확인한 뒤에나 A 가 정리한다.
+    r = orchestrate.판정(질문, 사업명=body.사업명, org_id=body.org_id, plan_id=body.plan_id)
     # 오케 반환값 → API 계약 (`프론트 연동 사양.md` §8). 이름이 다른 것만 옮긴다
     return {
         "판정": r.get("판정", "판단불가"),
@@ -684,7 +697,34 @@ def _실_판정(body: 판정요청) -> dict:
         "버전스탬프": r.get("버전스탬프"),
         "참조사슬": r.get("참조사슬", []),
         **({"문의초안": r["문의초안"]} if r.get("문의초안") else {}),
+        # 🔴 내부 저장용 키다 — `gen()` 이 `결과` 로 내보내기 전에 벗겨내고 `저장`
+        #    이벤트에만 따로 실어준다 (레인 A/C 계약, 2026-09-01 ai-14 정정).
+        **({"decision_id": r["decision_id"]} if r.get("decision_id") else {}),
     }
+
+
+def _판정_저장_시도(body: 판정요청, out: dict, 캐시적중: bool, decision_id: int | None) -> dict:
+    """`judge()` 의 `gen()` 안에서만 부른다 — 판정 스트림의 부수 효과다.
+
+    🔴 **지연 import.** `server.persist` 는 레인 A 소유고 이 파일보다 늦게 생길 수 있다.
+       모듈 상단에서 import 하면 그 파일 하나 없다고 앱 전체(+ 레인 B 테스트의
+       `server.main` import)가 못 뜬다 — `_실_판정` 이 `orchestrate` 를 지연 import
+       하는 것과 같은 결 (2026-09-01 ai-14 정정).
+    🔴 저장이 실패해도 SSE 를 죽이지 않는다 — 판정은 이미 사용자 손에 갔다.
+    """
+    if body.plan_id is None:
+        return {"저장": False, "사유": "plan_id 없음"}
+    if 캐시적중:
+        # 캐시로 답한 건 이번 요청에서 새로 만든 판정 행이 없다 — 남의 decision_id 를
+        # 이 plan_id 에 잘못 붙이지 않으려고 저장을 건너뛴다 (비용가드는 저장 경로가 아니다).
+        return {"저장": False, "사유": "캐시 적중 — 새 판정 기록 없음"}
+    try:
+        from .persist import 판정_저장
+        return 판정_저장(body.plan_id, body, out, body.org_id, decision_id=decision_id)
+    except ImportError:
+        return {"저장": False, "사유": "저장 계층 미배선"}
+    except Exception as e:                                    # noqa: BLE001
+        return {"저장": False, "사유": f"저장 실패 ({type(e).__name__})"}
 
 
 def _실_프로필(org_id: str) -> dict:
