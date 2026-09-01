@@ -4,7 +4,7 @@
     PYTHONIOENCODING=utf-8 python -m pytest tests/test_persist.py -q
 
 MOCK 분기는 `persist.MOCK` 을 직접 세워 DB 없이 돈다 (conftest 의 모듈 스위치 목록에
-`server.persist` 가 없다 — 새 모듈이라 조율 세션에 별도 보고). 실 DB 분기는
+`server.persist` 가 없다 — 새 모듈이었다). 실 DB 분기는
 `_실_저장()` 을 직접 불러 `판정_저장()` 의 MOCK 분기를 아예 거치지 않는다
 (`test_plans.py` 가 `_실_생성()` 을 직접 부르는 것과 같은 관례).
 """

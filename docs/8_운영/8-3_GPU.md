@@ -40,14 +40,14 @@ python scripts/pick_gpu.py --min-vram 24
 | 겹 | 무엇 | 언제 뚫리나 |
 |---|---|---|
 | 워치독 | `runpod_pod.py open --hours N` 로컬 프로세스 | PC 꺼지면 같이 죽음 |
-| 대장 | `.claude/_runpod_open.json` | 사람이 `ls` 안 보면 무용 |
+| 목록 | `.claude/_runpod_open.json` | 사람이 `ls` 안 보면 무용 |
 | 잔액 | 크레딧 소진 시 RunPod 정지 | 손실 상한 = 잔액 |
 
-**정본은 사람이 닫는 것이다.**
+**원칙은 사람이 닫는 것이다.**
 
 ```bash
 PYTHONIOENCODING=utf-8 python scripts/runpod_pod.py ls      # 도는 팟 + 경과비용
-PYTHONIOENCODING=utf-8 python scripts/runpod_pod.py close   # 대장의 팟 전부
+PYTHONIOENCODING=utf-8 python scripts/runpod_pod.py close   # 목록의 팟 전부
 ```
 
 ## 3. 흐름 (1회 세션)
@@ -55,7 +55,7 @@ PYTHONIOENCODING=utf-8 python scripts/runpod_pod.py close   # 대장의 팟 전�
 ```
 (0)DC/GPU 확정 → (1)볼륨(최초1회) → (2)팟생성(SSH키 먼저, 볼륨은 생성시점에만 붙는다)
 → (3)가중치 다운로드(최초1회, 볼륨에 잔존) → (4)vLLM 기동 → (5)더미호출1회(워밍업)
-→ (6)골든셋 추론(결과 로컬 회수) → (7)delete-pod(볼륨은 남김)
+→ (6)정답셋 추론(결과 로컬 회수) → (7)delete-pod(볼륨은 남김)
 다음 세션은 (2)부터 — 가중치가 볼륨에 있어 (3)이 사라진다
 ```
 
