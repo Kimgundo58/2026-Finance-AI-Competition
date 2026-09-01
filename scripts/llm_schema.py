@@ -31,7 +31,7 @@ if (sys.stdout.encoding or "").lower().replace("-", "") != "utf8":
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
 ROOT = Path(__file__).resolve().parent.parent
-어휘집_경로 = ROOT / "2026_Finance_DATA_FOR_RAG" / "_비목_어휘집.json"
+용어사전_경로 = ROOT / "2026_Finance_DATA_FOR_RAG" / "_비목_어휘집.json"
 
 # ════════════════════════════════════════════════════════════════════════════
 # 폐쇄 목록
@@ -48,7 +48,7 @@ S번호_PATTERN = r"^S\d{2,3}$"      # 조립기가 B1→B2→B3 통합 연번�
 
 def 비목_enum(경로: Path | None = None) -> list[str]:
     """`_비목_어휘집.json` 의 guided_json_enum. 비목 폐쇄 목록의 유일한 기준 문서."""
-    p = 경로 or 어휘집_경로
+    p = 경로 or 용어사전_경로
     v = json.loads(p.read_text(encoding="utf-8"))
     대기 = v.get("enum_검수대기") or []
     if 대기:

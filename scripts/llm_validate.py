@@ -299,7 +299,7 @@ def _설명검사(h: dict, *, f사실: Optional[dict], 허용숫자: Optional[se
 
 
 def _설명제거(h: dict, 대상: str) -> None:
-    """🔴 항목·code 는 남긴다. 화면이 `check_items` 정적 설명으로 폴백한다."""
+    """🔴 항목·code 는 남긴다. 화면이 `check_items` 정적 설명으로 대체한다."""
     for k in (("상태절",) if 대상 == "상태절" else _설명키):
         h.pop(k, None)
 
@@ -451,13 +451,13 @@ def 검증(llm출력: dict, s맵: dict, *,
     #    하나가 6,026청크). 그걸로 강등하면 3문항 중 1문항에서 울리는 상시 경보가 되고,
     #    **"근거 불완전" 이 기본 상태가 되면 강등코드가 신호를 잃는다.**
     #    게이팅 후 실측: 정답셋 77문항에서 끊긴 참조 44건 중 조지정 1건 · 1문항.
-    조지정_dangling = [x for x in (dangling or []) if _RE_조.search(str(x))]
-    if 조지정_dangling:
+    조지정_끊긴참조 = [x for x in (dangling or []) if _RE_조.search(str(x))]
+    if 조지정_끊긴참조:
         if 신뢰등급 == "A":
             신뢰등급 = "B"
         깎("DANGLING_WARN",
-          f"참조 폐포에 조 지정된 dangling {len(조지정_dangling)}건 — "
-          f"{조지정_dangling[:3]} → 신뢰등급 하향")
+          f"참조 폐포에 조 지정된 dangling {len(조지정_끊긴참조)}건 — "
+          f"{조지정_끊긴참조[:3]} → 신뢰등급 하향")
 
     # ── 5. verified=false 룰만으로 '가능' 금지 ────────────────────────────
     # `corpus.rules.verified` 주석: 'false 인 룰만으로 "가능" 판정 금지'

@@ -90,7 +90,7 @@ GROUP BY ct.chunk_id ORDER BY score DESC LIMIT %(k)s
 # 깊이 1 이면 재귀가 필요 없지만 CTE 형태를 유지한다 — 규정 모음이 바뀌어 깊이를 다시 재야
 # 할 때 `깊이` 하나만 올리면 되고, RAG.md §4-3 의 SQL 과 눈으로 대조된다.
 #   🔴 `dst_조번호 IS NOT NULL` 은 시작 간선에도, 재귀 간선에도 둘 다 건다.
-폐포SQL = """
+참조확장SQL = """
 WITH RECURSIVE 시작(doc_id, 조번호) AS (
     SELECT DISTINCT doc_id, 조번호 FROM corpus.chunks WHERE chunk_id = ANY(%(cids)s)
 ),
@@ -226,7 +226,7 @@ def 폐포수집(cur, 진입점: list[int], *, 깊이값: int = 깊이) -> tuple
     """
     if not 진입점:
         return [], [], []
-    cur.execute(폐포SQL, {"cids": 진입점, "깊이": 깊이값})
+    cur.execute(참조확장SQL, {"cids": 진입점, "깊이": 깊이값})
     폐포, 사슬 = [], []
     본 = set()
     for (_rid, sdoc, s조, 표기, 관계, ddoc, d조, 상태, 보정근거,

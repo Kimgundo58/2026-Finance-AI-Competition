@@ -260,7 +260,7 @@ def main() -> None:
 
         d_res, b_res, r_res = [], [], []
         겹침 = []
-        폐포res = []
+        참조확장res = []
         for (gid, 세트, q, 정답, 사업, 근거), vec in zip(데이터, 벡터들):
             사업 = 사업키(사업)
             dn = retrieve.dense(cur, vec, k=a.k, 사업명=사업, 사업필터=a.사업필터)
@@ -277,7 +277,7 @@ def main() -> None:
                 cur.execute("SELECT article_id FROM corpus.chunks WHERE chunk_id = ANY(%s)",
                             (top5,))
                 도달 = [r[0] for r in cur.fetchall()]
-                폐포res.append((도달, 도달 + pae, 정답조(cur, 근거)))
+                참조확장res.append((도달, 도달 + pae, 정답조(cur, 근거)))
 
         print(f"{'검색기':10} " + " ".join(f"{'hit@'+str(k):>8}" for k in KS) + f"{'MRR':>8}")
         print("-" * (10 + 9 * len(KS) + 8))
@@ -406,13 +406,13 @@ def main() -> None:
 
         if a.폐포:
             def cov(idx):
-                맞 = sum(1 for row in 폐포res if set(row[idx]) & row[2])
-                return 맞 / len(폐포res) * 100
-            분모 = sum(1 for row in 폐포res if row[2])
-            print(f"\n[폐포] 조 단위 커버리지 (정답 조를 역추적한 {분모}/{len(폐포res)}문항 기준)")
+                맞 = sum(1 for row in 참조확장res if set(row[idx]) & row[2])
+                return 맞 / len(참조확장res) * 100
+            분모 = sum(1 for row in 참조확장res if row[2])
+            print(f"\n[폐포] 조 단위 커버리지 (정답 조를 역추적한 {분모}/{len(참조확장res)}문항 기준)")
             print(f"  top-5 만        {cov(0):5.1f}%")
             print(f"  top-5 + 폐포    {cov(1):5.1f}%")
-            추가 = sum(len(set(row[1]) - set(row[0])) for row in 폐포res) / len(폐포res)
+            추가 = sum(len(set(row[1]) - set(row[0])) for row in 참조확장res) / len(참조확장res)
             print(f"  폐포가 더한 조  평균 {추가:.1f}개/문항")
 
 

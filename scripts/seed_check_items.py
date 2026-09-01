@@ -411,7 +411,7 @@ def _증빙접지검사(cur) -> tuple[int, int, list[str]]:
     return 전체, 전체 - len(미해소), 미해소
 
 
-def _dangling검사(cur) -> list[tuple]:
+def _끊긴참조검사(cur) -> list[tuple]:
     return cur.execute("""
         SELECT DISTINCT g->>'doc_id', g->>'조번호'
           FROM corpus.check_items r, jsonb_array_elements(r.근거) g
@@ -562,7 +562,7 @@ def main() -> None:
             print(f"   {비목:<22} {c}")
 
         # ── 통과 조건 (a) 끊긴 참조 ───────────────────────────────────────────
-        dang = _dangling검사(cur)
+        dang = _끊긴참조검사(cur)
         print(f"\n[게이트 a] 근거 dangling: {len(dang)}" + ("  🔴" if dang else "  ✔"))
         for d in dang:
             print("   🔴", d)

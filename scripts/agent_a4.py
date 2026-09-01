@@ -392,7 +392,7 @@ def 영향_레코드(conn, 신doc: str, 구doc: str, 쌍: dict, 변경: dict) ->
     return recs
 
 
-def 어휘집_트리거(변경조: list[tuple[dict, dict]], 신doc: str, 구doc: str) -> list[dict]:
+def 용어사전_트리거(변경조: list[tuple[dict, dict]], 신doc: str, 구doc: str) -> list[dict]:
     """비목 용어 사전 재검수 트리거 (`Agent.md` §9 A4 마지막 줄)."""
     맞은비목 = {}
     for 쌍, 변경 in 변경조:
@@ -834,7 +834,7 @@ def 실행_db(conn, 줄, 스캔한신doc: set[str] | None = None) -> list[dict]:
             근거통계[쌍["근거"].split("0.")[0]] = 근거통계.get(쌍["근거"].split("0.")[0], 0) + 1
         줄(f"    구 {len(구)}조 ↔ 신 {len(신)}조   매칭 {근거통계}")
         줄(f"    변경 {통계}")
-        recs += 어휘집_트리거(변경조, g["신"]["doc_id"], g["구"]["doc_id"])
+        recs += 용어사전_트리거(변경조, g["신"]["doc_id"], g["구"]["doc_id"])
     return recs
 
 
