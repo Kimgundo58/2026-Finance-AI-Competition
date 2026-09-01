@@ -79,6 +79,51 @@ PATTERNS = [
 }
 
 
+# ── 문서별 약칭 사전 ────────────────────────────────────────────────────
+# 🔴 2026-09-01 — 「법」 을 dangling 으로 버리던 것을 고쳤다.
+#    법령 문서는 **자기 안에서 약칭을 정의한다**. 법제처 편집 관례라 예외가 거의 없다:
+#        제1조(목적) 이 요령은 「중소기업창업 지원법」(이하 "법"이라 한다) 제12조에 따른…
+#        제2조 … 「중소기업창업 지원법 시행령」(이하 "영"이라 한다) 제38조제3항…
+#              … 「보조금 관리에 관한 법률」(이하 "보조금법"이라 한다) 제33조의2…
+#    그래서 "어느 법인지 확정 불가" 가 아니다 — **그 문서를 읽으면 적혀 있다.**
+#    이걸 안 걷으면 「중소기업창업 지원법」 제28~31조(사업비 관련 상위 근거)가
+#    코퍼스에 멀쩡히 있는데도 참조가 끊겨 판정이 B등급으로 내려앉는다 (실측 1건).
+#
+#    ⚠️ `RE_약칭`(위)은 이 괄호를 **지우는** 정규식이다. 순서가 중요하다 —
+#       약칭은 지우기 전에 걷어야 한다.
+RE_약칭정의 = re.compile(
+    r"[「『]([^」』\n]{4,60})[」』]\s*[」』]?\s*[(（]\s*이하\s*"
+    r"['\"‘’“”]?([가-힣]{1,12})['\"‘’“”]?\s*(?:이라|라)\s*(?:한다|함)")
+
+# 약칭으로 인정하지 않는 것 — 규범이 아니라 개념을 가리킨다.
+# ("이하 '지원사업'이라 한다" 처럼 「」 없이 붙는 것은 정규식이 이미 거른다)
+약칭_제외 = {"이하", "약칭", "이법", "동법"}
+
+
+def 수집_약칭(전체본문: str) -> dict[str, str]:
+    """문서가 스스로 정의한 약칭 → 정식 규범명."""
+    표: dict[str, str] = {}
+    for m in RE_약칭정의.finditer(re.sub(r"\s+", " ", 전체본문 or "")):
+        정식, 약 = m.group(1).strip(), m.group(2).strip()
+        if 약 in 약칭_제외 or len(약) < 1:
+            continue
+        # 먼저 나온 정의가 이긴다. 같은 약칭을 두 번 정의하는 문서는 없다시피 하고,
+        # 있다면 앞의 것(대개 제1조 목적)이 그 문서의 기준이다.
+        표.setdefault(약, 정식)
+    return 표
+
+
+def 경계_ok(t: str, imap: list[int], m) -> bool:
+    """매치 앞이 한글이면 **긴 규범명의 꼬리를 잘라 먹은 것**이다.
+
+    "부가가치세법 제10조" 에서 토큰 `법` 이 걸리면 「부가가치세법」이 아니라
+    그 문서의 「법」(예: 중소기업창업 지원법)으로 해소돼 **엉뚱한 조문이 근거가 된다.**
+    공백을 지운 사본에서는 앞뒤가 붙어 판별이 안 되므로 **원문 좌표(imap)로 되돌려** 본다.
+    """
+    i = imap[m.start()]
+    return i == 0 or not ("가" <= t[i - 1] <= "힣")
+
+
 def squash(t: str) -> tuple[str, list[int]]:
     buf, idx = [], []
     for i, ch in enumerate(t):
@@ -174,6 +219,20 @@ def load_corpus_names() -> dict[str, str]:
 }
 
 
+def _계열(s: str) -> str:
+    """법 / 시행령 / 시행규칙 중 무엇인가. 부분일치가 계열을 넘나드는 걸 막는 열쇠다.
+
+    🔴 2026-09-01 — 「법인세법」인용 425건이 **「법인세법시행령」에 붙어 있었다.**
+       본법이 코퍼스에 없어서(시행령·시행규칙만 수집됨) 부분일치가 길이차 3으로
+       시행령을 골랐다. 없는 걸 없다고 해야 수집 결손이 드러난다 — 조용히 옆 문서로
+       대체하면 **엉뚱한 조문이 근거로 인용되고**, 결손은 영원히 안 보인다.
+    """
+    for 접미 in ("시행규칙", "시행령", "시행규정"):
+        if s.endswith(접미):
+            return 접미
+    return "법"
+
+
 def resolve_규범(name: str, corpus: dict[str, str]) -> tuple[str, str | None]:
     """규범명이 코퍼스에 있나. (해소상태, 경로)"""
     key = norm_규범(name)
@@ -187,6 +246,8 @@ def resolve_규범(name: str, corpus: dict[str, str]) -> tuple[str, str | None]:
     # 파일명 쪽이 길어지는 경우가 많아 비대칭으로 잡는다.
     best = None
     for k, v in corpus.items():
+        if _계열(k) != _계열(key):
+            continue                      # 「법인세법」이 「법인세법시행령」에 붙는 걸 막는다
         if key in k or k in key:
             gap = abs(len(k) - len(key))
             if gap <= 12 and (best is None or gap < best[0]):
@@ -194,8 +255,55 @@ def resolve_규범(name: str, corpus: dict[str, str]) -> tuple[str, str | None]:
     return ("resolved", best[1]) if best else ("dangling", None)
 
 
+# 기본 문형이 이미 잡는 토큰. 여기 있는 것은 동적 패턴에서 빼야 엣지가 두 번 안 생긴다.
+기본토큰 = {"지침", "요령", "관리기준", "기준", "법", "시행령", "시행규칙"}
+# 앞이 한글이면 잘라먹은 것으로 보고 버릴 토큰 (`경계_ok`). 「부가가치세법」→「법」 사고 방지.
+경계검사_토큰 = {"법", "시행령", "시행규칙", "영"}
+
+
+def _동적패턴(약칭표: dict[str, str]):
+    """문서가 스스로 정의한 약칭만으로 문형을 만든다. 정의가 없으면 아무것도 안 잡는다.
+
+    🔴 범위와 조의 토큰 집합이 **일부러 다르다.**
+      · 범위(`…부터 …까지`) 는 기본 문형이 이미 `법|시행령|시행규칙` 을 잡는다 → 빼야 중복이 없다
+      · 조(`법 제51조제6항`) 는 기본 문형이 `지침|요령|관리기준|기준` 만 잡는다 →
+        `법|시행령|시행규칙` 을 **여기서 처음 잡는다.** 종전에는 이 참조가 통째로 유실됐다
+        (실측 26,600건 · 그중 22,848건이 문서 자체 정의로 해소 가능).
+    """
+    범위토큰 = sorted((k for k in 약칭표 if k not in 기본토큰), key=len, reverse=True)
+    조토큰 = sorted((k for k in 약칭표 if k not in ("지침", "요령", "관리기준", "기준")),
+                   key=len, reverse=True)
+    out = []
+    if 범위토큰:
+        alt = "|".join(re.escape(k) for k in 범위토큰)
+        out.append(("약칭범위",
+                    re.compile(rf"({alt})제(\d+)조(?:의(\d+))?부터제(\d+)조(?:의(\d+))?까지")))
+    if 조토큰:
+        alt = "|".join(re.escape(k) for k in 조토큰)
+        out.append(("약칭조", re.compile(rf"({alt})제(\d+)조(?:의(\d+))?(?:제(\d+)항)?")))
+    return out or None
+
+
+def _약칭해소(e: dict, 토큰: str, 약칭표: dict[str, str], corpus: dict[str, str]) -> None:
+    """약칭 → 정식명 → 코퍼스. 못 닿으면 **왜 못 닿았는지**를 남기고 dangling 유지."""
+    정식 = (약칭표 or {}).get(토큰)
+    if not 정식:
+        e.update(해소상태="dangling", 보정근거="규범명이 앞에서 잘림 — 문맥으로 확정 필요")
+        return
+    st, path = resolve_규범(정식, corpus)
+    if st == "resolved":
+        e.update(해소상태="resolved", dst_doc_id=path,
+                 보정근거=f'문서 자체 정의 「{정식}」(이하 "{토큰}") 로 해소')
+    else:
+        # 정식명은 알아냈는데 코퍼스에 그 규범이 없다. 이건 진짜 결손이고,
+        # 위의 "문맥으로 확정 필요" 와 섞으면 수집 대상 목록이 오염된다.
+        e.update(해소상태="dangling",
+                 보정근거=f'약칭 "{토큰}" → 「{정식}」 — 코퍼스에 없는 규범')
+
+
 def scan(text: str, doc_id: str, corpus: dict[str, str],
-         src_조번호: str = "문서전체") -> list[dict]:
+         src_조번호: str = "문서전체", 약칭표: dict[str, str] | None = None,
+         동적: list | None = None) -> list[dict]:
     t = re.sub(r"\s+", " ", text)
     sq, imap = squash(t)
     edges: list[dict] = []
@@ -205,8 +313,23 @@ def scan(text: str, doc_id: str, corpus: dict[str, str],
         a, b = imap[m.start()], imap[m.end() - 1] + 1
         return re.sub(r"\s+", " ", t[a:b])
 
-    for kind, pat in PATTERNS:
+    # 🔴 범위 문형을 **먼저** 태운다. "법 제28조부터 제31조까지" 는 조 문형에도
+    #    "법 제28조" 로 걸려서, 순서를 안 잡으면 같은 참조가 엣지 두 개가 된다
+    #    (dst 는 같은 제28조다 — 정보가 아니라 중복이다).
+    문형 = PATTERNS + (동적 or [])
+    문형 = [x for x in 문형 if x[0].endswith("범위")] + [x for x in 문형 if not x[0].endswith("범위")]
+    범위span: list[tuple[int, int]] = []
+
+    for kind, pat in 문형:
         for m in pat.finditer(sq):
+            # 약칭 토큰은 앞이 한글이면 긴 규범명의 꼬리다 — 버린다 (`경계_ok` 주석 참조)
+            if kind.startswith("약칭") or (kind in ("범위", "조") and m.group(1) in 경계검사_토큰):
+                if not 경계_ok(t, imap, m):
+                    continue
+            if kind.endswith("범위"):
+                범위span.append((m.start(), m.end()))
+            elif kind.endswith("조") and any(a <= m.start() < b for a, b in 범위span):
+                continue                      # 범위 참조가 이미 먹은 자리
             raw = 원문(m)
             key = (kind, raw)
             if key in seen:
@@ -219,6 +342,14 @@ def scan(text: str, doc_id: str, corpus: dict[str, str],
 
             if kind == "규범":
                 st, path = resolve_규범(m.group(1), corpus)
+                # 「보조금법」처럼 **약칭을 「」 안에 넣어** 쓰는 문서가 있다. 정식 제명으로는
+                # 코퍼스에 없지만 그 문서가 스스로 정의해 뒀다 — 한 번 더 물어본다.
+                if st == "dangling" and (약칭표 or {}).get(m.group(1).strip()):
+                    정식 = 약칭표[m.group(1).strip()]
+                    st2, path2 = resolve_규범(정식, corpus)
+                    if st2 == "resolved":
+                        st, path = st2, path2
+                        e["보정근거"] = f'문서 자체 정의 「{정식}」(이하 "{m.group(1).strip()}") 로 해소'
                 e.update(관계="인용", dst_doc_id=path, 해소상태=st)
             elif kind == "별표":
                 e.update(관계="별표참조", dst_doc_id=doc_id,
@@ -226,11 +357,15 @@ def scan(text: str, doc_id: str, corpus: dict[str, str],
             elif kind == "미규정위임":
                 e.update(관계="미규정위임", 해소상태="resolved",
                          보정근거="상위 규범으로 위임. 게이팅(파이프라인 §6.2)의 근거")
-            else:  # 조 / 범위
+            else:  # 조 / 범위 / 약칭조 / 약칭범위
                 target = m.group(1)
                 조 = m.group(2)
                 e.update(관계="준용" if target in ("지침", "요령") else "인용",
                          dst_조번호=f"제{조}조")
+                if kind.startswith("약칭"):
+                    _약칭해소(e, target, 약칭표, corpus)
+                    edges.append(e)
+                    continue
                 # 지침 참조는 판본 어긋남을 검사한다 (파이프라인 §2.5)
                 if target == "지침":
                     for 판, tbl in 지침_조제목.items():
@@ -254,9 +389,10 @@ def scan(text: str, doc_id: str, corpus: dict[str, str],
                     e.update(관계="인용", 해소상태="resolved", dst_doc_id=doc_id,
                              보정근거="자기 문서 내부 참조")
                 elif target in ("법", "시행령", "시행규칙"):
-                    # 앞말이 잘린 참조("…법 제5조"). 어느 법인지 확정 불가.
-                    e.update(해소상태="dangling",
-                             보정근거="규범명이 앞에서 잘림 — 문맥으로 확정 필요")
+                    # 🔴 2026-09-01 — "어느 법인지 확정 불가" 를 걷었다.
+                    #    그 문서의 제1·2조가 「…」(이하 "법"이라 한다) 로 **직접 정의**한다.
+                    #    정의가 없는 문서에서만 종전대로 dangling 이다.
+                    _약칭해소(e, target, 약칭표, corpus)
             edges.append(e)
     return edges
 
@@ -288,6 +424,7 @@ def main() -> None:
 
     all_edges, per_doc, skipped, deduped = [], {}, [], []
     strat_count = Counter()
+    약칭_문서수, 약칭_누적 = 0, Counter()
     items = [(k, v) for k, v in stage0.items() if not args.src or args.src in k]
     total = len(items)
     for n, (stem, d) in enumerate(items, 1):
@@ -303,11 +440,21 @@ def main() -> None:
         # 위임 계통이 다르므로(상위가 신사업창업사관학교 운영지침) 이 조들의 참조를 폐포에
         # 남겨두면 일반·기술트랙 판정에서 범위 밖 규범이 딸려온다. 2026-08-31 추가.
         밖 = 범위밖_조(stem, arts)
+        # 🔴 약칭표는 **문서 전체**에서 한 번 걷는다. 정의는 제1·2조에 있고 쓰이는 곳은
+        #    제20조·제51조다 — 조 단위로 스캔하면서 조마다 걷으면 영원히 못 만난다.
+        #    삭제·범위밖 조도 정의 원천으로는 읽는다 (정의가 거기 있을 수 있고,
+        #    여기서 만드는 건 엣지가 아니라 사전이다).
+        약칭표 = 수집_약칭(" ".join(a.get("본문") or "" for a in arts))
+        동적 = _동적패턴(약칭표)
+        if 약칭표:
+            약칭_문서수 += 1
+            약칭_누적.update(약칭표.keys())
         edges = []
         for a in arts:
             if a.get("삭제") or a["조번호"] in 밖:
                 continue
-            edges += scan(a["본문"], stem, corpus, src_조번호=a["조번호"])
+            edges += scan(a["본문"], stem, corpus, src_조번호=a["조번호"],
+                          약칭표=약칭표, 동적=동적)
         # 레이어를 엣지에 붙인다. dangling 비율을 레이어별로 봐야 신호가 산다 —
         # L1 법령끼리의 인용은 코퍼스 경계(219 규범) 밖으로 나가면 당연히 dangling 이고
         # 그게 전체의 40%다. 뭉뚱그리면 L2 의 진짜 해소 실패가 묻힌다.
@@ -340,12 +487,24 @@ def main() -> None:
         "문자중복_해소": deduped,
         "조분해_전략": dict(strat_count),
         "src_조번호_채움": sum(1 for e in all_edges if e.get("src_조번호") != "문서전체"),
+        "약칭": {
+            "정의를_가진_문서": 약칭_문서수,
+            "약칭_종류": dict(약칭_누적.most_common(20)),
+            "약칭으로_해소": sum(1 for e in all_edges
+                              if (e.get("보정근거") or "").startswith("문서 자체 정의")),
+            "약칭은_풀었으나_규범없음": sum(1 for e in all_edges
+                                     if (e.get("보정근거") or "").endswith("코퍼스에 없는 규범")),
+        },
     }
     OUT.write_text(json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8")
 
     print(f"\n문서 {len(per_doc)}건 → 엣지 {len(all_edges)}개  → {OUT.relative_to(ROOT)}")
     print("  해소상태:", dict(st))
     print("  관계    :", dict(rel))
+    print(f"  약칭    : 정의 보유 문서 {약칭_문서수}건 · "
+          f"약칭으로 해소 {doc['약칭']['약칭으로_해소']}건 · "
+          f"규범없음 {doc['약칭']['약칭은_풀었으나_규범없음']}건")
+    print(f"            {list(약칭_누적.most_common(10))}")
     top = sorted(per_doc.items(), key=lambda x: -x[1])[:8]
     print("\n  엣지 많은 문서:")
     for k, v in top:
