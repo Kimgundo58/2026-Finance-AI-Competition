@@ -14,11 +14,17 @@ hwpx = zip. 본문은 `Contents/section*.xml`, 문단은 `hp:p`, 글자는 `hp:r
    실물 사례: TIPS 운영사 현황(2026년).hwpx 는 내부가 xl/workbook.xml 인 XLSX 였다.
    hwpx 가 아니면 조용히 빈 문자열을 돌려주지 않고 `NotHwpxError` 로 실패한다
    (프로젝트 원칙: 모든 실패의 기본값은 판단불가 — 조용한 빈 값이 제일 나쁘다).
+
+🔴 `sniff()` 는 hwpx(zip) 뿐 아니라 **OLE2 HWP v5 의 배포용/암호화 여부도 판정한다**
+   (`HwpProtectedError`). 실측(2026-09-02): TIPS 총괄 운영지침 「본문」 hwp 는
+   `hwp_extract.extract()` 가 예외 없이 성공 반환하는데 실제로 뽑히는 건
+   뷰어 안내문 106~107자뿐이다 — 조 0개짜리 규정이 조용히 판정에 들어갈 뻔했다.
 """
 from __future__ import annotations
 
 import io
 import re
+import struct
 import sys
 import zipfile
 import xml.etree.ElementTree as ET
@@ -51,17 +57,65 @@ class NotHwpxError(ValueError):
     """파일이 hwpx 가 아니다. 메시지에 실제 정체를 담는다."""
 
 
+class HwpProtectedError(ValueError):
+    """hwp/hwpx 형식은 맞지만 배포용(DRM)·암호화라 본문을 못 읽는다.
+
+    실측(2026-09-02): TIPS 총괄 운영지침 3개년치 「본문」 파일이 이 경우다.
+    `hwp_extract.extract()` 는 이런 파일에서도 **예외 없이 성공 반환**하는데,
+    실제로 뽑히는 건 뷰어 안내문 106~107자뿐이다("이 문서는 상위 버전의
+    배포용 문서입니다…"). 겉보기엔 성공한 조 0개짜리 규정이라 위험하다.
+    """
+
+
 # ── 정체 판정 ──────────────────────────────────────────────────────
+def _hwp_ole_kind(path: Path) -> str | None:
+    """OLE2 파일이 진짜 HWP v5 인지, 배포용/암호화라 본문이 막혀 있는지 확인한다.
+
+    FileHeader 스트림이 없거나 서명이 다르면(구형 .doc 등 HWP 아닌 OLE2) None.
+    오프셋 36:40 의 32비트 속성 플래그는 `hwp_extract.is_compressed()` 와 같은
+    자리 — HWP 5.0 스펙: bit0 압축, bit1 암호화, bit2 배포용 문서(DRM).
+
+    실측(2026-09-02, `2026_Finance_DATA_FOR_RAG/` 전수 43개 hwp):
+    배포용 플래그(0b101) 8개 전부 106~107자·조 0개로 정확히 일치했고,
+    정상 문서(0b001) 35개는 최소 430자부터 시작해 겹치지 않았다.
+    """
+    import olefile
+
+    try:
+        ole = olefile.OleFileIO(str(path))
+    except Exception:
+        return None
+    try:
+        names = {"/".join(s) for s in ole.listdir()}
+        if "FileHeader" not in names:
+            return None
+        header = ole.openstream("FileHeader").read()
+        if not header.startswith(b"HWP Document File"):
+            return None
+        if len(header) < 40:
+            return "HWP-DRM: 손상된 FileHeader (속성 플래그 없음) — 본문 추출 불가"
+        (flags,) = struct.unpack("<I", header[36:40])
+        if flags & (1 << 1):
+            return "HWP-DRM: 암호화 문서(비밀번호 보호) — 본문 추출 불가"
+        if flags & (1 << 2):
+            return "HWP-DRM: 배포용 문서(뷰어 전용) — 본문 추출 불가"
+        return "OLE2 (HWP v5)"
+    finally:
+        ole.close()
+
+
 def sniff(path: str | Path) -> str:
     """파일의 실제 정체를 문자열로 돌려준다. 'hwpx' 면 진짜다.
 
     zip 이면 내용물로, zip 이 아니면 매직 바이트로 판정한다.
+    OLE2 이면서 진짜 HWP 인 경우 배포용/암호화 여부까지 연다(`_hwp_ole_kind`) —
+    「본문이 없다」는 파싱 실패가 아니라 **정체**라 여기서 잡는 게 맞다.
     """
     p = Path(path)
     if not zipfile.is_zipfile(p):
         head = p.open("rb").read(8)
         if head.startswith(b"\xd0\xcf\x11\xe0"):
-            return "OLE2 (HWP v5 또는 MS Office 97-2003)"
+            return _hwp_ole_kind(p) or "OLE2 (HWP v5 또는 MS Office 97-2003)"
         if head.startswith(b"%PDF"):
             return "PDF"
         if head.lstrip().startswith(b"<?xml"):
