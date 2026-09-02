@@ -136,10 +136,22 @@ def 파싱(cur, doc_id: str) -> dict:
             continue
         dang += sum(1 for r in l3_load.상위참조(cur, a["본문"]) if not r["해소"])
 
-    # ── 파싱품질 — flags 있으면 warn, 없으면 pass. 0건은 이미 위에서 fail 로 닫혔다 ──
-    파싱품질 = "warn" if v["flags"] else "pass"
+    파싱품질, flags = _품질판정(arts, v["flags"])
     return _닫기(파싱품질, 조_건수=len(arts), dangling수=dang,
-                strategy=strategy, flags=v["flags"])
+                strategy=strategy, flags=flags)
+
+
+def _품질판정(arts: list[dict], validate_flags: list[str]) -> tuple[str, list[str]]:
+    """flags 있으면 warn, 없으면 pass. 조 0건은 호출부에서 이미 fail 로 닫혔다(안 들어옴).
+
+    🔴 확인해본 결과 — ai-ae 가 제안한 "조 1건 + 본문 수천 자" 별도 게이트는
+    **필요 없었다.** `stage0_articles.validate()` 의 V2(`조_개수_부족`, 5건 미만이면
+    무조건 발동)가 조 1건인 모든 경우를 이미 잡는다 — 건국대 붙임1 이 고치기 전 조
+    1건짜리 paragraph 로 떨어졌을 때도 V2 가 이미 걸려 있었다(실측: `flags=['V2:조_개수_부족(1)',
+    '구조없음:단락분할']`). 별도 코드를 넣었다가 "V2 가 이미 채워놔서 내 조건이 항상
+    거짓이 되는" 죽은 분기였다 — 넣어보고 확인한 뒤 도로 뺐다.
+    """
+    return ("warn" if validate_flags else "pass"), list(validate_flags)
 
 
 def main() -> None:

@@ -139,8 +139,29 @@ def test_조_0건이면_pass가_아니라_fail이다() -> None:
             _정리(conn, [org_id], [경로])
 
 
+def test_조1건이면_validate의_V2가_이미_잡아서_warn이다() -> None:
+    """🔴 「조 1건 + 본문 수천 자」를 잡는 별도 게이트를 만들어봤다가 뺐다 —
+    `stage0_articles.validate()` 의 V2(조 5건 미만이면 무조건 발동)가 조 1건인
+    모든 경우를 이미 잡고 있어서 별도 코드가 죽은 분기였다. 그 사실 자체를
+    회귀 테스트로 남긴다: 조 1건이면 flags 가 뭐가 됐든 V2 가 이미 차 있어야 한다."""
+    import sys
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from stage0_articles import validate
+
+    v = validate([{"조번호": "단락001", "본문": "x" * 5000}], "paragraph")
+    assert any("V2" in f for f in v["flags"]), v["flags"]
+
+    품질, flags = l3_parse._품질판정([{"조번호": "단락001"}], validate_flags=v["flags"])
+    assert 품질 == "warn", (품질, flags)
+
+    # 대조군 — flags 가 정말 비어 있으면(조 5건 이상 + 구조 튼튼) pass 로 나간다
+    품질2, flags2 = l3_parse._품질판정([{"조번호": f"제{i}조"} for i in range(1, 6)], [])
+    assert 품질2 == "pass", (품질2, flags2)
+
+
 if __name__ == "__main__":
     test_성공_경로_실_pdf_로_조문이_들어가고_파싱품질이_pass_또는_warn()
     test_파일_없으면_파싱품질이_fail_이고_대기로_안_남는다()
     test_조_0건이면_pass가_아니라_fail이다()
+    test_조1건이면_validate의_V2가_이미_잡아서_warn이다()
     print("✔ 전부 통과")
