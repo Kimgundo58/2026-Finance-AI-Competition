@@ -1464,7 +1464,13 @@ def _smoke() -> int:
         사업들 = [r[0] for r in cur.fetchall()] or [None]
         cur.execute("SELECT 비목 FROM corpus.item_vocab WHERE 계통='창업' ORDER BY 정렬")
         비목들 = [r[0] for r in cur.fetchall()]
-        cur.execute("SELECT org_id FROM tenant.orgs")
+        # 🔴 2026-09-02 — 전에는 `SELECT org_id FROM tenant.orgs` 였다. `tenant.orgs`
+        #    가 2행일 땐 조합이 270 이라 즉시 끝났는데, 기관 명부 413행이 적재되자
+        #    9×10×414 ≈ 37,000 이 되어 **스모크가 몇 분을 넘겨도 안 끝났다.**
+        #    이 스모크가 재려는 것은 «L3 가 붙었을 때 effective_rule 이 형태를 지키나»
+        #    이지 «기관이 몇 곳이나 있나» 가 아니다. L3 조문을 실제로 가진 기관만 돈다 —
+        #    나머지 기관은 l3 가 0행이라 `None` 과 같은 경로를 되풀이할 뿐이다.
+        cur.execute("SELECT DISTINCT org_id FROM tenant.l3_articles")
         orgs = [r[0] for r in cur.fetchall()]        # 🔴 UUID 객체 그대로. str() 금지
 
         n = 0

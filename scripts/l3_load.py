@@ -494,13 +494,46 @@ def 문서요약(cur, org_id: str) -> list[dict[str, Any]]:
     return [dict(zip(keys, r)) for r in rows]
 
 
+class 기관모호(ValueError):
+    """부분 이름이 여러 기관에 걸린다. 후보를 담는다."""
+
+    def __init__(self, 기관: str, 후보: list[tuple[str, str]]):
+        self.기관, self.후보 = 기관, 후보
+        super().__init__(f"'{기관}' 이 {len(후보)}곳에 걸린다")
+
+
 def org해소(cur, 기관: str) -> tuple[str, str] | None:
-    """org_id 또는 기관명으로 기관을 찾는다 (CLI 편의)."""
+    """org_id 또는 기관명으로 기관을 찾는다 (CLI 편의).
+
+    🔴 2026-09-02 — 이전에는 `ILIKE %…% LIMIT 1` 하나였다. `ORDER BY` 도 없었다.
+    `tenant.orgs` 가 2행일 땐 아무 일도 안 났는데 **413행이 되자 조용히 틀리기
+    시작했다** — 실측:
+        '대학교'    160곳 매치 → 항상 옛 테스트픽스처 기관을 돌려줬다
+        '산학협력단'  45곳 매치 → 〃
+    에러도 경고도 없이 **엉뚱한 기관의 L3 규정이 로드된다.** skip 보다 나쁘다 —
+    skip 은 「안 쟀다」는 흔적이라도 남기는데 이건 「쟀는데 틀렸다」를 흔적 없이 통과시킨다.
+
+    그래서 세 단을 갈랐다:
+      ① org_id 또는 기관명 **완전 일치** — 하나뿐이다. 그대로 돌려준다
+      ② 부분 일치가 **딱 하나** — 그것이다
+      ③ 부분 일치가 **여럿** — 🔴 고르지 않고 `기관모호` 로 던진다.
+         「아마 이것」을 만들지 않는다. 사용자가 좁혀야 한다
+    """
     row = cur.execute(
         "SELECT org_id, 기관명 FROM tenant.orgs "
-        " WHERE org_id::text = %s OR 기관명 = %s OR 기관명 ILIKE %s LIMIT 1",
-        (기관, 기관, f"%{기관}%")).fetchone()
-    return (str(row[0]), row[1]) if row else None
+        " WHERE org_id::text = %s OR 기관명 = %s",
+        (기관, 기관)).fetchone()
+    if row:
+        return (str(row[0]), row[1])
+
+    후보 = cur.execute(
+        "SELECT org_id, 기관명 FROM tenant.orgs WHERE 기관명 ILIKE %s "
+        ' ORDER BY "기관명" LIMIT 21', (f"%{기관}%",)).fetchall()
+    if not 후보:
+        return None
+    if len(후보) == 1:
+        return (str(후보[0][0]), 후보[0][1])
+    raise 기관모호(기관, [(str(r[0]), r[1]) for r in 후보])
 
 
 def main() -> None:
@@ -510,7 +543,16 @@ def main() -> None:
     a = ap.parse_args()
 
     with db.connect() as conn, conn.cursor() as cur:
-        찾음 = org해소(cur, a.org)
+        try:
+            찾음 = org해소(cur, a.org)
+        except 기관모호 as e:
+            # 🔴 하나를 골라주지 않는다. 고르면 사용자는 «찾았다» 고 믿는다.
+            print(f"🔴 '{e.기관}' 이 {len(e.후보)}곳에 걸린다 — 더 좁혀라")
+            for oid, 이름 in e.후보[:20]:
+                print(f"     {이름}   {oid}")
+            if len(e.후보) > 20:
+                print("     … (20곳까지만 보인다)")
+            sys.exit(1)
         if not 찾음:
             print(f"🔴 기관을 못 찾았다: {a.org}")
             sys.exit(1)
