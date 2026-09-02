@@ -115,7 +115,16 @@ def test_잇기_그리고_두번_저장해도_decisions_행_안늘어난다(정�
     decision_id = _decision_만들기(상세)
     decision_ids.append(decision_id)
 
-    행수_전 = _질의("SELECT count(*) FROM tenant.decisions")[0][0]
+    # 🔴 2026-09-02 — 여기는 `count(*)` 전역이었다. **WHERE 가 없었다.**
+    #    그러면 이 assert 는 「전 세션이 조용히 있어야만」 참이다 — 같은 `suddoe` 를
+    #    여러 세션이 동시에 쓰는 지금은 게이트가 아니라 동전던지기다.
+    #    실제로 전체 스위트를 3번 돌려 **2회차에서만** 이 테스트가 빨개지는 걸 봤다.
+    #    이 테스트가 재려는 건 「이 판정 행이 안 늘었나」이지 「테이블 총량」이 아니다 —
+    #    `WHERE plan_id = %s` 로 좁히면 회귀 방지 의도(INSERT 로 되돌아감)는 그대로 지켜지고
+    #    남의 행에 흔들리지 않는다.
+    def _내판정행수() -> int:
+        return _질의("SELECT count(*) FROM tenant.decisions WHERE plan_id = %s",
+                    (상세.plan_id,))[0][0]
 
     out1 = persist._실_저장(상세.plan_id, None, {"해야할일": [{"항목": "증빙 준비"}]},
                            None, decision_id)
@@ -125,13 +134,22 @@ def test_잇기_그리고_두번_저장해도_decisions_행_안늘어난다(정�
     }
     assert out1["할일"]["생성"] == 1
 
+    # 🔴 «1차 저장 후» 를 기준선으로 잡는다. 저장 «전» 은 아직 `plan_id` 가 NULL 이라
+    #    이 계획에 붙은 판정이 0건이고, 1차 저장이 그걸 1로 만드는 게 **정상 동작**이다.
+    #    (처음에 저장 전을 기준선으로 잡았다가 `1 == 0` 으로 빨개져서 잡았다 —
+    #     전역 count 를 좁힐 때 «무엇을 재는 시점인가» 가 같이 바뀐 것이다)
+    행수_1차 = _내판정행수()
+    assert 행수_1차 == 1, f"1차 저장 후 이 계획에 붙은 판정이 {행수_1차}건이다 (1이어야)"
+
     # 🔴 같은 판정을 두 번 저장해도 decisions 행이 늘면 안 된다 — INSERT 로 되돌아간 회귀 방지
     out2 = persist._실_저장(상세.plan_id, None, {"해야할일": [{"항목": "증빙 준비"}]},
                            None, decision_id)
     assert out2["저장"] is True
 
-    행수_후 = _질의("SELECT count(*) FROM tenant.decisions")[0][0]
-    assert 행수_후 == 행수_전
+    행수_2차 = _내판정행수()
+    assert 행수_2차 == 행수_1차, (
+        f"같은 판정을 두 번 저장했더니 이 계획의 decisions 행이 "
+        f"{행수_1차} → {행수_2차} 로 늘었다 (INSERT 로 되돌아간 회귀)")
 
     plan_row = _질의(
         "SELECT latest_decision_id, 상태 FROM tenant.expense_plans WHERE plan_id = %s",

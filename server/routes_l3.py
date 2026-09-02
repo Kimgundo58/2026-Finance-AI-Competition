@@ -12,8 +12,10 @@
 """
 from __future__ import annotations
 
+import io
 import os
 import uuid
+import zipfile
 from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
@@ -28,6 +30,42 @@ router = APIRouter(prefix="/api/l3", tags=["L3 업로드"])
 허용_확장자 = {"pdf", "hwpx", "hwp"}
 거부_확장자 = {"doc", "docx"}          # 파서 없음. 프론트 온보딩 안내에서도 뺄 것
 최대_바이트 = 30 * 1024 * 1024
+
+
+def 실제형식(본문: bytes) -> str:
+    """파일 «내용»으로 형식을 본다. 확장자를 믿지 않는다.
+
+    🔴 **확장자는 거짓말을 한다** — 실물 증거가 있다. 코퍼스의
+       `민관공동창업자발굴육성(TIPS)….hwpx` 는 내부가 **XLSX** 다
+       (`namelist()` 가 `['[Content_Types].xml','_rels/.rels','xl/…']`).
+
+    🔴 **매직바이트만으로는 부족하다.** HWPX 도 XLSX 도 DOCX 도 전부 ZIP 이라
+       앞 4바이트가 똑같이 `PK\\x03\\x04` 다 — 위 파일은 매직바이트 검사를 그냥 통과한다.
+       그래서 ZIP 이면 **안의 항목 이름**까지 본다 (hwpx = `Contents/`, xlsx = `xl/`).
+
+    ⚠️ OLE 헤더(`\\xd0\\xcf\\x11\\xe0…`)는 구형 HWP·DOC·XLS 가 **공유**한다.
+       여기서 `hwp` 로 답하는 건 「OLE 복합문서다」까지이지 「한글 문서다」가 아니다.
+       그 이상은 파서가 열어봐야 안다 — 여기서 단정하지 않는다.
+    """
+    if 본문[:5] == b"%PDF-":
+        return "pdf"
+    if 본문[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
+        return "hwp"                       # OLE 복합문서 (구형 HWP·DOC·XLS 공통)
+    if 본문[:4] == b"PK\x03\x04":
+        try:
+            이름들 = zipfile.ZipFile(io.BytesIO(본문)).namelist()
+        except (zipfile.BadZipFile, OSError):
+            return "손상된zip"
+        if any(n.startswith("Contents/") for n in 이름들):
+            return "hwpx"
+        if any(n.startswith("xl/") for n in 이름들):
+            return "xlsx"
+        if any(n.startswith("word/") for n in 이름들):
+            return "docx"
+        if any(n.startswith("ppt/") for n in 이름들):
+            return "pptx"
+        return "zip"
+    return "알수없음"
 
 
 @router.post("/upload", response_model=L3업로드응답, status_code=202)
@@ -50,6 +88,15 @@ async def 업로드(
     if len(본문) > 최대_바이트:
         raise HTTPException(413, "파일이 너무 큽니다 (30MB 이하).")
 
+    # 🔴 확장자 다음에 «내용» 을 본다. 순서가 중요하다 — 크기·빈파일 검사를 먼저 통과시켜야
+    #    30MB 초과가 415 가 아니라 413 으로 나간다.
+    #    🔴 목·실 양쪽에 건다. 목이 받아주고 실서버가 거부하면 계약(「갈아끼워도 프론트
+    #       코드는 한 줄도 안 바뀐다」)이 깨진다.
+    진짜 = 실제형식(본문)
+    if 진짜 != 확장:
+        raise HTTPException(415, f"파일 내용이 .{확장} 이 아닙니다 (실제: {진짜}). "
+                                 f"확장자만 바꾼 파일은 파싱할 수 없습니다.")
+
     if MOCK:
         return L3업로드응답(**{**mock_data.목_L3, "파일명": 이름, "확장자": 확장,
                             "doc_id": f"l3-mock-{uuid.uuid4().hex[:8]}"})
@@ -69,7 +116,13 @@ def 상태(doc_id: str, org_id: str | None = None) -> L3업로드응답:
 # 🔴 L3 실 경로 구역
 # ════════════════════════════════════════════════════════════════════
 
-_확장_추출방식 = {"hwpx": "hwpx", "hwp": "hwp"}   # pdf → 'native' (pdftext.py 경로)
+# pdf → 'native' (pdftext.py 경로)
+#
+# 🔴 **이 표를 확장자로 조회해도 되는 이유는 `실제형식()` 이 앞에서 걸러주기 때문이다.**
+#    그 검사가 없으면 위장 파일이 **틀린 `extraction` 태그**를 DB 에 박는다.
+#    CLAUDE.md 가 `extraction` 을 신뢰등급에 묶어놨으므로(`vlm` → A등급 인용 금지)
+#    태그가 틀리면 **신뢰등급이 틀린다.** 업로드 경로에서 내용 검사를 빼면 이 줄이 거짓말한다.
+_확장_추출방식 = {"hwpx": "hwpx", "hwp": "hwp"}
 
 # 업로드 원본을 두는 곳. 파서가 `doc_id` 로 찾아간다.
 #

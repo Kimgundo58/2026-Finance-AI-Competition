@@ -223,9 +223,25 @@ def test_할일_목록과_추가와_수정_키():
     _키대조("동기화", r.json())
 
 
+def _hwpx_바이트() -> bytes:
+    """🔴 2026-09-02 — 픽스처가 `b"x"*32` 였다. 서버가 이제 파일 **내용**을 본다.
+
+    `.hwpx` 는 ZIP 이고, 서버는 앞 4바이트만이 아니라 **안의 항목 이름**까지 본다
+    (실물에 `….hwpx` 인데 내부가 XLSX 인 파일이 있다 — HWPX·XLSX 는 매직바이트가 같다).
+    그래서 진짜 hwpx 모양(`Contents/`)을 만들어 준다.
+    """
+    import io
+    import zipfile
+    b = io.BytesIO()
+    with zipfile.ZipFile(b, "w") as z:
+        for e in ("mimetype", "version.xml", "Contents/header.xml"):
+            z.writestr(e, "x")
+    return b.getvalue()
+
+
 def test_L3_업로드와_상태_키():
     r = client.post("/api/l3/upload",
-                    files={"파일": ("규정.hwpx", b"x" * 32, "application/octet-stream")},
+                    files={"파일": ("규정.hwpx", _hwpx_바이트(), "application/octet-stream")},
                     data={"org_id": "org-계약테스트"})
     assert r.status_code == 202, r.text
     _키대조("L3", r.json(), " upload")
