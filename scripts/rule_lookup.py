@@ -2,10 +2,10 @@
 """룰 조회 — 금지목록 즉답 · 비목 확정 · 효력 결정 · L3 게이팅.
 
 `0831_최종구현.md` §4 의 동결 인터페이스 4개를 공급한다 (B 세션 소유).
-설계 정본은 `rule_base.md` §3 · `Agent.md` §3-2 §3-3.
+설계 기준 문서는 `rule_base.md` §3 · `Agent.md` §3-2 §3-3.
 
-    금지적중()      게이트 A. LLM 0회로 "불가" 를 즉답한다
-    비목확정()      정확조회 → 실패 시 벡터. 게이트 C 의 재료
+    금지적중()      통과 조건 A. LLM 0회로 "불가" 를 즉답한다
+    비목확정()      정확조회 → 실패 시 벡터. 통과 조건 C 의 재료
     effective_rule()  L1·L2·L3 를 precedence_rules 로 병합
     l3_게이팅()     상위를 봐야 하는가 — 4갈래
 
@@ -25,7 +25,7 @@
 실행:
     PYTHONIOENCODING=utf-8 python scripts/rule_lookup.py --self-test   # DB 없이 (순수 함수)
     PYTHONIOENCODING=utf-8 python scripts/rule_lookup.py --smoke       # 실 커넥션 (타입·예외)
-    PYTHONIOENCODING=utf-8 python scripts/rule_lookup.py --golden      # 골든셋 77문항 3분류
+    PYTHONIOENCODING=utf-8 python scripts/rule_lookup.py --golden      # 정답셋 77문항 3분류
 """
 from __future__ import annotations
 
@@ -39,7 +39,9 @@ from pathlib import Path
 from typing import Any, Iterable, Sequence
 
 ROOT = Path(__file__).resolve().parent.parent
-DSN = os.environ.get("SUDDOE_DSN", "postgresql://postgres:devpw@localhost:5432/suddoe")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _lib import db                                                   # noqa: E402
+DSN = db.DSN
 
 허용_강도 = {"불가": 3, "조건부": 2, "가능": 1}   # 클수록 엄격
 
@@ -108,7 +110,7 @@ def 금지예시_해부(예시: str) -> dict[str, Any]:
 
     괄호는 두 일을 한다. 하나는 부연('법인은 …로 등재된 법인'), 하나는 예외 단서
     ('사전승인 시 예외'). 후자가 붙은 항목은 **즉답 불가의 재료가 아니다** —
-    골든셋 31번 '시제품 제작에 금 도금' 의 정답이 불가가 아니라 조건부인 이유가 이것이다.
+    정답셋 31번 '시제품 제작에 금 도금' 의 정답이 불가가 아니라 조건부인 이유가 이것이다.
     """
     원문 = _nfkc(예시)
     단서 = [m for m in _괄호.findall(원문)
@@ -147,7 +149,7 @@ def _행(cur, sql: str, args: Sequence[Any]) -> list[dict]:
 
 
 def 비목계통(cur, 사업명: str | None) -> str:
-    """'창업' | 'RND'. 사업명이 없으면(골든셋 '공통' 27문항) 창업 계통으로 본다."""
+    """'창업' | 'RND'. 사업명이 없으면(정답셋 '공통' 27문항) 창업 계통으로 본다."""
     if not 사업명:
         return "창업"
     try:
@@ -165,7 +167,7 @@ def base_룰(cur, 사업명: str | None, 비목: str | None = None) -> list[dict
 
     ① **L1 은 `사업명 IS NULL` 이다.** G3 이후 L1 행이 그렇게 들어오는데
        `NULL = ?` 는 항상 false 라 옛 조건으로는 L1 을 **영영 못 집는다**.
-       골든셋 '공통' 27문항(35%)이 전부 그 L1 행에만 걸려 있다.
+       정답셋 '공통' 27문항(35%)이 전부 그 L1 행에만 걸려 있다.
 
     ② 🔴 **L1 은 창업 계통 사업에만 붙인다.** TIPS 는 위임 계통이 다르다 —
        상위가 「중소기업창업 지원사업 통합관리지침」이 아니라 「중소기업기술혁신
@@ -226,7 +228,7 @@ def _l3정규화(l3: dict | None) -> dict | None:
 def l3적용가능(cur, 사업명: str | None) -> bool:
     """이 사업에 **우리 L3 룰**을 붙여도 되는가. 🔴 비목 축이 맞아야 한다.
 
-    L1 게이트(`base_룰` ②)와 **이유가 다르다.** L1 은 위임 계통 문제였다 —
+    L1 통과 조건(`base_룰` ②)와 **이유가 다르다.** L1 은 위임 계통 문제였다 —
     통합관리지침이 TIPS 를 규율하지 않는다. L3 는 그렇지 않다: 주관기관 규정이
     자기 TIPS 과제를 규율하는 건 현실에서 참이다.
 
@@ -261,15 +263,15 @@ def _org문자열(기관ID: Any) -> str | None:
 
 
 def l3_룰_행(cur, 기관ID: Any, 비목: str | None, 사업명: str | None = None) -> dict | None:
-    """L3 룰 한 행. **`l3_load.l3룰()` 이 정본이고 `corpus.rules` 는 폴백이다.**
+    """L3 룰 한 행. **`l3_load.l3룰()` 이 기준 문서이고 `corpus.rules` 는 대체 경로이다.**
 
     A 는 `effective_rule(..., l3룰=l3_load.l3룰(...))` 로 주입하는 게 정상 경로다
     (E 가 `tenant.l3_articles` 에서 조립한다). 주입이 없을 때만 여기가 돈다.
 
     ⚠️ **설계가 두 갈래로 공존한다** — CLAUDE.md 는 "L3 는 `tenant.l3_articles`" 라 하고
     `rule_base.md` §3-1 은 overlay 를 `rules WHERE layer='L3' AND 기관=?` 로 뽑는다고
-    한다. 실질 정본은 전자다(`corpus.rules` 의 `layer='L3'` 는 **0행**이고
-    `seed_rules.py` 가 L3 행을 아예 만들지 않는다). 어느 쪽으로 정리할지는 대장에 올렸고,
+    한다. 실질 기준 문서는 전자다(`corpus.rules` 의 `layer='L3'` 는 **0행**이고
+    `seed_rules.py` 가 L3 행을 아예 만들지 않는다). 어느 쪽으로 정리할지는 목록에 올렸고,
     그때까지 후자를 지운 게 아니라 **타입만 맞춰 두었다.**
     """
     org = _org문자열(기관ID)
@@ -312,7 +314,7 @@ def _precedence(cur, 사업명: str | None) -> list[dict]:
 def _우선규범(cur, 사업명: str | None) -> str | None:
     """B6 — 초격차·모두의창업의 상위는 통합관리지침이 **아니다**.
 
-    `corpus.programs.우선규범` 이 정본(D 적재). 없으면 precedence_rules 로 폴백한다.
+    `corpus.programs.우선규범` 이 기준 문서(D 적재). 없으면 precedence_rules 로 대체한다.
     """
     if not 사업명:
         return None
@@ -330,7 +332,7 @@ def _우선규범(cur, 사업명: str | None) -> str | None:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 4. 동결 인터페이스 ① 금지적중 — 게이트 A (B1)
+# 4. 동결 인터페이스 ① 금지적중 — 통과 조건 A (B1)
 # ══════════════════════════════════════════════════════════════════════════════
 
 _최소핵길이 = 4          # 정규형 기준. '기프티콘'(5) 은 통과, 2~3자 조각은 막는다
@@ -382,7 +384,7 @@ def 금지후보(cur, 품목: str | None, 용도: str | None, 사업명: str | N
 
 def 금지적중(cur, 품목: str | None, 용도: str | None, 사업명: str | None,
              비목: str | None) -> dict | None:
-    """게이트 A — 적중하면 LLM 0회로 "불가" 를 즉답할 수 있다.
+    """통과 조건 A — 적중하면 LLM 0회로 "불가" 를 즉답할 수 있다.
 
     정확일치(정규화 후 품목 == 금지예시 핵) 또는 구절포함(금지예시 핵이 품목+용도
     안에 문자 그대로 들어 있음)만 인정한다. 유사매칭은 하지 않는다 — §B1.
@@ -434,7 +436,7 @@ def 비목확정(cur, 품목: str | None, 사업명: str | None, *,
     """[{"비목","신뢰도","출처":"alias|vector"}] — 신뢰도 내림차순.
 
     정확조회(`item_alias`)를 먼저 본다. 사업 전용 별칭이 공통 별칭을 이긴다.
-    실패하면 벡터로 넘어간다. 임계치는 인자다 — 게이트 C(비목 갈림)의 폭을
+    실패하면 벡터로 넘어간다. 임계치는 인자다 — 통과 조건 C(비목 갈림)의 폭을
     A 가 조절할 수 있어야 한다.
 
     🔴 **임계치 0.75 는 실측으로 정했다** (`--calibrate`, 별칭 228쌍 leave-one-out:
@@ -469,9 +471,9 @@ def 비목확정(cur, 품목: str | None, 사업명: str | None, *,
                         "매칭": 상품명, "별칭사업명": 별칭사업, "별칭출처": 출처})
             본.add(비목)
 
-    # ── 비목 정본명·별칭 자체와의 일치 (어휘집) ──────────────────────────────
+    # ── 비목 정본명·별칭 자체와의 일치 (용어 사전) ──────────────────────────────
     if not out:
-        for 비목, 신뢰도 in _어휘집_직결(cur, 품목n):
+        for 비목, 신뢰도 in _용어사전_직결(cur, 품목n):
             if 비목 not in 본:
                 out.append({"비목": 비목, "신뢰도": 신뢰도, "출처": "alias",
                             "매칭": 품목, "별칭사업명": None, "별칭출처": "item_vocab"})
@@ -499,7 +501,7 @@ def 비목확정(cur, 품목: str | None, 사업명: str | None, *,
     return sorted(out, key=lambda o: -o["신뢰도"])[:top_n]
 
 
-def _어휘집_직결(cur, 품목n: str) -> list[tuple[str, float]]:
+def _용어사전_직결(cur, 품목n: str) -> list[tuple[str, float]]:
     """품목이 비목 정본명·별칭·하위항목 그 자체일 때 (사용자가 비목명을 그대로 쓴 경우)."""
     try:
         cur.execute("SELECT 비목, 별칭, 하위항목 FROM corpus.item_vocab WHERE 계통='창업'")
@@ -848,11 +850,11 @@ def _엄격병합(rows: Sequence[dict], *, 허용층우선: str | None = None) -
 def _오버레이(eff: dict, l3: dict) -> dict:
     """L2>L3 우선 조항이 **없는** 사업에서 L3 를 병합해 넣는다 (초격차·TIPS).
 
-    🔴 폴백은 "상위가 무조건 이긴다" 가 아니다. `rule_base.md` §3-1 이 폴백에
+    🔴 대체 경로는 "상위가 무조건 이긴다" 가 아니다. `rule_base.md` §3-1 이 대체 경로에
     `허용: 불가>조건부>가능 / 한도: min / 사전승인: OR / 증빙: UNION` 을 명시했는데,
-    상위가 통째로 이긴다면 그 연산들이 폴백에 있을 이유가 없다.
+    상위가 통째로 이긴다면 그 연산들이 대체 경로에 있을 이유가 없다.
 
-    같은 폴백 규칙을 L1↔L2 에서는 엄격병합으로 쓰면서 L2↔L3 에서만 "base 승" 으로
+    같은 대체 경로 규칙을 L1↔L2 에서는 엄격병합으로 쓰면서 L2↔L3 에서만 "base 승" 으로
     두면 **내 코드 안에서 같은 규칙이 두 갈래로 갈린다.** 게다가 그 갈래는
     L3 `불가` → 최종 `조건부` 로 **관대해지는 방향**이라 «틀린 가능» 계열이다.
     (2026-09-01 G 세션 지적. 예비창업으로만 재현하면 안 걸린다 — 그 사업은 조항이 있다)
@@ -958,7 +960,7 @@ def effective_rule(cur, 사업명: str | None, 비목: str | None, 기관ID: str
     base = base_룰(cur, 사업명, 비목)
     # 주입된 L3 도 정규화를 태운다 — E 의 산출물은 `corpus.rules` 행이 아니라 키가 다르다
     l3 = _l3정규화(l3룰) if l3룰 is not None else l3_룰_행(cur, 기관ID, 비목, 사업명)
-    # 🔴 비목계통 게이트는 L1 뿐 아니라 **L3 에도** 걸린다. 주입 경로(A 가 직접
+    # 🔴 비목계통 통과 조건은 L1 뿐 아니라 **L3 에도** 걸린다. 주입 경로(A 가 직접
     #    l3_load 로 뽑아 넘기는 길)가 `l3_룰_행` 을 우회하므로 여기서 한 번 더 본다.
     if l3 and not l3적용가능(cur, 사업명):
         l3 = None
@@ -991,8 +993,8 @@ def effective_rule(cur, 사업명: str | None, 비목: str | None, 기관ID: str
             참고_L3 = _참고L3(l3, "귀 기관 규정은 참고로 병기한다. 본 사업 관리기준이 우선한다", eff)
             적용조항 += [x for x in p_L2L3 if x["범위"] == "all"]
         else:
-            # 🔴 조항 없음(초격차·TIPS) → 폴백은 **엄격한 쪽**이다. base 가 자동으로
-            #    이기지 않는다 — L1↔L2 폴백과 같은 규칙을 써야 한다. §_오버레이 참조.
+            # 🔴 조항 없음(초격차·TIPS) → 대체 경로는 **엄격한 쪽**이다. base 가 자동으로
+            #    이기지 않는다 — L1↔L2 대체 경로와 같은 규칙을 써야 한다. §_오버레이 참조.
             참고_L3 = _참고L3(l3, "이 사업에는 L2>L3 우선순위 조항이 없다. "
                                   "상위 규범과 기관 규정 중 엄격한 쪽을 적용한다", eff)
             eff = _오버레이(eff, l3)
@@ -1030,7 +1032,7 @@ def effective_rule(cur, 사업명: str | None, 비목: str | None, 기관ID: str
         # `적용층` 이 'L1+L2' 로 뭉뚱그려질 때 어느 필드가 어느 층에서 왔는지 여기서 푼다
         "필드출처": eff["필드출처"],
         "적용층_기여": eff["적용층_기여"],
-        "금지예시": eff["금지예시"],      # 층 무관 합집합. 게이트 A 는 별도로 base 를 훑는다
+        "금지예시": eff["금지예시"],      # 층 무관 합집합. 통과 조건 A 는 별도로 base 를 훑는다
         "한도목록": [{"유형": r["한도_유형"], "값": r["한도_값"], "단위": r["한도_단위"],
                      "layer": r["layer"], "rule_id": r["rule_id"]}
                     for r in (eff.get("한도목록") or [])],
@@ -1081,7 +1083,7 @@ def l3_게이팅(l3룰: dict | None) -> dict:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 9. CLI — 자기검사와 골든셋 3분류
+# 9. CLI — 자기검사와 정답셋 3분류
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _connect():
@@ -1093,8 +1095,7 @@ def _connect():
     기다리면서 **8세션 전체의 rules 읽기가 멈췄다**. 읽기만 하는 커넥션은
     트랜잭션을 열지 않는다.
     """
-    import psycopg
-    return psycopg.connect(DSN, autocommit=True)
+    return db.connect(autocommit=True)
 
 
 def _self_test() -> int:
@@ -1117,7 +1118,7 @@ def _self_test() -> int:
     eq("예외3", 금지예시_해부("전대차 계약 사무실임차료(공유오피스 월단위 제외)")["무조건"], False)
     eq("예외4", 금지예시_해부("시제품 제작에 직·간접적으로 활용되는 기구·비품"
                               "(기계장치비로 구매해야 함)")["무조건"], False)
-    # 🔴 아래 둘은 예외가 아니다 — 골든셋 39·43번의 정답이 '불가' 다
+    # 🔴 아래 둘은 예외가 아니다 — 정답셋 39·43번의 정답이 '불가' 다
     eq("비예외1", 금지예시_해부("특허 등록 성공보수(대행 수수료는 가능)")["무조건"], True)
     eq("비예외2", 금지예시_해부("창업기업 대표자 인건비(현물로만 계상 가능)")["무조건"], True)
     eq("비예외3", 금지예시_해부("개인 간 중고거래")["무조건"], True)
@@ -1249,8 +1250,8 @@ def _self_test() -> int:
                                {"허용": "조건부", "한도_값": None})["L3더엄격"], False)
     eq("참고L3_기관없음", "기관id" in _참고L3(e3, "안내"), False)
 
-    # 🔴 _오버레이 — L2>L3 조항이 **없는** 사업(초격차·TIPS)의 폴백.
-    #    같은 폴백 규칙을 L1↔L2 에선 엄격병합, L2↔L3 에선 base 승으로 두면 규칙이 갈린다.
+    # 🔴 _오버레이 — L2>L3 조항이 **없는** 사업(초격차·TIPS)의 대체 경로.
+    #    같은 대체 경로 규칙을 L1↔L2 에선 엄격병합, L2↔L3 에선 base 승으로 두면 규칙이 갈린다.
     #    그 갈래는 L3 불가 → 조건부 로 관대해지는 방향이라 «틀린 가능» 계열이다.
     base쪽 = _엄격병합([R("L1", "조건부", None, 1), R("L2", "조건부", 300000.0, 2)])
     L3불가 = _l3정규화({"허용": "불가", "verified": False,
@@ -1309,7 +1310,7 @@ def 비목추정_문장(cur, 문장: str, 사업명: str | None) -> list[dict]:
                 "WHERE 사업명 = %s OR 사업명 IS NULL", [사업명])
     어휘: list[tuple[str, str]] = list(cur.fetchall())
     # 비목 정본명 자체("인건비를 줘도 되나요")도 잡아야 한다 — `비목확정()` 의
-    # `_어휘집_직결` 과 같은 재료를 쓰지 않으면 대역이 실제보다 못해 보인다
+    # `_용어사전_직결` 과 같은 재료를 쓰지 않으면 대역이 실제보다 못해 보인다
     try:
         cur.execute("SELECT 비목, 별칭, 하위항목 FROM corpus.item_vocab WHERE 계통='창업'")
         for 비목, 별칭, 하위 in cur.fetchall():
@@ -1320,7 +1321,7 @@ def 비목추정_문장(cur, 문장: str, 사업명: str | None) -> list[dict]:
     hits = []
     for 상품명, 비목 in 어휘:
         n = _norm(상품명)
-        # 2자 별칭(맥북·책상·외주·특허)이 골든셋 품목의 상당수다. 여기서 3자로 끊으면
+        # 2자 별칭(맥북·책상·외주·특허)이 정답셋 품목의 상당수다. 여기서 3자로 끊으면
         # 비목확정 능력이 아니라 이 대역 함수의 임계가 지표로 잡힌다
         if len(n) >= 2 and n in 본문:
             hits.append({"비목": 비목, "신뢰도": 0.9, "출처": "alias",
@@ -1372,7 +1373,7 @@ def _calibrate() -> int:
 
 
 def _audit() -> int:
-    """금지매칭 감사 — 금지예시 자기재현 · 괄호 26종 분류 · 골든셋 발화."""
+    """금지매칭 감사 — 금지예시 자기재현 · 괄호 26종 분류 · 정답셋 발화."""
     괄호분류: dict[str, dict] = {}
     자기재현 = {"전체": 0, "무조건": 0, "예외단서": 0, "정확일치복원": 0}
     with _connect() as c, c.cursor() as cur:
@@ -1467,7 +1468,7 @@ def _smoke() -> int:
 
 
 def _golden() -> int:
-    """골든셋 전건 3분류 카운트. `_B_골든셋_룰커버.json` 으로 남긴다."""
+    """정답셋 전건 3분류 카운트. `_B_골든셋_룰커버.json` 으로 남긴다."""
     카운트 = {"룰있음": 0, "룰없음(공통)": 0, "룰없음(사업지정)": 0, "금지적중": 0}
     행: list[dict] = []
     with _connect() as c, c.cursor() as cur:

@@ -13,7 +13,7 @@ L3 조항은 30~80개다. 20,525청크짜리 L1·L2 풀과 같은 링에 올리�
 그래서 멀티테넌시 누수가 **프롬프트 규율이 아니라 스키마**로 막힌다.
 
 ━━ 🔴 오늘(2026-08-31) 짓지 않은 것 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-HWPX/HWP 파서는 오늘 범위 밖이다. 골든셋 정답근거 82건이 전부 L1·L2 이고 L3 는 0건이라
+HWPX/HWP 파서는 오늘 범위 밖이다. 정답셋 정답근거 82건이 전부 L1·L2 이고 L3 는 0건이라
 파서를 지어도 지표에 안 잡히고, 기관마다 문서 구조가 달라 롱테일이다
 (2026-08-30 의 "L3 는 HWPX 파서" 결정은 **방법**의 결정이지 시점의 결정이 아니다).
 대신 `seed_l3_fixture.py` 의 합성 픽스처가 게이팅 4갈래·RLS·`index_guard` 를 태운다.
@@ -47,7 +47,10 @@ from typing import Any
 if (sys.stdout.encoding or "").lower().replace("-", "") != "utf8":
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
-DSN = os.environ.get("SUDDOE_DSN", "postgresql://postgres:devpw@localhost:5432/suddoe")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _lib import db                                                   # noqa: E402
+
+DSN = db.DSN
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -82,12 +85,12 @@ def 사업비관련장(장: str | None) -> bool:
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# 2. 비목 어휘 — `corpus.item_vocab` 이 정본, 상수는 폴백
+# 2. 비목 어휘 — `corpus.item_vocab` 이 기준 문서, 상수는 대체 경로
 # ════════════════════════════════════════════════════════════════════════════
 # 🔴 DB 조회만 하면 안 된다. G 세션의 `TRUNCATE rules` 재적재 창(합류점 1) 처럼
 #    참조 테이블이 잠깐 비는 순간이 있고, 그때 비목이 0종이면 L3 룰이 **전건 무음 None**
 #    이 된다 — 판정은 계속 돌지만 L3 가 통째로 사라진 걸 아무도 모른다.
-_비목_폴백: dict[str, tuple[str, ...]] = {
+_비목_대체경로: dict[str, tuple[str, ...]] = {
     "재료비": ("재료 및 원료비", "원재료비", "재료"),
     "외주용역비": ("외주 용역비", "용역비", "외주"),
     "기계장치": ("기계장치비", "공구기구비", "비품비", "공구", "기구", "비품",
@@ -105,7 +108,7 @@ _비목_폴백: dict[str, tuple[str, ...]] = {
 
 
 def 비목어휘(cur) -> dict[str, tuple[str, ...]]:
-    """{정본비목: (별칭...)}. `item_vocab` 이 없거나 비면 폴백을 쓰고 경고한다."""
+    """{정본비목: (별칭...)}. `item_vocab` 이 없거나 비면 대체 경로를 쓰고 경고한다."""
     try:
         rows = cur.execute(
             "SELECT 비목, coalesce(별칭,'{}') , coalesce(하위항목,'{}') "
@@ -114,11 +117,11 @@ def 비목어휘(cur) -> dict[str, tuple[str, ...]]:
         rows = []
     if not rows:
         print("   ⚠️ corpus.item_vocab 조회 실패/0행 — 폴백 어휘 10종을 쓴다", file=sys.stderr)
-        return {k: v for k, v in _비목_폴백.items()}
+        return {k: v for k, v in _비목_대체경로.items()}
     vocab: dict[str, tuple[str, ...]] = {}
     for 비목, 별칭, 하위 in rows:
-        vocab[비목] = tuple(list(별칭) + list(하위) + list(_비목_폴백.get(비목, ())))
-    for k, v in _비목_폴백.items():          # 어휘집에 없는 비목은 폴백으로 메운다
+        vocab[비목] = tuple(list(별칭) + list(하위) + list(_비목_대체경로.get(비목, ())))
+    for k, v in _비목_대체경로.items():          # 용어 사전에 없는 비목은 대체 경로로 메운다
         vocab.setdefault(k, v)
     return vocab
 
@@ -276,7 +279,7 @@ _약칭_문서 = {
 
 
 def _상위문서해소(cur, 법령: str | None, 약칭: str | None) -> str | None:
-    """참조 표기 → `corpus.documents.doc_id`. 못 찾으면 None(=dangling)."""
+    """참조 표기 → `corpus.documents.doc_id`. 못 찾으면 None(=끊긴 참조)."""
     키 = None
     if 법령:
         키 = 법령
@@ -287,7 +290,7 @@ def _상위문서해소(cur, 법령: str | None, 약칭: str | None) -> str | No
     # 🔴 doc_id 는 `L1_중소기업창업_지원사업_통합관리지침_제14차개정_20251223` 처럼
     #    공백이 아니라 **밑줄**로 이어져 있다. 인용 표기는 「중소기업창업 지원사업
     #    통합관리지침」 처럼 공백이다. 양쪽에서 구분자를 다 지우고 맞춰야 붙는다 —
-    #    공백만 지우면 전건 dangling 이 되어 seed_refs 가 통째로 비고,
+    #    공백만 지우면 전건 끊긴 참조가 되어 seed_refs 가 통째로 비고,
     #    게이팅 (2) 가 상위를 못 짚는다 (무음 실패라 지표에도 안 잡힌다).
     핵심 = re.sub(r"[\s_·\-()]+", "", 키)
     for 패턴 in (f"%{핵심}%", f"%{핵심[:10]}%"):
@@ -506,8 +509,7 @@ def main() -> None:
     ap.add_argument("--사업명", default=None)
     a = ap.parse_args()
 
-    import psycopg
-    with psycopg.connect(DSN) as conn, conn.cursor() as cur:
+    with db.connect() as conn, conn.cursor() as cur:
         찾음 = org해소(cur, a.org)
         if not 찾음:
             print(f"🔴 기관을 못 찾았다: {a.org}")

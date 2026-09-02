@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""D5 — 골든셋 실전 E2E. `orchestrate.판정()` 을 끝까지 돌리고 `eval.runs` 에 남긴다.
+"""D5 — 정답셋 실전 E2E. `orchestrate.판정()` 을 끝까지 돌리고 `eval.runs` 에 남긴다.
 
 **오늘 이게 내는 유일하게 중요한 숫자.**
 
-    판정층 격리 (근거를 정답으로 주면)   일치율 84.7% · 치명 오답 0
+    판정 단계 격리 (근거를 정답으로 주면)   일치율 84.7% · 치명 오답 0
     검색이 근거를 찾는 비율               hit@5 52.9%
     ─────────────────────────────────────────────────────────────
     실전 E2E                              ← 여기. 둘 사이의 낙폭이 내일 무엇을 고칠지 정한다
@@ -42,9 +42,10 @@ import traceback
 import psycopg
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _lib import db  # noqa: E402
 import eval_store  # noqa: E402
 
-DSN = eval_store.DSN
+DSN = db.DSN
 
 판정4 = ("가능", "조건부", "불가", "판단불가")
 
@@ -86,11 +87,11 @@ def 실행(*, dry: bool, limit: int | None, 세트: str | None, 라벨: str | No
             gid = m["gold_id"]
             정답청크[gid] = eval_store.정답청크(cur, gid)
             # 🔴 정답 좌표는 `golden_chunks.조번호` 가 아니라 **그 청크의 좌표**로 잡는다.
-            #    golden_chunks.조번호 는 골든셋 원표기('제20조①' · '[붙임2] 외주용역비
+            #    golden_chunks.조번호 는 정답셋 원표기('제20조①' · '[붙임2] 외주용역비
             #    유의사항')를 그대로 보존한 것이라 인용 쪽 표기('제20조' · '붙임2')와 다르다.
             #    실측: 104행 중 85행이 형식 불일치 → 그대로 비교하면 **인용적중이 허위 0%** 로
             #    나온다. chunk_id 는 이미 고정돼 있으니 corpus.chunks 에서 좌표를 읽으면
-            #    표기가 자동으로 맞춰지고 정본이 한 곳(chunks)으로 유지된다.
+            #    표기가 자동으로 맞춰지고 기준 문서가 한 곳(chunks)으로 유지된다.
             cur.execute("SELECT c.doc_id, c.조번호 FROM eval.golden_chunks gc "
                         "JOIN corpus.chunks c ON c.chunk_id = gc.chunk_id "
                         "WHERE gc.gold_id = %s", (gid,))
@@ -172,8 +173,8 @@ def 실행(*, dry: bool, limit: int | None, 세트: str | None, 라벨: str | No
 
     def 지표(부분: list[dict]) -> dict:
         n = len(부분) or 1
-        # 🔴 **다수결 기준선을 같이 낸다** (2026-09-01. 오너 지시 «골든셋 성역을 깨라»).
-        #    골든셋 정답이 «불가» 로 쏠려 있어(채점 62문항 기준 66.1%) 일치율 한 숫자만
+        # 🔴 **다수결 기준선을 같이 낸다** (2026-09-01. 오너 지시 «정답셋 성역을 깨라»).
+        #    정답셋 정답이 «불가» 로 쏠려 있어(채점 62문항 기준 66.1%) 일치율 한 숫자만
         #    보면 실력인지 쏠림인지 갈리지 않는다. **상수 예측기('항상 불가')가 몇 점인지**를
         #    같은 분모로 찍어 두면, 지표가 기준선을 못 넘었을 때 그 사실이 표에서 바로 보인다.
         #    `초과`(일치율 - 기준선)가 이 평가의 진짜 신호다. 양수가 아니면 개선이 아니다.

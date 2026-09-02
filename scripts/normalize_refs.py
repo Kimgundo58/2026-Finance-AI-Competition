@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """`corpus.refs.dst_doc_id` 를 `corpus.documents.doc_id` 로 정규화한다.
 
-## 왜 필요한가 — 폐포가 지금 작동하지 않는다
+## 왜 필요한가 — 참조 확장이 지금 작동하지 않는다
 
 `RAG.md` §4-2 가 199문서를 `폐포전용`(검색 후보에서 빼고 참조로만 도달)으로 돌렸다.
-그 안전 근거는 "검색에 안 걸려도 refs 폐포로 도달한다" 인데, 실측하면 **도달하지 않는다**:
+그 안전 근거는 "검색에 안 걸려도 refs 참조 확장으로 도달한다" 인데, 실측하면 **도달하지 않는다**:
 
     진입점 문서발 resolved 참조        3,907건
       그중 dst 가 폐포전용 문서            0건   <- 하나도 없다
@@ -172,7 +172,7 @@ def main() -> None:
         conn.commit()
         print(f"\nUPDATE {갱신:,}행")
 
-        # 사후 검증 — 고친 뒤에 폐포가 실제로 켜졌는지 본다
+        # 사후 검증 — 고친 뒤에 참조 확장이 실제로 켜졌는지 본다
         남은 = conn.execute("""
             SELECT count(*) FROM corpus.refs r
              WHERE dst_doc_id IS NOT NULL

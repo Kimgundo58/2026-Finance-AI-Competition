@@ -12,8 +12,8 @@
    검증기는 그래도 돌린다 (2겹 방어, `LLM.md` §3-4).
 
 ## 격리 모드 (D6)
-`--isolated` 는 검색을 건너뛰고 골든셋 `정답근거` 의 조문 전문을 넣는다.
-**판정층만의 성능**을 재는 용도다 — 검색 hit@5 52.9% 에 가려진 판정력을 분리한다.
+`--isolated` 는 검색을 건너뛰고 정답셋 `정답근거` 의 조문 전문을 넣는다.
+**판정 단계만의 성능**을 재는 용도다 — 검색 hit@5 52.9% 에 가려진 판정력을 분리한다.
 
 실행:
     PYTHONIOENCODING=utf-8 python scripts/judge_run.py --isolated --limit 5
@@ -30,13 +30,12 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-import psycopg
-
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _lib import db                                    # noqa: E402
 from assemble_context import 조립, 격리_근거          # noqa: E402
 from llm_schema import 판정_스키마                     # noqa: E402
 
-DSN = os.environ.get("SUDDOE_DSN", "postgresql://postgres:devpw@localhost:5432/suddoe")
+DSN = db.DSN
 VLLM = os.environ.get("VLLM_URL", "http://localhost:8000")
 MODEL = os.environ.get("VLLM_MODEL", "Qwen/Qwen3-32B-AWQ")
 
@@ -89,7 +88,7 @@ def main() -> None:
         from llm_validate import 검증 as _v
         검증 = _v
 
-    with psycopg.connect(DSN) as conn:
+    with db.connect() as conn:
         cur = conn.cursor()
         q = "SELECT gold_id, 세트, 질문, 사업명, 정답판정 FROM eval.golden_set"
         if a.gold_id:

@@ -58,7 +58,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT))          # `python server/main.py` 로도 server 패키지가 보이게
 
-# 🔴 공용 정의는 `server/_common.py` · 계약은 `server/models.py` 가 정본이다 (Phase 0 동결).
+# 🔴 공용 정의는 `server/_common.py` · 계약은 `server/models.py` 가 기준이다 (2026-09-01 동결).
 #    라우터가 main 을 import 하면 순환참조가 나서 밖으로 뺐다. 여기서 다시 정의하지 말 것.
 from server._common import (DSN, MOCK, _sse, _sse응답, _질의,      # noqa: E402
                             비목_ENUM, 판정_ENUM, 창업활동비_사업 as _창업활동비_사업)
@@ -321,8 +321,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── 라우터 (Phase 0 분해) ────────────────────────────────────────────
-# 🔴 레인 소유가 갈린다. A=routes_plans · B=routes_tasks · C=routes_l3 + 아래 normalize.
+# ── 라우터 (2026-09-01 분해) ────────────────────────────────────────────
+# 계통이 갈린다. 지출계획=routes_plans · 할일=routes_tasks · L3=routes_l3 + 아래 normalize.
 #    남의 라우터 파일을 고치지 말 것 — 훅이 막고, 막히기 전에 이미 충돌한다.
 app.include_router(routes_plans.router)
 app.include_router(routes_tasks.router)
@@ -384,7 +384,7 @@ def normalize(req: Request, body: 정규화요청):
         raise HTTPException(429, 사유)
 
     # F5 는 판정 후 폐기다. 캐시 열쇠에는 해시로만 들어간다
-    # 🔴 폼 경로에서는 질문이 None 이다. 폼 값도 열쇠에 넣는다 (레인 C 가 이어받는다)
+    # 🔴 폼 경로에서는 질문이 None 이다. 폼 값도 열쇠에 넣는다
     k = 비용가드.열쇠("normalize", (body.질문 or "").strip(),
                      body.품목, body.금액, body.용도, body.사업명,
                      body.f5.친족거래, body.f5.전직임직원업체)
@@ -683,7 +683,7 @@ def _실_판정(body: 판정요청) -> dict:
     # 🔴 plan_id 를 넘기면 decisions 행이 처음부터 plan_id 를 달고 태어난다 —
     #    persist.py 의 「UPDATE 로 plan_id 잇기」가 필요 없어지는 방향
     #    (orchestrate.py:405, 2026-09-01 ai-25 시그니처 확장 · ai-14 후속 지시).
-    #    🔴 그래도 persist.py 의 UPDATE 는 아직 걷어내지 마라 — 레인 A 소유이고,
+    #    🔴 그래도 persist.py 의 UPDATE 는 아직 걷어내지 마라 —
     #       실측으로 decisions.plan_id 가 채워지는 걸 확인한 뒤에나 A 가 정리한다.
     r = orchestrate.판정(질문, 사업명=body.사업명, org_id=body.org_id, plan_id=body.plan_id)
     # 오케 반환값 → API 계약 (`프론트 연동 사양.md` §8). 이름이 다른 것만 옮긴다
@@ -698,7 +698,7 @@ def _실_판정(body: 판정요청) -> dict:
         "참조사슬": r.get("참조사슬", []),
         **({"문의초안": r["문의초안"]} if r.get("문의초안") else {}),
         # 🔴 내부 저장용 키다 — `gen()` 이 `결과` 로 내보내기 전에 벗겨내고 `저장`
-        #    이벤트에만 따로 실어준다 (레인 A/C 계약, 2026-09-01 ai-14 정정).
+        #    이벤트에만 따로 실어준다 (2026-09-01 ai-14 정정).
         **({"decision_id": r["decision_id"]} if r.get("decision_id") else {}),
     }
 
@@ -706,8 +706,8 @@ def _실_판정(body: 판정요청) -> dict:
 def _판정_저장_시도(body: 판정요청, out: dict, 캐시적중: bool, decision_id: int | None) -> dict:
     """`judge()` 의 `gen()` 안에서만 부른다 — 판정 스트림의 부수 효과다.
 
-    🔴 **지연 import.** `server.persist` 는 레인 A 소유고 이 파일보다 늦게 생길 수 있다.
-       모듈 상단에서 import 하면 그 파일 하나 없다고 앱 전체(+ 레인 B 테스트의
+    🔴 **지연 import.** `server.persist` 는 지출계획 계통이라 이 파일보다 늦게 생길 수 있다.
+       모듈 상단에서 import 하면 그 파일 하나 없다고 앱 전체(+ 할일 테스트의
        `server.main` import)가 못 뜬다 — `_실_판정` 이 `orchestrate` 를 지연 import
        하는 것과 같은 결 (2026-09-01 ai-14 정정).
     🔴 저장이 실패해도 SSE 를 죽이지 않는다 — 판정은 이미 사용자 손에 갔다.

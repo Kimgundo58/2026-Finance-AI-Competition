@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-"""`retrieval_scope` 재태깅 — 검색 진입점과 참조 폐포 도착지를 가른다.
+"""`retrieval_scope` 재태깅 — 검색 진입점과 참조 확장 도착지를 가른다.
 
 배경
 ----
 `RAG.md` §4-2 는 `retrieval_scope` 를 `진입점`(검색 후보) / `폐포전용`(refs 로만 도달)
 으로 나누라고 설계했지만 적재 시점(`load_db.py`)에는 전부 `진입점` 으로 넣었다
-("좁히기는 골든셋 Recall@5 A/B 후"). 그 A/B 를 하려고 재보니 판정 검색 후보
+("좁히기는 정답셋 Recall@5 A/B 후"). 그 A/B 를 하려고 재보니 판정 검색 후보
 19,835청크 중 상위 14개 문서가 6,611청크(33%)이고 **전부 민상법·세법**이었다
 (상법 1,145 · 민법 1,116 · 조세특례제한법시행령 662 · 형사소송법 604 · 형법 395 ...).
 창업지원금 지출 질문에 민법·형사소송법이 후보로 경쟁하고 있었다.
@@ -22,13 +22,13 @@
       고시/훈령. 지출 가부가 여기 문장으로 적혀 있다
   (B) 보조금·사업비의 집행·정산·환수를 일반적으로 규율하는 규범 — 보조금법 ·
       국고보조금 통합관리지침 · 국가연구개발 사업비 규범. 세부관리기준이 침묵할 때
-      실제로 답을 쥔 쪽이고, 골든셋 적대문항 A26 의 정답 근거가 여기 있다
+      실제로 답을 쥔 쪽이고, 정답셋 적대문항 A26 의 정답 근거가 여기 있다
   (C) 지출 **비목 자체**의 한도·기준을 직접 정하는 규범 — 공무원 여비규정.
       세부관리기준이 "여비규정에 준한다"로 넘기므로 출장비 질의의 실질 답이 여기다
 
-나머지는 `폐포전용`. 민법·상법·형법·세법·근로기준법 같은 일반 법령은 **코퍼스에는
+나머지는 `폐포전용`. 민법·상법·형법·세법·근로기준법 같은 일반 법령은 **규정 모음에는
 있어야 한다** — 세부관리기준이 정의를 빌려오고("근로기준법에 따른 근로자"), 위임
-사슬의 상위이기도 하다. 하지만 그건 refs 폐포의 **도착지**이지 검색 **진입점**이
+사슬의 상위이기도 하다. 하지만 그건 refs 참조 확장의 **도착지**이지 검색 **진입점**이
 아니다. 폐포전용 문서도 `doc_articles`·`refs` 에는 전량 남아 있고 참조로 도달하면
 정상 인용된다 (`RAG.md` §4-3).
 
@@ -84,7 +84,7 @@ KEEP: dict[str, str] = {
 
     # (B) 보조금·사업비 집행/정산/환수 계통
     #     ⚠️ 부처 메타데이터로 가르면 안 된다 — 아래는 기획예산처 소관이지만
-    #        적대적 골든셋 A26 의 정답 근거다 (RAG.md §4-2 경고)
+    #        함정 문항 A26 의 정답 근거다 (RAG.md §4-2 경고)
     "L1_보조금관리에관한법률_20260602":
         "세부관리기준이 침묵할 때 실제로 답을 쥔 상위 규범. 목적외 사용·반환 직접 규율",
     "L1_보조금관리에관한법률시행령_20260102": "위와 한 벌",
@@ -116,8 +116,8 @@ KEEP: dict[str, str] = {
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CLOSURE — 폐포전용. (그룹명, 근거, [doc_id...])
-#   전부 "코퍼스에는 있어야 하지만 첫 검색 대상은 아닌" 문서다.
-#   refs 폐포(깊이 3)로 도달하면 정상 인용된다.
+#   전부 "규정 모음에는 있어야 하지만 첫 검색 대상은 아닌" 문서다.
+#   refs 참조 확장(깊이 3)로 도달하면 정상 인용된다.
 # ─────────────────────────────────────────────────────────────────────────────
 CLOSURE: list[tuple[str, str, list[str]]] = [
     ("민상법",
@@ -404,7 +404,7 @@ CLOSURE: list[tuple[str, str, list[str]]] = [
       "L1_혁신도전형연구개발사업군의지정및분류기준등에관한고시_20250203"]),
 ]
 
-폐포전용_집합: dict[str, str] = {
+참조확장전용_집합: dict[str, str] = {
     d: 그룹 for 그룹, _근거, docs in CLOSURE for d in docs
 }
 
@@ -416,9 +416,9 @@ def main() -> None:
     a = ap.parse_args()
 
     # 하드코딩 목록 자체의 자기검증 — 중복 doc_id 는 근거가 둘이라는 뜻이다
-    if len(폐포전용_집합) != sum(len(d) for _, _, d in CLOSURE):
+    if len(참조확장전용_집합) != sum(len(d) for _, _, d in CLOSURE):
         sys.exit("CLOSURE 안에 중복 doc_id 가 있다.")
-    if 겹침 := set(KEEP) & set(폐포전용_집합):
+    if 겹침 := set(KEEP) & set(참조확장전용_집합):
         sys.exit(f"KEEP 과 CLOSURE 에 동시 등장: {겹침}")
 
     with psycopg.connect(DSN) as conn:
@@ -439,14 +439,14 @@ def main() -> None:
         cur.execute("SELECT doc_id FROM corpus.documents "
                     "WHERE layer='L1' AND status='active' ORDER BY doc_id")
         active_l1 = [r[0] for r in cur.fetchall()]
-        미분류 = [d for d in active_l1 if d not in KEEP and d not in 폐포전용_집합]
+        미분류 = [d for d in active_l1 if d not in KEEP and d not in 참조확장전용_집합]
         if 미분류:
             print("🔴 분류되지 않은 active L1 문서가 있다. KEEP 이나 CLOSURE 에 근거와 함께 "
                   "추가할 것:", file=sys.stderr)
             for d in 미분류:
                 print(f"    {d}", file=sys.stderr)
             sys.exit(1)
-        유령 = [d for d in (set(KEEP) | set(폐포전용_집합)) if d not in active_l1]
+        유령 = [d for d in (set(KEEP) | set(참조확장전용_집합)) if d not in active_l1]
         if 유령:
             print(f"⚠️  목록에는 있으나 DB active L1 에 없는 doc_id {len(유령)}건 "
                   "(개정으로 doc_id 가 바뀌었을 수 있다):")
@@ -461,10 +461,10 @@ def main() -> None:
         cur.execute("""SELECT d.doc_id, coalesce(c.n,0) FROM corpus.documents d
                        LEFT JOIN (SELECT doc_id, count(*) n FROM corpus.chunks GROUP BY 1) c
                               ON c.doc_id = d.doc_id
-                        WHERE d.doc_id = ANY(%s)""", (list(폐포전용_집합),))
+                        WHERE d.doc_id = ANY(%s)""", (list(참조확장전용_집합),))
         청크수 = dict(cur.fetchall())
 
-        print(f"\n폐포전용 {len(폐포전용_집합)}문서 "
+        print(f"\n폐포전용 {len(참조확장전용_집합)}문서 "
               f"/ {sum(청크수.values())}청크  (KEEP {len(KEEP)}문서)")
         for 그룹, _근거, docs in CLOSURE:
             print(f"  {그룹:24} {len(docs):3}문서 {sum(청크수.get(d,0) for d in docs):6}청크")
@@ -475,7 +475,7 @@ def main() -> None:
 
         cur.execute("UPDATE corpus.documents SET retrieval_scope='폐포전용' "
                     "WHERE doc_id = ANY(%s) AND retrieval_scope <> '폐포전용'",
-                    (list(폐포전용_집합),))
+                    (list(참조확장전용_집합),))
         print(f"\ndocuments UPDATE {cur.rowcount}건")
 
         # 🔴 chunks 는 documents 의 사본이다. 한쪽만 고치면 조용히 어긋난다 —

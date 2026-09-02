@@ -3,7 +3,7 @@
 
 오늘의 목표가 이 파일이다: **judge_cli 한 줄로 끝까지 돌고, 지표가 남는다.**
 `orchestrate.판정()` 은 dict 를 돌려주는 라이브러리이고, 여기는 그걸 사람이 읽는
-화면으로 바꾼다. UI 보다 CLI 판정기가 먼저다 (`CLAUDE.md` — 판정 품질이 골든셋을
+화면으로 바꾼다. UI 보다 CLI 판정기가 먼저다 (`CLAUDE.md` — 판정 품질이 정답셋을
 못 넘으면 UI 는 의미가 없다).
 
     PYTHONIOENCODING=utf-8 python scripts/judge_cli.py "맥북 250만원 사도 되나요"

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""검색 축 — Agent.md (3)-b~e 를 한 모듈로. `RAG.md` §4 가 정본이다.
+"""검색 축 — Agent.md (3)-b~e 를 한 모듈로. `RAG.md` §4 가 기준 문서이다.
 
 `eval_retrieval.py` 안에 흩어져 있던 SQL·RRF·임베딩을 여기로 뽑았다. 평가와 실전이
 **같은 코드를 부르게** 하는 것이 목적이다 — 둘이 갈라지면 잰 숫자가 실전을 설명하지 못한다.
@@ -9,7 +9,7 @@
   · pre-filter 가 검색보다 먼저다 (`FILTER`). `적용대상 IN (...)` 은 NULL 을 통과시키지
     않으므로 태깅이 비면 조용히 사라진다 — 회귀 방어로 남겨 둔 조건이다 (§4-2)
   · RRF 가중 0.9/0.1 · K=60. 🔴 초판 0.6/0.4 는 hit@5 가 7.2%p 낮았다 (§4-4)
-  · 폐포는 **깊이 1 · `dst_조번호 IS NOT NULL`** 만. 조 없는 인용을 펴면 근로기준법
+  · 참조 확장은 **깊이 1 · `dst_조번호 IS NOT NULL`** 만. 조 없는 인용을 펴면 근로기준법
     하나가 6,026청크를 끌고 온다 (2026-08-31 실측 · §4-3)
   · 게이트값은 **dense 코사인 최고값**. RRF 점수는 스케일이 없어 임계치로 못 쓴다
 
@@ -31,9 +31,11 @@ import statistics
 import sys
 import time
 
-import psycopg
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _lib import db, paths                                           # noqa: E402
+paths.ensure_on_path()
 
-DSN = os.environ.get("SUDDOE_DSN", "postgresql://postgres:devpw@localhost:5432/suddoe")
+DSN = db.DSN
 
 # ── (3)-b pre-filter — 평가와 실전이 같은 집합을 봐야 한다 ────────────────────
 FILTER = """embedding IS NOT NULL AND status='active' AND parse_quality='high'
@@ -84,11 +86,11 @@ WHERE ct.chunk_id IN (SELECT chunk_id FROM corpus.chunks WHERE """ + FILTER + ""
 GROUP BY ct.chunk_id ORDER BY score DESC LIMIT %(k)s
 """
 
-# ── 폐포 (§4-3) ──────────────────────────────────────────────────────────────
-# 깊이 1 이면 재귀가 필요 없지만 CTE 형태를 유지한다 — 코퍼스가 바뀌어 깊이를 다시 재야
+# ── 참조 확장 (§4-3) ──────────────────────────────────────────────────────────────
+# 깊이 1 이면 재귀가 필요 없지만 CTE 형태를 유지한다 — 규정 모음이 바뀌어 깊이를 다시 재야
 # 할 때 `깊이` 하나만 올리면 되고, RAG.md §4-3 의 SQL 과 눈으로 대조된다.
 #   🔴 `dst_조번호 IS NOT NULL` 은 시작 간선에도, 재귀 간선에도 둘 다 건다.
-폐포SQL = """
+참조확장SQL = """
 WITH RECURSIVE 시작(doc_id, 조번호) AS (
     SELECT DISTINCT doc_id, 조번호 FROM corpus.chunks WHERE chunk_id = ANY(%(cids)s)
 ),
@@ -115,7 +117,7 @@ SELECT DISTINCT ON (p.ref_id)
  ORDER BY p.ref_id
 """
 
-# 판정 인덱스 **안의** dangling 만 신호다 (§4-3). 밖의 dangling 은 정상이라 세지 않는다.
+# 판정 인덱스 **안의** 끊긴 참조만 신호다 (§4-3). 밖의 끊긴 참조는 정상이라 세지 않는다.
 DANGLING_SQL = """
 SELECT DISTINCT r.참조문자열
   FROM corpus.refs r
@@ -127,7 +129,7 @@ SELECT DISTINCT r.참조문자열
 
 W_DENSE, W_SPARSE, RRF_K = 0.9, 0.1, 60
 후보K = 50          # dense·BM25 각각의 깊이. §4-2 "top-50 + top-50 -> RRF -> top-5"
-깊이 = 1            # §4-3 실측: 1·2·3 의 hit@5+폐포가 전부 같다
+깊이 = 1            # §4-3 실측: 1·2·3 의 hit@5+참조 확장이 전부 같다
 
 # ── 임베딩 상주 (C5) ─────────────────────────────────────────────────────────
 _모델 = None
@@ -157,7 +159,7 @@ def 토큰화(texts: list[str]) -> list[list[str]]:
     """
     global _토큰화, _stdout보관
     if _토큰화 is None:
-        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        paths.ensure_on_path()
         원래 = sys.stdout
         from stage2_bm25 import 토큰화 as _t
         if sys.stdout is not 원래:
@@ -215,16 +217,16 @@ def rrf(순위목록: list[list[int]], k: int = RRF_K,
     return [c for c, _ in sorted(점수.items(), key=lambda x: -x[1])]
 
 
-# ── 폐포 ─────────────────────────────────────────────────────────────────────
+# ── 참조 확장 ─────────────────────────────────────────────────────────────────────
 def 폐포수집(cur, 진입점: list[int], *, 깊이값: int = 깊이) -> tuple[list[int], list[dict], list[str]]:
-    """진입점 청크가 가리키는 조항을 끌어온다. (폐포 article_id, 참조사슬, dangling)
+    """진입점 청크가 가리키는 조항을 끌어온다. (참조 확장 article_id, 참조사슬, 끊긴 참조)
 
     `shifted` 는 보정된 dst 를 쓰되 **원래 표기도 함께** 넘긴다 — 화면 7 이
     "귀 기관 규정은 제33조라 하지만 현행 기준 제39조입니다" 를 그리는 재료다.
     """
     if not 진입점:
         return [], [], []
-    cur.execute(폐포SQL, {"cids": 진입점, "깊이": 깊이값})
+    cur.execute(참조확장SQL, {"cids": 진입점, "깊이": 깊이값})
     폐포, 사슬 = [], []
     본 = set()
     for (_rid, sdoc, s조, 표기, 관계, ddoc, d조, 상태, 보정근거,
@@ -334,7 +336,7 @@ def main() -> None:
 
     # 🔴 읽기 전용인데도 트랜잭션을 붙들면 다른 세션의 DDL 과 교착이 난다
     #    (2026-08-31 8세션 병렬 중 DeadlockDetected 실측). autocommit 으로 푼다.
-    with psycopg.connect(DSN, autocommit=True) as conn:
+    with db.connect(autocommit=True) as conn:
         cur = conn.cursor()
         if a.bench:
             _p50(cur, 기록=a.기록)

@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-"""`/api/judge` 저장 배선 테스트.   **[레인 C 소유]**
+"""`/api/judge` 저장 배선 테스트.   **[판정 저장 배선]**
 
 `server/main.py::judge()` 의 `gen()` 이 `결과` 다음 · `완료` 앞에 `저장` 이벤트를
 정확히 한 번 흘리는지, `decision_id` 가 `결과` 에는 안 실리고 `저장` 에만 실리는지,
 저장이 실패해도(예외·`plan_id` 없음·캐시 적중) 스트림이 안 죽는지를 검증한다.
 
-🔴 `server/persist.py` (레인 A 소유) 는 아직 없다 — `main.py` 는 그래서
+🔴 `server/persist.py` 는 2026-09-01 에 들어왔다 — `main.py` 는 그래서
    모듈 상단이 아니라 `gen()` 안에서 지연 import 한다(2026-09-01 ai-14 정정,
    이유: `_실_판정` 이 `orchestrate` 를 지연 import 하는 것과 같은 결. 저장 계층은
    판정 스트림의 부수 효과라 그게 없다고 앱 전체가 못 뜨면 의존 방향이 거꾸로다).
@@ -127,7 +127,7 @@ def test_결과에는_decision_id가_없다(monkeypatch):
 
 
 # ════════════════════════════════════════════════════════════════════
-# `server/persist.py` (레인 A) — 2026-09-01 반영됨, xfail 걷어냄
+# `server/persist.py` — 2026-09-01 반영됨, xfail 걷어냄
 # ════════════════════════════════════════════════════════════════════
 
 def test_저장_성공하면_계약대로_담긴다():
@@ -140,12 +140,27 @@ def test_저장_성공하면_계약대로_담긴다():
 
 
 # ════════════════════════════════════════════════════════════════════
-# 레인 A 대기분 — MOCK=False + `_실_판정` 가짜값(decision_id=777) 과
-# 실제 plan_id=1 행이 같이 존재해야 참이라 여전히 xfail 이다.
+# 🔴 2026-09-02 — 이 xfail 의 사유가 **세 번 틀리게 적혀 있었다.** 실측으로 좁혔다.
+#
+#   적혀 있던 것 ①「레인 A 의 persist.py 대기」 → 그 파일은 2026-09-01 에 들어왔다
+#   적혀 있던 것 ②「GPU 판정이 있어야 한다」   → 🔴 **내가 오늘 밤 잘못 적은 것이다.**
+#       인수인계 문서의 「GPU 팟 미가동」을 그대로 옮겼는데, 이 테스트는 `_실_판정` 을
+#       monkeypatch 로 갈아끼워 **LLM 을 아예 안 부른다.** GPU 와 무관하다
+#   추정됐던 것 ③「실 plan_id=1 행이 없어서」 → 행을 실제로 넣고 태워봤다. **여전히 xfail.**
+#
+#   실제 원인(태워서 확인): `monkeypatch.setattr(main, "MOCK", False)` 는 `main` 모듈의
+#   MOCK 만 뒤집는다. `persist.py` 는 import 시점에 `from ._common import MOCK` 로
+#   **자기 모듈 상수를 따로 들고 있어서** 그대로 True 다 → `판정_저장()` 이 목 분기를 타고
+#   하드코딩 `decision_id: 9001` 을 돌려준다. 실패 메시지가 `assert 9001 == 777` 이다.
+#
+#   → 닫으려면 `persist.MOCK` 도 같이 뒤집고 계획 행을 하나 만들면 된다
+#     (`test_contract.py` 의 `모드()` 가 전 모듈을 한 번에 뒤집는 그 방식이다).
+#     **고치는 건 오너 판단 대기다 — 사유만 사실로 고쳐 둔다.**
 # ════════════════════════════════════════════════════════════════════
 
 
-@pytest.mark.xfail(reason="레인 A 의 server/persist.py 대기 — 들어오면 초록", strict=False)
+@pytest.mark.xfail(reason="`persist.MOCK` 이 안 뒤집혀 목 분기(decision_id=9001)를 탄다. "
+                          "GPU 와 무관하다", strict=False)
 def test_저장_이벤트에_decision_id가_실제로_채워진다(monkeypatch):
     monkeypatch.setattr(main, "MOCK", False)
 

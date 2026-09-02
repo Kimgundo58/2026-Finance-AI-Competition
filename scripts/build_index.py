@@ -21,9 +21,10 @@ if _CACHE.exists() and any(_CACHE.rglob("model.safetensors")):
     os.environ.setdefault("HF_HUB_OFFLINE", "1")
     os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
-import psycopg
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _lib import db  # noqa: E402
 
-DSN = os.environ.get("SUDDOE_DSN", "postgresql://postgres:devpw@localhost:5432/suddoe")
+DSN = db.DSN
 MODEL = "nlpai-lab/KURE-v1"
 MAX_CHARS = 3000
 MIN_CHARS = 50
@@ -156,7 +157,7 @@ def main():
     model.max_seq_length = 1024
     assert dim == 1024, f"차원 불일치: {dim}"
 
-    with psycopg.connect(DSN) as conn:
+    with db.connect() as conn:
         conn.execute("TRUNCATE chunks, case_chunks;")
 
         docs = conn.execute("""

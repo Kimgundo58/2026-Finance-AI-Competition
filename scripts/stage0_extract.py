@@ -137,7 +137,7 @@ def _pdf_plumber(path: Path) -> tuple[str, dict[int, int]]:
 def extract_pdf(path: Path) -> tuple[str, dict[int, int]]:
     """PDF → 평문 + {문자오프셋: 페이지번호}.
 
-    ⚠️ pdfplumber 를 기본으로 쓴다. pypdf 는 실패 시 폴백일 뿐이다.
+    ⚠️ pdfplumber 를 기본으로 쓴다. pypdf 는 실패 시 대체 경로일 뿐이다.
 
     실측 (L2 통합관리지침 제14차, 55p):
         pypdf        2.7초  →  조 12개, 제목 0개   ← 쓸 수 없음

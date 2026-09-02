@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """판정 오케스트레이터 — (1)~(7) 을 코드가 지휘한다.
 
-정본: `Agent.md` §1(단계·예산) §3(게이트) §4(전제 해소) §5(검증·강등) §8(실패 경로).
-동결 인터페이스는 `0831_최종구현.md` §4.
+기준 문서: `docs/6_LLM/` (호출 설계·출력 스키마·평가).
+동결 인터페이스는 `docs/기록/2026-08-31.md` 의 세션 계약분.
 
 ## 🔴 오케스트레이터는 LLM 이 아니다
 에이전트가 다음 행동을 고르지 않는다. 순서가 코드에 박혀 있어서 호출 수가 고정되고,
@@ -17,7 +17,7 @@ LLM 호출은 **2회 고정**이다. (1) 정규화 · (4) 판정 조립. 그 사
 특히 검색 스텁은 `eval_retrieval.py` 의 실제 SQL 을 그대로 쓴다. 남의 모듈을 기다리며
 멈추면 오늘 밤이 끝난다.
 
-## 게이트 4갈래 (`Agent.md` §3)
+## 게이트 4갈래 (`docs/6_LLM/6-1_호출_설계.md`)
     A 금지목록 적중    (2) 에서 즉답 "불가"            LLM 0회
     B 검색 스코어 미달  게이트에서 판단불가             LLM 1회
     C 비목 신뢰도 갈림  두 경로를 모두 판정해 나란히    LLM 2배
@@ -43,29 +43,29 @@ import traceback
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Optional
 
-import psycopg
-
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _lib import db, paths                                           # noqa: E402
+paths.ensure_on_path()
 from assemble_context import 조립                                    # noqa: E402
 from llm_schema import 판정_스키마, 체크코드_enum                      # noqa: E402
 from llm_validate import 검증, f_경로집합                              # noqa: E402
 from normalize_run import LLM실패, llm_호출, 정규화                     # noqa: E402
 
-DSN = os.environ.get("SUDDOE_DSN", "postgresql://postgres:devpw@localhost:5432/suddoe")
+DSN = db.DSN
 
 # ════════════════════════════════════════════════════════════════════════════
-# 임계치 — 🔴 전부 미결 항목이다 (`서비스 아키텍쳐.md` §11 임계치 대장 #7)
+# 임계치 — 🔴 전부 미결 항목이다 (`docs/9_미결.md` 임계치 목록 #7)
 # ════════════════════════════════════════════════════════════════════════════
 # 게이트 B. dense 코사인 **최고값** 기준이다 — RRF 점수는 스케일이 없어 임계를 못 건다.
 #
 # 🔴 **0.0 으로 확정한다 (2026-09-01 실측). 임계를 걸 수 없다는 것이 결론이다.**
-#    골든셋 74문항(D3 `golden_chunks` 고정)에서 hit/miss 의 게이트값 분포를 재보니
+#    정답셋 74문항(D3 `golden_chunks` 고정)에서 hit/miss 의 게이트값 분포를 재보니
 #    **거의 완전히 겹친다**:
 #        hit  min 0.443  p25 0.549  med 0.594  p75 0.656  max 0.725   (41건)
 #        miss min 0.467  p25 0.514  med 0.551  p75 0.615  max 0.718   (33건)
 #    분리 임계가 존재하지 않는다. 0.52 로 걸면 12건을 차단하는데 그중 3건이 hit 이고,
 #    남은 24건의 miss 는 그대로 통과한다 — **맞는 근거를 버리면서 틀린 근거를 못 막는다.**
-#    즉 dense 코사인 최고값은 이 코퍼스에서 "근거를 찾았는가" 의 대리변수가 아니다.
+#    즉 dense 코사인 최고값은 이 규정 모음에서 "근거를 찾았는가" 의 대리변수가 아니다.
 #    게이트 B 는 `top5 == 0건` 일 때만 발화한다.
 #
 #    이건 튜닝 실패가 아니라 측정 결과다. 판단불가는 검색 스코어가 아니라 **(6) 인용
@@ -76,12 +76,12 @@ DSN = os.environ.get("SUDDOE_DSN", "postgresql://postgres:devpw@localhost:5432/s
 
 # 게이트 C. 비목 후보 1·2위가 이만큼 안 벌어지면 갈렸다고 본다.
 #   근거: `item_alias` 0행이라 벡터 경로가 아직 미측정이다. 0.15 는 측정 전 가정이고
-#   `결과보고.md` 에 가정으로 적는다. 갈리면 손해가 "LLM 2배" 뿐이라 관대하게 잡는다.
+#   `docs/기록/2026-08-31_축별보고.md` 에 가정으로 적는다. 갈리면 손해가 "LLM 2배" 뿐이라 관대하게 잡는다.
 게이트C_격차 = float(os.environ.get("SUDDOE_GATE_C", "0.15"))
 게이트C_최소신뢰 = 0.35
 
 # ════════════════════════════════════════════════════════════════════════════
-# 강등코드 18종 — A 가 발행한다 (`0831_최종구현.md` §4)
+# 강등코드 18종 — A 가 발행한다 (동결 인터페이스)
 # ════════════════════════════════════════════════════════════════════════════
 강등코드_전체: tuple[str, ...] = (
     "INVALID_JUDGMENT", "CITE_NOT_IN_MAP", "CITE_DB_MISSING", "CITE_HANG_MISMATCH",
@@ -118,7 +118,7 @@ _F_사례 = _옵션임포트("case_search", "유사사례")                  # S
 def 워밍업() -> None:
     """프로세스당 1회. 임베딩 모델·kiwi 로드 28초를 첫 판정 밖으로 뺀다 (C5).
 
-    `LLM.md` vLLM 운영 규칙의 "기동 후 더미 1회" 와 같은 이유다 — 첫 요청이
+    `docs/6_LLM/6-1_호출_설계.md` vLLM 운영 규칙의 "기동 후 더미 1회" 와 같은 이유다 — 첫 요청이
     콜드 스타트를 뒤집어쓰면 지연 예산 측정이 전부 거짓말이 된다.
     """
     try:
@@ -169,7 +169,7 @@ def _스텁_검색(cur, 질문: str, 사업명: str | None, *, top_k: int = 5,
 #
 # 이건 지표 튜닝이 아니라 인덱스 경계다. 필터를 끄면 예비창업패키지 질문의 top-5 에
 # 재도전성공패키지 제21조·창업도약패키지 제32조·모두의 창업 제35조가 들어온다 —
-# **남의 사업 규정이 인용 가능한 근거로 B2 블록에 실린다.** `CLAUDE.md` 인덱싱 코퍼스의
+# **남의 사업 규정이 인용 가능한 근거로 B2 블록에 실린다.** `CLAUDE.md` 검색 대상의
 # 경계가 "남의 규정이 인용되는 순간 그 자체가 오답" 이라고 못박은 그 상황이다.
 # 지표가 올라서 켜는 게 아니다. 지표가 내려가도 켜야 하는 종류의 것이다.
 # (마침 C 의 짝지어 비교에서 15개 지표 전부 상승·하락 0 이었다. 상충이 없어 다행일 뿐이다)
@@ -234,7 +234,7 @@ def _l3룰(cur, org_id, 비목):
 # (2)-e·B4 — 룰 결과를 문장으로. 🔴 원시 한도값을 프롬프트에 넣지 않는다
 # ════════════════════════════════════════════════════════════════════════════
 def b4_문장(룰: dict | None) -> str | None:
-    """B4 블록 본문. B 의 `B4문장` 이 있으면 그것이 정본이다 (§4 동결 인터페이스).
+    """B4 블록 본문. B 의 `B4문장` 이 있으면 그것이 기준이다 (동결 인터페이스).
 
     없으면 A 가 최소한만 만든다 — **비교가 끝난 문장**이어야 한다.
     LLM 에게 "한도 500만원" 을 주면 계산을 시키는 것이고, 그 순간 (2)-e 가 무의미해진다.
@@ -405,7 +405,7 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool 
        plan_id: int | None = None,
        격리근거: list[dict] | None = None, 주입: str | None = None,
        게이트임계: float | None = None, 온도: float = 0.0,
-       변형: str = "V0") -> dict:
+       변형: str = "V0", _비목고정: str | None = None) -> dict:
     """(1)~(7). 동결 인터페이스 — 시그니처를 협의 없이 바꾸지 않는다.
 
     `dry=True` : LLM 을 부르지 않는다. (1) 은 규칙 정규화, (4) 는 프롬프트 조립까지만.
@@ -432,7 +432,7 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool 
         # 🔴 autocommit. (4) LLM 호출이 30초를 넘길 수 있는데 그동안 읽기 트랜잭션을
         #    붙들고 있으면 다른 세션의 DDL·VACUUM 이 막힌다. 쓰기는 단문 INSERT 하나뿐이라
         #    문장 단위 원자성으로 충분하다.
-        conn = conn or psycopg.connect(DSN, connect_timeout=5, autocommit=True)
+        conn = conn or db.connect(connect_timeout=5, autocommit=True)
     except Exception as e:
         # `Agent.md` §8: DB 연결 실패 → 503. 판정을 추측으로 만들지 않는다.
         return _빈응답("판단불가", "데이터베이스에 연결할 수 없어 판정을 내리지 않았습니다.",
@@ -465,8 +465,41 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool 
         잰다("비목확정", t)
         if not 후보 and 정규.get("비목후보"):
             # B 가 못 잡으면 (1) 의 후보를 쓴다. 출처를 남겨 두 경로를 구분한다.
-            후보 = [{"비목": c["비목"], "신뢰도": c.get("신뢰도", 0.0), "출처": "슬롯1"}
-                   for c in 정규["비목후보"]]
+            #
+            # 🔴 (1) 의 산출 모양이 두 가지다 — 둘 다 받는다 (2026-09-02).
+            #    LLM 모드 스키마는 `{비목, 신뢰도}` 객체를 강제하지만,
+            #    dry 의 `규칙_정규화()` 는 **문자열 리스트**를 돌려준다.
+            #    dict 만 가정했더니 정답셋 93문항 중 23건이 여기서
+            #    `TypeError: string indices must be integers` 로 죽었다.
+            #    LLM 이 스키마를 어겨 문자열을 섞어 보내도 같은 자리가 터지므로,
+            #    모양을 걸러 받는 것이 dry 대응이 아니라 방어다.
+            #    문자열에는 신뢰도가 없다 — 0.0 으로 둔다. 없는 숫자를 지어내지 않는다
+            #    (0.0 이면 게이트 C 의 최소신뢰 0.35 에 안 걸려 갈래가 안 열린다).
+            후보 = []
+            _후보원본 = 정규["비목후보"]
+            if isinstance(_후보원본, (str, dict)):
+                _후보원본 = [_후보원본]          # 단건을 그대로 준 경우
+            elif not isinstance(_후보원본, (list, tuple)):
+                _후보원본 = []                   # dict 를 순회하면 키가 비목이 된다 — 막는다
+            for c in _후보원본:
+                if isinstance(c, str):
+                    이름, 신뢰 = c, 0.0
+                elif isinstance(c, dict):
+                    이름, 신뢰 = c.get("비목"), c.get("신뢰도", 0.0)
+                else:
+                    continue
+                if 이름:
+                    후보.append({"비목": 이름, "신뢰도": 신뢰, "출처": "슬롯1"})
+        # 🔴 갈래 재귀는 «이 비목으로 보면 어떻게 되나» 를 묻는 것이다. 고정된 비목만 남긴다.
+        #    안 남기면 재귀 안에서 같은 후보가 또 나와 게이트 C 가 다시 열린다 (2026-09-02).
+        #    🔴 못 찾으면 «아무거나 하나» 로 물러나지 않는다. 재귀 안에서 (1) 정규화를 다시
+        #    돌기 때문에 품목이 미세하게 달라져 후보가 안 겹칠 수 있는데, 그때 후보[:1] 로
+        #    물러나면 **다른 비목으로 판정하고 고정 비목 이름표를 붙이게 된다**
+        #    (호출부가 `r["비목"] = c["비목"]` 로 덮어쓴다). 판정 제품에서 그건 오답 표기다.
+        #    고정된 비목은 부모가 실제 후보에서 고른 것이므로, 없으면 그것으로 새로 세운다.
+        if _비목고정:
+            후보 = ([c for c in 후보 if c.get("비목") == _비목고정]
+                  or [{"비목": _비목고정, "신뢰도": 0.0, "출처": "갈래고정"}])
         비목 = 후보[0]["비목"] if 후보 else None
 
         # ── 게이트 C: 비목이 갈리는가 ────────────────────────────────────
@@ -474,14 +507,16 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool 
                 and 후보[0].get("신뢰도", 0) >= 게이트C_최소신뢰
                 and 후보[1].get("신뢰도", 0) >= 게이트C_최소신뢰
                 and (후보[0].get("신뢰도", 0) - 후보[1].get("신뢰도", 0)) < 게이트C_격차)
-        if 갈림 and not 격리근거:
+        # 🔴 `_비목고정` 이 종료 조건이다. 이게 없으면 무한 재귀가 된다 — 실측으로 확인했다
+        #    (gold_id=360 「시제품 제작에 금 도금」 이 dry 에서 자기 자신을 300겹 넘게 쌓았다).
+        if 갈림 and not 격리근거 and not _비목고정:
             경로.append("C비목갈림")
             결과 = []
             for c in 후보[:2]:
                 r = 판정(질문, 사업명=사업명, org_id=org_id, dry=dry, 기관ID=기관ID,
                         top_k=top_k, conn=conn, 기록=False, 주입=주입,
-                        게이트임계=게이트임계, 온도=온도, 변형=변형,
-                        격리근거=격리근거)
+                        격리근거=격리근거, _비목고정=c["비목"],
+                        게이트임계=게이트임계, 온도=온도, 변형=변형)
                 r["비목"] = c["비목"]
                 결과.append(r)
             응답 = dict(결과[0])
@@ -683,7 +718,7 @@ def _병렬_l3(org_id, 사업명):
     try:
         # 🔴 autocommit. 읽기 트랜잭션을 붙들면 다른 세션의 DDL 과 교착난다
         #    (2026-08-31 8세션 병렬 중 DeadlockDetected 실측 — C 세션 보고).
-        with psycopg.connect(DSN, connect_timeout=5, autocommit=True) as c:
+        with db.connect(connect_timeout=5, autocommit=True) as c:
             return _l3로드(c.cursor(), org_id, 사업명), None
     except Exception as e:
         return [], f"{type(e).__name__}: {e}"
@@ -691,7 +726,7 @@ def _병렬_l3(org_id, 사업명):
 
 def _병렬_검색(질문, 사업명, top_k):
     try:
-        with psycopg.connect(DSN, connect_timeout=5, autocommit=True) as c:
+        with db.connect(connect_timeout=5, autocommit=True) as c:
             return _검색(c.cursor(), 질문, 사업명, top_k=top_k), None
     except Exception as e:
         return {"top5": [], "폐포": [], "참조사슬": [], "게이트값": 0.0,
@@ -756,17 +791,20 @@ def _마무리(conn, cur, 응답: dict, *, 기록: bool, 닫기: bool,
     return 응답
 
 
-_코퍼스버전: str | None = None
+_규정모음버전: str | None = None
 
 
 def 코퍼스버전(cur) -> str:
-    """재현성의 축. 코퍼스가 바뀌면 같은 질문의 답이 바뀔 수 있다 (`Agent.md` §6)."""
-    global _코퍼스버전
-    if _코퍼스버전 is None:
+    """재현성의 축. 규정 모음이 바뀌면 같은 질문의 답이 바뀔 수 있다.
+
+    🔴 함수·변수 이름의 «코퍼스» 는 그대로 둔다 — `eval.runs` 에 그 키로 들어간다.
+    """
+    global _규정모음버전
+    if _규정모음버전 is None:
         d, c = cur.execute("SELECT (SELECT count(*) FROM corpus.documents WHERE status='active'), "
                            "(SELECT count(*) FROM corpus.chunks)").fetchone()
-        _코퍼스버전 = f"docs{d}/chunks{c}"
-    return _코퍼스버전
+        _규정모음버전 = f"docs{d}/chunks{c}"
+    return _규정모음버전
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -781,7 +819,7 @@ def main() -> None:
     ap.add_argument("--사업명")
     ap.add_argument("--org-id")
     ap.add_argument("--dry", action="store_true")
-    ap.add_argument("--golden", action="store_true", help="골든셋 전량 (드라이런용)")
+    ap.add_argument("--golden", action="store_true", help="정답셋 전량 (드라이런용)")
     ap.add_argument("--limit", type=int)
     ap.add_argument("--fault", help="|".join(_주입종류) + "|all")
     ap.add_argument("--no-log", action="store_true", help="decisions 기록 생략")
@@ -814,7 +852,7 @@ def main() -> None:
 
     if a.golden:
         워밍업()
-        with psycopg.connect(DSN, autocommit=True) as conn:
+        with db.connect(autocommit=True) as conn:
             # 🔴 D2 이후: 공통 27문항은 `사업명 IS NULL` + `적용범위` 에 원표기가 있다.
             #    사업명='공통...' 을 기대하는 코드는 그 자리에서 0건이 된다.
             컬럼 = {r[0] for r in conn.execute(

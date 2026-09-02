@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-"""할일 「확인필요」 — 화면 11 ⑧ 집행 준비 · 화면 6 ⑥ 다가오는 일정.   **[레인 B 소유]**
+"""할일 「확인필요」 — 화면 11 ⑧ 집행 준비 · 화면 6 ⑥ 다가오는 일정.   **[할일 계통]**
 
 🔴 체크리스트와 캘린더는 **같은 테이블 같은 행**이다. `due_date` 유무로만 갈린다.
    따로 두면 상세에서 체크했는데 캘린더는 「준비 필요」로 남는 식으로 반드시 어긋난다.
    (`db/init/02_frontend.sql` tenant.plan_tasks 주석)
 
-Phase 0 이 목 경로를 끝까지 구현해 뒀다. 🔴 **레인 B 는 `_실_*` 함수와 `코드_매칭()` 을 채운다.**
+목 경로는 끝까지 구현돼 있다. 🔴 **실 경로는 `_실_*` 함수와 `코드_매칭()` 에 있다.**
 응답 모델과 목 경로는 건드리지 않는다.
 """
 from __future__ import annotations
@@ -20,6 +20,7 @@ from fastapi import APIRouter, HTTPException, Query
 from ._common import MOCK, _질의, _실행
 from .models import (할일, 할일동기화, 할일동기화응답, 할일목록응답, 할일생성, 할일수정)
 from . import mock_data
+from .routes_plans import _org조건
 
 router = APIRouter(tags=["할일"])
 
@@ -29,7 +30,7 @@ router = APIRouter(tags=["할일"])
 # ════════════════════════════════════════════════════════════════════
 
 @router.post("/api/plans/{plan_id}/tasks:sync", response_model=할일동기화응답)
-def 동기화(plan_id: int, body: 할일동기화) -> 할일동기화응답:
+def 동기화(plan_id: int, body: 할일동기화, org_id: str | None = None) -> 할일동기화응답:
     """🔴 재판정 규칙 — 여기가 제일 틀리기 쉽다.
 
     ① 출처='user' 행은 **절대** 건드리지 않는다
@@ -47,7 +48,7 @@ def 동기화(plan_id: int, body: 할일동기화) -> 할일동기화응답:
             생성=len(body.해야할일), 갱신=0, 보존_user=보존u, 보존_날짜수정=보존d,
             코드매칭=맞춤, 코드미상=len(body.해야할일) - 맞춤,
         )
-    return _실_동기화(plan_id, body)
+    return _실_동기화(plan_id, body, org_id)
 
 
 _조사_RE = re.compile(r"(으로|에서|에게|이나|만큼|까지|부터|은|는|이|가|을|를|와|과|만|도|의|나|로)$")
@@ -61,7 +62,7 @@ _어미_RULES = (
 
 def _문장_정규화(s: str) -> str:
     """조사·존댓말 어미를 뗀다. 안 떼면 "...확인하세요" 같은 공통 꼬리 때문에
-    내용이 완전히 달라도 SequenceMatcher 유사도가 뜬다(2026-09-01 조율 세션 실측)."""
+    내용이 완전히 달라도 SequenceMatcher 유사도가 뜬다(2026-09-01 실측)."""
     s = (s or "").strip()
     for pat in _어미_RULES:
         새 = pat.sub("", s).strip()
@@ -112,7 +113,7 @@ def 코드_매칭(항목: str) -> str | None:
        그래도 남겨둔다: code 가 비는 경로가 생기면(구버전 판정 재생 등) 여기가
        마지막 안전판이다. 실패하면 None → 호출부가 코드=NULL · 구분='결제전' 기본값으로 넣는다.
 
-    🔴 2026-09-01 조율 세션 검수로 재조정. 원문 그대로 SequenceMatcher 만 쓰던 이전
+    🔴 2026-09-01 검수로 재조정. 원문 그대로 SequenceMatcher 만 쓰던 이전
        버전은 임계값 0.3 에서 확신에 찬 오답을 냈다(실측): "비교견적 3곳 이상 확보"
        → 멘토링한도_예비창업(0.35), "집행 전에 주관기관 승인을 받으세요" →
        국외출장사전보고(0.50). 둘 다 내용은 다른데 존댓말 어미("...하세요")가 겹쳐
@@ -148,7 +149,7 @@ def 코드_매칭(항목: str) -> str | None:
 # ════════════════════════════════════════════════════════════════════
 
 @router.post("/api/plans/{plan_id}/tasks", response_model=할일, status_code=201)
-def 추가(plan_id: int, body: 할일생성) -> 할일:
+def 추가(plan_id: int, body: 할일생성, org_id: str | None = None) -> 할일:
     if MOCK:
         새 = max((t["task_id"] for t in mock_data.목_할일), default=0) + 1
         행 = {"task_id": 새, "plan_id": plan_id, "출처": "user", "코드": None,
@@ -158,7 +159,7 @@ def 추가(plan_id: int, body: 할일생성) -> 할일:
               "상태": "준비필요", "계획제목": None}
         mock_data.목_할일.append(행)
         return 할일(**행)
-    return _실_추가(plan_id, body)
+    return _실_추가(plan_id, body, org_id)
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -166,7 +167,7 @@ def 추가(plan_id: int, body: 할일생성) -> 할일:
 # ════════════════════════════════════════════════════════════════════
 
 @router.patch("/api/plans/{plan_id}/tasks/{task_id}", response_model=할일)
-def 수정(plan_id: int, task_id: int, body: 할일수정) -> 할일:
+def 수정(plan_id: int, task_id: int, body: 할일수정, org_id: str | None = None) -> 할일:
     if MOCK:
         행 = next((t for t in mock_data.목_할일 if t["task_id"] == task_id), None)
         if not 행:
@@ -179,7 +180,7 @@ def 수정(plan_id: int, task_id: int, body: 할일수정) -> 할일:
         if body.유형 is not None:
             행["유형"] = body.유형
         return 할일(**행)
-    return _실_수정(plan_id, task_id, body)
+    return _실_수정(plan_id, task_id, body, org_id)
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -214,7 +215,7 @@ def 목록(
 
 
 # ════════════════════════════════════════════════════════════════════
-# 🔴 레인 B 작업 구역
+# 🔴 실 경로 구역
 # ════════════════════════════════════════════════════════════════════
 
 # 목록 조회에 공용으로 쓰는 컬럼 순서. `계획제목` 은 JOIN 으로 붙인다.
@@ -265,7 +266,7 @@ def _유형_맵(코드들: set) -> dict:
     return {code: (유형 or "기타") for code, 유형 in 행}
 
 
-def _실_동기화(plan_id: int, body: 할일동기화) -> 할일동기화응답:
+def _실_동기화(plan_id: int, body: 할일동기화, org_id: str | None = None) -> 할일동기화응답:
     """판정 결과 → `tenant.plan_tasks` 적재. 재판정 규칙 4개(§4-2)를 지킨다.
 
     ① 출처='user' 행은 아예 후보에 넣지 않는다 — 매칭·삭제 대상에서 원천 제외
@@ -273,11 +274,12 @@ def _실_동기화(plan_id: int, body: 할일동기화) -> 할일동기화응답
     ③ 같은 코드의 ai 행은 갱신, 이번 회차에 없는 ai 행은 삭제
     ④ 코드가 없으면(`코드_매칭` 도 실패) 항목 텍스트로 대조
     """
-    계획 = _질의('SELECT org_id, "집행예정일" FROM tenant.expense_plans WHERE plan_id = %s',
-                (plan_id,))
+    조건, org인자 = _org조건(org_id, "p")
+    계획 = _질의(f'SELECT p.org_id, p."집행예정일" FROM tenant.expense_plans p '
+                f'WHERE p.plan_id = %s AND {조건}', (plan_id, *org인자))
     if not 계획:
         raise HTTPException(404, f"지출계획 {plan_id} 을(를) 찾을 수 없습니다")
-    org_id, 집행예정일 = 계획[0]
+    계획org, 집행예정일 = 계획[0]
 
     기존 = _질의(
         'SELECT task_id, 출처, 코드, 항목, 날짜_사용자수정 '
@@ -337,13 +339,17 @@ def _실_동기화(plan_id: int, body: 할일동기화) -> 할일동기화응답
                 'INSERT INTO tenant.plan_tasks '
                 '(org_id, plan_id, decision_id, 출처, 코드, 구분, 항목, 설명, due_date, "유형") '
                 "VALUES (%s,%s,%s,'ai',%s,%s,%s,%s,%s,%s)",
-                (org_id, plan_id, body.decision_id, 코드, 구분, 항목, 설명, 새_due, 유형),
+                (계획org, plan_id, body.decision_id, 코드, 구분, 항목, 설명, 새_due, 유형),
             )
 
     # ③ 코드 소멸 — 이번 회차에 안 나온 ai 행만 지운다 (출처='user' 는 애초에 후보 밖)
     사라진 = [r[0] for r in 기존 if r[1] == "ai" and r[0] not in 살아남은]
     if 사라진:
-        _실행('DELETE FROM tenant.plan_tasks WHERE task_id = ANY(%s)', (사라진,))
+        # 🔴 `plan_id` 를 한 번 더 건다. 위에서 계획 소유를 확인했고 `사라진` 도 그 계획의
+        #    행에서만 나오므로 지금은 없어도 같은 결과지만, task_id 만으로 지우는 DELETE 는
+        #    호출 경로가 하나만 바뀌어도 남의 행을 지우는 문장이 된다 (2026-09-02 정밀검토).
+        _실행('DELETE FROM tenant.plan_tasks WHERE task_id = ANY(%s) AND plan_id = %s',
+             (사라진, plan_id))
 
     return 할일동기화응답(
         생성=생성, 갱신=갱신, 보존_user=보존u, 보존_날짜수정=보존날짜,
@@ -351,26 +357,39 @@ def _실_동기화(plan_id: int, body: 할일동기화) -> 할일동기화응답
     )
 
 
-def _실_추가(plan_id: int, body: 할일생성) -> 할일:
-    계획 = _질의('SELECT org_id FROM tenant.expense_plans WHERE plan_id = %s', (plan_id,))
+def _실_추가(plan_id: int, body: 할일생성, org_id: str | None = None) -> 할일:
+    조건, org인자 = _org조건(org_id, "p")
+    계획 = _질의(f'SELECT p.org_id FROM tenant.expense_plans p '
+                f'WHERE p.plan_id = %s AND {조건}', (plan_id, *org인자))
     if not 계획:
         raise HTTPException(404, f"지출계획 {plan_id} 을(를) 찾을 수 없습니다")
-    org_id = 계획[0][0]
+    계획org = 계획[0][0]
     날짜수정 = body.due_date is not None
     행 = _질의(
         'INSERT INTO tenant.plan_tasks '
         '(org_id, plan_id, 출처, 구분, 항목, 설명, due_date, "유형", 날짜_사용자수정) '
         "VALUES (%s,%s,'user',%s,%s,%s,%s,%s,%s) RETURNING task_id",
-        (org_id, plan_id, body.구분, body.항목, body.설명, body.due_date, body.유형, 날짜수정),
+        (계획org, plan_id, body.구분, body.항목, body.설명, body.due_date, body.유형, 날짜수정),
     )
     if not 행:
         raise HTTPException(500, "할일 생성에 실패했습니다")
     return _할일_조회(행[0][0])
 
 
-def _실_수정(plan_id: int, task_id: int, body: 할일수정) -> 할일:
-    존재 = _질의('SELECT 1 FROM tenant.plan_tasks WHERE task_id = %s AND plan_id = %s',
-                (task_id, plan_id))
+def _실_수정(plan_id: int, task_id: int, body: 할일수정, org_id: str | None = None) -> 할일:
+    """🔴 소유 판정의 «기준»은 계획이다 — 할일이 아니다 (2026-09-02 정밀검토에서 맞췄다).
+
+    처음엔 `plan_tasks.org_id` 로 봤는데, `_실_추가`·`_실_동기화` 는 `expense_plans.org_id`
+    로 본다. **같은 쓰기 3경로가 서로 다른 기준을 쓰면** 두 값이 어긋나는 날
+    「추가는 되는데 수정은 404」 같은 게 나온다. 지금은 두 쓰기가 다 계획의 org 를
+    복사해 넣어서 어긋난 행이 0이지만(실측), 기준이 둘인 것 자체가 부채다.
+    → 셋 다 계획을 기준으로 통일한다. 할일이 그 계획 것인지는 `t.plan_id` 가 잡는다.
+    """
+    조건, org인자 = _org조건(org_id, "p")
+    존재 = _질의(f'SELECT 1 FROM tenant.plan_tasks t '
+                f'JOIN tenant.expense_plans p ON p.plan_id = t.plan_id '
+                f'WHERE t.task_id = %s AND t.plan_id = %s AND {조건}',
+                (task_id, plan_id, *org인자))
     if not 존재:
         raise HTTPException(404, f"할일 {task_id} 을(를) 찾을 수 없습니다")
 
