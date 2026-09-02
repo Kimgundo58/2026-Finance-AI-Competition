@@ -13,17 +13,21 @@
 from __future__ import annotations
 
 import io
+import logging
 import os
 import uuid
 import zipfile
 from pathlib import Path
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import (APIRouter, BackgroundTasks, File, Form, HTTPException,
+                     UploadFile)
 
-from ._common import MOCK, ROOT, _질의, _실행
+from ._common import DSN, MOCK, ROOT, _질의, _실행
 from .models import L3업로드응답
 from .routes_plans import _org조건
 from . import mock_data
+
+_log = logging.getLogger("suddoe.l3")
 
 router = APIRouter(prefix="/api/l3", tags=["L3 업로드"])
 
@@ -70,6 +74,7 @@ def 실제형식(본문: bytes) -> str:
 
 @router.post("/upload", response_model=L3업로드응답, status_code=202)
 async def 업로드(
+    배경: BackgroundTasks,
     파일: UploadFile = File(...),
     org_id: str = Form(...),
     기관명: str | None = Form(None),
@@ -100,7 +105,10 @@ async def 업로드(
     if MOCK:
         return L3업로드응답(**{**mock_data.목_L3, "파일명": 이름, "확장자": 확장,
                             "doc_id": f"l3-mock-{uuid.uuid4().hex[:8]}"})
-    return _실_업로드(본문, 이름, 확장, org_id, 기관명)
+    응답 = _실_업로드(본문, 이름, 확장, org_id, 기관명)
+    # 🔴 응답을 «보낸 뒤» 에 파싱한다. 202 Accepted 계약이라 여기서 붙들면 안 된다.
+    배경.add_task(파싱_배경, 응답.doc_id)
+    return 응답
 
 
 @router.get("/{doc_id}", response_model=L3업로드응답)
@@ -187,6 +195,35 @@ def _실_업로드(본문: bytes, 파일명: str, 확장: str,
         조_건수=None, dangling=[],
         메시지="접수했습니다. 조문 분해가 끝나면 상태가 「완료」로 바뀝니다.",
     )
+
+
+def 파싱_배경(doc_id: str) -> None:
+    """업로드 응답을 보낸 «뒤» 에 파서를 태운다.
+
+    🔴 **동기로 부르면 안 된다.** 계약이 `202 Accepted` + 상태 폴링이고
+       (`API_계약_v1.0.md` §7-2), 파싱은 PDF 면 초 단위다. 응답을 붙들면
+       프론트의 「분석 중」 스피너가 존재 이유를 잃는다.
+
+    🔴 **여기서 예외를 밖으로 던지지 마라.** 이 함수는 응답이 나간 뒤에 도는지라
+       터져도 사용자에게 전달할 길이 없다 — 조용히 죽으면 상태가 '대기' 에 영원히 남는다.
+       `l3_parse.파싱()` 은 자체적으로 모든 실패를 `파싱품질='fail'` 로 닫고 예외를
+       안 던지지만(ai-e5 확인), **DB 접속 자체가 실패하는 경로**는 그 밖이다.
+       그 경우까지 '대기' 로 남지 않게 여기서 잡아 'fail' 로 닫는다.
+    """
+    try:
+        import psycopg
+
+        from l3_parse import 파싱                      # scripts/ — sys.path 는 main.py 가 잡는다
+        with psycopg.connect(DSN, connect_timeout=10) as conn:
+            with conn.cursor() as cur:
+                파싱(cur, doc_id)
+            conn.commit()
+    except Exception as e:                              # noqa: BLE001
+        _log.exception("L3 파싱 배경 작업 실패 doc_id=%s", doc_id)
+        # 🔴 '대기' 로 남기면 사용자는 영원히 「분석 중」을 본다. 실패를 실패라고 말한다.
+        _실행('UPDATE tenant.l3_documents SET "파싱품질" = %s WHERE doc_id = %s',
+             ("fail", doc_id))
+        _log.error("  → 파싱품질을 fail 로 닫았다 (%s)", type(e).__name__)
 
 
 def _실_상태(doc_id: str, org_id: str | None) -> L3업로드응답:
