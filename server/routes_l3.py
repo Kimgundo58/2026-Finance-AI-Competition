@@ -12,11 +12,13 @@
 """
 from __future__ import annotations
 
+import os
 import uuid
+from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
-from ._common import MOCK, _질의, _실행
+from ._common import MOCK, ROOT, _질의, _실행
 from .models import L3업로드응답
 from .routes_plans import _org조건
 from . import mock_data
@@ -69,19 +71,41 @@ def 상태(doc_id: str, org_id: str | None = None) -> L3업로드응답:
 
 _확장_추출방식 = {"hwpx": "hwpx", "hwp": "hwp"}   # pdf → 'native' (pdftext.py 경로)
 
+# 업로드 원본을 두는 곳. 파서가 `doc_id` 로 찾아간다.
+#
+# 🔴 **DB 에 파일 칸이 없다.** `l3_documents` 는 `원본파일명`(표시용)·`출처`(라벨)만 들고
+#    바이트를 담을 컬럼이 없다. 컬럼을 새로 파는 건 DDL 이라 여기서 안 한다 —
+#    대신 **`doc_id` 에서 경로가 유도되게** 해서 DB 에 경로를 안 적고도 찾을 수 있게 한다.
+#    (`doc_id` 는 PK 라 충돌하지 않고, 행이 지워지면 파일도 고아가 되는 게 눈에 보인다)
+L3_저장소 = Path(os.environ.get("SUDDOE_L3_DIR", str(ROOT / "_l3_업로드")))
+
+
+def 원본경로(doc_id: str, 확장: str) -> Path:
+    """🔴 파일명을 **사용자 입력에서 만들지 않는다.** 서버가 만든 `doc_id`(uuid)로만 짓는다 —
+    사용자 파일명을 경로에 쓰면 `../` 로 저장소 밖에 쓸 수 있다."""
+    안전확장 = 확장 if 확장 in 허용_확장자 else "bin"
+    return L3_저장소 / f"{uuid.UUID(str(doc_id))}.{안전확장}"
+
 
 def _실_업로드(본문: bytes, 파일명: str, 확장: str,
              org_id: str, 기관명: str | None) -> L3업로드응답:
-    """tenant.l3_documents 행 생성 + 원본 저장 + 상태='파싱대기' 로 202.
+    """tenant.l3_documents 행 생성 + **원본 저장** + 상태='파싱대기' 로 202.
 
     🔴 여기서 파서를 부르지 마라. `scripts/` 는 훅이 막고, 파싱은 파서 쪽에서 붙인다.
     🔴 org_id 는 l3_articles 에도 중복 저장된다 — 판정 검색이 기관을 못 넘게 하는 축이다.
        (그 INSERT 는 파서가 한다 — 여기는 l3_documents 접수까지다)
-    🔴 `기관명` 은 저장하지 않는다 — `tenant.orgs.기관명` 이 기준이고 orgs 는 E 세션 소유다.
-       (원본 파일 바이트도 이 함수 밖 — 저장소 경로는 파서 쪽에서 정한다)
+    🔴 `기관명` 은 저장하지 않는다 — `tenant.orgs.기관명` 이 기준이다.
 
-    ✅ `파싱품질` CHECK 에 '대기' 가 추가됐다(2026-09-01 ai-25) — 업로드 시점엔 그대로
-       '대기' 로 넣는다. 파서가 실제 파싱 후 UPDATE 로 pass/warn/fail 로 덮어쓴다.
+    🔴 **2026-09-02 — 이 함수는 그 전까지 `본문`(파일 바이트)을 인자로 받아놓고 버렸다.**
+       INSERT 에 안 쓰고 디스크에도 안 썼다. 그래서 사용자가 규정을 올리면
+       **「접수했습니다」 → 행만 생기고 → 파일은 사라지고 → 영원히 「분석 중」** 이었다.
+       415(거부)는 실패라고 말해주는데 202 는 **성공했다고 말하고 아무 일도 안 했다** —
+       프로젝트 원칙(「모든 실패의 기본값은 판단불가」) 기준으로 이쪽이 훨씬 나쁘다.
+       RAG 축이 「L3 먼저」로 시작하는데 L3 가 들어올 길이 없던 것이다.
+
+    ✅ `파싱품질` CHECK 에 '대기' 가 있다 — 업로드 시점엔 '대기'. 파서가 실제 파싱 후
+       UPDATE 로 pass/warn/fail 로 덮어쓴다. **그 UPDATE 는 아직 아무도 안 한다**
+       (`server/`·`scripts/` 통틀어 0건) — 파일이 남으니 이제 붙일 수는 있다.
     """
     추출방식 = _확장_추출방식.get(확장, "native")
     행 = _질의(
@@ -93,8 +117,20 @@ def _실_업로드(본문: bytes, 파일명: str, 확장: str,
     )
     if not 행:
         raise HTTPException(400, "업로드를 저장하지 못했습니다 (org_id를 확인해 주세요).")
+    doc_id = str(행[0][0])
+
+    # 🔴 INSERT 로 doc_id 를 받은 «다음에» 쓴다 — 경로가 doc_id 에서 나오기 때문이다.
+    #    쓰기가 실패하면 행만 남아 「파일 없는 파싱대기」가 된다. 그건 고치려던 그 상태와
+    #    같으므로 **행을 되돌리고 실패를 알린다.** 조용히 202 를 주지 않는다.
+    try:
+        L3_저장소.mkdir(parents=True, exist_ok=True)
+        원본경로(doc_id, 확장).write_bytes(본문)
+    except OSError as e:
+        _실행("DELETE FROM tenant.l3_documents WHERE doc_id = %s", (doc_id,))
+        raise HTTPException(500, f"원본을 저장하지 못했습니다 ({type(e).__name__}).") from e
+
     return L3업로드응답(
-        doc_id=str(행[0][0]), 파일명=파일명, 확장자=확장, 상태="파싱대기",
+        doc_id=doc_id, 파일명=파일명, 확장자=확장, 상태="파싱대기",
         조_건수=None, dangling=[],
         메시지="접수했습니다. 조문 분해가 끝나면 상태가 「완료」로 바뀝니다.",
     )
