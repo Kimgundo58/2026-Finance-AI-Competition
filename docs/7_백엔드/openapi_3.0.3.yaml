@@ -1,0 +1,1458 @@
+openapi: 3.0.3
+info:
+  title: 써도돼요 API
+  description: 창업지원금 지출비 사전승인 판정. `프론트 연동 사양.md` §8 계약.
+  version: 0.1.0
+paths:
+  /api/plans:
+    get:
+      tags:
+      - 지출계획
+      summary: 목록
+      operationId: 목록_api_plans_get
+      parameters:
+      - name: 탭
+        in: query
+        required: false
+        schema:
+          type: string
+          description: 전체·확인필요·위험·특이사항없음·점검전
+          default: 전체
+          title: 탭
+        description: 전체·확인필요·위험·특이사항없음·점검전
+      - name: 사업명
+        in: query
+        required: false
+        schema:
+          title: 사업명
+          type: string
+          nullable: true
+      - name: 확정비목
+        in: query
+        required: false
+        schema:
+          title: 확정비목
+          type: string
+          nullable: true
+      - name: q
+        in: query
+        required: false
+        schema:
+          description: 지출명 검색
+          title: Q
+          type: string
+          nullable: true
+        description: 지출명 검색
+      - name: 금액_최소
+        in: query
+        required: false
+        schema:
+          title: 금액 최소
+          type: number
+          nullable: true
+      - name: 금액_최대
+        in: query
+        required: false
+        schema:
+          title: 금액 최대
+          type: number
+          nullable: true
+      - name: 정렬
+        in: query
+        required: false
+        schema:
+          type: string
+          description: 최근수정순·금액많은순·금액적은순·지출일순
+          default: 최근수정순
+          title: 정렬
+        description: 최근수정순·금액많은순·금액적은순·지출일순
+      - name: 페이지
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+          title: 페이지
+      - name: 크기
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          default: 20
+          title: 크기
+      - name: org_id
+        in: query
+        required: false
+        schema:
+          title: Org Id
+          type: string
+          nullable: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/server__models__________1'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - 지출계획
+      summary: 생성
+      operationId: 생성_api_plans_post
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/server__models________1'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/server__models________7'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/plans/{plan_id}:
+    get:
+      tags:
+      - 지출계획
+      summary: 상세
+      operationId: 상세_api_plans__plan_id__get
+      parameters:
+      - name: plan_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Plan Id
+      - name: org_id
+        in: query
+        required: false
+        schema:
+          title: Org Id
+          type: string
+          nullable: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/server__models________7'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/plans/{plan_id}/tasks:sync:
+    post:
+      tags:
+      - 할일
+      summary: 동기화
+      description: '🔴 재판정 규칙 — 여기가 제일 틀리기 쉽다.
+
+
+        ① 출처=''user'' 행은 **절대** 건드리지 않는다
+
+        ② 날짜_사용자수정=true 인 행의 due_date 는 덮지 않는다
+
+        ③ 같은 `코드` 의 ai 행은 갱신, 없어진 것은 지운다
+
+        ④ 코드가 없으면(코드=NULL) 항목 텍스트로 대조한다'
+      operationId: 동기화_api_plans__plan_id__tasks_sync_post
+      parameters:
+      - name: plan_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Plan Id
+      - name: org_id
+        in: query
+        required: false
+        schema:
+          title: Org Id
+          type: string
+          nullable: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/server__models_________1'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/_______'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/plans/{plan_id}/tasks:
+    post:
+      tags:
+      - 할일
+      summary: 추가
+      operationId: 추가_api_plans__plan_id__tasks_post
+      parameters:
+      - name: plan_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Plan Id
+      - name: org_id
+        in: query
+        required: false
+        schema:
+          title: Org Id
+          type: string
+          nullable: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/server__models________2'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/__'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/plans/{plan_id}/tasks/{task_id}:
+    patch:
+      tags:
+      - 할일
+      summary: 수정
+      operationId: 수정_api_plans__plan_id__tasks__task_id__patch
+      parameters:
+      - name: plan_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Plan Id
+      - name: task_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Task Id
+      - name: org_id
+        in: query
+        required: false
+        schema:
+          title: Org Id
+          type: string
+          nullable: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/server__models________3'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/__'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/tasks:
+    get:
+      tags:
+      - 할일
+      summary: 목록
+      operationId: 목록_api_tasks_get
+      parameters:
+      - name: 상태
+        in: query
+        required: false
+        schema:
+          description: 준비필요·집행예정·완료
+          title: 상태
+          type: string
+          nullable: true
+        description: 준비필요·집행예정·완료
+      - name: 구분
+        in: query
+        required: false
+        schema:
+          description: 결제전·결제후·집행
+          title: 구분
+          type: string
+          nullable: true
+        description: 결제전·결제후·집행
+      - name: plan_id
+        in: query
+        required: false
+        schema:
+          title: Plan Id
+          type: integer
+          nullable: true
+      - name: 일정만
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: true 면 due_date 가 있는 행만 (캘린더)
+          default: false
+          title: 일정만
+        description: true 면 due_date 가 있는 행만 (캘린더)
+      - name: 이후
+        in: query
+        required: false
+        schema:
+          description: YYYY-MM-DD — 이 날짜 이후만
+          title: 이후
+          type: string
+          nullable: true
+        description: YYYY-MM-DD — 이 날짜 이후만
+      - name: org_id
+        in: query
+        required: false
+        schema:
+          title: Org Id
+          type: string
+          nullable: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/server__models__________2'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/l3/upload:
+    post:
+      tags:
+      - L3 업로드
+      summary: 업로드
+      operationId: 업로드_api_l3_upload_post
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Body_____api_l3_upload_post'
+        required: true
+      responses:
+        '202':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/L3_____'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/l3/{doc_id}:
+    get:
+      tags:
+      - L3 업로드
+      summary: 상태
+      description: 프론트가 「분석 중」 스피너를 돌리며 폴링하는 경로.
+      operationId: 상태_api_l3__doc_id__get
+      parameters:
+      - name: doc_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Doc Id
+      - name: org_id
+        in: query
+        required: false
+        schema:
+          title: Org Id
+          type: string
+          nullable: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/L3_____'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/health:
+    get:
+      summary: Health
+      operationId: health_api_health_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Health Api Health Get
+  /api/vocab:
+    get:
+      summary: Vocab
+      description: 비목 enum 10종. 🔴 창업활동비는 예비창업패키지에만 있다 (§9).
+      operationId: vocab_api_vocab_get
+      parameters:
+      - name: 사업명
+        in: query
+        required: false
+        schema:
+          title: 사업명
+          type: string
+          nullable: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Vocab Api Vocab Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/programs:
+    get:
+      summary: Programs
+      description: '사업 목록. 게스트에게 화면 3 에서 사업을 묻기 위한 재료 (§10 확인필요 #1).
+
+
+        룰 조회 키가 `사업 × 비목` 이라 사업을 모르면 한도를 못 고른다 — 그래서
+
+        게스트에게도 물어야 한다. 그 UI 결정의 데이터는 여기가 준다.'
+      operationId: programs_api_programs_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Programs Api Programs Get
+  /api/normalize:
+    post:
+      summary: Normalize
+      description: '화면 3 → 4. SSE.
+
+
+        이벤트 순서: `진행`* → `결과`(전체 JSON) → `완료`
+
+        프론트가 단순하게 가고 싶으면 `결과` 하나만 들어도 된다.'
+      operationId: normalize_api_normalize_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/server__models_________2'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/judge:
+    post:
+      summary: Judge
+      description: "화면 4 → 5 / 6 / 7. SSE.\n\n이벤트 순서: `진행`* → `판정` → `해야할일` → `인용` → `전제` → `참조사슬`\n \
+        \           → `결과`(전체 JSON) → `저장`(계획 연결 결과) → `완료`\n\n목 모드에서 `?목=조건부|불가|판단불가` 로 4-way 를 전부 그려볼\
+        \ 수 있다.\n\U0001F534 판단불가는 에러가 아니라 정상 경로다 — 빨간 화면이 아니라 화면 9 로 잇는다.\n\U0001F534 `저장` 은 부수 효과다 —\
+        \ `plan_id` 가 없거나 캐시 적중이거나 저장이 실패해도\n   스트림은 항상 `완료` 까지 간다 (`_판정_저장_시도` 참조).\n\U0001F534 실 판정\
+        \ 대기 중에는 `SUDDOE_JUDGE_HEARTBEAT_SEC`(기본 12초) 마다 SSE 주석\n   (`: keep-alive`)이 낀다 — EventSource\
+        \ 가 무시하는 라인이라 이벤트 목록·순서에는\n   안 잡힌다. 프록시·게이트웨이의 idle timeout 으로 스트림이 끊기는 걸 막는다."
+      operationId: judge_api_judge_post
+      parameters:
+      - name: 목
+        in: query
+        required: false
+        schema:
+          title: 목
+          type: string
+          nullable: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/server__models________4'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/profile:
+    get:
+      summary: Profile Get
+      description: 게스트도 판정은 된다 — 프로필이 없으면 빈 값을 돌려주고 전제[] 가 늘어날 뿐이다.
+      operationId: profile_get_api_profile_get
+      parameters:
+      - name: org_id
+        in: query
+        required: false
+        schema:
+          title: Org Id
+          type: string
+          nullable: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Profile Get Api Profile Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    put:
+      summary: Profile Put
+      description: 🔴 PMS 원문·실명·과제번호는 받지 않는다. 스키마에 그 자리가 없다 (§7).
+      operationId: profile_put_api_profile_put
+      parameters:
+      - name: org_id
+        in: query
+        required: false
+        schema:
+          title: Org Id
+          type: string
+          nullable: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/___'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Profile Put Api Profile Put
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /admin/cost:
+    get:
+      summary: Admin Cost
+      operationId: admin_cost_admin_cost_get
+      parameters:
+      - name: x-admin-token
+        in: header
+        required: false
+        schema:
+          title: X-Admin-Token
+          type: string
+          nullable: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Admin Cost Admin Cost Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /admin/gate:
+    get:
+      summary: Admin Gate
+      description: H5 f_axis 차단 로그. 영구 기록은 `tenant.incidents(종류='ROUTING_BLOCK')`.
+      operationId: admin_gate_admin_gate_get
+      parameters:
+      - name: x-admin-token
+        in: header
+        required: false
+        schema:
+          title: X-Admin-Token
+          type: string
+          nullable: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Admin Gate Admin Gate Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /admin/queue:
+    get:
+      summary: Admin Queue
+      description: "재검수 큐 — 관리 화면 「제N차 개정 · 변경 M개 조항 자동 반영」의 재료.\n\n`corpus.recheck_queue` 를 그대로 읽는다.\
+        \ H1(A4 개정)·H2(A2 엄격조항)·\nH3(A5 기관답변)·H4(정산 리허설)가 전부 이 한 표에 쌓인다.\n\n\U0001F534 **읽기 전용이다.** 큐를\
+        \ 승인해 `corpus.rules` 로 올리는 경로는 여기 없다 —\n   그건 사람이 검수하는 일이고(`rule_base.md` §6), API 로 열면 검수 없이\n\
+        \   룰이 바뀔 길이 생긴다. 계약서 §3 상 `rules` 쓰기는 G 소유이기도 하다."
+      operationId: admin_queue_admin_queue_get
+      parameters:
+      - name: 종류
+        in: query
+        required: false
+        schema:
+          title: 종류
+          type: string
+          nullable: true
+      - name: 사유코드
+        in: query
+        required: false
+        schema:
+          title: 사유코드
+          type: string
+          nullable: true
+      - name: 사업명
+        in: query
+        required: false
+        schema:
+          title: 사업명
+          type: string
+          nullable: true
+      - name: 상태
+        in: query
+        required: false
+        schema:
+          type: string
+          default: 대기
+          title: 상태
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 50
+          title: Limit
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 0
+          title: Offset
+      - name: x-admin-token
+        in: header
+        required: false
+        schema:
+          title: X-Admin-Token
+          type: string
+          nullable: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Admin Queue Admin Queue Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /admin/warmup:
+    post:
+      summary: Admin Warmup
+      description: "발표 30분 전 워밍업 (`Agent.md` §9).\n\n\U0001F534 콜드 스타트가 두 군데다 — 임베딩 모델 로딩(수십 초)과 vLLM\
+        \ 의 `guided_json`\n   첫 호출 스키마 컴파일(`LLM.md` §1 vLLM 운영 규칙). 둘 다 미리 태운다."
+      operationId: admin_warmup_admin_warmup_post
+      parameters:
+      - name: x-admin-token
+        in: header
+        required: false
+        schema:
+          title: X-Admin-Token
+          type: string
+          nullable: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Admin Warmup Admin Warmup Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+components:
+  schemas:
+    Body_____api_l3_upload_post:
+      properties:
+        파일:
+          type: string
+          contentMediaType: application/octet-stream
+          title: 파일
+        org_id:
+          type: string
+          title: Org Id
+        기관명:
+          title: 기관명
+          type: string
+          nullable: true
+      type: object
+      required:
+      - 파일
+      - org_id
+      title: Body_업로드_api_l3_upload_post
+    F1:
+      properties:
+        정부지원_현금:
+          type: number
+          title: 정부지원 현금
+          default: 0
+        자기부담_현금:
+          type: number
+          title: 자기부담 현금
+          default: 0
+        협약시작일:
+          title: 협약시작일
+          type: string
+          nullable: true
+        협약종료일:
+          title: 협약종료일
+          type: string
+          nullable: true
+      type: object
+      title: F1
+    F3_:
+      properties:
+        비목:
+          type: string
+          title: 비목
+        재원:
+          type: string
+          enum:
+          - 정부지원
+          - 자기부담
+          title: 재원
+        거래처:
+          title: 거래처
+          type: string
+          nullable: true
+        인력역할:
+          title: 인력역할
+          type: string
+          nullable: true
+        귀속월:
+          title: 귀속월
+          type: string
+          nullable: true
+        금액:
+          type: number
+          title: 금액
+          default: 0
+      type: object
+      required:
+      - 비목
+      - 재원
+      title: F3항
+    F4_:
+      properties:
+        역할:
+          type: string
+          title: 역할
+        고용형태:
+          title: 고용형태
+          type: string
+          nullable: true
+        타사업참여율:
+          type: number
+          title: 타사업참여율
+          default: 0
+        소속기관유형:
+          title: 소속기관유형
+          type: string
+          nullable: true
+        겸직:
+          type: boolean
+          title: 겸직
+          default: false
+      type: object
+      required:
+      - 역할
+      title: F4항
+    F5:
+      properties:
+        친족거래:
+          type: boolean
+          title: 친족거래
+          default: false
+        전직임직원업체:
+          type: boolean
+          title: 전직임직원업체
+          default: false
+      type: object
+      title: F5
+      description: 판정 후 폐기. 저장하지 않는다 (`서비스 아키텍쳐.md` §6).
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    L3_____:
+      properties:
+        doc_id:
+          type: string
+          title: Doc Id
+        파일명:
+          type: string
+          title: 파일명
+        확장자:
+          type: string
+          title: 확장자
+        상태:
+          type: string
+          enum:
+          - 파싱대기
+          - 파싱중
+          - 완료
+          - 실패
+          title: 상태
+          default: 파싱대기
+        조_건수:
+          title: 조 건수
+          type: integer
+          nullable: true
+        dangling:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Dangling
+        메시지:
+          title: 메시지
+          type: string
+          nullable: true
+      type: object
+      required:
+      - doc_id
+      - 파일명
+      - 확장자
+      title: L3업로드응답
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+        input:
+          title: Input
+        ctx:
+          type: object
+          title: Context
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError
+    __:
+      properties:
+        task_id:
+          type: integer
+          title: Task Id
+        plan_id:
+          title: Plan Id
+          type: integer
+          nullable: true
+        출처:
+          type: string
+          enum:
+          - ai
+          - user
+          title: 출처
+          default: ai
+        코드:
+          title: 코드
+          type: string
+          nullable: true
+        구분:
+          type: string
+          enum:
+          - 결제전
+          - 결제후
+          - 집행
+          title: 구분
+          default: 결제전
+        항목:
+          type: string
+          title: 항목
+        설명:
+          title: 설명
+          type: string
+          nullable: true
+        due_date:
+          title: Due Date
+          type: string
+          nullable: true
+        유형:
+          type: string
+          enum:
+          - 기타
+          - 계약
+          - 비교견적
+          title: 유형
+          default: 기타
+        날짜_사용자수정:
+          type: boolean
+          title: 날짜 사용자수정
+          default: false
+        상태:
+          type: string
+          enum:
+          - 준비필요
+          - 집행예정
+          - 완료
+          title: 상태
+          default: 준비필요
+        계획제목:
+          title: 계획제목
+          type: string
+          nullable: true
+      type: object
+      required:
+      - task_id
+      - 항목
+      title: 할일
+    ___:
+      properties:
+        f1:
+          $ref: '#/components/schemas/F1'
+        f3:
+          items:
+            $ref: '#/components/schemas/F3_'
+          type: array
+          title: F3
+        f4:
+          items:
+            $ref: '#/components/schemas/F4_'
+          type: array
+          title: F4
+      type: object
+      title: 프로필
+    _______:
+      properties:
+        생성:
+          type: integer
+          title: 생성
+          default: 0
+        갱신:
+          type: integer
+          title: 갱신
+          default: 0
+        보존_user:
+          type: integer
+          title: 보존 User
+          default: 0
+        보존_날짜수정:
+          type: integer
+          title: 보존 날짜수정
+          default: 0
+        코드매칭:
+          type: integer
+          title: 코드매칭
+          default: 0
+        코드미상:
+          type: integer
+          title: 코드미상
+          default: 0
+      type: object
+      title: 할일동기화응답
+    server__models________1:
+      properties:
+        사업명:
+          type: string
+          title: 사업명
+        제목:
+          title: 제목
+          type: string
+          nullable: true
+        품목:
+          type: string
+          title: 품목
+        금액:
+          type: number
+          title: 금액
+        용도:
+          type: string
+          title: 용도
+        집행예정일:
+          title: 집행예정일
+          type: string
+          nullable: true
+        거래처:
+          title: 거래처
+          type: string
+          nullable: true
+        추가설명:
+          title: 추가설명
+          type: string
+          nullable: true
+        확정비목:
+          title: 확정비목
+          type: string
+          nullable: true
+        정규화:
+          additionalProperties: true
+          type: object
+          title: 정규화
+        질문원문:
+          title: 질문원문
+          type: string
+          nullable: true
+        org_id:
+          title: Org Id
+          type: string
+          nullable: true
+      type: object
+      required:
+      - 사업명
+      - 품목
+      - 금액
+      - 용도
+      title: 계획생성
+    server__models________2:
+      properties:
+        항목:
+          type: string
+          title: 항목
+        설명:
+          title: 설명
+          type: string
+          nullable: true
+        구분:
+          type: string
+          enum:
+          - 결제전
+          - 결제후
+          - 집행
+          title: 구분
+          default: 결제전
+        due_date:
+          title: Due Date
+          type: string
+          nullable: true
+        유형:
+          type: string
+          enum:
+          - 기타
+          - 계약
+          - 비교견적
+          title: 유형
+          default: 기타
+      type: object
+      required:
+      - 항목
+      title: 할일생성
+      description: 사용자 직접 추가. 🔴 출처는 서버가 'user' 로 강제한다 — 재판정이 안 건드린다.
+    server__models________3:
+      properties:
+        상태:
+          title: 상태
+          type: string
+          enum:
+          - 준비필요
+          - 집행예정
+          - 완료
+          nullable: true
+        due_date:
+          title: Due Date
+          type: string
+          nullable: true
+        유형:
+          title: 유형
+          type: string
+          enum:
+          - 기타
+          - 계약
+          - 비교견적
+          nullable: true
+      type: object
+      title: 할일수정
+      description: 「확인필요」 토글 · 날짜 지정. 보낸 필드만 바뀐다.
+    server__models________4:
+      properties:
+        정규화:
+          additionalProperties: true
+          type: object
+          title: 정규화
+        확정비목:
+          title: 확정비목
+          type: string
+          nullable: true
+        사업명:
+          title: 사업명
+          type: string
+          nullable: true
+        org_id:
+          title: Org Id
+          type: string
+          nullable: true
+        plan_id:
+          title: Plan Id
+          type: integer
+          nullable: true
+        f5:
+          $ref: '#/components/schemas/F5'
+      type: object
+      title: 판정요청
+    server__models________5:
+      properties:
+        전체:
+          type: integer
+          title: 전체
+          default: 0
+        확인필요:
+          type: integer
+          title: 확인필요
+          default: 0
+        위험:
+          type: integer
+          title: 위험
+          default: 0
+        특이사항없음:
+          type: integer
+          title: 특이사항없음
+          default: 0
+        점검전:
+          type: integer
+          title: 점검전
+          default: 0
+        금액합계:
+          type: number
+          title: 금액합계
+          default: 0
+      type: object
+      title: 계획통계
+      description: "화면 6 ④ 통계 카드 4개 + ③ 전체 현황.\n\n\U0001F511 프론트 요구서: «통계 전용 API 불필요 — 한 번의 JOIN 이면 다\
+        \ 나온다».\n   그래서 목록 응답에 얹어 보낸다. 프론트가 부르기 편한 쪽을 택했다.\n⚠️ 전체 = 확인필요 + 위험 + 특이사항없음 + 점검전 이다."
+    server__models________6:
+      properties:
+        plan_id:
+          type: integer
+          title: Plan Id
+        제목:
+          title: 제목
+          type: string
+          nullable: true
+        확정비목:
+          title: 확정비목
+          type: string
+          nullable: true
+        금액:
+          title: 금액
+          type: number
+          nullable: true
+        판정:
+          title: 판정
+          type: string
+          enum:
+          - 가능
+          - 조건부
+          - 불가
+          - 판단불가
+          nullable: true
+        집행예정일:
+          title: 집행예정일
+          type: string
+          nullable: true
+        updated_at:
+          title: Updated At
+          type: string
+          nullable: true
+        사업명:
+          title: 사업명
+          type: string
+          nullable: true
+        상태:
+          type: string
+          enum:
+          - draft
+          - judged
+          title: 상태
+          default: draft
+      type: object
+      required:
+      - plan_id
+      title: 계획요약
+      description: 목록 표 한 행 (`프론트_데이터요구서_0901.md` §화면7-④).
+    server__models________7:
+      properties:
+        plan_id:
+          type: integer
+          title: Plan Id
+        제목:
+          title: 제목
+          type: string
+          nullable: true
+        확정비목:
+          title: 확정비목
+          type: string
+          nullable: true
+        금액:
+          title: 금액
+          type: number
+          nullable: true
+        판정:
+          title: 판정
+          type: string
+          enum:
+          - 가능
+          - 조건부
+          - 불가
+          - 판단불가
+          nullable: true
+        집행예정일:
+          title: 집행예정일
+          type: string
+          nullable: true
+        updated_at:
+          title: Updated At
+          type: string
+          nullable: true
+        사업명:
+          title: 사업명
+          type: string
+          nullable: true
+        상태:
+          type: string
+          enum:
+          - draft
+          - judged
+          title: 상태
+          default: draft
+        질문원문:
+          title: 질문원문
+          type: string
+          nullable: true
+        용도:
+          title: 용도
+          type: string
+          nullable: true
+        거래처:
+          title: 거래처
+          type: string
+          nullable: true
+        추가설명:
+          title: 추가설명
+          type: string
+          nullable: true
+        정규화:
+          additionalProperties: true
+          type: object
+          title: 정규화
+        latest_decision_id:
+          title: Latest Decision Id
+          type: integer
+          nullable: true
+        판정상세:
+          title: 판정상세
+          additionalProperties: true
+          type: object
+          nullable: true
+        할일:
+          items:
+            $ref: '#/components/schemas/__'
+          type: array
+          title: 할일
+        created_at:
+          title: Created At
+          type: string
+          nullable: true
+      type: object
+      required:
+      - plan_id
+      title: 계획상세
+    server__models_________1:
+      properties:
+        decision_id:
+          title: Decision Id
+          type: integer
+          nullable: true
+        해야할일:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: 해야할일
+      type: object
+      title: 할일동기화
+      description: 판정 결과 → plan_tasks 적재. 출처='ai' 행만 만든다.
+    server__models_________2:
+      properties:
+        품목:
+          title: 품목
+          type: string
+          nullable: true
+        금액:
+          title: 금액
+          type: number
+          nullable: true
+        용도:
+          title: 용도
+          type: string
+          nullable: true
+        집행예정일:
+          title: 집행예정일
+          type: string
+          nullable: true
+        거래처:
+          title: 거래처
+          type: string
+          nullable: true
+        추가설명:
+          title: 추가설명
+          type: string
+          nullable: true
+        질문:
+          title: 질문
+          type: string
+          maxLength: 2000
+          nullable: true
+        사업명:
+          title: 사업명
+          type: string
+          nullable: true
+        f5:
+          $ref: '#/components/schemas/F5'
+      type: object
+      title: 정규화요청
+    server__models__________1:
+      properties:
+        통계:
+          $ref: '#/components/schemas/server__models________5'
+        건수:
+          type: integer
+          title: 건수
+          default: 0
+        페이지:
+          type: integer
+          title: 페이지
+          default: 1
+        크기:
+          type: integer
+          title: 크기
+          default: 20
+        항목:
+          items:
+            $ref: '#/components/schemas/server__models________6'
+          type: array
+          title: 항목
+      type: object
+      title: 계획목록응답
+    server__models__________2:
+      properties:
+        건수:
+          type: integer
+          title: 건수
+          default: 0
+        항목:
+          items:
+            $ref: '#/components/schemas/__'
+          type: array
+          title: 항목
+      type: object
+      title: 할일목록응답
