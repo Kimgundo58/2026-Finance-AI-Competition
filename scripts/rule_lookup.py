@@ -148,8 +148,19 @@ def _행(cur, sql: str, args: Sequence[Any]) -> list[dict]:
     return out
 
 
-def 비목계통(cur, 사업명: str | None) -> str:
-    """'창업' | 'RND'. 사업명이 없으면(정답셋 '공통' 27문항) 창업 계통으로 본다."""
+def 비목계통(cur, 사업명: str | None) -> str | None:
+    """'창업' | 'RND' | **None**. 사업명이 없으면(정답셋 '공통' 27문항) 창업 계통으로 본다.
+
+    🔴 2026-09-02 — **"준 사업명을 못 찾았다"와 "사업명을 안 줬다"는 다르다.**
+    이전에는 못 찾아도 조용히 "창업"으로 떨어졌다. `corpus.programs` 표기와
+    프론트·L3 등 다른 출처의 표기가 갈리면(예: TIPS 를 "민관공동 창업자 발굴·육성"
+    으로 보내는 경우) 이 폴백이 **정확히 막으려던 시나리오를 스스로 만든다** —
+    R&D 계통 TIPS 질문이 창업 계통 L1 지침으로 잘못 분류되고, 그 결과가
+    "근거를 단 오답"으로 나간다(§base_룰 ②). CLAUDE.md 확정 원칙: 모든 실패의
+    기본값은 판단불가다. "모르는 사업 = 창업 계통"은 그 원칙이 금지하는 "아마"다.
+    → 사업명을 **줬는데** 없으면 `None`. 호출부(`base_룰`·`l3적용가능`)가 그 `None`
+    을 판단불가로 닫는다. 사업명을 아예 안 준 경우(공통 문항)는 기존대로 "창업".
+    """
     if not 사업명:
         return "창업"
     try:
@@ -159,7 +170,8 @@ def 비목계통(cur, 사업명: str | None) -> str:
             return r[0]
     except Exception:                       # programs 가 아직 없는 워킹트리
         cur.connection.rollback()
-    return "창업"
+        return "창업"                       # 표 자체가 없는 워킹트리 — 기존 동작 유지
+    return None                             # 표는 있는데 이 사업명이 없다 — 판단불가로 닫는다
 
 
 def base_룰(cur, 사업명: str | None, 비목: str | None = None) -> list[dict]:
@@ -176,9 +188,21 @@ def base_룰(cur, 사업명: str | None, 비목: str | None = None) -> list[dict
        발화한다. 근거 없는 오답보다 근거 붙은 오답이 나쁘다 — 사용자가 검증할
        방법이 없기 때문이다. TIPS 는 rules 0행 → None → 판단불가가 맞다.
 
-    (둘 다 2026-08-31 A 세션과 합의. ②는 G 가 조문으로 잡은 건이다)
+    ③ 🔴 **사업명을 줬는데 `corpus.programs` 에 없으면 조회 자체를 접는다.**
+       `비목계통()` 이 `None` 을 돌려주는 경우다(2026-09-02). 그때 "창업"으로
+       가정하고 계속 조회하면 ②가 막으려던 오분류가 그대로 재발한다 — 그래서
+       여기서 `[]` 로 끊는다. `effective_rule()` 은 base 도 l3 도 없으면 판단불가로
+       닫으므로(§effective_rule), 이건 "룰이 없다"가 아니라 "이 사업명을 모른다"를
+       올바르게 판단불가로 접는 것이다. 사업명을 아예 안 준 경우(공통 문항)는
+       `비목계통(None)`이 그대로 "창업"이라 이 분기를 안 탄다.
+
+    (①②는 2026-08-31 A 세션과 합의. ②는 G 가 조문으로 잡은 건. ③은 W3 가 2026-09-02
+     TIPS 프론트 표기 불일치 조사에서 잡았고 ai-ae 승인)
     """
-    창업계통 = 비목계통(cur, 사업명) == "창업"
+    계통 = 비목계통(cur, 사업명)
+    if 사업명 is not None and 계통 is None:
+        return []                            # 모르는 사업명 — 조회 없이 판단불가로 접는다
+    창업계통 = 계통 == "창업"
     where = ["((layer='L1' AND 사업명 IS NULL AND %s) OR (layer='L2' AND 사업명 = %s))"]
     args: list[Any] = [창업계통, 사업명]
     if 비목:
@@ -244,8 +268,15 @@ def l3적용가능(cur, 사업명: str | None) -> bool:
     있었지만, **그 문장이 ④ 조립 프롬프트에 실린다.** 근거 붙은 오답이 더 나쁘다.
 
     계통이 늘거나 L3 가 R&D 비목으로 키를 걸게 되면 그때 이 함수만 고치면 된다.
+
+    🔴 2026-09-02 — 사업명을 줬는데 `corpus.programs` 에 없으면(`비목계통()`이
+    `None`) **여기도 `False` 다.** 모르는 사업명에 L3 를 붙이지 않는다 — §base_룰 ③
+    과 같은 이유다.
     """
-    return 비목계통(cur, 사업명) == "창업"
+    계통 = 비목계통(cur, 사업명)
+    if 사업명 is not None and 계통 is None:
+        return False
+    return 계통 == "창업"
 
 
 def _org문자열(기관ID: Any) -> str | None:
@@ -1433,7 +1464,13 @@ def _smoke() -> int:
         사업들 = [r[0] for r in cur.fetchall()] or [None]
         cur.execute("SELECT 비목 FROM corpus.item_vocab WHERE 계통='창업' ORDER BY 정렬")
         비목들 = [r[0] for r in cur.fetchall()]
-        cur.execute("SELECT org_id FROM tenant.orgs")
+        # 🔴 2026-09-02 — 전에는 `SELECT org_id FROM tenant.orgs` 였다. `tenant.orgs`
+        #    가 2행일 땐 조합이 270 이라 즉시 끝났는데, 기관 명부 413행이 적재되자
+        #    9×10×414 ≈ 37,000 이 되어 **스모크가 몇 분을 넘겨도 안 끝났다.**
+        #    이 스모크가 재려는 것은 «L3 가 붙었을 때 effective_rule 이 형태를 지키나»
+        #    이지 «기관이 몇 곳이나 있나» 가 아니다. L3 조문을 실제로 가진 기관만 돈다 —
+        #    나머지 기관은 l3 가 0행이라 `None` 과 같은 경로를 되풀이할 뿐이다.
+        cur.execute("SELECT DISTINCT org_id FROM tenant.l3_articles")
         orgs = [r[0] for r in cur.fetchall()]        # 🔴 UUID 객체 그대로. str() 금지
 
         n = 0

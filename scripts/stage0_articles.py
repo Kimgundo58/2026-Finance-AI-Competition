@@ -19,6 +19,12 @@ RE_JO_BARE = re.compile(r"제\s*(\d+)\s*조(?:\s*의\s*(\d+))?(?=\s)")
 # 2순위: 제N장 / 번호 목록 — 매뉴얼·가이드라인
 RE_JANG = re.compile(r"제\s*(\d+)\s*장\s*([^\n]{0,50})")
 
+# 2.5순위: 로마숫자 장(Ⅰ,Ⅱ,Ⅲ…) — "제N장"이 아예 없는 문서(2026-09-02 실측:
+# 건국대 L3 레퍼런스 「붙임1 사업비 관리 운영 지침」). hwpx 추출 특성상 표제줄이
+# 로마숫자 «앞»에 온다("사업비 집행 및 관리\nⅠ") — 숫자·제목 순서가 반대다.
+RE_ROMAN = re.compile(r"(?:^|\n)[ \t]*([Ⅰ-Ⅹ])[ \t]*(?=\n|$)")
+_ROMAN_ORDER = "ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ"
+
 
 def sanitize(t: str) -> str:
     """Postgres text 에 넣을 수 없는 문자 제거.
@@ -213,6 +219,31 @@ def _outline_headings(body: str) -> list[re.Match]:
     return out
 
 
+def _roman_chapters(text: str, page_offsets: dict[int, int]) -> list[dict]:
+    """"표제줄 \\n 로마숫자 단독줄"을 장 경계로 쓴다 — "제N장"이 없는 개요형 문서용.
+
+    🔴 우연히 등장한 낱글자(예: 서수 표기)를 장 경계로 오인하지 않도록 **등장 순서가
+    Ⅰ,Ⅱ,Ⅲ… 로 정확히 이어지는지**부터 검사한다. 3개 미만이거나 순서가 어긋나면
+    빈 리스트를 돌려준다 — 그러면 호출부가 그대로 단락 분할로 내려간다(안전한 쪽).
+    """
+    marks = list(RE_ROMAN.finditer(text))
+    seq = "".join(m.group(1) for m in marks)
+    if len(marks) < 3 or not _ROMAN_ORDER.startswith(seq):
+        return []
+    arts = []
+    for i, m in enumerate(marks):
+        끝 = marks[i + 1].start() if i + 1 < len(marks) else len(text)
+        머리 = text[:m.start()].rstrip().rsplit("\n", 1)[-1].strip()
+        본문 = ((머리 + "\n") if 머리 else "") + text[m.end():끝].strip()
+        if len(본문.strip()) < 30:
+            continue
+        arts.append({
+            "조번호": m.group(1), "조제목": 머리 or None, "조번호_int": i + 1,
+            "본문": 본문.strip(), "페이지": _page_of(m.start(), page_offsets),
+        })
+    return arts
+
+
 def split_articles(text: str, page_offsets: dict[int, int] | None = None) -> tuple[list[dict], str]:
     """반환: (조 리스트, 사용한 전략 이름)"""
     text = _clean(text)
@@ -255,6 +286,14 @@ def split_articles(text: str, page_offsets: dict[int, int] | None = None) -> tup
             })
         if arts:
             return arts, "jang"
+
+    # ── 2.5순위: 로마숫자 장 — "jang" 이 하나도 못 잡았을 때만 시도한다.
+    #    🔴 이미 앞 전략(jo_titled·outline_numbered·jo_bare·jang) 중 하나가 성립하면
+    #    여기 도달하지 않는다 — 기존 문서(TIPS·훈령 등)의 결과를 절대 안 바꾼다.
+    #    paragraph 로 떨어질 뻔한 문서만 후보가 된다(순수 개선, 회귀 불가).
+    romans = _roman_chapters(text, page_offsets)
+    if romans:
+        return romans, "roman_chapter"
 
     # ── 3순위: 단락 분할 (구조 없음) ────────────────────────────
     paras = [p.strip() for p in re.split(r"\n{2,}", text) if len(p.strip()) >= 100]

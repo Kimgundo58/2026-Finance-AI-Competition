@@ -12,12 +12,11 @@ L3 조항은 30~80개다. 20,525청크짜리 L1·L2 풀과 같은 링에 올리�
 판정 검색(`corpus.chunks`, `layer IN ('L1','L2')`)과 물리적으로 다른 경로다.
 그래서 멀티테넌시 누수가 **프롬프트 규율이 아니라 스키마**로 막힌다.
 
-━━ 🔴 오늘(2026-08-31) 짓지 않은 것 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-HWPX/HWP 파서는 오늘 범위 밖이다. 정답셋 정답근거 82건이 전부 L1·L2 이고 L3 는 0건이라
-파서를 지어도 지표에 안 잡히고, 기관마다 문서 구조가 달라 롱테일이다
-(2026-08-30 의 "L3 는 HWPX 파서" 결정은 **방법**의 결정이지 시점의 결정이 아니다).
-대신 `seed_l3_fixture.py` 의 합성 픽스처가 게이팅 4갈래·RLS·`index_guard` 를 태운다.
-파서가 들어오면 이 모듈은 그대로 두고 `l3_articles` 를 채우는 쪽만 바뀐다.
+━━ 2026-09-02 갱신 — 파서가 들어왔다 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+`l3_parse.py` 가 실제 업로드(`server/routes_l3.py` 가 저장한 원본)를 읽어 이 모듈이
+기대하는 모양대로 `l3_articles` 를 채운다. 이 모듈 자체는 안 바뀐다 — 그 약속대로다.
+`seed_l3_fixture.py` 의 두 기관(합성 데이터)은 여전히 게이팅·RLS 검증 전용이며
+실제 파싱 경로를 타지 않는다 — 섞이지 않게 `출처='테스트픽스처'` 로 계속 구분한다.
 
 ━━ 🔴 왜 `corpus.rules` 에서 L3 를 읽지 않는가 ━━━━━━━━━━━━━━━━━━━━━━━━━━━
 `Agent.md` §3-2 · `rule_base.md` §3-1 의 의사코드는 L3 오버레이를
@@ -305,6 +304,33 @@ def _상위문서해소(cur, 법령: str | None, 약칭: str | None) -> str | No
     return None
 
 
+def _shifted_재매칭(cur, doc_id: str, 약칭: str | None, 조번호숫자: str) -> str | None:
+    """🔴 조번호 참조는 구판일 수 있다 — 조 제목으로 재매칭한다 (CLAUDE.md 확정 원칙).
+
+    L3 가 인용한 「지침 제N조」의 N이 옛 개정판 번호면, 현행판에서 조번호가 옮겨가
+    직접 조회가 dangling 이 된다. `build_refs.py` 가 L1↔L1 참조에 쓰는 것과 **같은
+    기준표**(`지침_조제목`)를 재사용한다 — 새로 만들지 않는다. 「지침」 계열이 아니면
+    (기준표가 통합관리지침 전용이라) None.
+    """
+    if 약칭 not in ("지침", "통합관리지침"):
+        return None
+    try:
+        from build_refs import 지침_조제목
+    except ImportError:
+        return None
+    for 판, tbl in 지침_조제목.items():
+        if 판 == "제14차" or 조번호숫자 not in tbl:
+            continue
+        제목 = tbl[조번호숫자]
+        현행 = cur.execute(
+            "SELECT 조번호 FROM corpus.doc_articles "
+            " WHERE doc_id=%s AND 조제목=%s AND NOT coalesce(삭제,false) LIMIT 1",
+            (doc_id, 제목)).fetchone()
+        if 현행:
+            return 현행[0]
+    return None
+
+
 def 상위참조(cur, 본문: str) -> list[dict[str, Any]]:
     """조문이 인용한 상위 규범을 (해소 여부와 함께) 뽑는다.
 
@@ -314,7 +340,8 @@ def 상위참조(cur, 본문: str) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     본 = set()
     for m in _참조표기.finditer(본문):
-        조 = f"제{int(m.group('조'))}조" + (f"의{int(m.group('의'))}" if m.group("의") else "")
+        조번호숫자 = str(int(m.group("조")))
+        조 = f"제{조번호숫자}조" + (f"의{int(m.group('의'))}" if m.group("의") else "")
         법령, 약칭 = m.group("법령"), m.group("약칭")
         if not 법령 and not 약칭:
             continue                       # "제3조" 처럼 자기 규정 내부 참조 — 상위 아님
@@ -324,14 +351,19 @@ def 상위참조(cur, 본문: str) -> list[dict[str, Any]]:
             continue
         본.add(표기)
         doc_id = _상위문서해소(cur, 법령, 약칭)
-        해소 = False
+        해소, 보정 = False, None
         if doc_id:
             해소 = bool(cur.execute(
                 "SELECT 1 FROM corpus.doc_articles "
                 " WHERE doc_id=%s AND 조번호=%s AND NOT coalesce(삭제,false)",
                 (doc_id, 조)).fetchone())
+            if not 해소 and not m.group("의"):     # 「의N」 붙은 조는 기준표 대상이 아니다
+                재매칭 = _shifted_재매칭(cur, doc_id, 약칭, 조번호숫자)
+                if 재매칭:
+                    해소, 보정 = True, f"{조} 로 표기됨 → {재매칭} 로 재매칭(구판 조번호)"
+                    조 = 재매칭
         out.append({"표기": 표기, "doc_id": doc_id if 해소 else None,
-                    "조번호": 조, "해소": 해소})
+                    "조번호": 조, "해소": 해소, "보정": 보정})
     return out
 
 
@@ -494,13 +526,46 @@ def 문서요약(cur, org_id: str) -> list[dict[str, Any]]:
     return [dict(zip(keys, r)) for r in rows]
 
 
+class 기관모호(ValueError):
+    """부분 이름이 여러 기관에 걸린다. 후보를 담는다."""
+
+    def __init__(self, 기관: str, 후보: list[tuple[str, str]]):
+        self.기관, self.후보 = 기관, 후보
+        super().__init__(f"'{기관}' 이 {len(후보)}곳에 걸린다")
+
+
 def org해소(cur, 기관: str) -> tuple[str, str] | None:
-    """org_id 또는 기관명으로 기관을 찾는다 (CLI 편의)."""
+    """org_id 또는 기관명으로 기관을 찾는다 (CLI 편의).
+
+    🔴 2026-09-02 — 이전에는 `ILIKE %…% LIMIT 1` 하나였다. `ORDER BY` 도 없었다.
+    `tenant.orgs` 가 2행일 땐 아무 일도 안 났는데 **413행이 되자 조용히 틀리기
+    시작했다** — 실측:
+        '대학교'    160곳 매치 → 항상 옛 테스트픽스처 기관을 돌려줬다
+        '산학협력단'  45곳 매치 → 〃
+    에러도 경고도 없이 **엉뚱한 기관의 L3 규정이 로드된다.** skip 보다 나쁘다 —
+    skip 은 「안 쟀다」는 흔적이라도 남기는데 이건 「쟀는데 틀렸다」를 흔적 없이 통과시킨다.
+
+    그래서 세 단을 갈랐다:
+      ① org_id 또는 기관명 **완전 일치** — 하나뿐이다. 그대로 돌려준다
+      ② 부분 일치가 **딱 하나** — 그것이다
+      ③ 부분 일치가 **여럿** — 🔴 고르지 않고 `기관모호` 로 던진다.
+         「아마 이것」을 만들지 않는다. 사용자가 좁혀야 한다
+    """
     row = cur.execute(
         "SELECT org_id, 기관명 FROM tenant.orgs "
-        " WHERE org_id::text = %s OR 기관명 = %s OR 기관명 ILIKE %s LIMIT 1",
-        (기관, 기관, f"%{기관}%")).fetchone()
-    return (str(row[0]), row[1]) if row else None
+        " WHERE org_id::text = %s OR 기관명 = %s",
+        (기관, 기관)).fetchone()
+    if row:
+        return (str(row[0]), row[1])
+
+    후보 = cur.execute(
+        "SELECT org_id, 기관명 FROM tenant.orgs WHERE 기관명 ILIKE %s "
+        ' ORDER BY "기관명" LIMIT 21', (f"%{기관}%",)).fetchall()
+    if not 후보:
+        return None
+    if len(후보) == 1:
+        return (str(후보[0][0]), 후보[0][1])
+    raise 기관모호(기관, [(str(r[0]), r[1]) for r in 후보])
 
 
 def main() -> None:
@@ -510,7 +575,16 @@ def main() -> None:
     a = ap.parse_args()
 
     with db.connect() as conn, conn.cursor() as cur:
-        찾음 = org해소(cur, a.org)
+        try:
+            찾음 = org해소(cur, a.org)
+        except 기관모호 as e:
+            # 🔴 하나를 골라주지 않는다. 고르면 사용자는 «찾았다» 고 믿는다.
+            print(f"🔴 '{e.기관}' 이 {len(e.후보)}곳에 걸린다 — 더 좁혀라")
+            for oid, 이름 in e.후보[:20]:
+                print(f"     {이름}   {oid}")
+            if len(e.후보) > 20:
+                print("     … (20곳까지만 보인다)")
+            sys.exit(1)
         if not 찾음:
             print(f"🔴 기관을 못 찾았다: {a.org}")
             sys.exit(1)
