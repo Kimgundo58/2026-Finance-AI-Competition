@@ -3,7 +3,8 @@
 
 XML  → 조문 구조 그대로 (품질 최상)
 PDF  → pdfplumber
-HWP  → hwp_extract.py 재사용
+HWP  → hwp_extract.py 재사용 (OLE v5) · HWPML(XML) 은 lxml
+HWPX → hwpx_extract.py (zip). 확장자가 아니라 **내용물**로 갈라 보낸다
 TXT  → 그대로
 """
 from __future__ import annotations
@@ -170,7 +171,20 @@ def _extract_hwpml(path: Path) -> str:
 
 
 def extract_hwp(path: Path) -> str:
+    """`.hwp` / `.hwpx` 공용. 🔴 확장자를 믿지 않고 앞 바이트로 갈라 보낸다.
+
+    실측(2026-09-02): TIPS 운영사 현황(2026년).hwpx 는 확장자만 hwpx 고 내부는
+    XLSX 였다. 확장자로 보내면 OLE 파서가 NotOleFileError 로 죽고 정체를 못 밝힌다.
+      PK     → zip → hwpx_extract (내용물 재검증 · hwpx 아니면 NotHwpxError)
+      D0 CF 11 E0     → OLE  → hwp_extract (HWP v5)
+      <?xml           → HWPML
+      그 밖           → 그대로 hwp_extract 로 보내 그쪽 예외를 살린다
+    """
     head = path.open("rb").read(16)
+    if head.startswith(b"PK"):
+        from hwpx_extract import extract as extract_hwpx
+
+        return extract_hwpx(path)
     if head.lstrip()[:5] == b"<?xml":
         return _extract_hwpml(path)
 
