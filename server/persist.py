@@ -1,20 +1,20 @@
 # -*- coding: utf-8 -*-
-"""판정 결과 → DB 영속화.   **[레인 A 소유 — 시그니처는 ai-14 동결]**
+"""판정 결과 → DB 영속화.   **[지출계획 계통 · 시그니처 동결]**
 
 🔴 **`tenant.decisions` 에 INSERT 하지 않는다.** `scripts/orchestrate.py::decisions_적재()`
    가 판정 시점에 이미 그 행을 만든다 (decision_id 도 거기서 나온다). 여기서 또 넣으면
-   판정 1건당 행이 둘 생기고, 골든셋 평가가 그 테이블을 분모로 쓰기 때문에 지표까지
+   판정 1건당 행이 둘 생기고, 정답셋 평가가 그 테이블을 분모로 쓰기 때문에 지표까지
    오염된다 (ai-14 정정, 2026-09-01 — 최초 지시서 ②-1 은 폐기됨).
 
 이 함수가 하는 일은 **잇기** 세 가지뿐이다:
   1. 이미 있는 `decisions` 행에 `plan_id` 를 UPDATE 로 붙인다 (INSERT 아니다)
   2. `expense_plans.latest_decision_id`·`상태='judged'` 를 UPDATE 한다
   3. `routes_tasks.동기화()` 를 **함수로 호출**해 `plan_tasks` 를 잇는다
-     (그 파일은 레인 B 소유라 편집하지 않는다 — import 만 한다)
+     (할일 계통이라 편집하지 않고 import 만 한다 — 재판정 규칙이 그 파일에 몰려 있다)
 
 `decision_id` 가 None 이면 (orchestrate 가 DB 없이 돌았거나 적재가 실패한 경우) 없는
 행을 만들지 않고 저장 실패를 알린다. 판정 결과 자체는 이미 사용자 화면에 나갔으므로
-저장 실패로 SSE 스트림을 죽이지 않는다 — 호출부(`main.py::_실_판정`, 레인 C 소유)가
+저장 실패로 SSE 스트림을 죽이지 않는다 — 호출부(`main.py::_실_판정`)가
 `저장` 이벤트로 이 반환값을 그대로 흘린다.
 
 과도기 주석: 근본 해법은 `orchestrate.판정()` 이 처음부터 `plan_id` 를 받아 decisions
@@ -28,7 +28,7 @@ from ._common import MOCK, _실행
 
 def 판정_저장(plan_id: int | None, body, out: dict,
              org_id: str | None = None, decision_id: int | None = None) -> dict:
-    """반환 모양은 고정이다 (레인 C 가 SSE `저장` 이벤트로 그대로 흘린다).
+    """반환 모양은 고정이다 (`main.py` 가 SSE `저장` 이벤트로 그대로 흘린다).
 
         {"저장": true,  "decision_id": 123, "plan_id": 45,
          "할일": {"생성":.., "갱신":.., "보존_user":.., "보존_날짜수정":.., "코드매칭":.., "코드미상":..}}
@@ -77,6 +77,7 @@ def _실_저장(plan_id: int | None, body, out: dict,
     # ③ 할일 동기화 — routes_tasks.py 를 편집하지 않고 함수만 부른다.
     동기화결과 = _할일동기화(
         plan_id, 할일동기화(decision_id=decision_id, 해야할일=out.get("해야할일", [])),
+        org_id,
     )
 
     return {

@@ -1,0 +1,60 @@
+{
+  "session_id": "e5e3e0dd-0c75-4ba7-bccf-38a8a980bbfa",
+  "role": "coordinator",
+  "nagged": true,
+  "기록보류": "실제 구현.md 가 다른 세션의 미커밋 수정 상태라 append 충돌 위험. Phase 2 에서 기록한다",
+  "복구메모": "2026-09-01 핀 파일이 외부 요인으로 사라져 조율 세션이 재작성했다. 1차 레인(routes_* 구현)의 session_id 는 소실됐고, 2차 배정은 아래 배정표로 한다.",
+  "배정": {
+    "A": "ai-de",
+    "B": "ai-59",
+    "C": "ai-ff",
+    "D": "49ba6a97-1bd6-4ae4-b61a-85499c82f647"
+  },
+  "lanes": {
+    "A": {
+      "이름": "지출계획·판정영속화",
+      "session_id": null,
+      "owns": [
+        "server/routes_plans.py",
+        "server/persist.py",
+        "tests/test_plans.py",
+        "tests/test_persist.py"
+      ]
+    },
+    "B": {
+      "이름": "할일",
+      "session_id": null,
+      "owns": [
+        "server/routes_tasks.py",
+        "tests/test_tasks.py"
+      ]
+    },
+    "C": {
+      "이름": "입력계약·L3·judge배선",
+      "session_id": "0ed90e94-b731-4abe-af79-a36aacc340dd",
+      "owns": [
+        "server/routes_l3.py",
+        "server/main.py",
+        "tests/test_normalize_form.py",
+        "tests/test_l3_upload.py",
+        "tests/test_judge_persist.py"
+      ]
+    },
+    "D": {
+      "이름": "계약검증·회귀",
+      "session_id": null,
+      "owns": [
+        "tests/test_contract.py",
+        "tests/test_regression_rank.py"
+      ]
+    }
+  },
+  "계약파일": [
+    "server/models.py",
+    "server/_common.py",
+    "server/mock_data.py",
+    "server/__init__.py",
+    "tests/conftest.py",
+    "db/init/05_frontend_alter.sql"
+  ]
+}

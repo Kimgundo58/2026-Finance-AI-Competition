@@ -3,7 +3,7 @@
 
 🔴 MOCK 모드(기본, DB 없이 돈다)만 검증한다. `_실_업로드`/`_실_상태` 의 DB 경로는
    `SUDDOE_MOCK=0` + 실 DSN 이 있어야 도는데, 그건 이 테스트의 책임이 아니다
-   (계약·확장자 게이트가 이 레인의 검증 대상이다).
+   (계약·확장자 통과 조건이 이 파일의 검증 대상이다).
 
     pytest tests/test_l3_upload.py -q
     python tests/test_l3_upload.py            (pytest 없이도 돈다)

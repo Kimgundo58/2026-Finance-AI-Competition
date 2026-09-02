@@ -1,28 +1,28 @@
 # -*- coding: utf-8 -*-
-"""LLM 어댑터 — 슬롯 라우팅과 **f_axis 차단 게이트** (`LLM.md` §2 · `서비스 아키텍쳐.md` §6 §11).
+"""LLM 어댑터 — 호출 자리 라우팅과 **f_axis 차단 통과 조건** (`LLM.md` §2 · `서비스 아키텍쳐.md` §6 §11).
 
                     판정 오케스트레이터
                            |
-                LLMAdapter.호출(슬롯, 프롬프트, 스키마)
+                LLMAdapter.호출(호출 자리, 프롬프트, 스키마)
                            |
         +------------------+------------------+
      LocalVLLM        AnthropicAPI        (예비)
-     자체/임대 GPU     비활성 폴백
-     (OpenAI 호환)    (F축 슬롯 제외)
+     자체/임대 GPU     비활성 대체 경로
+     (OpenAI 호환)    (F축 호출 자리 제외)
 
-🔴 **이 파일의 존재 이유는 게이트 하나다.**
+🔴 **이 파일의 존재 이유는 통과 조건 하나다.**
    「F축이 프롬프트에 들어가는 호출은 외부 제공자로 라우팅되면 안 된다」 —
    `서비스 아키텍쳐.md` §11 이 "설계됐으나 미구현" 으로 박아둔 항목이고,
    2026-08-31 실측으로 코드베이스 전체에 `f_axis` 식별자가 없었다.
    지침이 아니라 **코드가 막는다.** 막히면 `tenant.incidents(종류='ROUTING_BLOCK')` 에 남는다.
 
-게이트는 두 겹이다 — 어느 한쪽만으로는 새는 걸 실측으로 확인했다:
+통과 조건은 두 겹이다 — 어느 한쪽만으로는 새는 걸 실측으로 확인했다:
 
-  [1겹] 슬롯 선언   `f_axis=True` 슬롯 + 외부 제공자 → 차단
-        슬롯 표가 정확하다는 전제다. 오케스트레이터가 슬롯 이름을 잘못 넘기면 뚫린다
+  [1겹] 호출 자리 선언   `f_axis=True` 호출 자리 + 외부 제공자 → 차단
+        호출 자리 표가 정확하다는 전제다. 오케스트레이터가 호출 자리 이름을 잘못 넘기면 뚫린다
 
-  [2겹] 프롬프트 검사  F축 필드명·라벨이 프롬프트에 있으면 슬롯 선언과 무관하게 차단
-        요건의 원문이 "F축이 **프롬프트에 들어가는** 호출" 이다. 슬롯 라벨이 아니라
+  [2겹] 프롬프트 검사  F축 필드명·라벨이 프롬프트에 있으면 호출 자리 선언과 무관하게 차단
+        요건의 원문이 "F축이 **프롬프트에 들어가는** 호출" 이다. 호출 자리 라벨이 아니라
         내용이 기준이므로 이쪽이 오히려 요건에 더 가깝다
 
 무엇이 F축인가 (`RAG.md` §2-3)
@@ -45,7 +45,10 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 
-DSN = os.environ.get("SUDDOE_DSN", "postgresql://postgres:devpw@localhost:5432/suddoe")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _lib import db  # noqa: E402
+
+DSN = db.DSN
 
 
 class RoutingBlocked(RuntimeError):
@@ -53,11 +56,11 @@ class RoutingBlocked(RuntimeError):
 
 
 class ProviderDisabled(RuntimeError):
-    """비활성 폴백을 부르려 했다."""
+    """비활성 대체 경로를 부르려 했다."""
 
 
 # ────────────────────────────────────────────────────────────────────
-# 슬롯 (LLM.md §1)
+# 호출 자리 (LLM.md §1)
 # ────────────────────────────────────────────────────────────────────
 
 @dataclass(frozen=True)
@@ -76,12 +79,12 @@ class 슬롯:
     "정규화":   슬롯("정규화", "(1) 자연어 → JSON", True, "Qwen/Qwen3-8B"),
     # F 문서 파싱 — 사업계획서 원문이 통째로 들어간다
     "F문서파싱": 슬롯("F문서파싱", "사업계획서 등 F2 파싱", True, "Qwen/Qwen3-8B", 4000, False),
-    # (4)-a 조항별 스크리닝. 채택 자체가 미결(LLM.md §4)이나 슬롯 자리는 잡아둔다
+    # (4)-a 조항별 스크리닝. 채택 자체가 미결(LLM.md §4)이나 호출 자리는 잡아둔다
     "스크리닝": 슬롯("스크리닝", "(4)-a 조항별 독립 판정 (채택 미결)", True, "Qwen/Qwen3-8B"),
     # (4)-b 판정 조립. 🔴 B5 에 F 프로필이 들어간다 — 외부 배치 불가의 근원
     "판정조립": 슬롯("판정조립", "(4)-b 최종 판정 + 인용", True, "Qwen/Qwen3-32B-AWQ", 1500),
     # (5) 표현만. 판단불가 경로 전용 — 문의 초안·안내문·A4 diff 요약.
-    #     F축이 안 들어가므로 이론상 외부 라우팅이 가능한 유일한 슬롯이다.
+    #     F축이 안 들어가므로 이론상 외부 라우팅이 가능한 유일한 호출 자리이다.
     #     그래도 [2겹] 프롬프트 검사는 그대로 탄다
     "문장생성": 슬롯("문장생성", "(5) 표현 생성 (판단불가 경로 전용)", False, "Qwen/Qwen3-8B", 1200, False),
 }
@@ -135,7 +138,7 @@ class LocalVLLM(제공자):
 
     ⚠️ RunPod 는 3자 하드웨어지만 **외부 API 제공자가 아니다.** 우리가 띄운 프로세스에
        우리가 HTTP 를 친다. `LLM.md` §1 이 "제출본·데모는 테스트 데이터만 다루므로
-       RunPod 서빙 허용, 실서비스의 F축 실데이터 슬롯은 자체 GPU 전제" 로 갈라둔 그대로다.
+       RunPod 서빙 허용, 실서비스의 F축 실데이터 호출 자리는 자체 GPU 전제" 로 갈라둔 그대로다.
        그 구분은 `SUDDOE_VLLM_SELF_HOSTED=0` 으로 뒤집을 수 있게 남겨둔다.
     """
     이름: str = "LocalVLLM"
@@ -172,10 +175,10 @@ class LocalVLLM(제공자):
 
 @dataclass
 class AnthropicAPI(제공자):
-    """비활성 폴백 (`LLM.md` §1).
+    """비활성 대체 경로 (`LLM.md` §1).
 
     재개 조건은 §6 사다리에서 치명 오답 0 제약이 실패할 때뿐이고, 그때도
-    **F축 슬롯은 제외**다. 여기서 살아나도 게이트가 f_axis 슬롯을 막는다 —
+    **F축 호출 자리는 제외**다. 여기서 살아나도 통과 조건이 f_axis 호출 자리를 막는다 —
     그 이중구조가 이 클래스를 지워버리지 않고 남겨두는 이유다.
     """
     이름: str = "AnthropicAPI"
@@ -195,8 +198,7 @@ class AnthropicAPI(제공자):
 def _사고기록(종류: str, 상세: dict, dsn: str | None = None) -> None:
     """`tenant.incidents` 에 남긴다. 🔴 기록 실패가 차단을 삼키면 안 된다."""
     try:
-        import psycopg
-        with psycopg.connect(dsn or DSN, connect_timeout=3) as conn:
+        with db.connect(dsn, connect_timeout=3) as conn:
             conn.execute(
                 'INSERT INTO tenant.incidents ("종류", "상세") VALUES (%s, %s::jsonb)',
                 (종류, json.dumps(상세, ensure_ascii=False)))
@@ -207,7 +209,7 @@ def _사고기록(종류: str, 상세: dict, dsn: str | None = None) -> None:
 
 
 class LLMAdapter:
-    """슬롯 → 제공자 라우팅. 게이트를 통과한 호출만 나간다."""
+    """호출 자리 → 제공자 라우팅. 통과 조건을 통과한 호출만 나간다."""
 
     def __init__(self, 제공자들: list[제공자] | None = None, *, dsn: str | None = None,
                  기록: bool = True):
@@ -219,7 +221,7 @@ class LLMAdapter:
         self.기록 = 기록
         self.차단로그: list[dict] = []      # 테스트·서버 진단용 (프로세스 수명)
 
-    # ── 게이트 ──────────────────────────────────────────────────────
+    # ── 통과 조건 ──────────────────────────────────────────────────────
     def 검사(self, s: 슬롯, p: 제공자, 프롬프트: str) -> None:
         흔적 = F축_흔적(프롬프트)
         if not p.외부:
@@ -247,7 +249,7 @@ class LLMAdapter:
         if not 후보:
             raise LookupError(f"제공자 '{강제}' 가 등록돼 있지 않다")
         # 활성 제공자 우선. 강제 지정이면 활성 여부와 무관하게 그것을 고른다 —
-        # 🔴 게이트 테스트가 비활성 외부 제공자를 지목해 차단을 확인해야 하기 때문이다
+        # 🔴 통과 조건 테스트가 비활성 외부 제공자를 지목해 차단을 확인해야 하기 때문이다
         if 강제:
             return 후보[0]
         살아있는 = [p for p in 후보 if p.활성]
@@ -256,14 +258,14 @@ class LLMAdapter:
         return 살아있는[0]
 
     # ── 호출 ────────────────────────────────────────────────────────
-    def 호출(self, 슬롯이름: str, 프롬프트: str, 스키마: dict | None = None, *,
+    def 호출(self, 호출자리이름: str, 프롬프트: str, 스키마: dict | None = None, *,
              온도: float = 0.0, 타임아웃: int = 180,
              제공자강제: str | None = None) -> tuple[dict | str, dict]:
         try:
-            s = 슬롯표[슬롯이름]
+            s = 슬롯표[호출자리이름]
         except KeyError:
             raise LookupError(
-                f"모르는 슬롯 '{슬롯이름}'. 슬롯은 {list(슬롯표)} 뿐이다 — "
+                f"모르는 슬롯 '{호출자리이름}'. 슬롯은 {list(슬롯표)} 뿐이다 — "
                 f"function calling 미개방이라 슬롯이 늘어나면 호출 수 예측이 깨진다") from None
         p = self._고르기(s, 제공자강제)
         self.검사(s, p, 프롬프트)                      # 🔴 나가기 전에 반드시
@@ -275,15 +277,15 @@ class LLMAdapter:
 기본어댑터 = LLMAdapter()
 
 
-def 호출(슬롯이름: str, 프롬프트: str, 스키마: dict | None = None, **kw):
+def 호출(호출자리이름: str, 프롬프트: str, 스키마: dict | None = None, **kw):
     """모듈 수준 편의 함수. 오케스트레이터·서버가 이걸 쓴다."""
-    return 기본어댑터.호출(슬롯이름, 프롬프트, 스키마, **kw)
+    return 기본어댑터.호출(호출자리이름, 프롬프트, 스키마, **kw)
 
 
 # ────────────────────────────────────────────────────────────────────
 
 def _selftest() -> int:
-    """게이트가 실제로 막는지 확인한다. GPU·DB 없이 돈다."""
+    """통과 조건이 실제로 막는지 확인한다. GPU·DB 없이 돈다."""
     실패 = 0
 
     def 확인(설명, 조건):

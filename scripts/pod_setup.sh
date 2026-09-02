@@ -12,6 +12,8 @@
 #         드라이버가 12.4 라 RuntimeError: NVIDIA driver is too old (found 12040)
 #      ② vLLM 0.8.5 를 깔았더니 transformers 가 최신이라 토크나이저 API 불일치
 #         AttributeError: Qwen2Tokenizer has no attribute all_special_tokens_extended
+#         🔴 2026-09-02 에 **다른 버전으로 재발**했다 (vllm 0.11.0 + transformers 5.16.1).
+#         그래서 이제 constraints 에 `transformers<5` 를 같이 못박는다
 #
 #    그래서 **템플릿 torch 가 이미 CUDA 를 쓸 수 있으면 그걸 상속**하고
 #    (`--system-site-packages` + `--no-deps`), 못 쓸 때만 드라이버에 맞춰 새로 깐다.
@@ -54,6 +56,11 @@ if [ "${TORCH_OK}" = "True" ]; then
   {
     echo "torch==${TORCH_V}"
     [ -n "${TV_V}" ] && echo "torchvision==${TV_V}"
+    # 🔴 transformers 도 못박는다 (2026-09-02 재발). vLLM 이 자기 의존성으로 5.x 를 끌어오면
+    #    토크나이저 API 가 안 맞아 부팅이 죽는다 — 아래 함정 ② 와 같은 병, 다른 버전이다.
+    #      vllm 0.11.0 + transformers 5.16.1 -> Qwen2Tokenizer has no attribute
+    #      all_special_tokens_extended.  4.57.6 으로 내려서 해결했다
+    echo "transformers<5"
   } > /workspace/constraints.txt
   echo "torch 고정:"; cat /workspace/constraints.txt
 
@@ -68,7 +75,7 @@ else
   python -m venv "${VENV}"
   "${VENV}/bin/pip" install -q --upgrade pip
   "${VENV}/bin/pip" install -q "torch==${TORCH}" --index-url "https://download.pytorch.org/whl/${IDX}"
-  echo "torch==${TORCH}" > /workspace/constraints.txt
+  { echo "torch==${TORCH}"; echo "transformers<5"; } > /workspace/constraints.txt   # transformers 5.x 는 토크나이저 API 불일치 (2026-09-02)
   "${VENV}/bin/pip" install -q --constraint /workspace/constraints.txt "vllm==${VLLM}"
 fi
 

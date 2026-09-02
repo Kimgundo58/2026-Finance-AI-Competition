@@ -62,12 +62,11 @@ import sys
 from difflib import SequenceMatcher, unified_diff
 from pathlib import Path
 
-import psycopg
-
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
+from _lib import db  # noqa: E402
 
-DSN = os.environ.get("SUDDOE_DSN", "postgresql://postgres:devpw@localhost:5432/suddoe")
+DSN = db.DSN
 
 # recheck_queue DDL 은 D 소유(D1-d)다. 아직 없으면 여기로 떨어뜨리고 계속 간다.
 FALLBACK = ROOT / "scripts" / "_work" / "_recheck_queue.json"
@@ -393,8 +392,8 @@ def 영향_레코드(conn, 신doc: str, 구doc: str, 쌍: dict, 변경: dict) ->
     return recs
 
 
-def 어휘집_트리거(변경조: list[tuple[dict, dict]], 신doc: str, 구doc: str) -> list[dict]:
-    """비목 어휘집 재검수 트리거 (`Agent.md` §9 A4 마지막 줄)."""
+def 용어사전_트리거(변경조: list[tuple[dict, dict]], 신doc: str, 구doc: str) -> list[dict]:
+    """비목 용어 사전 재검수 트리거 (`Agent.md` §9 A4 마지막 줄)."""
     맞은비목 = {}
     for 쌍, 변경 in 변경조:
         if not 변경["본문변경"] or not 쌍["신"]:
@@ -835,14 +834,14 @@ def 실행_db(conn, 줄, 스캔한신doc: set[str] | None = None) -> list[dict]:
             근거통계[쌍["근거"].split("0.")[0]] = 근거통계.get(쌍["근거"].split("0.")[0], 0) + 1
         줄(f"    구 {len(구)}조 ↔ 신 {len(신)}조   매칭 {근거통계}")
         줄(f"    변경 {통계}")
-        recs += 어휘집_트리거(변경조, g["신"]["doc_id"], g["구"]["doc_id"])
+        recs += 용어사전_트리거(변경조, g["신"]["doc_id"], g["구"]["doc_id"])
     return recs
 
 
 def 실행_xml(conn, 줄, 한도: int | None) -> list[dict]:
     쌍목록 = xml_계보()
     줄(f"\n■ 법령 연혁 XML — 현행 대비 직전 판이 있는 법령 {len(쌍목록)}건")
-    # 우리 코퍼스가 실제로 참조하는 법령만 본다. 944건 전부 파싱하면 수분이 날아가고,
+    # 우리 규정 모음이 실제로 참조하는 법령만 본다. 944건 전부 파싱하면 수분이 날아가고,
     # 아무도 인용하지 않는 법령의 개정은 recheck 대상이 아니다.
     참조되는 = {r[0] for r in conn.execute("""
         SELECT DISTINCT dst_doc_id FROM corpus.refs
@@ -908,7 +907,7 @@ def main() -> None:
     a = ap.parse_args()
 
     if a.heal_only:
-        with psycopg.connect(DSN) as conn:
+        with db.connect() as conn:
             치유(conn, a.dry, print)
             조정(conn, a.dry, print)      # 열쇠 대조 없이 ACTIVE_NOT_LATEST 만
         return
@@ -920,7 +919,7 @@ def main() -> None:
         줄들.append(s)
 
     줄("A4 개정 대응 — 조 매칭(제목 주·번호 보조) → 본문 diff → 근거 역조회 → recheck_queue")
-    with psycopg.connect(DSN) as conn:
+    with db.connect() as conn:
         recs: list[dict] = []
         스캔한신doc: set[str] = set()
         if a.source in ("db", "both"):

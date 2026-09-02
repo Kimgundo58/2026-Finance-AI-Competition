@@ -54,3 +54,7 @@ scripts/_work/_rrf_tune_cache.pkl
 
 # 백업 산출물
 *.bak
+
+# 커밋 메시지 임시파일 (git add -A 에 쓸려 들어간 적 있다)
+_m.txt
+_msg.tmp

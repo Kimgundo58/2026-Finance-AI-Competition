@@ -19,7 +19,7 @@
 **정답은 `eval.golden_chunks` 고정분**(D3)이다. 매 실행 원문 부분일치로 되짚지 않는다 —
 그래야 조합 간 비교가 성립한다.
 
-🔴 **유의미 판정 규칙 (계약 §7).** 골든셋 74문항에서 1문항 = 1.4%p 다.
+🔴 **유의미 판정 규칙 (계약 §7).** 정답셋 74문항에서 1문항 = 1.4%p 다.
    **3문항(4.1%p) 미만의 차이는 노이즈다.** "최적" 이라고 부르지 않는다.
    이 스크립트는 기준값 대비 +3문항 이상인 조합만 `유의미` 로 표시한다.
 
@@ -42,10 +42,11 @@ import time
 import psycopg
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _lib import db  # noqa: E402
 import eval_store  # noqa: E402
 import retrieve  # noqa: E402
 
-DSN = eval_store.DSN
+DSN = db.DSN
 
 W_그리드 = [0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
 RRFK_그리드 = [5, 10, 20, 60, 120]

@@ -14,7 +14,7 @@
 
 🔴 **검색 구현은 여기에 없다 — `scripts/retrieve.py` 를 부른다** (2026-08-31 분리).
    평가와 실전이 다른 코드를 쓰면 여기서 잰 숫자가 실전을 설명하지 못한다.
-   분리 시점의 기준값(골든셋 70문항): **RRF hit@5 = 52.9%** · dense 47.1% · BM25 40.0%.
+   분리 시점의 기준값(정답셋 70문항): **RRF hit@5 = 52.9%** · dense 47.1% · BM25 40.0%.
    이 값이 한 자리라도 바뀌면 검색 동작이 바뀐 것이다.
 
 지표
@@ -30,7 +30,7 @@
     PYTHONIOENCODING=utf-8 python scripts/eval_retrieval.py --c7           # C7 사업필터 on/off 짝비교
     PYTHONIOENCODING=utf-8 python scripts/eval_retrieval.py --사업필터      # 사업필터 켠 채로 전체 재측정
     PYTHONIOENCODING=utf-8 python scripts/eval_retrieval.py --dangling     # DANGLING_WARN 발화 여부
-    PYTHONIOENCODING=utf-8 python scripts/eval_retrieval.py --폐포          # 폐포 포함 커버리지
+    PYTHONIOENCODING=utf-8 python scripts/eval_retrieval.py --폐포          # 참조 확장 포함 커버리지
 """
 from __future__ import annotations
 
@@ -47,9 +47,10 @@ import psycopg
 #    출력 인코딩은 PYTHONIOENCODING=utf-8 로 준다 (훅이 강제한다).
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import retrieve  # noqa: E402  검색 구현 정본
+from _lib import db  # noqa: E402
+import retrieve  # noqa: E402  검색 구현 기준 문서
 
-DSN = retrieve.DSN
+DSN = db.DSN
 
 
 def 정규화(s: str) -> str:
@@ -93,7 +94,7 @@ def 정답청크_고정(cur, gold_id: int) -> set[int]:
 
 
 def 정답조(cur, 근거: list[dict]) -> set[int]:
-    """정답근거 -> `doc_articles.article_id` 집합. 폐포는 조 단위라 청크로는 못 잰다."""
+    """정답근거 -> `doc_articles.article_id` 집합. 참조 확장은 조 단위라 청크로는 못 잰다."""
     out: set[int] = set()
     for g in 근거 or []:
         조 = re.match(r"(제\d+조(?:의\d+)?)", g.get("조번호") or "")
@@ -112,7 +113,7 @@ def 정답조(cur, 근거: list[dict]) -> set[int]:
 #   필터밖    정답 청크가 pre-filter 를 통과하지 못한다 (status·scope·적용대상·사업명)
 #             -> 검색기를 아무리 고쳐도 안 잡힌다. 태깅·적재 쪽 문제다
 #   결손      정답 근거에 해당하는 청크 자체가 없다 (부속물 미청킹 등)
-#             -> 코퍼스 문제. 청킹·룰 테이블 쪽
+#             -> 규정 모음 문제. 청킹·룰 테이블 쪽
 #   후보밖    필터는 통과하는데 dense 전량 순위가 후보K 밖이다
 #             -> 임베딩/질의 표현 문제. 리랭커로도 못 구한다
 #   랭킹      후보 안에는 있는데 top-5 밖이다
@@ -158,7 +159,7 @@ def 진단하기(cur, 데이터, r_res, 벡터들, a, 미해결) -> None:
         if 사례.get(k):
             print(f"    {k}: {사례[k][:12]}")
     if 미해결:
-        # 평가 분모 밖이라 위 백분율에는 안 들어간다. 코퍼스 결손이므로 따로 센다.
+        # 평가 분모 밖이라 위 백분율에는 안 들어간다. 규정 모음 결손이므로 따로 센다.
         print(f"  (평가 제외 {len(미해결)}건 — 정답 청크가 코퍼스에 없다: "
               f"{[(m[0], m[1]) for m in 미해결]})")
     if 사례.get("필터밖"):
@@ -259,7 +260,7 @@ def main() -> None:
 
         d_res, b_res, r_res = [], [], []
         겹침 = []
-        폐포res = []
+        참조확장res = []
         for (gid, 세트, q, 정답, 사업, 근거), vec in zip(데이터, 벡터들):
             사업 = 사업키(사업)
             dn = retrieve.dense(cur, vec, k=a.k, 사업명=사업, 사업필터=a.사업필터)
@@ -272,11 +273,11 @@ def main() -> None:
             if a.폐포:
                 top5 = r_res[-1][0][:5]
                 pae, _, _ = retrieve.폐포수집(cur, top5)
-                # 조 단위로 맞춘다 — top-5 청크의 article_id + 폐포 article_id
+                # 조 단위로 맞춘다 — top-5 청크의 article_id + 참조 확장 article_id
                 cur.execute("SELECT article_id FROM corpus.chunks WHERE chunk_id = ANY(%s)",
                             (top5,))
                 도달 = [r[0] for r in cur.fetchall()]
-                폐포res.append((도달, 도달 + pae, 정답조(cur, 근거)))
+                참조확장res.append((도달, 도달 + pae, 정답조(cur, 근거)))
 
         print(f"{'검색기':10} " + " ".join(f"{'hit@'+str(k):>8}" for k in KS) + f"{'MRR':>8}")
         print("-" * (10 + 9 * len(KS) + 8))
@@ -304,7 +305,7 @@ def main() -> None:
 
         if a.dangling:
             # A3 DANGLING_WARN 이 L1·L2 경로에서 실제로 발화하는지. 판정 인덱스 **안의**
-            # dangling 만 신호다 — top-5 진입점에서 출발한 것만 센다 (RAG.md §4-3).
+            # 끊긴 참조만 신호다 — top-5 진입점에서 출발한 것만 센다 (RAG.md §4-3).
             빈, 있음 = 0, []
             for (gid, _세트, _q, _정답, _사업, _근거), row in zip(데이터, r_res):
                 _, _, dang = retrieve.폐포수집(cur, row[0][:5])
@@ -405,13 +406,13 @@ def main() -> None:
 
         if a.폐포:
             def cov(idx):
-                맞 = sum(1 for row in 폐포res if set(row[idx]) & row[2])
-                return 맞 / len(폐포res) * 100
-            분모 = sum(1 for row in 폐포res if row[2])
-            print(f"\n[폐포] 조 단위 커버리지 (정답 조를 역추적한 {분모}/{len(폐포res)}문항 기준)")
+                맞 = sum(1 for row in 참조확장res if set(row[idx]) & row[2])
+                return 맞 / len(참조확장res) * 100
+            분모 = sum(1 for row in 참조확장res if row[2])
+            print(f"\n[폐포] 조 단위 커버리지 (정답 조를 역추적한 {분모}/{len(참조확장res)}문항 기준)")
             print(f"  top-5 만        {cov(0):5.1f}%")
             print(f"  top-5 + 폐포    {cov(1):5.1f}%")
-            추가 = sum(len(set(row[1]) - set(row[0])) for row in 폐포res) / len(폐포res)
+            추가 = sum(len(set(row[1]) - set(row[0])) for row in 참조확장res) / len(참조확장res)
             print(f"  폐포가 더한 조  평균 {추가:.1f}개/문항")
 
 

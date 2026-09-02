@@ -19,7 +19,7 @@
    내일 아침 "이 숫자가 무엇 때문에 나왔나"를 답할 수 있는 건 이 필드뿐이다.
 
 3. `코퍼스버전` · `git커밋` 은 안 주면 여기서 실측해 채운다.
-   사람이 안 적어서 비는 걸 막는다 — 코퍼스가 바뀌면 지표는 비교 불가가 된다.
+   사람이 안 적어서 비는 걸 막는다 — 규정 모음이 바뀌면 지표는 비교 불가가 된다.
 
 **금지** — 계약 §10: LLM-as-judge 평가(RAGAS 등)를 여기에 붙이지 않는다.
 심판이 LLM 이면 같은 산출물에 다른 점수가 나온다. 채점은 전부 결정론적이다.
@@ -30,10 +30,12 @@ import hashlib
 import json
 import os
 import subprocess
+import sys
 
-import psycopg
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _lib import db                                                   # noqa: E402
 
-DSN = os.environ.get("SUDDOE_DSN", "postgresql://postgres:devpw@localhost:5432/suddoe")
+DSN = db.DSN
 
 _종류 = ("e2e", "retrieval", "judge")
 
@@ -75,9 +77,7 @@ def 기록(run: dict, items: list[dict] | None = None, *, conn=None) -> int:
     if 종류 not in _종류:
         raise ValueError(f"종류는 {_종류} 중 하나여야 한다: {종류!r}")
 
-    닫기 = conn is None
-    conn = conn or psycopg.connect(DSN)
-    try:
+    with db.borrow(conn) as conn:
         cur = conn.cursor()
         cur.execute(
             """INSERT INTO eval.runs
@@ -109,9 +109,6 @@ def 기록(run: dict, items: list[dict] | None = None, *, conn=None) -> int:
             )
         conn.commit()
         return run_id
-    finally:
-        if 닫기:
-            conn.close()
 
 
 def 정답청크(cur, gold_id: int) -> set[int]:
@@ -176,9 +173,7 @@ def 사업키(사업명: str | None) -> str | None:
 
 def 요약(run_id: int, *, conn=None) -> dict:
     """적재된 실행 하나를 사람이 읽는 형태로 되읽는다 (검증용)."""
-    닫기 = conn is None
-    conn = conn or psycopg.connect(DSN)
-    try:
+    with db.borrow(conn) as conn:
         cur = conn.cursor()
         cur.execute("SELECT 종류, 시작, 코퍼스버전, git커밋, 문항수, 지표, 설정, 라벨 "
                     "FROM eval.runs WHERE run_id=%s", (run_id,))
@@ -191,9 +186,6 @@ def 요약(run_id: int, *, conn=None) -> dict:
         return {"run_id": run_id, "종류": r[0], "시작": r[1], "코퍼스버전": r[2],
                 "git커밋": r[3], "문항수": r[4], "지표": r[5], "설정": r[6], "라벨": r[7],
                 "items": n, "적중": hit}
-    finally:
-        if 닫기:
-            conn.close()
 
 
 if __name__ == "__main__":

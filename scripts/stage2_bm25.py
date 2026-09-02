@@ -31,7 +31,6 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="repla
 
 ROOT = Path(__file__).resolve().parent.parent
 JSONL = ROOT / "scripts" / "_work" / "_stage2_chunks.jsonl"
-DSN = os.environ.get("SUDDOE_DSN", "postgresql://postgres:devpw@localhost:5432/suddoe")
 
 # 채택 품사 (`RAG.md` §2-4). 불용어 목록은 두지 않는다 — IDF 가 감쇠시킨다.
 채택품사 = frozenset({
@@ -61,14 +60,14 @@ def 토큰화(texts: list[str]) -> list[list[str]]:
 
 
 def 적재(rows: list[dict]) -> None:
-    import psycopg
+    from _lib import db
     t = time.time()
     docs = 토큰화([r["text"] for r in rows])
     print(f"  토큰화 {time.time() - t:.0f}초", flush=True)
 
     총토큰 = sum(len(d) for d in docs)
     posting = 0
-    with psycopg.connect(DSN) as conn:
+    with db.connect() as conn:
         with conn.cursor() as cur:
             # 한 트랜잭션. 중간 상태가 검색에 노출되지 않는다.
             cur.execute("TRUNCATE corpus.chunk_terms, corpus.chunk_len;")
@@ -110,13 +109,13 @@ def 적재(rows: list[dict]) -> None:
 
 
 def verify() -> None:
-    """SQL BM25 와 `bm25s` 의 top-20 겹침률. 골든셋 평가보다 **먼저** 한다."""
+    """SQL BM25 와 `bm25s` 의 top-20 겹침률. 정답셋 평가보다 **먼저** 한다."""
     try:
         import bm25s
     except ImportError:
         sys.exit("bm25s 가 없다.  pip install bm25s")
     import numpy as np
-    import psycopg
+    from _lib import db
 
     rows = [json.loads(l) for l in JSONL.open(encoding="utf-8")]
     ids = np.array([r["chunk_id"] for r in rows])
@@ -141,7 +140,7 @@ def verify() -> None:
     ORDER BY score DESC LIMIT 20;
     """
     겹침 = []
-    with psycopg.connect(DSN) as conn:
+    with db.connect() as conn:
         for q in 질의들:
             terms = 토큰화([q])[0]
             sql_top = [r[0] for r in conn.execute(SQL, {"terms": terms}).fetchall()]

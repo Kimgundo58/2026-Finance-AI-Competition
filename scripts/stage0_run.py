@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Stage 0 오케스트레이터 — 전체 코퍼스 조(條) 분해 → JSON.
+"""Stage 0 오케스트레이터 — 전체 규정 모음 조(條) 분해 → JSON.
 
 `stage0_ingest.py` 를 대체한다. 두 가지가 달라졌다.
 
@@ -46,8 +46,8 @@ OUT_ART = DATASET / "_stage0_articles.json"
 OUT_REP = DATASET / "_stage0_report.json"
 
 # 데이터셋 안에서 판정 인덱스 대상이 **아닌** 것.
-# index_guard 는 절대 규칙(골든셋·L4·archive)만 막는다. 아래는 그 위의 스코프 판단이라
-# 게이트가 아니라 여기에 둔다. 사유를 각각 적어 리포트에 남긴다.
+# index_guard 는 절대 규칙(정답셋·L4·archive)만 막는다. 아래는 그 위의 스코프 판단이라
+# 게이트이 아니라 여기에 둔다. 사유를 각각 적어 리포트에 남긴다.
 DATASET_제외 = {
     "PMS": "PMS 매뉴얼 42건 — 판독 불필요 확정 (서비스 아키텍쳐.md §7-3③)",
     "_정리보류": "중복·범위외 보류분",
