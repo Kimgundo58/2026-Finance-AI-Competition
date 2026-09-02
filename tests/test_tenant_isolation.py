@@ -116,9 +116,17 @@ def 세계():
             "SELECT org_id FROM tenant.orgs WHERE org_id IN "
             "  (SELECT org_id FROM tenant.l3_documents) "
             ' ORDER BY "기관명" LIMIT 2').fetchall()
-        if len(기관) < 2:                       # 픽스처 미투입 — 넓혀서 잡는다
-            기관 = conn.execute(
-                'SELECT org_id FROM tenant.orgs ORDER BY "기관명" LIMIT 2').fetchall()
+        # 🔴 못 찾으면 «넓혀서 아무거나» 로 물러나지 않는다. 그게 이 커밋이 고친 바로
+        #    그 버그다 — `ORDER BY 기관명 LIMIT 2` 로 물러나면 L3 문서 없는 기관이
+        #    뽑히고 테스트 3건이 흔적 없이 skip 이 된다. 폴백이 자기가 고친 버그를 되살린다.
+        #    지금 안 터지는 이유는 l3_documents 의 distinct org 가 «딱 2» 이기 때문뿐이다.
+        #    하나만 지워져도 조용히 옛 상태로 돌아간다.
+        #    → 조건이 안 서면 **왜 못 하는지 말하고** 멈춘다. 이유 없는 skip 과 다르다.
+        if len(기관) < 2:
+            pytest.skip(
+                f"L3 문서를 가진 기관이 {len(기관)}곳뿐이다 (2곳 필요) — "
+                "scripts/seed_l3_fixture.py 로 픽스처를 넣어라. "
+                "🔴 아무 기관으로 물러나지 않는다: 그러면 L3 격리 검증이 조용히 사라진다")
         s.A, s.B = str(기관[0][0]), str(기관[1][0])
 
         # 🔴 만들기 «전» 을 먼저 잰다. 다른 세션이 같은 DB 를 쓰므로 절대값이 아니라

@@ -136,3 +136,22 @@ SELECT op.*
 
 COMMENT ON VIEW tenant."v_기관명부_최신" IS
     '사업별 최신 연도의 기관 명부. 기관 선택 화면용. 🔴 org_id 를 그대로 내보내지 마라 — 사칭 축이다';
+
+
+-- ── ④ 🔴 tenant.orgs 공개열람 — 2026-09-02 추가 ──────────────────
+--
+-- ②에서 `org_programs` 만 열어놨는데 **`orgs` 를 안 봤다.** 기관 선택 화면은
+-- `기관명` 을 보여줘야 하니 두 표를 조인한다. `orgs` 에는 `org_isolation
+-- USING (org_id = tenant.current_org())` 만 걸려 있어서, RLS 를 실제로 켜는 날
+-- **기관 목록이 통째로 0행이 된다** — 사용자가 자기 기관을 고르는 시점엔 org 문맥이 없다.
+--
+-- `orgs` 가 담은 것은 기관명·주소·부서다. 정부가 공개한 명부에서 뽑았고 원본 PDF 에
+-- 다 실려 있다. 남의 tenant 데이터(계획·판정·L3 문서)는 다른 표에 있고 그쪽은 계속 막힌다.
+--
+-- ⚠️ 🔴 그래도 이게 사칭 문제를 푸는 건 아니다. `org_id` 는 인증된 신원이 아니라
+--    **자기신고 쿼리 파라미터**다. 값을 알면 그 기관인 척할 수 있다.
+--    이 정책은 「목록을 볼 수 있게」 할 뿐이고, **기관 목록 API 는 `org_id` 를 그대로
+--    내보내면 안 된다.** 근본 해법은 org_id 를 파라미터에서 없애고 세션으로 옮기는 것이다.
+ALTER TABLE tenant.orgs ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS orgs_read_all ON tenant.orgs;
+CREATE POLICY orgs_read_all ON tenant.orgs FOR SELECT USING (true);
