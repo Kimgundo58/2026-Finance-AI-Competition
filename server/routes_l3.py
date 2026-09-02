@@ -12,14 +12,22 @@
 """
 from __future__ import annotations
 
+import io
+import logging
+import os
 import uuid
+import zipfile
+from pathlib import Path
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import (APIRouter, BackgroundTasks, File, Form, HTTPException,
+                     UploadFile)
 
-from ._common import MOCK, _질의, _실행
+from ._common import DSN, MOCK, ROOT, _질의, _실행
 from .models import L3업로드응답
 from .routes_plans import _org조건
 from . import mock_data
+
+_log = logging.getLogger("suddoe.l3")
 
 router = APIRouter(prefix="/api/l3", tags=["L3 업로드"])
 
@@ -28,8 +36,45 @@ router = APIRouter(prefix="/api/l3", tags=["L3 업로드"])
 최대_바이트 = 30 * 1024 * 1024
 
 
+def 실제형식(본문: bytes) -> str:
+    """파일 «내용»으로 형식을 본다. 확장자를 믿지 않는다.
+
+    🔴 **확장자는 거짓말을 한다** — 실물 증거가 있다. 코퍼스의
+       `민관공동창업자발굴육성(TIPS)….hwpx` 는 내부가 **XLSX** 다
+       (`namelist()` 가 `['[Content_Types].xml','_rels/.rels','xl/…']`).
+
+    🔴 **매직바이트만으로는 부족하다.** HWPX 도 XLSX 도 DOCX 도 전부 ZIP 이라
+       앞 4바이트가 똑같이 `PK\\x03\\x04` 다 — 위 파일은 매직바이트 검사를 그냥 통과한다.
+       그래서 ZIP 이면 **안의 항목 이름**까지 본다 (hwpx = `Contents/`, xlsx = `xl/`).
+
+    ⚠️ OLE 헤더(`\\xd0\\xcf\\x11\\xe0…`)는 구형 HWP·DOC·XLS 가 **공유**한다.
+       여기서 `hwp` 로 답하는 건 「OLE 복합문서다」까지이지 「한글 문서다」가 아니다.
+       그 이상은 파서가 열어봐야 안다 — 여기서 단정하지 않는다.
+    """
+    if 본문[:5] == b"%PDF-":
+        return "pdf"
+    if 본문[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
+        return "hwp"                       # OLE 복합문서 (구형 HWP·DOC·XLS 공통)
+    if 본문[:4] == b"PK\x03\x04":
+        try:
+            이름들 = zipfile.ZipFile(io.BytesIO(본문)).namelist()
+        except (zipfile.BadZipFile, OSError):
+            return "손상된zip"
+        if any(n.startswith("Contents/") for n in 이름들):
+            return "hwpx"
+        if any(n.startswith("xl/") for n in 이름들):
+            return "xlsx"
+        if any(n.startswith("word/") for n in 이름들):
+            return "docx"
+        if any(n.startswith("ppt/") for n in 이름들):
+            return "pptx"
+        return "zip"
+    return "알수없음"
+
+
 @router.post("/upload", response_model=L3업로드응답, status_code=202)
 async def 업로드(
+    배경: BackgroundTasks,
     파일: UploadFile = File(...),
     org_id: str = Form(...),
     기관명: str | None = Form(None),
@@ -48,10 +93,22 @@ async def 업로드(
     if len(본문) > 최대_바이트:
         raise HTTPException(413, "파일이 너무 큽니다 (30MB 이하).")
 
+    # 🔴 확장자 다음에 «내용» 을 본다. 순서가 중요하다 — 크기·빈파일 검사를 먼저 통과시켜야
+    #    30MB 초과가 415 가 아니라 413 으로 나간다.
+    #    🔴 목·실 양쪽에 건다. 목이 받아주고 실서버가 거부하면 계약(「갈아끼워도 프론트
+    #       코드는 한 줄도 안 바뀐다」)이 깨진다.
+    진짜 = 실제형식(본문)
+    if 진짜 != 확장:
+        raise HTTPException(415, f"파일 내용이 .{확장} 이 아닙니다 (실제: {진짜}). "
+                                 f"확장자만 바꾼 파일은 파싱할 수 없습니다.")
+
     if MOCK:
         return L3업로드응답(**{**mock_data.목_L3, "파일명": 이름, "확장자": 확장,
                             "doc_id": f"l3-mock-{uuid.uuid4().hex[:8]}"})
-    return _실_업로드(본문, 이름, 확장, org_id, 기관명)
+    응답 = _실_업로드(본문, 이름, 확장, org_id, 기관명)
+    # 🔴 응답을 «보낸 뒤» 에 파싱한다. 202 Accepted 계약이라 여기서 붙들면 안 된다.
+    배경.add_task(파싱_배경, 응답.doc_id)
+    return 응답
 
 
 @router.get("/{doc_id}", response_model=L3업로드응답)
@@ -67,21 +124,49 @@ def 상태(doc_id: str, org_id: str | None = None) -> L3업로드응답:
 # 🔴 L3 실 경로 구역
 # ════════════════════════════════════════════════════════════════════
 
-_확장_추출방식 = {"hwpx": "hwpx", "hwp": "hwp"}   # pdf → 'native' (pdftext.py 경로)
+# pdf → 'native' (pdftext.py 경로)
+#
+# 🔴 **이 표를 확장자로 조회해도 되는 이유는 `실제형식()` 이 앞에서 걸러주기 때문이다.**
+#    그 검사가 없으면 위장 파일이 **틀린 `extraction` 태그**를 DB 에 박는다.
+#    CLAUDE.md 가 `extraction` 을 신뢰등급에 묶어놨으므로(`vlm` → A등급 인용 금지)
+#    태그가 틀리면 **신뢰등급이 틀린다.** 업로드 경로에서 내용 검사를 빼면 이 줄이 거짓말한다.
+_확장_추출방식 = {"hwpx": "hwpx", "hwp": "hwp"}
+
+# 업로드 원본을 두는 곳. 파서가 `doc_id` 로 찾아간다.
+#
+# 🔴 **DB 에 파일 칸이 없다.** `l3_documents` 는 `원본파일명`(표시용)·`출처`(라벨)만 들고
+#    바이트를 담을 컬럼이 없다. 컬럼을 새로 파는 건 DDL 이라 여기서 안 한다 —
+#    대신 **`doc_id` 에서 경로가 유도되게** 해서 DB 에 경로를 안 적고도 찾을 수 있게 한다.
+#    (`doc_id` 는 PK 라 충돌하지 않고, 행이 지워지면 파일도 고아가 되는 게 눈에 보인다)
+L3_저장소 = Path(os.environ.get("SUDDOE_L3_DIR", str(ROOT / "_l3_업로드")))
+
+
+def 원본경로(doc_id: str, 확장: str) -> Path:
+    """🔴 파일명을 **사용자 입력에서 만들지 않는다.** 서버가 만든 `doc_id`(uuid)로만 짓는다 —
+    사용자 파일명을 경로에 쓰면 `../` 로 저장소 밖에 쓸 수 있다."""
+    안전확장 = 확장 if 확장 in 허용_확장자 else "bin"
+    return L3_저장소 / f"{uuid.UUID(str(doc_id))}.{안전확장}"
 
 
 def _실_업로드(본문: bytes, 파일명: str, 확장: str,
              org_id: str, 기관명: str | None) -> L3업로드응답:
-    """tenant.l3_documents 행 생성 + 원본 저장 + 상태='파싱대기' 로 202.
+    """tenant.l3_documents 행 생성 + **원본 저장** + 상태='파싱대기' 로 202.
 
     🔴 여기서 파서를 부르지 마라. `scripts/` 는 훅이 막고, 파싱은 파서 쪽에서 붙인다.
     🔴 org_id 는 l3_articles 에도 중복 저장된다 — 판정 검색이 기관을 못 넘게 하는 축이다.
        (그 INSERT 는 파서가 한다 — 여기는 l3_documents 접수까지다)
-    🔴 `기관명` 은 저장하지 않는다 — `tenant.orgs.기관명` 이 기준이고 orgs 는 E 세션 소유다.
-       (원본 파일 바이트도 이 함수 밖 — 저장소 경로는 파서 쪽에서 정한다)
+    🔴 `기관명` 은 저장하지 않는다 — `tenant.orgs.기관명` 이 기준이다.
 
-    ✅ `파싱품질` CHECK 에 '대기' 가 추가됐다(2026-09-01 ai-25) — 업로드 시점엔 그대로
-       '대기' 로 넣는다. 파서가 실제 파싱 후 UPDATE 로 pass/warn/fail 로 덮어쓴다.
+    🔴 **2026-09-02 — 이 함수는 그 전까지 `본문`(파일 바이트)을 인자로 받아놓고 버렸다.**
+       INSERT 에 안 쓰고 디스크에도 안 썼다. 그래서 사용자가 규정을 올리면
+       **「접수했습니다」 → 행만 생기고 → 파일은 사라지고 → 영원히 「분석 중」** 이었다.
+       415(거부)는 실패라고 말해주는데 202 는 **성공했다고 말하고 아무 일도 안 했다** —
+       프로젝트 원칙(「모든 실패의 기본값은 판단불가」) 기준으로 이쪽이 훨씬 나쁘다.
+       RAG 축이 「L3 먼저」로 시작하는데 L3 가 들어올 길이 없던 것이다.
+
+    ✅ `파싱품질` CHECK 에 '대기' 가 있다 — 업로드 시점엔 '대기'. 파서가 실제 파싱 후
+       UPDATE 로 pass/warn/fail 로 덮어쓴다. **그 UPDATE 는 아직 아무도 안 한다**
+       (`server/`·`scripts/` 통틀어 0건) — 파일이 남으니 이제 붙일 수는 있다.
     """
     추출방식 = _확장_추출방식.get(확장, "native")
     행 = _질의(
@@ -93,11 +178,52 @@ def _실_업로드(본문: bytes, 파일명: str, 확장: str,
     )
     if not 행:
         raise HTTPException(400, "업로드를 저장하지 못했습니다 (org_id를 확인해 주세요).")
+    doc_id = str(행[0][0])
+
+    # 🔴 INSERT 로 doc_id 를 받은 «다음에» 쓴다 — 경로가 doc_id 에서 나오기 때문이다.
+    #    쓰기가 실패하면 행만 남아 「파일 없는 파싱대기」가 된다. 그건 고치려던 그 상태와
+    #    같으므로 **행을 되돌리고 실패를 알린다.** 조용히 202 를 주지 않는다.
+    try:
+        L3_저장소.mkdir(parents=True, exist_ok=True)
+        원본경로(doc_id, 확장).write_bytes(본문)
+    except OSError as e:
+        _실행("DELETE FROM tenant.l3_documents WHERE doc_id = %s", (doc_id,))
+        raise HTTPException(500, f"원본을 저장하지 못했습니다 ({type(e).__name__}).") from e
+
     return L3업로드응답(
-        doc_id=str(행[0][0]), 파일명=파일명, 확장자=확장, 상태="파싱대기",
+        doc_id=doc_id, 파일명=파일명, 확장자=확장, 상태="파싱대기",
         조_건수=None, dangling=[],
         메시지="접수했습니다. 조문 분해가 끝나면 상태가 「완료」로 바뀝니다.",
     )
+
+
+def 파싱_배경(doc_id: str) -> None:
+    """업로드 응답을 보낸 «뒤» 에 파서를 태운다.
+
+    🔴 **동기로 부르면 안 된다.** 계약이 `202 Accepted` + 상태 폴링이고
+       (`API_계약_v1.0.md` §7-2), 파싱은 PDF 면 초 단위다. 응답을 붙들면
+       프론트의 「분석 중」 스피너가 존재 이유를 잃는다.
+
+    🔴 **여기서 예외를 밖으로 던지지 마라.** 이 함수는 응답이 나간 뒤에 도는지라
+       터져도 사용자에게 전달할 길이 없다 — 조용히 죽으면 상태가 '대기' 에 영원히 남는다.
+       `l3_parse.파싱()` 은 자체적으로 모든 실패를 `파싱품질='fail'` 로 닫고 예외를
+       안 던지지만(ai-e5 확인), **DB 접속 자체가 실패하는 경로**는 그 밖이다.
+       그 경우까지 '대기' 로 남지 않게 여기서 잡아 'fail' 로 닫는다.
+    """
+    try:
+        import psycopg
+
+        from l3_parse import 파싱                      # scripts/ — sys.path 는 main.py 가 잡는다
+        with psycopg.connect(DSN, connect_timeout=10) as conn:
+            with conn.cursor() as cur:
+                파싱(cur, doc_id)
+            conn.commit()
+    except Exception as e:                              # noqa: BLE001
+        _log.exception("L3 파싱 배경 작업 실패 doc_id=%s", doc_id)
+        # 🔴 '대기' 로 남기면 사용자는 영원히 「분석 중」을 본다. 실패를 실패라고 말한다.
+        _실행('UPDATE tenant.l3_documents SET "파싱품질" = %s WHERE doc_id = %s',
+             ("fail", doc_id))
+        _log.error("  → 파싱품질을 fail 로 닫았다 (%s)", type(e).__name__)
 
 
 def _실_상태(doc_id: str, org_id: str | None) -> L3업로드응답:

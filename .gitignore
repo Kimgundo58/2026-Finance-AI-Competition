@@ -58,3 +58,9 @@ scripts/_work/_rrf_tune_cache.pkl
 # 커밋 메시지 임시파일 (git add -A 에 쓸려 들어간 적 있다)
 _m.txt
 _msg.tmp
+
+# 주관기관 추출 중간 산출 (스크래치패드로 가야 할 것)
+_orgs_*.json
+
+# L3 기관 규정 업로드 원본 — 사용자 문서다. 저장소에 올리지 않는다
+_l3_업로드/
