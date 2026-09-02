@@ -39,6 +39,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import sys
 import time
 from collections import deque
@@ -342,9 +343,63 @@ def health() -> dict:
             "판정_enum": list(판정_ENUM), "시각": datetime.now(timezone.utc).isoformat()}
 
 
+# ── 사업명 정본화 ────────────────────────────────────────────────────
+#
+# 🔴 **진입점에서만 한다.** 다운스트림 250여 곳은 전부 파라미터화 쿼리라
+#    모르는 표기가 들어가면 «조용한 0행» 으로 똑같이 실패한다 — 그래서 막을 자리가
+#    흩어져 있지 않고 여기 둘(`사업명` 쿼리파라미터 · `body.사업명`)뿐이다.
+#
+# 🔴 **왜 조용히 통과시키면 안 되나** (2026-09-02, ai-68 추적):
+#    `rule_lookup.비목계통()` 은 `corpus.programs` 에서 못 찾으면 **조용히 「창업」으로**
+#    떨어진다. 그러면 TIPS 질문이 창업 계통 L1 지침으로 분류돼 **근거를 달고 틀린 답**이
+#    나간다. 판단불가가 아니라 «근거 있는 척하는 오답» 이라 제일 나쁘다.
+#
+# 🔴 **정규화가 흡수하는 것과 못 하는 것을 갈라 둔다.**
+#    흡수: 「2026 」 연도 접두사 · 공백 · 가운뎃점 흔들림(U+30FB ・ → U+00B7 ·).
+#          프론트 번들에 두 코드포인트가 실제로 섞여 있다(실측). 어떤 유니코드 정규화로도
+#          안 합쳐지므로(NFC/NFD/NFKC/NFKD 전부 확인) **명시적 치환**으로 처리한다.
+#    못 함: 「모두의 창업 일반・기술」↔「모두의 창업 프로젝트」처럼 **이름 자체가 다른 것**.
+#          그건 정규화가 아니라 **별칭**이라 `corpus.programs.별칭` 에 넣어야 한다.
+#          지금 프론트 8종 중 3종이 여기 걸린다 — 별칭이 들어오면 자동으로 풀린다.
+
+def _사업명_키(값: str) -> str:
+    """비교 전용 키. 표시용으로 쓰지 말 것."""
+    s = re.sub(r"^\s*20\d{2}\s+", "", (값 or "").strip())   # 「2026 」 접두사
+    return re.sub(r"\s+", "", s.replace("・", "·"))          # 공백 제거 · 가운뎃점 통일
+
+
+def _사업명_표() -> dict[str, str]:
+    """`키 → 정본`. 🔴 DB 를 못 읽으면 **빈 dict** 를 준다 (목 모드·DB 미기동)."""
+    표: dict[str, str] = {}
+    for 정본, 별칭들 in _질의('SELECT "사업명", "별칭" FROM corpus.programs WHERE "활성"'):
+        for v in [정본, *(별칭들 or [])]:
+            표[_사업명_키(v)] = 정본
+    return 표
+
+
+def _사업명_정본(값: str | None) -> str | None:
+    """모르는 표기면 422 로 **명시적으로 거부**한다. 조용히 통과시키지 않는다.
+
+    🔴 단, 표가 **비어 있으면**(목 모드·DB 미기동) 판단할 근거가 없으므로 원값을 그대로
+       돌려준다. 「모른다」와 「물어볼 데가 없다」는 다르다 — 후자로 거부하면 DB 없이
+       뜨는 목 서버가 통째로 죽는다.
+    """
+    if not 값:
+        return 값
+    표 = _사업명_표()
+    if not 표:
+        return 값
+    정본 = 표.get(_사업명_키(값))
+    if 정본 is None:
+        raise HTTPException(422, f"모르는 사업명입니다: {값!r}. "
+                                 f"아는 사업: {sorted(set(표.values()))}")
+    return 정본
+
+
 @app.get("/api/vocab")
 def vocab(사업명: str | None = None) -> dict:
     """비목 enum 10종. 🔴 창업활동비는 예비창업패키지에만 있다 (§9)."""
+    사업명 = _사업명_정본(사업명)          # 🔴 `_창업활동비_사업` 비교도 정본 기준이라 먼저 푼다
     목록 = [b for b in 비목_ENUM
             if b != "창업활동비" or 사업명 is None or 사업명 in _창업활동비_사업]
     별칭: dict[str, list[str]] = {}
@@ -382,6 +437,10 @@ def normalize(req: Request, body: 정규화요청):
     ok, 사유 = 가드.통과(_ip(req))
     if not ok:
         raise HTTPException(429, 사유)
+
+    # 🔴 캐시 열쇠를 만들기 «전» 에 정본화한다 — 안 그러면 「2026 초기창업패키지」와
+    #    「초기창업패키지」가 서로 다른 열쇠가 돼 같은 질문이 두 번 돈다.
+    body.사업명 = _사업명_정본(body.사업명)
 
     # F5 는 판정 후 폐기다. 캐시 열쇠에는 해시로만 들어간다
     # 🔴 폼 경로에서는 질문이 None 이다. 폼 값도 열쇠에 넣는다
@@ -448,6 +507,9 @@ def judge(req: Request, body: 판정요청, 목: str | None = None):
         raise HTTPException(429, 사유)
     if body.확정비목 and body.확정비목 not in 비목_ENUM:
         raise HTTPException(422, f"비목은 enum 10종 뿐입니다: {비목_ENUM}")
+    # 🔴 비목과 같은 자리에서 닫는다. 여기를 통과하면 `orchestrate.판정()` 이 이 값을
+    #    그대로 쓰고, `rule_lookup.비목계통()` 이 모르는 표기를 「창업」으로 삼켜버린다.
+    body.사업명 = _사업명_정본(body.사업명)
 
     k = 비용가드.열쇠("judge", body.org_id, body.사업명, body.확정비목,
                      json.dumps(body.정규화, ensure_ascii=False, sort_keys=True),
