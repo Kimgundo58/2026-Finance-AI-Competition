@@ -304,6 +304,33 @@ def _상위문서해소(cur, 법령: str | None, 약칭: str | None) -> str | No
     return None
 
 
+def _shifted_재매칭(cur, doc_id: str, 약칭: str | None, 조번호숫자: str) -> str | None:
+    """🔴 조번호 참조는 구판일 수 있다 — 조 제목으로 재매칭한다 (CLAUDE.md 확정 원칙).
+
+    L3 가 인용한 「지침 제N조」의 N이 옛 개정판 번호면, 현행판에서 조번호가 옮겨가
+    직접 조회가 dangling 이 된다. `build_refs.py` 가 L1↔L1 참조에 쓰는 것과 **같은
+    기준표**(`지침_조제목`)를 재사용한다 — 새로 만들지 않는다. 「지침」 계열이 아니면
+    (기준표가 통합관리지침 전용이라) None.
+    """
+    if 약칭 not in ("지침", "통합관리지침"):
+        return None
+    try:
+        from build_refs import 지침_조제목
+    except ImportError:
+        return None
+    for 판, tbl in 지침_조제목.items():
+        if 판 == "제14차" or 조번호숫자 not in tbl:
+            continue
+        제목 = tbl[조번호숫자]
+        현행 = cur.execute(
+            "SELECT 조번호 FROM corpus.doc_articles "
+            " WHERE doc_id=%s AND 조제목=%s AND NOT coalesce(삭제,false) LIMIT 1",
+            (doc_id, 제목)).fetchone()
+        if 현행:
+            return 현행[0]
+    return None
+
+
 def 상위참조(cur, 본문: str) -> list[dict[str, Any]]:
     """조문이 인용한 상위 규범을 (해소 여부와 함께) 뽑는다.
 
@@ -313,7 +340,8 @@ def 상위참조(cur, 본문: str) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     본 = set()
     for m in _참조표기.finditer(본문):
-        조 = f"제{int(m.group('조'))}조" + (f"의{int(m.group('의'))}" if m.group("의") else "")
+        조번호숫자 = str(int(m.group("조")))
+        조 = f"제{조번호숫자}조" + (f"의{int(m.group('의'))}" if m.group("의") else "")
         법령, 약칭 = m.group("법령"), m.group("약칭")
         if not 법령 and not 약칭:
             continue                       # "제3조" 처럼 자기 규정 내부 참조 — 상위 아님
@@ -323,14 +351,19 @@ def 상위참조(cur, 본문: str) -> list[dict[str, Any]]:
             continue
         본.add(표기)
         doc_id = _상위문서해소(cur, 법령, 약칭)
-        해소 = False
+        해소, 보정 = False, None
         if doc_id:
             해소 = bool(cur.execute(
                 "SELECT 1 FROM corpus.doc_articles "
                 " WHERE doc_id=%s AND 조번호=%s AND NOT coalesce(삭제,false)",
                 (doc_id, 조)).fetchone())
+            if not 해소 and not m.group("의"):     # 「의N」 붙은 조는 기준표 대상이 아니다
+                재매칭 = _shifted_재매칭(cur, doc_id, 약칭, 조번호숫자)
+                if 재매칭:
+                    해소, 보정 = True, f"{조} 로 표기됨 → {재매칭} 로 재매칭(구판 조번호)"
+                    조 = 재매칭
         out.append({"표기": 표기, "doc_id": doc_id if 해소 else None,
-                    "조번호": 조, "해소": 해소})
+                    "조번호": 조, "해소": 해소, "보정": 보정})
     return out
 
 
