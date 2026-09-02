@@ -5,6 +5,7 @@ XML  → 조문 구조 그대로 (품질 최상)
 PDF  → pdfplumber
 HWP  → hwp_extract.py 재사용 (OLE v5) · HWPML(XML) 은 lxml
 HWPX → hwpx_extract.py (zip). 확장자가 아니라 **내용물**로 갈라 보낸다
+DOCX → docx_extract.py (zip, python-docx). hwpx 와 같은 sniff() 로 내용물 재검증
 TXT  → 그대로
 """
 from __future__ import annotations
@@ -170,27 +171,108 @@ def _extract_hwpml(path: Path) -> str:
     return "\n".join(lines)
 
 
+def _route_zip_office(path: Path) -> str:
+    """PK(zip) 로 시작하는 hwpx/docx 후보 — 확장자가 아니라 `sniff()` 로 실제 파서를 고른다.
+
+    실측(2026-09-02): hwpx 확장자에 docx 가, docx 확장자에 hwpx 가 들어와도
+    내용물대로 가야 한다(둘 다 zip 이라 PK 매직만으로는 못 가른다). 그 밖(XLSX·PPTX·
+    ODF·정체불명)은 `hwpx_extract` 의 NotHwpxError 로 정체를 담아 실패한다 —
+    `docx_extract` 도 같은 `sniff()` 를 쓰므로 어느 쪽에서 걸려도 정체 메시지는 같다.
+    """
+    from hwpx_extract import sniff
+
+    kind = sniff(path)
+    if kind.startswith("DOCX"):
+        from docx_extract import extract as extract_docx
+
+        return extract_docx(path)
+
+    from hwpx_extract import extract as extract_hwpx
+
+    return extract_hwpx(path)
+
+
 def extract_hwp(path: Path) -> str:
     """`.hwp` / `.hwpx` 공용. 🔴 확장자를 믿지 않고 앞 바이트로 갈라 보낸다.
 
     실측(2026-09-02): TIPS 운영사 현황(2026년).hwpx 는 확장자만 hwpx 고 내부는
     XLSX 였다. 확장자로 보내면 OLE 파서가 NotOleFileError 로 죽고 정체를 못 밝힌다.
-      PK     → zip → hwpx_extract (내용물 재검증 · hwpx 아니면 NotHwpxError)
-      D0 CF 11 E0     → OLE  → hwp_extract (HWP v5)
+      PK     → zip → 내용물로 hwpx/docx 를 가른다(`_route_zip_office`)
+      D0 CF 11 E0     → OLE  → 배포용/암호화면 HwpProtectedError, 아니면 hwp_extract
       <?xml           → HWPML
       그 밖           → 그대로 hwp_extract 로 보내 그쪽 예외를 살린다
+
+    🔴 실측(2026-09-02): TIPS 총괄 운영지침 「본문」 hwp 3개년치는 `hwp_extract.extract()`
+    가 예외 없이 성공 반환하는데 실제로 뽑히는 건 뷰어 안내문 106~107자뿐이다
+    (배포용 문서, 조 0개). 조용히 성공한 빈 규정이 판정에 들어가는 걸 막으려면
+    `hwp_extract.extract()` 를 부르기 **전에** 배포용/암호화 여부를 확인해야 한다 —
+    파싱이 끝난 뒤 글자수로 되짚는 게 아니라, 정체 판정 단계에서 막는다.
     """
     head = path.open("rb").read(16)
     if head.startswith(b"PK"):
-        from hwpx_extract import extract as extract_hwpx
-
-        return extract_hwpx(path)
+        return _route_zip_office(path)
     if head.lstrip()[:5] == b"<?xml":
         return _extract_hwpml(path)
+
+    from hwpx_extract import sniff, HwpProtectedError
+
+    kind = sniff(path)
+    if kind.startswith("HWP-DRM"):
+        raise HwpProtectedError(f"{kind} ({path.name})")
 
     from hwp_extract import extract
 
     return extract(str(path))
+
+
+def extract_docx(path: Path) -> str:
+    """`.docx` 진입점. 🔴 확장자를 믿지 않고 내용으로 재검증한다.
+
+    zip 이 아니면(오래된 `.doc` OLE2 등) 파서가 없다 — `docx_extract` 자신의
+    `sniff()` 가 정체를 담아 NotDocxError 로 실패시킨다. `.doc` 전용 파서는
+    만들지 않는다(제품 결정: 프론트 업로드 허용 목록에서 뺀다).
+    """
+    head = path.open("rb").read(4)
+    if head.startswith(b"PK"):
+        return _route_zip_office(path)
+
+    from docx_extract import extract as extract_docx_impl
+
+    return extract_docx_impl(path)
+
+
+# ── 빈 추출 게이트 ───────────────────────────────────────────────────
+# 실측(2026-09-02, `2026_Finance_DATA_FOR_RAG/` 전수 43개 hwp 원문 — hwp_extract 직접 호출,
+# 배포용 게이트 적용 전 원시값):
+#   배포용 문서(DRM) 8건 전부 정확히 106~107자 · 조 0개
+#   정상 문서 35건 중 가장 짧은 것도 430자("재도전성공패키지 주관기관 현황") — 겹치지 않는다
+# 106~429자 구간 어디든 안전해 200자를 컷오프로 둔다(양쪽에 100자 이상 여유).
+빈_추출_글자수_임계치 = 200
+
+
+def 추출_품질_점검(text: str) -> dict:
+    """추출된 본문이 「성공했지만 사실상 비었다」인지 **값으로** 돌려준다 — 던지지 않는다.
+
+    🔴 정체가 이미 밝혀진 실패(hwpx/docx 위장, hwp 배포용/암호화)는 `extract_*()` 단계에서
+    이미 예외로 막는다. 이 함수는 그다음 층 — 정체 판정을 통과했는데도 원인 불명으로 짧게
+    나온 추출(예: hwpx 의 동일 계열 문제, 스캔 판독 실패, 아직 모르는 새 실패 유형)을
+    호출부가 「판단불가」로 접을 수 있게 값을 준다.
+
+    🔴 조수(=0)만으로 판단불가를 트리거하지 않는다 — 실측에 「TIPS 운영사 현황」·
+    「~ 주관기관 현황」처럼 조가 원래 없는 정상 문서(목록·현황표류)가 다수 있다
+    (430~25,359자, 조 0개 전부 정상). 글자수 임계치만 하드 게이트로 쓰고 조수는
+    참고 값으로 같이 돌려준다 — 규정류만 받아야 하는 호출부(예: L3 업로드)는
+    이 값을 보고 그쪽 기준(조 0개 거부 등)을 따로 적용해라.
+    """
+    글자수 = len(text)
+    조수 = len(re.findall(r"제\s*\d+\s*조", text))
+    판단불가 = 글자수 < 빈_추출_글자수_임계치
+    return {
+        "글자수": 글자수,
+        "조수": 조수,
+        "판단불가": 판단불가,
+        "사유": f"본문 {글자수}자 — 임계치 {빈_추출_글자수_임계치}자 미만" if 판단불가 else "",
+    }
 
 
 # ── TXT ──────────────────────────────────────────────────────────
@@ -214,6 +296,8 @@ def extract(path: Path):
         return "text", extract_pdf(path)
     if ext in (".hwp", ".hwpx"):
         return "text", (extract_hwp(path), {})
+    if ext == ".docx":
+        return "text", (extract_docx(path), {})
     if ext == ".txt":
         return "text", (extract_txt(path), {})
     raise ValueError(f"지원하지 않는 형식: {ext}")
