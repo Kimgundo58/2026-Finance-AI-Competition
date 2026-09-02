@@ -107,8 +107,18 @@ def 세계():
     """A 2건 · B 1건 · 게스트 2건 + 각각의 할일 + 내 판정 1건. 전부 id 로 지운다."""
     s = 세계상태()
     with _접속() as conn:
+        # 🔴 «가나다순 앞의 두 기관» 으로 고르지 않는다. 2026-09-02 에 기관 명부
+        #    410곳이 적재되자 그 두 자리를 실제 기관이 차지했고, 그 기관엔 L3 문서가
+        #    없어서 **L3 격리 테스트 3건이 조용히 skip 으로 바뀌었다.** 통과도 실패도
+        #    아닌 채로 사라지는 게 제일 나쁘다 — 아무도 안 본다.
+        #    L3 문서를 «가진» 기관을 고른다. 이 테스트가 재려는 게 바로 그거다.
         기관 = conn.execute(
-            'SELECT org_id FROM tenant.orgs ORDER BY "기관명" LIMIT 2').fetchall()
+            "SELECT org_id FROM tenant.orgs WHERE org_id IN "
+            "  (SELECT org_id FROM tenant.l3_documents) "
+            ' ORDER BY "기관명" LIMIT 2').fetchall()
+        if len(기관) < 2:                       # 픽스처 미투입 — 넓혀서 잡는다
+            기관 = conn.execute(
+                'SELECT org_id FROM tenant.orgs ORDER BY "기관명" LIMIT 2').fetchall()
         s.A, s.B = str(기관[0][0]), str(기관[1][0])
 
         # 🔴 만들기 «전» 을 먼저 잰다. 다른 세션이 같은 DB 를 쓰므로 절대값이 아니라
