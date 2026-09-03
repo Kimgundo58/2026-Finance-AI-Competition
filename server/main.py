@@ -318,7 +318,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[o for o in os.environ.get(
         "SUDDOE_CORS", "http://localhost:3000,http://localhost:5173").split(",") if o],
-    allow_methods=["GET", "POST", "PUT", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "OPTIONS"],
     allow_headers=["*"],
 )
 
