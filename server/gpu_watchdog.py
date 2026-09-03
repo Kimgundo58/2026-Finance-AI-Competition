@@ -26,6 +26,9 @@
     SUDDOE_GPU_CHECK_SEC      검사 주기. 기본 60
     SUDDOE_GPU_START_SEC      기동 후 준비 대기 상한. 기본 300
     SUDDOE_GPU_POLL_SEC       기동 중 폴링 주기. 기본 5
+    SUDDOE_GPU_KEEPALIVE_MAX_MIN  🔴 keepalive 로 미룰 수 있는 최대 분. 기본 60.
+                              마지막 «실제 GPU 호출» 기준이다 — 그 뒤로는 keepalive 를
+                              아무리 쳐도 정지한다 (`생존신호()` 가 이유)
     RUNPOD_API_KEY            없으면 «제어 불가» — 절대 끄지 않는다
     RUNPOD_POD_ID             대상 팟. 없으면 «제어 불가»
     RUNPOD_REST               기본 https://rest.runpod.io/v1
@@ -202,8 +205,10 @@ class GPU워치독:
         self.검사주기초 = _int환경("SUDDOE_GPU_CHECK_SEC", 60)
         self.기동상한초 = _int환경("SUDDOE_GPU_START_SEC", 300)
         self.폴링주기초 = _int환경("SUDDOE_GPU_POLL_SEC", 5)
+        self.연장상한초 = _int환경("SUDDOE_GPU_KEEPALIVE_MAX_MIN", 60) * 60
         self._락 = threading.RLock()
-        self._마지막호출 = self.시계()
+        self._마지막호출 = self.시계()      # GPU 를 «실제로» 쓴 시각 (권위)
+        self._마지막생존 = self.시계()      # keepalive — 「사람이 화면 앞에 있다」일 뿐
         self._팟상태 = 알수없음          # 🔴 부팅 직후엔 모른다. 모르면 «막지 않는다»
         self._스레드: threading.Thread | None = None
         self._멈춤 = threading.Event()
@@ -221,14 +226,39 @@ class GPU워치독:
 
     # ── ① 마지막 호출 시각 ─────────────────────────────────────────
     def 호출기록(self) -> None:
-        """GPU 를 **실제로 쓰는** 자리에서만 부른다 (`_실_정규화` LLM 분기 · `_실_판정`)."""
+        """GPU 를 **실제로 쓰는** 자리에서만 부른다 (`_실_정규화` LLM 분기 · `_실_판정`).
+
+        🔴 `keepalive()` 와 «다른 무게» 다. 이것만이 연장 상한을 되감는다.
+        """
         with self._락:
-            self._마지막호출 = self.시계()
+            self._마지막호출 = self._마지막생존 = self.시계()
+
+    def 생존신호(self) -> None:
+        """keepalive 전용. 🔴 GPU 호출과 **같은 무게로 취급하지 않는다.**
+
+        `/api/gpu/keepalive` 는 인증 없이 열린 자리다(게스트도 쳐야 하니까). 이걸
+        `호출기록()` 과 동일하게 두면 **워치독이 무력화된다** — 공격이 아니라 정상
+        사용에서 먼저 난다: 프론트가 모달 전에 keepalive 를 자동 전송하도록 짜면
+        탭 하나 열어둔 것만으로 팟이 영원히 산다. 그게 이 워치독을 만든 이유다.
+
+        그래서 keepalive 는 마지막 **실제 GPU 호출** 로부터
+        `SUDDOE_GPU_KEEPALIVE_MAX_MIN`(기본 60분)까지만 유휴를 미룬다.
+        그 뒤로는 아무리 쳐도 정지가 발동한다 — 판정을 한 건이라도 더 해야 풀린다.
+        """
+        with self._락:
+            self._마지막생존 = self.시계()
 
     @property
     def 유휴초(self) -> float:
+        """마지막 «유효 활동» 으로부터의 초.
+
+        유효 활동 = 실제 GPU 호출, 또는 그로부터 `연장상한초` 안에 들어온 keepalive.
+        상한 밖의 keepalive 는 **없는 것으로 친다** (`생존신호` 참조).
+        """
         with self._락:
-            return max(0.0, self.시계() - self._마지막호출)
+            상한 = self._마지막호출 + self.연장상한초
+            유효 = max(self._마지막호출, min(self._마지막생존, 상한))
+            return max(0.0, self.시계() - 유효)
 
     def _종료예정초(self) -> float | None:
         """None = 「끌 계획이 없다」. 프론트는 None 이면 모달을 띄우면 안 된다."""
@@ -256,7 +286,7 @@ class GPU워치독:
             }
 
     def keepalive(self) -> dict:
-        self.호출기록()
+        self.생존신호()
         return self.현황()
 
     # ── ① 60초 주기 검사 ───────────────────────────────────────────
