@@ -29,6 +29,12 @@
     SUDDOE_GPU_KEEPALIVE_MAX_MIN  🔴 keepalive 로 미룰 수 있는 최대 분. 기본 60.
                               마지막 «실제 GPU 호출» 기준이다 — 그 뒤로는 keepalive 를
                               아무리 쳐도 정지한다 (`생존신호()` 가 이유)
+    SUDDOE_GPU_WAKE_DAILY_CAP 하루 «실제 기동(정지→시작)» 상한. 기본 3.
+                              🔴 2026-09-04 실측: 이 캡은 이 커밋 전까지 코드 어디에도
+                              없었다 — `내일_작업_3건_0904.md`·`8-3_GPU.md` 의 "하루
+                              깨우기 3회" 는 문서에만 있던 정책이다. 캡을 넘으면 시작을
+                              시도하지 않고 «중지» 로 남긴다 → `게이트()` 가 판단불가로 닫는다.
+                              이미 가동 중이던 팟을 계속 쓰는 것은 «깨우기» 로 안 센다
     RUNPOD_API_KEY            없으면 «제어 불가» — 절대 끄지 않는다
     RUNPOD_POD_ID             대상 팟. 없으면 «제어 불가»
     RUNPOD_REST               기본 https://rest.runpod.io/v1
@@ -45,6 +51,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 from typing import Callable, Iterator
 
 from fastapi import APIRouter
@@ -62,6 +69,13 @@ class GPU기동실패(RuntimeError):
 def _int환경(키: str, 기본: int) -> int:
     try:
         return int(os.environ.get(키, 기본))
+    except ValueError:
+        return 기본
+
+
+def _float환경(키: str, 기본: float) -> float:
+    try:
+        return float(os.environ.get(키, 기본))
     except ValueError:
         return 기본
 
@@ -102,6 +116,20 @@ class 팟제어:
 
     def 정지(self) -> bool:
         return False
+
+    def 잔액(self) -> float | None:
+        """🔴 항상 None — **서버 프로세스에서는 구현 불가능이다, 미완이 아니다.**
+
+        2026-09-04 확인: RunPod REST v1(`openapi.json`)에 `/user`·잔액 조회
+        엔드포인트가 **없다** — `/billing/pods`·`/billing/endpoints`·
+        `/billing/networkvolumes` 뿐이고 전부 과거 사용량이지 «지금 잔액» 이 아니다.
+        `scripts/runpod_pod.py:cmd_close` 가 잔액을 찍는 건 `runpodctl user`
+        (GraphQL 경유, CLI 전용) 다 — 그 바이너리는 배포 이미지에 없다.
+        잔액 관찰은 **사람이 로컬에서 `runpod_pod.py ls`/`close` 로 하는 것이 정본**이다.
+        여기 자리를 남긴 이유는 다음 사람이 REST 로 될 거라 믿고 또 «미검증 스키마» 를
+        만들지 않게 하기 위해서다 (`docs/0-3_초록이_가린다.md` ⓘ 참고).
+        """
+        return None
 
 
 class RunPod팟(팟제어):
@@ -206,12 +234,17 @@ class GPU워치독:
         self.기동상한초 = _int환경("SUDDOE_GPU_START_SEC", 300)
         self.폴링주기초 = _int환경("SUDDOE_GPU_POLL_SEC", 5)
         self.연장상한초 = _int환경("SUDDOE_GPU_KEEPALIVE_MAX_MIN", 60) * 60
+        self.일일깨우기캡 = _int환경("SUDDOE_GPU_WAKE_DAILY_CAP", 3)
         self._락 = threading.RLock()
         self._마지막호출 = self.시계()      # GPU 를 «실제로» 쓴 시각 (권위)
         self._마지막생존 = self.시계()      # keepalive — 「사람이 화면 앞에 있다」일 뿐
         self._팟상태 = 알수없음          # 🔴 부팅 직후엔 모른다. 모르면 «막지 않는다»
+        self._깨움날짜 = self._오늘()
+        self._오늘_깨움 = 0               # 실제 stop→start 왕복 횟수. 가동 중 재사용은 안 센다
         self._스레드: threading.Thread | None = None
         self._멈춤 = threading.Event()
+        self._vllm_최근확인: bool | None = None   # None = 아직 한 번도 안 봄
+        self._vllm_확인시각 = 0.0
 
     # ── 활성 여부 ───────────────────────────────────────────────────
     @property
@@ -248,6 +281,32 @@ class GPU워치독:
         with self._락:
             self._마지막생존 = self.시계()
 
+    # ── 하루 깨우기 캡 ──────────────────────────────────────────────
+    # 🔴 2026-09-04 신설. `SUDDOE_GPU_WAKE_DAILY_CAP`(기본 3)를 넘으면 시작을
+    # 시도하지 않는다 — 오너 지시("GPU 과사용 절대 금지")의 유일한 하드 가드다.
+    # 날짜 경계는 `비용가드._오늘()`(server/main.py)과 같은 UTC 자정이다 —
+    # 다른 기준이면 「하루」 가 두 군데서 다르게 셈해진다.
+    @staticmethod
+    def _오늘() -> str:
+        return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    def _날짜_롤오버(self) -> None:
+        오늘 = self._오늘()
+        if self._깨움날짜 != 오늘:
+            self._깨움날짜, self._오늘_깨움 = 오늘, 0
+
+    def 깨우기_허용(self) -> bool:
+        """«실제 stop→start 왕복» 을 하나 더 해도 되는가. 이미 가동 중인 팟을
+        계속 쓰는 것과 폴링은 여기 안 걸린다 — `기동_진행` 이 그 구분을 한다."""
+        with self._락:
+            self._날짜_롤오버()
+            return self._오늘_깨움 < self.일일깨우기캡
+
+    def _깨움_기록(self) -> None:
+        with self._락:
+            self._날짜_롤오버()
+            self._오늘_깨움 += 1
+
     @property
     def 유휴초(self) -> float:
         """마지막 «유효 활동» 으로부터의 초.
@@ -268,12 +327,42 @@ class GPU워치독:
             return None
         return max(0.0, self.유휴임계초 - self.유휴초)
 
+    # ── vLLM 헬스 — «팟은 가동인데 모델은 죽어있다» 를 감추지 않는다 ─────────
+    # 🔴 2026-09-04 신설. ai-d7(Q1) 실측 계기: 운영에서 `GET /status` 가 `상태:가동`
+    # 을 주는 동안 `/api/normalize`·`/api/judge` 는 전부 LLM실패/판단불가였다.
+    # 원인은 `상태` 필드가 «RunPod 팟 컨테이너» 만 보고 vLLM 프로세스 응답성은 안
+    # 본다는 것 — 게다가 지금 운영은 `RUNPOD_API_KEY`/`RUNPOD_POD_ID` 가 Cloud Run
+    # env 에 아예 없어(2026-09-04 `gcloud run services describe` 확인) `제어.가능=False`
+    # 라 `_팟상태` 가 영원히 `알수없음` 이고, 그게 `현황()` 에서 «가동» 으로 접힌다.
+    # 이 필드는 `제어.가능`·`활성` 과 **무관하게** 동작해 그 사각지대를 메운다.
+    def _vllm_상태(self) -> bool | None:
+        """캐시된 vLLM `/health`. 매 상태 폴링마다 치지 않는다 — `검사주기초`(기본 60)
+        만큼 캐시한다. 목모드에선 아예 안 친다(`_목모드` 와 같은 이유)."""
+        if self.목모드:
+            return None
+        with self._락:
+            지금 = self.시계()
+            신선 = (self._vllm_최근확인 is not None
+                   and (지금 - self._vllm_확인시각) < self.검사주기초)
+            if 신선:
+                return self._vllm_최근확인
+        결과 = self.준비확인()              # 🔴 락 밖 — HTTP 지연이 다른 요청을 안 막는다
+        with self._락:
+            self._vllm_최근확인, self._vllm_확인시각 = 결과, self.시계()
+        return 결과
+
     # ── ② 프론트 계약 ──────────────────────────────────────────────
     def 현황(self) -> dict:
         상태 = self._팟상태
         # 🔴 프론트 어휘는 가동|중지|기동중 셋뿐이다. 「알수없음」은 가동으로 접는다 —
         #    종료예정초 가 null 인 것이 「모른다」의 신호다
+        # 🔴 락 밖에서 먼저 계산한다 — `_vllm_상태()` 는 캐시가 식으면 HTTP 를 친다.
+        #    락 «안에서» 부르면 RLock 재진입이라 죽진 않지만, 이 메서드가 쥔 락을
+        #    HTTP 타임아웃(최대 5초)만큼 다른 스레드에게 계속 쥐고 있게 된다 —
+        #    /status 는 프론트가 몇 초마다 때리는 자리라 그게 더 나쁘다.
+        vllm_응답 = self._vllm_상태()
         with self._락:
+            self._날짜_롤오버()
             return {
                 "상태": 상태 if 상태 in (가동, 중지, 기동중) else 가동,
                 "유휴초": int(self.유휴초),
@@ -283,6 +372,13 @@ class GPU워치독:
                 "경고초": self.예고초,
                 "유휴임계초": self.유휴임계초 if self.활성 else 0,
                 "제어가능": self.제어.가능,
+                "오늘_깨움": self._오늘_깨움,
+                "일일깨우기캡": self.일일깨우기캡,
+                # 🔴 부가 필드 — 프론트 「상태」 3값 계약은 안 건드린다. 이건 그 위에 얹는
+                # 진단용 신호다: null=아직 미확인, true/false=최근 vLLM /health 결과
+                # (최대 검사주기초 캐시). 「상태:가동 인데 vLLM_응답:false」 가 바로
+                # ai-d7 이 잡은 그 사각지대 — 화면이 이 필드를 보면 더는 안 속는다
+                "vLLM_응답": vllm_응답,
             }
 
     def keepalive(self) -> dict:
@@ -364,12 +460,22 @@ class GPU워치독:
         if 상태 in (가동, 알수없음):
             self._팟상태 = 상태
             return
+        if 상태 == 중지 and not self.깨우기_허용():
+            # 🔴 한도 초과 — 시도조차 안 한다. RunPod 에 start 를 쏘고 실패하는 게
+            #    아니라, 애초에 쏘지 않는다. 팟상태는 중지로 남아 게이트가 판단불가로 닫는다
+            self._팟상태 = 중지
+            _log.error("오늘 GPU 기동 한도(%d회) 초과 — 시작을 시도하지 않는다", self.일일깨우기캡)
+            yield {"단계": "기동",
+                   "설명": f"오늘 GPU 기동 한도({self.일일깨우기캡}회)를 다 썼습니다. 내일 다시 시도해 주세요"}
+            return
         self._팟상태 = 기동중
         yield {"단계": "기동", "설명": "AI 서버를 깨우는 중입니다"}
-        if 상태 == 중지 and not self.제어.시작():
-            self._팟상태 = 중지
-            _log.error("pod start 실패 — 판정은 판단불가로 닫힌다")
-            return
+        if 상태 == 중지:
+            self._깨움_기록()          # 시도 자체를 센다 — start() 가 실패해도 RunPod 호출은 났다
+            if not self.제어.시작():
+                self._팟상태 = 중지
+                _log.error("pod start 실패 — 판정은 판단불가로 닫힌다")
+                return
         마감 = self.시계() + self.기동상한초
         while self.시계() < 마감:
             if self.준비확인():
@@ -424,3 +530,54 @@ def gpu_keepalive() -> dict:
     🔴 이건 **보조**다. 브라우저가 이걸 못 쳐도(탭을 그냥 닫아도) ① 이 끈다.
     """
     return 워치독.keepalive()
+
+
+# ── /wake — 판정 요청과 «분리된» 사전 기동 ──────────────────────────────
+# 🔴 2026-09-04 신설. 이유는 코드로 확인한 사실이다 — 지어낸 게 아니다:
+#    `_실_정규화`·`_실_판정` 은 SSE 스트림 «안에서» `기동_진행()` 을 돈다
+#    (main.py:592·695). `SUDDOE_GPU_START_SEC` 기본값과 Cloud Run `timeout 300s`
+#    가 **둘 다 300** 이다 — 콜드부팅 실측 10~12분(600~720초)은 그 안에 못 들어간다.
+#    즉 팟이 꺼진 채로 첫 판정 요청이 오면, 그 요청 «자체가» Cloud Run 타임아웃과
+#    거의 동시에 끊긴다(SSE 하트비트는 프록시 idle-timeout 만 막지, 총 요청시간
+#    상한은 못 막는다). 로그인 직후 화면이 별도로 `/wake` 를 먼저 치고 `/status` 를
+#    폴링해 «준비됨» 이 된 뒤에야 실제 질문을 보내면 이 충돌을 피한다.
+_기동_락 = threading.Lock()
+
+
+def _백그라운드_기동() -> None:
+    if not _기동_락.acquire(blocking=False):
+        return                              # 이미 누가 기동 중이다 — 새로 안 띄운다
+    try:
+        for _ in 워치독.기동_진행():
+            pass                            # 진행 상태는 self._팟상태 에 이미 반영된다
+    except Exception:                       # noqa: BLE001
+        _log.exception("백그라운드 기동 실패 — /status 가 다음 진실이다")
+    finally:
+        _기동_락.release()
+
+
+@router.post("/wake")
+def gpu_wake() -> dict:
+    """**즉시 반환한다.** 기동은 백그라운드 스레드가 하고, 진행은 `GET /status`
+    폴링으로 본다. 이미 가동/기동중이면 아무 것도 새로 안 띄운다(락이 막는다).
+
+    🔴 이 호출 자체는 `호출기록()` 을 안 찍는다 — «쓰겠다는 의사표시» 지 «실제
+    GPU 사용» 이 아니다. 유휴 타이머는 실제 판정(`게이트()`)만 되돌린다.
+    """
+    if not _기동_락.locked():
+        threading.Thread(target=_백그라운드_기동, daemon=True, name="gpu-wake").start()
+    return 워치독.현황()
+
+
+@router.post("/reap")
+def gpu_reap() -> dict:
+    """`한번_검사()` 1회 실행 — Cloud Scheduler 가 5분마다 치는 자리로 설계했다.
+
+    🔴 **지금은 미배선이다.** `시작_루프()` 의 60초 스레드가 이미 같은 검사를 돈다.
+    이 엔드포인트를 Scheduler 에 물리려면 그 스레드를 끄는 결정이 같이 필요하다
+    (`docs/8_운영/8-3_GPU.md` 「Cloud Scheduler 이관」— 중앙 판단, 오늘 밤 범위 아님).
+    지금 존재 이유는 계약을 먼저 굳혀 두는 것 — 인증 없음(판정 게이트와 동일하게
+    fail-open, 최악의 결과가 "정지 안 함" 이라 위험이 크지 않다).
+    """
+    결과 = 워치독.한번_검사()
+    return {"결과": 결과, **워치독.현황()}
