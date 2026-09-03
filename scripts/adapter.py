@@ -86,7 +86,10 @@ class 슬롯:
     # (5) 표현만. 판단불가 경로 전용 — 문의 초안·안내문·A4 diff 요약.
     #     F축이 안 들어가므로 이론상 외부 라우팅이 가능한 유일한 호출 자리이다.
     #     그래도 [2겹] 프롬프트 검사는 그대로 탄다
-    "문장생성": 슬롯("문장생성", "(5) 표현 생성 (판단불가 경로 전용)", False, "Qwen/Qwen3-8B", 1200, False),
+    # 🔴 기본모델을 32B-AWQ 로 맞추었다. 8B 는 팯ollect 에 뜼는 모델이 아니라
+    #    vLLM 이 404 "The model does not exist" 를 돌려줬다 (2026-09-03 ai-98 실측).
+    #    두 모델을 띄우면 VRAM 이 모자란다 — 한 모델로 쓴다.
+    "문장생성": 슬롯("문장생성", "(5) 표현 생성 (판단불가 경로 전용)", False, "Qwen/Qwen3-32B-AWQ", 1200, False),
 }
 
 
@@ -161,7 +164,12 @@ class LocalVLLM(제공자):
         req = urllib.request.Request(
             f"{self.url}/v1/chat/completions",
             data=json.dumps(본문, ensure_ascii=False).encode(),
-            headers={"Content-Type": "application/json"})
+            headers={"Content-Type": "application/json",
+                     # 🔴 UA 가 없으면 RunPod 앞단 Cloudflare 가 403(1010) 을 둠 —
+                     #    `Python-urllib/3.x` 를 봇으로 읽는다. `normalize_run.py:90` 에만
+                     #    붙어 있어 «반쪽만 고쳐진» 상태였다 (2026-09-03 ai-98 실측:
+                     #    UA 없음→403 / UA 있음→200). 이 자리가 `/admin/warmup` 을 죽였다.
+                     "User-Agent": "suddoe/1.0"})
         t = time.time()
         with urllib.request.urlopen(req, timeout=타임아웃) as r:
             d = json.loads(r.read().decode())
