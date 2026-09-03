@@ -419,27 +419,33 @@ def _부분집합이름들() -> list[str]:
         return []
 
 
-def _부분집합(이름: str | None, gold_ids: str | None) -> tuple[list[int] | None, str | None]:
+def _부분집합(이름: str | None,
+           gold_ids: str | None) -> tuple[list[int] | None, str | None, str | None]:
     """🔴 부분집합은 **세트 이름이 아니라 gold_id 로 고정한다.**
     세트별로 빠지는 문항 수가 달라 이름으로 부르면 run 마다 다른 집합이 잡히고,
     튜닝분과 held-out 이 조용히 섞인다. 기준 파일은 scratchpad/P4_부분집합_0903.json.
     """
     if gold_ids:
-        return [int(x) for x in re.split(r"[,\s]+", gold_ids.strip()) if x], "직접지정"
+        return [int(x) for x in re.split(r"[,\s]+", gold_ids.strip()) if x], "직접지정", None
     if not 이름:
-        return None, None
+        return None, None, None
     경로, 표 = _부분집합표()
     if 이름 not in 표:
         sys.exit(f"부분집합 '{이름}' 이 {경로} 에 없다. 있는 것: "
                  f"{[k for k in 표 if isinstance(표[k], list)]}")
-    return list(표[이름]), f"{이름}@P4_부분집합_0903.json(기준run={표.get('기준run')})"
+    # 🔴 유보는 파일에만 두면 표에서 사라진다. `eval.runs.설정` 이 통째로 나르게 한다 —
+    #    예: P2_선택12 의 「이 12건은 전부 튜닝52 다」. 이게 없으면 다음 사람이 일반화한다.
+    return (list(표[이름]), f"{이름}@P4_부분집합_0903.json(기준run={표.get('기준run')})",
+            표.get(f"{이름}_설명"))
 
 
 def 실행(*, dry: bool, limit: int | None, 세트: list[str] | None, 라벨: str | None,
         top_k: int, 기록: bool, 변형: str = "V0", 부분집합: str | None = None,
         gold_ids: str | None = None, max_model_len: int = 40960,
         스냅샷: str | None = None) -> int:
-    ids, 부분집합표기 = _부분집합(부분집합, gold_ids)
+    ids, 부분집합표기, 부분집합유보 = _부분집합(부분집합, gold_ids)
+    if 부분집합유보:
+        print(f"🔴 이 부분집합의 유보 — 수를 옮길 때 같이 옮겨라:\n   {부분집합유보}\n")
     with psycopg.connect(DSN) as conn:
         cur = conn.cursor()
 
@@ -870,6 +876,7 @@ def 실행(*, dry: bool, limit: int | None, 세트: list[str] | None, 라벨: st
           "채점": "결정론 4-way + 치명오답 + 근거/인용 적중",
           "변형": 변형,
           "부분집합": 부분집합표기,
+          "부분집합_유보": 부분집합유보,
           "문항수": len(items),
           "max_model_len": max_model_len,
           "관측_최대토큰_①": _관측토큰("①정규화LLM"),
