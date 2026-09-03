@@ -22,7 +22,72 @@
 --      닫는다. 전건 열람 통로를 안 만드는 게 이 파일의 전부다.
 --
 -- 🔴 이 파일은 **`10_rls_guc.sql` 을 건드리지 않는다.** (그쪽은 Cloud SQL 적용 중)
+--
+-- ── 적용 방법 ───────────────────────────────────────────────────────────────
+--    🔴 **단일 트랜잭션으로 흘려라.** 자동커밋으로 한 문장씩 흘리면, 중간에서
+--       터졌을 때 «앞부분만 적용된» 상태가 남는다. 특히 REVOKE/GRANT 가 갈리면
+--       PUBLIC 에 EXECUTE 가 남은 SECURITY DEFINER 함수가 되는데, 그건 명부를
+--       한 건씩 캐낼 수 있는 상태다. 전부 되거나 전부 안 되거나여야 한다.
+--
+--           psql "$DSN" --single-transaction -v ON_ERROR_STOP=1 -f db/init/11_accounts_login.sql
+--
+--    가장 위험한 검사(FORCE RLS)는 **DDL 보다 앞** 에 두어서, 자동커밋으로 흘려도
+--    「거부했는데 함수는 남는」 모양이 안 나오게 했다. 그래도 위 방법이 맞다.
 -- ════════════════════════════════════════════════════════════════════════════
+
+
+-- ── 🔴 전제 검사 ①  «DDL 보다 먼저» 돈다 ───────────────────────────────────
+--
+-- 🔴 **왜 앞인가.** 이 검사가 파일 «끝» 에 있으면, 자동커밋으로 흘렸을 때
+--    `CREATE FUNCTION` 과 `GRANT` 가 먼저 커밋되고 나서 검사가 터진다 —
+--    「적용을 거부했다」인데 **함수는 이미 운영에 남는다.** 가장 나쁜 결과다.
+--    앞에 두면 아직 아무것도 안 만든 상태라 실행 방식과 무관하게 안전하다.
+--    (그래도 단일 트랜잭션으로 흘리는 게 맞다 — 아래 「적용 방법」 참조)
+--
+-- 무엇을 보나: `SECURITY DEFINER` 는 «소유자 권한» 으로 도는데, 소유자도 RLS 를 물게
+-- 만드는 스위치가 있다 — `FORCE ROW LEVEL SECURITY`. 켜져 있으면 정의자가 정책에
+-- 걸려 0행이 나오고, 증상은 **「명부가 비었다」와 완전히 같다** (로그인 403).
+--
+-- 🔴 실측이다. 소유자를 «비특권» 롤로 바꿔 놓고 비특권 롤로 함수를 부른 값:
+--
+--        FORCE rls = false  →  1행   ✅
+--        FORCE rls = true   →  0행   🔴 무력화
+--
+-- 🔴 **로컬에서는 이 차이가 안 보인다.** 로컬 소유자 `postgres` 는 superuser 라
+--    FORCE 와 무관하게 우회한다 — 소유자를 비특권으로 바꾸기 «전» 에 잰 값은
+--    FORCE 를 켜도 1행이었다. 값을 한 번만 읽으면 못 가른다. 운영 Cloud SQL 의
+--    `postgres` 는 superuser 가 아니다. `10_rls_guc.sql` 머리말과 같은 뿌리다.
+--
+-- ⚠️ 이 검사는 «적용 시점» 에만 돈다. 인스턴스를 다시 만들거나 누가 나중에 FORCE 를
+--    켜면 여기선 못 잡는다 — 그때는 위 두 줄을 손으로 다시 재라.
+DO $$
+DECLARE
+    _force  boolean;
+    _t소유  name;
+    _f소유  name;
+BEGIN
+    SELECT relforcerowsecurity, pg_get_userbyid(relowner)
+      INTO _force, _t소유
+      FROM pg_class WHERE oid = 'tenant.accounts'::regclass;
+
+    IF _force THEN
+        RAISE EXCEPTION
+            'tenant.accounts 에 FORCE ROW LEVEL SECURITY 가 켜져 있다 — SECURITY DEFINER 가 '
+            '무력화되어 로그인이 403 이 된다(실측). 끄든가, 이 처방을 다시 설계해라.';
+    END IF;
+
+    -- 재적용일 때만 본다. 첫 적용엔 함수가 없어서 NULL 이다
+    -- (그래서 `::regprocedure` 가 아니라 `to_regprocedure` 다 — 앞자는 없으면 던진다)
+    SELECT pg_get_userbyid(proowner) INTO _f소유
+      FROM pg_proc WHERE oid = to_regprocedure('tenant.계정찾기(text)');
+
+    IF _f소유 IS NOT NULL AND _f소유 IS DISTINCT FROM _t소유 THEN
+        RAISE EXCEPTION
+            '함수 소유자(%)와 테이블 소유자(%)가 다르다 — 정의자가 accounts 를 못 읽으면 '
+            '함수는 0행을 돌려주고 증상은 「명부가 비었다」와 같아진다.', _f소유, _t소유;
+    END IF;
+END
+$$;
 
 
 -- ── 로그인 조회 — 이메일 1건 → 1행 ──────────────────────────────────────────
@@ -74,47 +139,26 @@ END
 $$;
 
 
--- ── 🔴 전제 검사 — 이게 깨지면 함수가 «조용히» 아무 일도 안 한다 ────────────
+-- ── 🔴 전제 검사 ②  «만든 뒤» 확인 ─────────────────────────────────────────
 --
--- `SECURITY DEFINER` 는 «소유자 권한» 으로 돈다. 그런데 소유자도 RLS 를 물게 만드는
--- 스위치가 있다 — `FORCE ROW LEVEL SECURITY`. 켜져 있으면 정의자가 정책에 걸려
--- 0행이 나오고, 증상은 **「명부가 비었다」와 완전히 같다** (로그인 403).
---
--- 🔴 실측이다. 소유자를 «비특권» 롤로 바꿔 놓고 비특권 롤로 함수를 부른 값:
---
---        FORCE rls = false  →  1행   ✅
---        FORCE rls = true   →  0행   🔴 무력화
---
--- 🔴 **로컬에서는 이 차이가 안 보인다.** 로컬 소유자 `postgres` 는 superuser 라
---    FORCE 와 무관하게 우회한다 — 소유자를 비특권으로 바꾸기 «전» 에 잰 값은
---    FORCE 를 켜도 1행이었다. 운영 Cloud SQL 의 `postgres` 는 superuser 가 아니다.
---    또 이 프로젝트가 반복해 데인 자리다 (`10_rls_guc.sql` 머리말과 같은 뿌리).
---
--- ⚠️ 이 검사는 «적용 시점» 에만 돈다. 인스턴스를 다시 만들거나 누가 나중에 FORCE 를
---    켜면 여기선 못 잡는다 — 그때는 위 두 줄을 손으로 다시 재라.
+-- 첫 적용에서는 위 ①이 함수 소유자를 못 본다(아직 없다). 만든 «뒤» 한 번 더 본다.
+-- ⚠️ 자동커밋으로 흘리면 여기서 터져도 함수는 이미 남는다 — 그래서 진짜 위험한
+--    FORCE 검사는 ①에 두고, 여기엔 「덜 위험한 쪽」만 남긴다. 소유자가 어긋난 함수는
+--    새는 게 아니라 0행을 돌려줄 뿐이다.
 DO $$
 DECLARE
-    _force  boolean;
-    _t소유  name;
-    _f소유  name;
+    _t소유 name;
+    _f소유 name;
 BEGIN
-    SELECT relforcerowsecurity, pg_get_userbyid(relowner)
-      INTO _force, _t소유
+    SELECT pg_get_userbyid(relowner) INTO _t소유
       FROM pg_class WHERE oid = 'tenant.accounts'::regclass;
-
     SELECT pg_get_userbyid(proowner) INTO _f소유
       FROM pg_proc WHERE oid = 'tenant.계정찾기(text)'::regprocedure;
 
-    IF _force THEN
-        RAISE EXCEPTION
-            'tenant.accounts 에 FORCE ROW LEVEL SECURITY 가 켜져 있다 — SECURITY DEFINER 가 '
-            '무력화되어 로그인이 403 이 된다(실측). 끄든가, 이 처방을 다시 설계해라.';
-    END IF;
-
     IF _f소유 IS DISTINCT FROM _t소유 THEN
         RAISE EXCEPTION
-            '함수 소유자(%)와 테이블 소유자(%)가 다르다 — 정의자가 accounts 를 못 읽으면 '
-            '함수는 0행을 돌려주고 증상은 「명부가 비었다」와 같아진다.', _f소유, _t소유;
+            '함수 소유자(%)와 테이블 소유자(%)가 다르다 — 이 함수는 0행만 돌려준다. '
+            'ALTER FUNCTION tenant.계정찾기(text) OWNER TO % 로 맞춰라.', _f소유, _t소유, _t소유;
     END IF;
 
     RAISE NOTICE '전제 검사 통과 — 소유자=% · FORCE rls=off', _t소유;
