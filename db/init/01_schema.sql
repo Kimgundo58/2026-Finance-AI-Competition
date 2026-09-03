@@ -399,7 +399,10 @@ CREATE TABLE tenant.accounts (
     account_id  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     org_id      UUID NOT NULL REFERENCES tenant.orgs(org_id) ON DELETE CASCADE,
     email       TEXT NOT NULL UNIQUE,
-    pw_hash     TEXT NOT NULL,
+    -- 🔴 NOT NULL 해제 (2026-09-03, S2 인증). Supabase 가 비밀번호를 들고 우리는
+    --    (email → org_id) 만 든다. 우리 쪽 pw_hash 는 «있으면 안 되는» 값이다.
+    --    자체 로그인을 되살릴 때만 다시 채운다 — 그때 NOT NULL 을 되걸 것.
+    pw_hash     TEXT,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

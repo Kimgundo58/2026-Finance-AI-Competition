@@ -4,6 +4,7 @@ __pycache__/
 venv/
 .env
 .env.*
+!.env.example      # 이름만 든 견본이다 — 값이 없어 커밋한다
 *.log
 .DS_Store
 Thumbs.db
