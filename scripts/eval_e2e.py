@@ -108,29 +108,55 @@ _RE_S = re.compile(r"(?<![A-Za-z0-9])S\d{2,}(?![0-9])")
 
 _RE_강등코드 = re.compile(r'"([A-Z][A-Z0-9_]{4,})"')
 _강등코드_제외 = re.compile(r"^(SUDDOE_|VLLM_|RUNPOD_|HF_|PYTHON)")
+_RE_강등코드_SQL = re.compile(r"'([A-Z][A-Z0-9_]{4,})'")
 
 
-def _강등코드목록() -> tuple[list[str], str]:
-    """강등코드 «전량». 발화한 것만 세면 「안 울린 코드」가 기록에서 사라진다.
+def _강등코드_소스훑기() -> set[str]:
+    """소스의 대문자 리터럴에서 코드 후보를 긁는다. **보조 닻이다.**
 
-    🔴 목록을 이 파일에 손으로 박지 않는다. P1(ai-2c)이 21종이라 했고 원본을 훑으니
-       **22종**이었다 — 베끼는 순간 그 오차가 run 에 굳는다. 소스에서 뽑는다.
-       (`llm_validate.py:325`·`:541` 도 자기 주석에 「강등코드 22종」이라 적어 두었다)
-    🔴 f-string 등으로 만들어지는 코드는 이 훑기가 못 잡는다. 그래서 «관측된 코드 중
-       목록에 없는 것» 을 따로 세어 시끄럽게 만든다 — 조용히 빠지는 쪽이 나쁘다.
+    🔴 이 그물은 코드가 아닌 것도 잡는다 — `SUDDOE_GATE_B` 같은 환경변수 이름이
+       같은 꼴이다(P1 지적). 접두어로 거르지만 거르는 목록 자체가 손으로 적은 것이라
+       또 낡는다. 그래서 **기준은 DB CHECK 로 두고 이건 대조용으로만 쓴다.**
     """
     여기 = os.path.dirname(os.path.abspath(__file__))
-    본 = set()
-    출처 = []
+    본: set[str] = set()
     for f in ("llm_validate.py", "orchestrate.py"):
         try:
             with open(os.path.join(여기, f), encoding="utf-8") as fh:
                 본 |= {m for m in _RE_강등코드.findall(fh.read())
                       if not _강등코드_제외.match(m)}
-            출처.append(f)
         except OSError:
             pass
-    return sorted(본), "+".join(출처) or "없음"
+    return 본
+
+
+def _강등코드목록(cur=None) -> tuple[list[str], str, dict]:
+    """강등코드 «전량». 발화한 것만 세면 「안 울린 코드」가 기록에서 사라진다.
+
+    🔴 목록을 이 파일에 손으로 박지 않는다. P1(ai-2c)이 21종이라 했고 뽑아 보니
+       **22종**이었다 — 베끼는 순간 그 오차가 run 에 굳는다.
+       (P1·ai-e8 둘 다 정규식이 `[A-Z_]+` 라 `L3_ONLY_DOWNGRADE` 의 `3` 을 놓쳤다.
+        같은 날 두 세션이 같은 실수를 했다. 세는 방법이 답을 만든다.)
+    🔴 **기준은 `tenant.decisions` 의 CHECK 제약이다** (P1 권고). 선언적 목록이고,
+       여기 없는 코드는 애초에 저장이 안 되니 그게 진짜 경계다. 소스 훑기는 대조용.
+       2026-09-03 실측: CHECK 22 · 소스 22 · 차집합 «양방향 0».
+    🔴 둘이 어긋나면 조용히 합치지 않는다 — 양쪽 차집합을 그대로 남기고 run 이 찍는다.
+    """
+    소스 = _강등코드_소스훑기()
+    체크: set[str] = set()
+    if cur is not None:
+        try:
+            cur.execute("""SELECT pg_get_constraintdef(oid) FROM pg_constraint
+                           WHERE conrelid = 'tenant.decisions'::regclass AND contype = 'c'
+                             AND conname LIKE %s""", ("%강등코드%",))
+            for (d,) in cur.fetchall():
+                체크 |= set(_RE_강등코드_SQL.findall(d))
+        except Exception:
+            체크 = set()
+    기준, 출처 = (체크, "DB CHECK") if 체크 else (소스, "소스훑기(CHECK 를 못 읽었다)")
+    대조 = {"CHECK수": len(체크), "소스수": len(소스),
+          "CHECK에만": sorted(체크 - 소스), "소스에만": sorted(소스 - 체크)}
+    return sorted(기준), 출처, 대조
 
 
 def _헤드() -> dict:
@@ -426,6 +452,8 @@ def 실행(*, dry: bool, limit: int | None, 세트: list[str] | None, 라벨: st
         rules수 = dict(zip(("총", "verified"), cur.fetchone()))
         cur.execute("SELECT 적용대상, count(*) FROM corpus.chunks GROUP BY 1 ORDER BY 2 DESC")
         적용대상분포 = {r[0]: r[1] for r in cur.fetchall()}
+        # 🔴 `with` 밖(집계 절)에서는 conn 이 닫혀 있다. 여기서 미리 읽는다
+        코드목록, 코드출처, 코드대조 = _강등코드목록(cur)
         # 🔴 «어느 DB 의 어느 롤로 돌았나». 비밀번호는 담지 않는다.
         #    ai-a3 실측: RLS 가 걸린 롤로 실판정을 돌리면 미매핑 전제 저장이 죽으면서
         #    약 46%가 「판단불가」로 잡힌다 — 모델 판단이 아니라 저장 실패다.
@@ -656,18 +684,21 @@ def 실행(*, dry: bool, limit: int | None, 세트: list[str] | None, 라벨: st
     #    그냥 조건 미충족인 0. 어느 0 이 다음 run 에서 1 이 되는지가 신호다.
     #    2판(꽂기)은 근거를 꽂으니 `PREMISE_UNMAPPED`·`CITE_HANG_MISMATCH` 가
     #    움직여야 정상이고, 안 움직이면 그게 사고다.
-    코드목록, 코드출처 = _강등코드목록()
     강등표 = {c: 코드빈도.get(c, 0) for c in 코드목록}
     목록밖 = sorted(set(코드빈도) - set(코드목록))
     for c in 목록밖:
         강등표[c] = 코드빈도[c]
     print(f"\n강등코드 {len(코드목록)}종 중 발화 {sum(1 for v in 강등표.values() if v)}종"
-          f" (출처 {코드출처})")
+          f" (기준 {코드출처})")
     if 목록밖:
-        print(f"  🔴 목록에 «없는» 코드가 울렸다: {목록밖} — 훑기가 못 잡는 자리가 있다")
+        print(f"  🔴 목록에 «없는» 코드가 울렸다: {목록밖} — 저장이 CHECK 에 막힌다")
+    if 코드대조["CHECK에만"] or 코드대조["소스에만"]:
+        print(f"  🔴 DB CHECK 와 소스가 어긋난다: CHECK에만 {코드대조['CHECK에만']} · "
+              f"소스에만 {코드대조['소스에만']}")
 
     지표전체 = {**전체, "분해": 분해, "혼동": 혼동, "강등코드빈도": 코드빈도,
-              "강등코드표": 강등표, "강등코드_목록출처": 코드출처, "강등코드_목록밖": 목록밖,
+              "강등코드표": 강등표, "강등코드_목록출처": 코드출처,
+              "강등코드_목록밖": 목록밖, "강등코드_닻대조": 코드대조,
               "경로빈도": 경로빈도, "근거측정": 근거측정,
               "소요초": round(경과, 1), "오류": len(오류)}
 
