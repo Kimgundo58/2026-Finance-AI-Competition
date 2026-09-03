@@ -90,6 +90,15 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA corpus
 --    NULL 이고, RLS 는 참이 아닌 것을 통과시키지 않는다. 즉 「게스트 행」이라는 개념이
 --    이 정책에서는 성립하지 않는다.
 --
--- 두 건 모두 «안» 을 보고서에 적었다. 정책 DDL 은 결정 후 11번 파일로 따로 낸다.
+-- ③ 🔴 `tenant.unmapped_premise` 는 **RLS 가 켜져 있는데 정책이 하나도 없다.**
+--    정책 없는 RLS 는 「전부 거부」다 — 쓰기는 42501, 읽기는 «에러 없이 0행» 이다.
+--    로컬 postgres 는 BYPASSRLS 라 여기서도 안 보인다. 운영 실측(2026-09-03, B1):
+--        SELECT unmapped_premise  → 0행 (조용하다)
+--        INSERT unmapped_premise  → 42501 row-level security policy
+--    tenant 13개 중 RLS 켜진 것은 12개, 정책이 붙은 것은 11개다. 그 차이가 이 표다.
+--    (`incidents` 는 반대다 — RLS 자체가 꺼져 있어 org 격리가 «없다». 앱은 rwd 를 쥔다.)
+--    전제 미매핑 적재가 조용히 버려지고 있는지부터 확인해야 한다. 정책 결정은 오너 몫.
+--
+-- 세 건 모두 «안» 을 보고서에 적었다. 정책 DDL 은 결정 후 11번 파일로 따로 낸다.
 -- 🔴 여기에 미리 써 두고 주석 처리하지 않는다 — 주석 처리된 DDL 은 누가 지나가다
 --    풀어 버린다. 결정 안 난 것은 파일에 «없는» 게 맞다.
