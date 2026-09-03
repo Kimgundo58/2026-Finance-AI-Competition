@@ -302,3 +302,48 @@ print("  유휴 31분 → ", r14, "| 팟기록:", 팟14.기록)
 assert r14 == "정지함" and 팟14._상태 == gw.중지, "실 모드에서 정지가 안 됐다"
 print("  ✅ 실 모드는 정지 그대로 발동 — 가드가 실서버를 막지 않는다")
 print("\n" + "=" * 72 + "\n목 모드 가드 시나리오 통과\n" + "=" * 72)
+
+# ══════════════════════════════════════════════════════════════════
+줄("⑩ 🔴 keepalive 가 워치독을 무력화하는가 — 연장 상한")
+# 사고: 프론트가 모달 전에 keepalive 를 자동 전송한다. 탭만 열어두면 팟이 영원히 산다?
+팟15 = 가짜팟(gw.가동)
+w15, 시계15 = 만들기(팟15, SUDDOE_GPU_IDLE_MIN=30, SUDDOE_GPU_KEEPALIVE_MAX_MIN=60,
+                    RUNPOD_API_KEY="k", RUNPOD_POD_ID="p")
+print("  연장상한 =", w15.연장상한초, "초 · 유휴임계 =", w15.유휴임계초, "초")
+정지시점 = None
+for 분 in range(1, 121):                       # 2시간 동안 1분마다 keepalive 만 친다
+    시계15.앞당기기(60)
+    w15.keepalive()                            # 🔴 GPU 호출은 «한 번도» 없다
+    r = w15.한번_검사()
+    if r == "정지함":
+        정지시점 = 분
+        break
+print(f"  1분마다 keepalive · GPU 호출 0회 → {정지시점}분에 '정지함' (팟기록 {팟15.기록})")
+assert 정지시점 is not None, "🔴 keepalive 만으로 팟이 영원히 살았다 — 워치독 무력화"
+assert 90 <= 정지시점 <= 91, f"상한 60분 + 임계 30분 = 90분 근처여야 하는데 {정지시점}분"
+print("  ✅ 상한 60분 뒤로는 keepalive 를 쳐도 90분에 꺼진다")
+
+줄("⑩-b 정상 사용은 안 막는가 — 판정을 계속하면 안 꺼진다")
+팟16 = 가짜팟(gw.가동)
+w16, 시계16 = 만들기(팟16, SUDDOE_GPU_IDLE_MIN=30, SUDDOE_GPU_KEEPALIVE_MAX_MIN=60,
+                    RUNPOD_API_KEY="k", RUNPOD_POD_ID="p")
+for 분 in range(1, 241):                       # 4시간 동안 20분마다 «실제 판정»
+    시계16.앞당기기(60)
+    if 분 % 20 == 0:
+        w16.호출기록()                          # 실 GPU 호출
+    if w16.한번_검사() == "정지함":
+        raise AssertionError(f"🔴 정상 사용 중 {분}분에 꺼졌다")
+print("  4시간 동안 20분마다 판정 → 정지 0회 · 팟기록", 팟16.기록)
+print("  ✅ 실제로 쓰는 동안은 안 꺼진다 — 상한이 정상 사용을 막지 않는다")
+
+줄("⑩-c keepalive 는 «상한 안에서는» 제 역할을 한다")
+팟17 = 가짜팟(gw.가동)
+w17, 시계17 = 만들기(팟17, SUDDOE_GPU_IDLE_MIN=30, SUDDOE_GPU_KEEPALIVE_MAX_MIN=60,
+                    RUNPOD_API_KEY="k", RUNPOD_POD_ID="p")
+시계17.앞당기기(29 * 60); w17.keepalive()       # 판정 29분 뒤 모달 → 사용자가 「더 쓸게요」
+시계17.앞당기기(29 * 60)
+r17 = w17.한번_검사()
+print("  판정 후 29분에 keepalive → 다시 29분 →", r17, "(상한 60분 안이라 살아야 한다)")
+assert r17.startswith("대기"), f"상한 안인데 꺼졌다: {r17}"
+print("  ✅ 상한 안의 keepalive 는 유효 — 모달 「더 쓸게요」가 동작한다")
+print("\n" + "=" * 72 + "\nkeepalive 상한 시나리오 통과\n" + "=" * 72)
