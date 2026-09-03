@@ -652,7 +652,16 @@ def test_실판정이_터져도_4way_밖으로_안_나간다(monkeypatch):
 #    타입·FK 는 orgs·l3_documents·l3_articles·decisions·plan_tasks 의 RLS
 #    (`org_isolation USING (org_id = tenant.current_org())`)와 묶여 있어
 #    **로그인 설계와 분리해서 못 바꾼다.**
-계약_보류: set[tuple[str, str]] = set()
+# ── 2026-09-03 배선분 — 계약 v1.0 «뒤» 에 생겼고 오너가 승인했다 ──────────
+# 🔴 여기에 넣는 것은 「계약 밖이어도 된다」가 아니라 **「계약 문서를 아직 못 고쳤다」**
+#    는 뜻이다. `docs/7_백엔드/API_계약_v1.0.md` 를 갱신하면 위 표로 옮기고 여기서 뺀다.
+#    이 집합이 커지면 그게 계약이 죽었다는 신호다.
+계약_보류: set[tuple[str, str]] = {
+    ("GET",  "/api/orgs"),          # 기관 목록. 🔴 org_id 를 «안» 싣는다 — slug 만 나간다
+    ("POST", "/api/demo/session"),  # 심사위원용 임시 org 토큰(2h). uuid4 라 이름에서 재계산 불가
+    ("GET",  "/api/gpu/status"),    # GPU 유휴초. 테넌트 데이터를 안 만져 인증 제외
+    ("POST", "/api/gpu/keepalive"), # 유휴 타이머 리셋. 보조 수단 — 탭을 닫아도 서버가 끈다
+}
 
 
 def _실제_엔드포인트() -> set[tuple[str, str]]:

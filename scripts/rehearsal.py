@@ -137,7 +137,10 @@ def 한건(질문: str, 사업명: str | None, org_id: str | None, live: bool,
     return {"판정": r.get("판정") or "판단불가", "요약": r.get("요약") or "",
             "해야할일": r.get("해야할일") or [],
             # 인용은 조번호만 남긴다 — 원문까지 담으면 결과 JSON 이 수 MB 가 된다
-            "인용": [c.get("조번호") for c in (r.get("인용") or []) if isinstance(c, dict)],
+            # 🔴 오케는 `인용목록` 으로 돌려준다 — `r.get("인용")` 만 쓰면 항상 []
+            #    (2026-09-03 ai-43. `server/main.py:_실_판정` 에 같은 결함이 있었다)
+            "인용": [c.get("조번호") for c in (r.get("인용") or r.get("인용목록") or [])
+                          if isinstance(c, dict)],
             "신뢰등급": r.get("신뢰등급"), "경로": r.get("경로"),
             "실패단계": r.get("실패단계"),
             "강등코드": r.get("강등코드") or [],
