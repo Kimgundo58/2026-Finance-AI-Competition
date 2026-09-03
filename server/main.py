@@ -65,7 +65,10 @@ from server._common import (DSN, MOCK, _sse, _sse응답, _질의,      # noqa: E
                             비목_ENUM, 판정_ENUM, 창업활동비_사업 as _창업활동비_사업)
 from server.models import (F1, F3항, F4항, F5, 정규화요청,          # noqa: E402
                            판정요청, 프로필)
-from server import routes_l3, routes_plans, routes_tasks           # noqa: E402
+from server import (auth, gpu_watchdog, routes_l3, routes_orgs,     # noqa: E402
+                    routes_plans, routes_tasks)
+
+_워치독 = gpu_watchdog.워치독
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -314,6 +317,18 @@ _목_프로필 = {"f1": F1().model_dump(), "f3": [], "f4": []}
 app = FastAPI(title="써도돼요 API", version="0.1.0",
               description="창업지원금 지출비 사전승인 판정. `프론트 연동 사양.md` §8 계약.")
 
+# ── 인증·테넌트 귀속 (2026-09-03 배선) ──────────────────────────────────
+# 🔴 CORS 보다 «먼저» add 한다. add_middleware 는 마지막에 넣은 것이 «바깥» 이라,
+#    이 순서라야 CORS 가 바깥에 서서 401·503 응답에도 Access-Control-Allow-Origin 이
+#    붙는다. 반대로 두면 인증 거부가 CORS 밖으로 나가 브라우저 콘솔엔 「CORS 차단」
+#    으로 찍히고, 프론트는 «인증 문제» 라는 걸 영영 모른다. (검증 세션 실측:
+#     CORS→auth 순서 = 401 에 ACAO «없음» / auth→CORS 순서 = 401 에 ACAO 있음)
+# 🔴 목 모드에선 붙이지 않는다. 목 서버엔 SUDDOE_JWKS_URL 도 DB 도 없어서, 로그인한
+#    프론트가 보내는 Bearer 를 검증하려다 «/api 전 경로»가 503(JWKS 미설정) 또는
+#    403(계정 조회 빈 결과)이 된다. 목은 지금처럼 ?org_id= 자기신고로 돈다.
+if not MOCK:
+    app.add_middleware(auth.OrgId주입)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o for o in os.environ.get(
@@ -328,6 +343,13 @@ app.add_middleware(
 app.include_router(routes_plans.router)
 app.include_router(routes_tasks.router)
 app.include_router(routes_l3.router)
+app.include_router(routes_orgs.router)         # 기관 목록 — org_id 를 «안» 싣는다
+app.include_router(gpu_watchdog.router)        # /api/gpu/status · keepalive
+
+# 🔴 IDLE_MIN=0 이면 스레드조차 만들지 않는다. 목 모드 가드는 gpu_watchdog 안에 있다
+#    — 목 서버는 GPU 를 안 부르니 «영원히 유휴» 라, 가드가 없으면 30분 뒤 목이
+#    실 팟에 stop 을 쏜다 (S4 가 재현·차단 확인).
+_워치독.시작_루프()
 
 
 def _관리자(token: str | None) -> None:
@@ -547,6 +569,11 @@ def normalize(req: Request, body: 정규화요청):
             yield _sse("결과", 캐시)
             yield _sse("완료", {"캐시": True})
             return
+        # 🔴 첫 진행 이벤트 «뒤» 다. 앞에 두면 팟 상태 조회(타임아웃 15초)가
+        #    첫 바이트를 막아 화면이 최대 15초 빈다.
+        if not MOCK and body.질문 and body.질문.strip():
+            for 진 in _워치독.기동_진행():
+                yield _sse("진행", 진)
         try:
             out = dict(_목_정규화) if MOCK else _실_정규화(body)
         except Exception as e:                                # noqa: BLE001
@@ -625,6 +652,10 @@ def judge(req: Request, body: 판정요청, 목: str | None = None):
             _decision_id = out.pop("decision_id", None)
             가드.넣기(k, out)
         else:
+            # 🔴 기존 이벤트 이름(`진행`)만 쓴다 — 이벤트 목록·순서는 계약이다.
+            #    가동 중이면 0건이라 평상시 이벤트열은 그대로다.
+            for 진 in _워치독.기동_진행():
+                yield _sse("진행", 진)
             # 🔴 별도 스레드에서 돌리고 짧은 주기로 폴링한다 — 대기 중에는 SSE 주석
             #    (`: keep-alive`)만 흘린다. **새 이벤트 이름을 안 만든다** — 이벤트
             #    목록·순서는 계약이고 D 의 테스트가 그대로 잠근다. 무한정 기다리되
@@ -774,6 +805,7 @@ def admin_warmup(x_admin_token: str | None = Header(default=None)) -> dict:
         결과["vLLM"] = f"{time.time() - t:.1f}초"
     except Exception as e:                                    # noqa: BLE001
         결과["vLLM"] = f"미가동 ({type(e).__name__})"
+    _워치독.호출기록()          # 🔴 워밍업도 GPU 사용이다. 30분 뒤 죽으면 안 된다
     가드.워밍업시각 = datetime.now(timezone.utc).isoformat()
     return {"워밍업": 결과, "시각": 가드.워밍업시각}
 
@@ -846,6 +878,7 @@ def _폼_비목후보(품목: str | None, 용도: str, 금액: float | None,
 
 def _실_정규화(body: 정규화요청) -> dict:
     if body.질문 and body.질문.strip():
+        _워치독.게이트()      # 못 깨우면 raise → 기존 except → 판단불가
         from normalize_run import 정규화
         out, _메타 = 정규화(body.질문, 비목목록=비목_ENUM)
     else:
@@ -881,6 +914,7 @@ def _실_정규화(body: 정규화요청) -> dict:
 
 
 def _실_판정(body: 판정요청) -> dict:
+    _워치독.게이트()
     import orchestrate
     질문 = body.정규화.get("_원문") or body.정규화.get("질문") or ""
     if not 질문:
