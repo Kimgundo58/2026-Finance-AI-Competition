@@ -107,6 +107,29 @@ def test_샘플에_판정이_안_붙어_있다(판):
     assert n == 0, f"판정이 붙었거나 상태가 draft 가 아닌 샘플이 {n}건 있다"
 
 
+def test_샘플이_쓰는_사업이_데모org_사업명에_다_들어있다(판):
+    """🔴 **개수가 아니라 «포함» 을 본다.** 샘플 5건의 사업이 4종으로 섞여 있는데
+    데모 org 의 `사업명` 이 1종이면, 온보딩에서 고를 수 있는 사업과 홈에 뜬 계획의
+    사업이 어긋난다 — 사업별로 룰이 갈리므로 시연에서 바로 티가 난다.
+
+    `_데모사업명들()` 이 `_샘플계획()` 에서 «뽑아» 쓰므로 구조상 늘 참이어야 한다.
+    이 줄이 빨개지면 둘 중 하나를 손으로 적어 둔 것이다 — 그러면 갈린다.
+    ⚠️ 이건 시연 화면 문제지 판정 정확도 문제가 아니다.
+    """
+    판.post("/api/demo/session")
+    with psycopg.connect(관리DSN, connect_timeout=5) as c:
+        행 = c.execute(
+            "SELECT o.사업명, array_agg(DISTINCT p.사업명) "
+            "FROM tenant.orgs o JOIN tenant.expense_plans p USING (org_id) "
+            "WHERE o.기관명 LIKE %s GROUP BY o.org_id, o.사업명",
+            (f"{routes_orgs.데모접두}%",)).fetchall()
+    assert 행, "데모 org 가 없다"
+    for org사업, 계획사업 in 행:
+        빠진 = set(계획사업) - set(org사업)
+        assert not 빠진, (
+            f"샘플 계획이 쓰는 사업 {sorted(빠진)} 가 데모 org 의 사업명 {org사업} 에 없다")
+
+
 # ── ② 격리 — 🔴 개수로는 안 갈린다 ──────────────────────────────────
 
 def test_두_데모세션은_서로의_계획을_못_본다(판):
