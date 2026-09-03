@@ -270,7 +270,10 @@ export HF_HOME=/workspace/hf
 vllm serve Qwen/Qwen3-32B-AWQ \
   --reasoning-parser qwen3 \
   --enable-prefix-caching \
-  --max-model-len 20000 \
+  --max-model-len 40960   # 🔴 20000 이었다 (0903 정정). 실측: 출력 3,000 을 뺀 입력 예산 기준
+  #   20,000 -> 19/95 문항이 잘린다 · 24,576 -> 16 · 32,768 -> 1(행분해 on 이면 3) · 40,960 -> 0
+  #   잘리면 B6(질문+출력지시)가 맨 뒤라 **질문이 날아간 조용한 오답**이 된다.
+  #   기준 문서는 scripts/pod_serve.sh 다 — 문서가 아니라 스크립트로 띄운다 \
   --gpu-memory-utilization 0.92 \
   --port 8000
 ```

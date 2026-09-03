@@ -79,6 +79,10 @@ DSN = db.DSN
 #   `docs/기록/2026-08-31_축별보고.md` 에 가정으로 적는다. 갈리면 손해가 "LLM 2배" 뿐이라 관대하게 잡는다.
 게이트C_격차 = float(os.environ.get("SUDDOE_GATE_C", "0.15"))
 게이트C_최소신뢰 = 0.35
+# 🔴 판정 호출(④)의 max_tokens. **리터럴로 두지 않는다** — run 191 은 라벨이 3000 인데
+#    코드는 1500 이었고, finish_reason 도 안 남겨 사후 확인이 불가능했다(P1 실측 0903).
+#    기록되는 값과 실제 쓰이는 값이 같은 이름을 보게 묶는다.
+판정_최대토큰 = int(os.environ.get("SUDDOE_판정_최대토큰", "1500"))
 
 # ════════════════════════════════════════════════════════════════════════════
 # 강등코드 18종 — A 가 발행한다 (동결 인터페이스)
@@ -203,8 +207,12 @@ def _금지적중(cur, 품목, 용도, 사업명, 비목):
     return _B_금지적중(cur, 품목, 용도, 사업명, 비목) if _B_금지적중 else None   # STUB: B
 
 
-def _effective(cur, 사업명, 비목, 기관ID=None):
-    return _B_effective(cur, 사업명, 비목, 기관ID) if _B_effective else None    # STUB: B
+def _effective(cur, 사업명, 비목, 기관ID=None, 수치=None):
+    # 🔴 `수치=` 를 안 넘겨서 (2)-e 금액비교가 실판정 경로에서 **한 번도 안 돌았다**
+    #    (0903 ai-a3 발견 · ai-43 재확인 · 전수 `grep "수치="` 결과가 자가검사 한 곳뿐이었다).
+    #    한도 붙은 비목은 프롬프트에 늘 「비교 불가 — 기준값 없음」이 나갔다.
+    #    CLAUDE.md 확정 원칙 「금액 비교는 코드가 한다」가 통로만 있고 안 이어져 있었다.
+    return _B_effective(cur, 사업명, 비목, 기관ID, 수치=수치) if _B_effective else None  # STUB: B
 
 
 def _게이팅(l3룰) -> dict:
@@ -233,6 +241,11 @@ def _l3룰(cur, org_id, 비목):
 # ════════════════════════════════════════════════════════════════════════════
 # (2)-e·B4 — 룰 결과를 문장으로. 🔴 원시 한도값을 프롬프트에 넣지 않는다
 # ════════════════════════════════════════════════════════════════════════════
+# 🔴 아래 `_룰문장`/`b4_문장` 의 「비교 불가 — 기준값 없음」 갈래는 **실경로에서 도달 불가**다
+#    (0903 ai-a3 확인). `effective_rule` 이 B4문장을 항상 싣고(`rule_lookup.py:1050`)
+#    `_룰문장` 이 `if 룰.get("B4문장"): return` 으로 조기반환한다. 실제로 나가는 문장은
+#    `rule_lookup.py:771` 의 「한도 비교는 아직 못 한다 — {사유}」다.
+#    지우지 않고 명시만 한다 — 두 사람이 이 줄을 읽고 실경로라고 믿었다.
 def b4_문장(룰: dict | None) -> str | None:
     """B4 블록 본문. B 의 `B4문장` 이 있으면 그것이 기준이다 (동결 인터페이스).
 
@@ -335,12 +348,46 @@ def _unmapped_적재(cur, 전제들: list[dict], *, 사업명, 비목) -> None:
     D1-b 가 그 제약을 넣기 전에는 `발생횟수+1` 이 영영 안 걸려 결핍 루프가 죽는다.
     제약이 아직 없으면 ON CONFLICT 가 터지므로, 없으면 조용히 INSERT 만 한다.
     """
-    있음 = cur.execute("""SELECT 1 FROM pg_constraint
-                           WHERE conrelid='tenant.unmapped_premise'::regclass
-                             AND contype='u'""").fetchone()
-    for p in 전제들:
-        인자 = ((p.get("사실") or "")[:500], json.dumps(p.get("매핑") or [],
-                ensure_ascii=False), 사업명, 비목)
+    # 🔴 try/except «만» 으로는 부족하다. 비자동커밋 연결에서는 실패한 문장이 트랜잭션을
+    #    abort 시켜 **뒤따르는 decisions INSERT 가 25P02 로 같이 죽는다**(0903 ai-b2 실측).
+    #    SAVEPOINT 로 이 함수만 되감아야 판정 저장이 산다. autocommit 이면 SAVEPOINT 자체가
+    #    쓸 수 없으므로(트랜잭션 블록 밖) 연결 모드를 보고 건다.
+    _sp = False
+    try:
+        if not getattr(getattr(cur, "connection", None), "autocommit", True):
+            cur.execute("SAVEPOINT _unmapped_적재")
+            _sp = True
+        있음 = cur.execute("""SELECT 1 FROM pg_constraint
+                               WHERE conrelid='tenant.unmapped_premise'::regclass
+                                 AND contype='u'""").fetchone()
+        for p in 전제들:
+            인자 = ((p.get("사실") or "")[:500], json.dumps(p.get("매핑") or [],
+                    ensure_ascii=False), 사업명, 비목)
+            _unmapped_한건(cur, 있음, 인자)
+        if _sp:
+            cur.execute("RELEASE SAVEPOINT _unmapped_적재")
+    except Exception as e:
+        if _sp:
+            try:
+                cur.execute("ROLLBACK TO SAVEPOINT _unmapped_적재")
+            except Exception:
+                pass                      # 되감기까지 실패하면 판정 저장은 어차피 못 산다
+        # 🔴 **통계 적재가 판정을 죽이면 안 된다.** 이 함수는 (5) 전제해소 안에서
+        #    판정 본류로 불린다(:341 ← :684). 예외를 안 막으면 비특권 롤에서
+        #    `42501`(RLS 정책 통과 실패)이 그대로 올라가 바깥 except 로 빠지고,
+        #    **멀쩡히 난 판정이 통째로 실패 응답이 된다** (0903 ai-b2 운영 실측:
+        #    INSERT 컬럼에 org_id 가 없어 `tenant.unmapped_premise` 정책을 못 넘는다).
+        #    로컬에서 안 보였던 건 `postgres` 가 BYPASSRLS 라서다.
+        #    🔴 **로그에만 남긴다.** 강등사유에 넣으면 「내부 오류」가 사용자 화면 어휘로
+        #    새고, 판단불가 통계에도 계속 섞인다 (ai-43 지적).
+        #    접근 경로(정책 0개인 전사 통계표)는 스키마 결정이라 별건으로 남았다 —
+        #    이 try 는 그 결정과 무관하게 그 자체로 옳다.
+        sys.stderr.write("[unmapped 적재 실패 · 판정은 계속한다] "
+                         + type(e).__name__ + ": " + str(e) + chr(10))
+        return
+
+
+def _unmapped_한건(cur, 있음, 인자) -> None:
         if 있음:
             cur.execute("""INSERT INTO tenant.unmapped_premise
                              (premise_text, 근거조항, 사업명, 비목, 발생횟수, 최초, 최근)
@@ -397,6 +444,11 @@ def _빈응답(판정: str, 요약: str, **추가) -> dict:
     기본 = dict(판정=판정, 요약=요약, 해야할일=[], 인용목록=[], 전제목록=[],
                 신뢰등급=None, 버전스탬프=None, 참조사슬=[], 강등사유=[], 미매핑전제=[])
     기본.update(추가)
+    # 🔴 「판단불가」가 **모델의 판단인가 실패인가**를 집계에서 갈라야 한다 (CLAUDE.md).
+    #    지금까지는 `실패단계` 문자열이 유일한 단서였고, 그걸 아는 사람만 갈랐다.
+    #    (0903 실측: 미매핑 전제 하나가 트랜잭션을 죽여 판정이 조용히 판단불가로 닫히는
+    #     경로가 실재했다 — 그 값이 모델의 판단불가와 한 통에 섞여 있었다.)
+    기본["실패경로"] = "실패단계" in 추가
     return 기본
 
 
@@ -405,7 +457,8 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool 
        plan_id: int | None = None,
        격리근거: list[dict] | None = None, 주입: str | None = None,
        게이트임계: float | None = None, 온도: float = 0.0,
-       변형: str = "V0", _비목고정: str | None = None) -> dict:
+       변형: str = "V0", _비목고정: str | None = None,
+       정규화결과: dict | None = None) -> dict:
     """(1)~(7). 동결 인터페이스 — 시그니처를 협의 없이 바꾸지 않는다.
 
     `dry=True` : LLM 을 부르지 않는다. (1) 은 규칙 정규화, (4) 는 프롬프트 조립까지만.
@@ -414,6 +467,15 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool 
                  들어간다 — 서버가 판정 직후 UPDATE 로 뒤에서 잇던 이음매를 없앤다.
                  없으면 NULL(단건 판정). 컬럼이 없는 스키마에서는 조용히 빠진다.
     `주입`     : A10 fault injection. 'db'|'timeout'|'schema'|'empty'|'cite'
+    `정규화결과`: **이미 돈 (1) 의 산출**을 주면 ①을 건너뛴다. 서버는 `/api/normalize`
+                 에서 (1)을 이미 돌리고 사용자 확정값까지 받아 두는데, 그걸 안 넘겨서
+                 판정 1건이 **LLM 3회**가 되고 있었다 (0903 ai-43 실측). 확정 원칙은 2회다.
+                 되짚기(필드→문장→필드)는 정보를 잃는다 — `비목후보`
+                 `[{"비목":"기계장치","신뢰도":1}]` → `[]`, 인용 3건→1건 (ai-98 실측).
+                 🔴 **이름을 `정규화` 로 두지 않는다.** 모듈 전역 함수 `정규화` 를 가려
+                 None 을 호출하게 된다 — 어제 P4 를 물었던 `from X import Y` 결속 문제와 같은 반이다.
+                 🔴 None 이면 **바이트 단위로 종전과 같다.** 평가 하네스는 전부 None 이라
+                 run 191 기준선과 P4 의 A/B 가 이 변경에 안 흔들린다.
     """
     t0 = time.time()
     지연: dict[str, int] = {}
@@ -443,20 +505,32 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool 
     try:
         cur = conn.cursor()
 
-        # ── (1) 정규화 — LLM 1회 ─────────────────────────────────────────
+        # ── (1) 정규화 — LLM 1회. 이미 돈 결과를 받으면 건너뛴다 ─────────
         t = time.time()
-        try:
-            if 주입 == "timeout":
-                raise LLM실패("read timeout(주입)")
-            정규 , 메타1 = 정규화(질문, dry=dry)
-        except LLM실패 as e:
+        # 🔴 dict 인지만 본다. 모양을 더 따지지 않는 건 아래 (2)-a 가 이미
+        #    「문자열도 dict 도 받는」 방어를 하고 있어서다 (:470 주석). 여기서 또
+        #    스키마를 세우면 그 방어와 둘로 갈려 어느 쪽이 진짜 계약인지 모르게 된다.
+        외부정규화 = isinstance(정규화결과, dict) and bool(정규화결과)
+        if 외부정규화:
+            정규, 메타1 = 정규화결과, {"모델": "생략(호출부 제공)", "호출수": 0}
             잰다("정규화", t)
-            return _마무리(conn, cur, _빈응답(
-                "판단불가", "질문을 정규화하지 못했습니다. 품목과 금액을 나눠 다시 알려주세요.",
-                강등사유=[f"(1) 정규화 실패: {e}"], 강등코드=[], 경로="실패",
-                실패단계="정규화", 지연ms=지연), 기록=False, 닫기=닫기)
-        잰다("정규화", t)
-        경로.append("1정규화")
+            경로.append("1정규화(외부)")
+        else:
+            try:
+                if 주입 == "timeout":
+                    raise LLM실패("read timeout(주입)")
+                정규 , 메타1 = 정규화(질문, dry=dry)
+            except LLM실패 as e:
+                잰다("정규화", t)
+                return _마무리(conn, cur, _빈응답(
+                    "판단불가", "질문을 정규화하지 못했습니다. 품목과 금액을 나눠 다시 알려주세요.",
+                    강등사유=[f"(1) 정규화 실패: {e}"], 강등코드=[], 경로="실패",
+                    실패단계="정규화", 지연ms=지연), 기록=False, 닫기=닫기)
+            잰다("정규화", t)
+            경로.append("1정규화")
+        # 🔴 라벨이 아니라 **실제로 몇 번 불렀는가**. 어제 run 191 이 못 푼 문제가
+        #    「기록된 값과 쓰인 값이 다르다」였다 — 같은 실수를 여기서 되풀이하지 않는다.
+        정규화호출 = 0 if (dry or 외부정규화) else 1
         품목, 용도 = 정규.get("품목") or 질문[:40], 정규.get("용도") or ""
 
         # ── (2)-a 비목 확정 ──────────────────────────────────────────────
@@ -467,14 +541,14 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool 
             # B 가 못 잡으면 (1) 의 후보를 쓴다. 출처를 남겨 두 경로를 구분한다.
             #
             # 🔴 (1) 의 산출 모양이 두 가지다 — 둘 다 받는다 (2026-09-02).
-            #    LLM 모드 스키마는 `{비목, 신뢰도}` 객체를 강제하지만,
-            #    dry 의 `규칙_정규화()` 는 **문자열 리스트**를 돌려준다.
-            #    dict 만 가정했더니 정답셋 93문항 중 23건이 여기서
-            #    `TypeError: string indices must be integers` 로 죽었다.
-            #    LLM 이 스키마를 어겨 문자열을 섞어 보내도 같은 자리가 터지므로,
-            #    모양을 걸러 받는 것이 dry 대응이 아니라 방어다.
-            #    문자열에는 신뢰도가 없다 — 0.0 으로 둔다. 없는 숫자를 지어내지 않는다
-            #    (0.0 이면 게이트 C 의 최소신뢰 0.35 에 안 걸려 갈래가 안 열린다).
+        #    LLM 모드 스키마는 `{비목, 신뢰도}` 객체를 강제하지만,
+        #    dry 의 `규칙_정규화()` 는 **문자열 리스트**를 돌려준다.
+        #    dict 만 가정했더니 정답셋 93문항 중 23건이 여기서
+        #    `TypeError: string indices must be integers` 로 죽었다.
+        #    LLM 이 스키마를 어겨 문자열을 섞어 보내도 같은 자리가 터지므로,
+        #    모양을 걸러 받는 것이 dry 대응이 아니라 방어다.
+        #    문자열에는 신뢰도가 없다 — 0.0 으로 둔다. 없는 숫자를 지어내지 않는다
+        #    (0.0 이면 게이트 C 의 최소신뢰 0.35 에 안 걸려 갈래가 안 열린다).
             후보 = []
             _후보원본 = 정규["비목후보"]
             if isinstance(_후보원본, (str, dict)):
@@ -516,7 +590,12 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool 
                 r = 판정(질문, 사업명=사업명, org_id=org_id, dry=dry, 기관ID=기관ID,
                         top_k=top_k, conn=conn, 기록=False, 주입=주입,
                         격리근거=격리근거, _비목고정=c["비목"],
-                        게이트임계=게이트임계, 온도=온도, 변형=변형)
+                        게이트임계=게이트임계, 온도=온도, 변형=변형,
+                        # 🔴 재귀는 «이 비목으로 보면» 을 묻는 것이지 질문을 다시 읽는 게
+                    #    아니다. 안 물려주면 재귀 안에서 (1)이 또 돌아 품목이 미세하게
+                    #    달라진다(:520 주석이 그 사고를 적어 둔 자리다). 물려주면
+                    #    갈래 2개당 LLM 2회도 같이 준다. None 이면 종전과 같다.
+                        정규화결과=정규화결과)
                 r["비목"] = c["비목"]
                 결과.append(r)
             응답 = dict(결과[0])
@@ -536,7 +615,10 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool 
 
         # ── (2)-d 효력 결정 · (2)-e 금액 비교 ────────────────────────────
         t = time.time()
-        룰 = _effective(cur, 사업명, 비목, 기관ID) if 비목 else None
+        # 🔴 None 인 키는 넣지 않는다. `금액비교()` 가 `수치.get()` 으로 읽으니 결과는 같지만,
+        #    빈 값을 실어 보내면 「넘겼는데 비교가 안 됐다」와 「넘길 게 없었다」가 안 갈린다.
+        수치 = {k: v for k, v in (("금액", 정규.get("금액")),) if v is not None}
+        룰 = _effective(cur, 사업명, 비목, 기관ID, 수치=수치 or None) if 비목 else None
         잰다("effective_rule", t)
 
         # ── 게이트 A: 금지목록 적중 → 즉답 "불가". LLM 0회 ───────────────
@@ -549,7 +631,7 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool 
                         강등사유=[], 강등코드=[], 경로="+".join(경로))
             응답.update(게이트="A", 비목=비목, 정규화=정규, 금지근거=금지,
                        지연ms={**지연, "총": int((time.time() - t0) * 1000)},
-                       모델={"호출수": 0 if dry else 1})
+                       모델={"호출수": 정규화호출})
             return _마무리(conn, cur, 응답, 기록=기록, 닫기=닫기, 질문=질문,
                         사업명=사업명, org_id=org_id, 기관ID=기관ID,
                         plan_id=plan_id)
@@ -594,7 +676,7 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool 
                        참조사슬=검색결과["참조사슬"],
                        유사사례=_사례(cur, 질문, "판단불가"),
                        지연ms={**지연, "총": int((time.time() - t0) * 1000)},
-                       모델={"호출수": 0 if dry else 1})
+                       모델={"호출수": 정규화호출})
             return _마무리(conn, cur, 응답, 기록=기록, 닫기=닫기, 질문=질문,
                         사업명=사업명, org_id=org_id, 기관ID=기관ID,
                         plan_id=plan_id)
@@ -634,15 +716,15 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool 
             if 주입 == "timeout":
                 raise LLM실패("read timeout(주입)")
             # 🔴 사업명을 넘긴다. 안 넘기면 52개 code 가 통째로 enum 에 들어가
-            #    이 사업과 무관한 해야할일(예: `기장대행한도_재도전`)이 제안된다.
+        #    이 사업과 무관한 해야할일(예: `기장대행한도_재도전`)이 제안된다.
             코드들 = 체크코드_enum(사업명=사업명) or None
             스키마 = 판정_스키마(s번호들=list(s맵), 코드들=코드들)
             # 🔴 주입은 **제 단계까지 가야** 검증이 된다. vLLM 없이 (4) 를 지나려면
-            #    LLM 출력을 합성하는 수밖에 없다. 둘 다 (6) 이 잡아야 하는 것들이다:
-            #      schema — 스키마 밖 필드({결과,이유}) → INVALID_JUDGMENT
-            #      cite   — s맵 밖 S번호(S99)        → CITE_NOT_IN_MAP + NO_CITATION
-            #    합성값이 "가능" 인 게 요점이다. 검증기가 이걸 판단불가로 못 내리면
-            #    실패 경로에서 «틀린 가능» 이 새 나간다.
+        #    LLM 출력을 합성하는 수밖에 없다. 둘 다 (6) 이 잡아야 하는 것들이다:
+        #      schema — 스키마 밖 필드({결과,이유}) → INVALID_JUDGMENT
+        #      cite   — s맵 밖 S번호(S99)        → CITE_NOT_IN_MAP + NO_CITATION
+        #    합성값이 "가능" 인 게 요점이다. 검증기가 이걸 판단불가로 못 내리면
+        #    실패 경로에서 «틀린 가능» 이 새 나간다.
             if 주입 == "schema":
                 출력, 메타4 = {"결과": "가능", "이유": "주입"}, {"지연ms": 0, "모델": "합성(주입)"}
             elif 주입 == "cite":
@@ -650,7 +732,7 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool 
                               "인용": ["S99"], "전제": []},
                              {"지연ms": 0, "모델": "합성(주입)"})
             else:
-                출력, 메타4 = llm_호출(프롬프트, 스키마, 온도=온도, 최대토큰=1500)
+                출력, 메타4 = llm_호출(프롬프트, 스키마, 온도=온도, 최대토큰=판정_최대토큰)
         except LLM실패 as e:
             잰다("판정LLM", t)
             return _마무리(conn, cur, _빈응답(
@@ -691,8 +773,13 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool 
                    유사사례=_사례(cur, 질문, 응답.get("판정")),
                    지연ms={**지연, "총": int((time.time() - t0) * 1000)},
                    변형=변형,
-                   모델={"호출수": 2, "변형": 변형, "정규화": 메타1.get("모델"),
-                        "판정": 메타4.get("모델"), "판정지연ms": 메타4.get("지연ms")})
+                   모델={"호출수": 정규화호출 + 1, "변형": 변형, "정규화": 메타1.get("모델"),
+                        "판정": 메타4.get("모델"), "판정지연ms": 메타4.get("지연ms"),
+                        # 🔴 잘림을 사후에 판별할 수 있게 남긴다. finish_reason=="length" 면
+                    #    그 문항의 «판단불가» 는 모델의 선택이 아니라 실패경로다.
+                        "종료이유": 메타4.get("종료이유"),
+                        "토큰": 메타4.get("토큰"),
+                        "요청": {"최대토큰": 판정_최대토큰, "온도": 온도}})
         return _마무리(conn, cur, 응답, 기록=기록, 닫기=닫기, 질문=질문,
                     사업명=사업명, org_id=org_id, 기관ID=기관ID,
                     plan_id=plan_id)
@@ -838,7 +925,7 @@ def main() -> None:
         나쁨 = 0
         for f in 종류:
             # 🔴 dry 로 돈다. vLLM 없이도 5경로가 **각자 제 단계에서** 걸려야 한다 —
-            #    서버가 없어서 (1) 에서 다 죽으면 아무것도 검증한 게 아니다.
+        #    서버가 없어서 (1) 에서 다 죽으면 아무것도 검증한 게 아니다.
             r = 판정(a.q or "노트북 200만원 구매해도 되나요", 사업명=a.사업명,
                     dry=True, 기록=False, 주입=f)
             ok = r["판정"] == "판단불가"
@@ -854,7 +941,7 @@ def main() -> None:
         워밍업()
         with db.connect(autocommit=True) as conn:
             # 🔴 D2 이후: 공통 27문항은 `사업명 IS NULL` + `적용범위` 에 원표기가 있다.
-            #    사업명='공통...' 을 기대하는 코드는 그 자리에서 0건이 된다.
+        #    사업명='공통...' 을 기대하는 코드는 그 자리에서 0건이 된다.
             컬럼 = {r[0] for r in conn.execute(
                 "SELECT column_name FROM information_schema.columns WHERE "
                 "table_schema='eval' AND table_name='golden_set'").fetchall()}
@@ -877,7 +964,7 @@ def main() -> None:
         print(f"\n{len(out)}건 · {time.time()-t0:.0f}초 · 변형={a.변형}")
         if a.eval_log:
             # 🔴 `설정` 에 **사업필터와 변형을 반드시 박는다.** 이게 없으면 내일 이 숫자가
-            #    어느 조건에서 나온 건지 못 가린다 — 그게 오늘 밤의 유일한 산출물인데.
+        #    어느 조건에서 나온 건지 못 가린다 — 그게 오늘 밤의 유일한 산출물인데.
             try:
                 from eval_store import 기록 as _기록
                 n = len(out) or 1
