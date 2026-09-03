@@ -49,6 +49,7 @@ from typing import Any
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _lib import db  # noqa: E402
 from llm_schema import 비목_enum  # noqa: E402
+from adapter import 사고흔적_걷기  # noqa: E402  # 🔴 공용 방어 — 정의는 adapter.py 하나뿐이다
 
 DSN = db.DSN
 VLLM = os.environ.get("VLLM_URL", "http://localhost:8000")
@@ -101,11 +102,12 @@ def llm_호출(프롬프트: str, 스키마: dict | None, *,
             내용 = _메시지.get("content") or ""
             # 🔴 파서가 갈라 준 경우 `reasoning_content` 에 사고가 들어가고
             #    `content` 는 이미 깨끗하다. 안 갈라진 경우만 여기서 걷어낸다.
-            내용 = 사고흔적_제거(내용)
+            내용, 사고사실 = 사고흔적_걷기(내용)
             메타 = {"지연ms": int((time.time() - t) * 1000),
                    "토큰": d.get("usage", {}),
                    "종료이유": d["choices"][0].get("finish_reason"),
-                   "모델": 본문["model"], "재시도": 회차}
+                   "모델": 본문["model"], "재시도": 회차,
+                   **사고사실}
             if 스키마 is None:
                 return 내용, 메타
             try:
@@ -120,31 +122,18 @@ def llm_호출(프롬프트: str, 스키마: dict | None, *,
 
 
 def 사고흔적_제거(내용: str) -> str:
-    """🔴 Qwen3 는 thinking 이 기본이라 `<think>...</think>` 를 «본문 앞에» 붙여 보낸다.
+    """🔴 호환용 얇은 래퍼 — 실제 정의는 `adapter.사고흔적_걷기()` 하나뿐이다(2026-09-04 통합).
 
-    서버에 `--reasoning-parser qwen3` 를 줘도 갈라지지 않는 경우가 있다 — 실측
-    (2026-09-03 · 실서버): `/v1/chat/completions` 가 200 을 돌려주는데 `content` 가
-    `"<think>
-Okay, let's see. The user wants to know which category..."` 로 시작해
-    `json.loads` 가 **char 0 에서** 깨졌다. 정규화 3회 연속 동일 실패.
-
-    🔴 이 실패는 **조용하지 않다** — `LLM실패` 로 올라가고 기본값이 판단불가다.
-       그래서 「틀린 답」이 아니라 「답 없음」이 나갔다. 그건 설계대로다.
-       다만 «모델이 답을 냈는데 우리가 못 읽어서» 판단불가가 된 것이라 고친다.
-
-    ⚠️ 여는 태그 없이 닫는 태그만 오는 경우가 있다(파서가 여는 쪽만 먹은 경우).
-       그래서 `</think>` 를 기준으로 자른다 — 그 뒤가 본문이다.
+    이 파일에 따로 구현이 있었다(`a70c874`). 🔴 처음엔 "판정 호출(adapter.LocalVLLM)엔 이
+    방어가 없다"고 봤는데 틀렸다(ai-c4 재현) — `orchestrate.py:52` 가 이 모듈의
+    `llm_호출` 을 직접 부르므로 **판정도 정규화도 여기 하나를 이미 타고 있었다.**
+    옮긴 이유는 방어 추가가 아니라 **계측**이다 — 옛 함수는 사고흔적을 걷어내기만
+    하고 있었는가·몇 자였는가를 안 남겨 빈도를 못 셌다. 로직을 `adapter.py` 로 빼서
+    (기존 호출부·시그니처 호환 — 사실 정보가 필요하면 `사고흔적_걷기()` 를 직접 불러라)
+    다음에 호출 자리가 늘어도 한 곳만 고치면 전부 같이 움직이게 했다.
     """
-    if not 내용:
-        return 내용
-    if "</think>" in 내용:
-        내용 = 내용.rsplit("</think>", 1)[1]
-    내용 = 내용.strip()
-    # 코드펜스로 감싸 보내는 경우도 있다 — 스키마를 준 호출에서는 순수 JSON 이어야 한다
-    if 내용.startswith("```"):
-        내용 = re.sub(r"^```[a-zA-Z]*\s*", "", 내용)
-        내용 = re.sub(r"\s*```$", "", 내용).strip()
-    return 내용
+    정리됨, _ = 사고흔적_걷기(내용)
+    return 정리됨
 
 
 
