@@ -60,6 +60,8 @@ def _인자():
                    help="없으면 server/_common.py 의 DSN 을 쓴다")
     p.add_argument("--운영승인", action="store_true",
                    help="🔴 localhost 가 아닌 DB 에 쓰려면 반드시 붙인다")
+    p.add_argument("--계획", action="store_true",
+                   help="샘플 지출계획 5건도 심는다 (문안은 mock_data.목_계획 공유)")
     p.add_argument("--dry-run", action="store_true", help="롤백하고 끝낸다")
     a = p.parse_args()
     if not a.email:
@@ -87,6 +89,31 @@ def _org잡기(cur, 기관명: str) -> tuple[str, str]:
     cur.execute("SELECT set_config('app.org_id', %s, true)", (새,))
     cur.execute("INSERT INTO tenant.orgs (org_id, 기관명) VALUES (%s, %s)", (새, 기관명))
     return 새, "만듦"
+
+
+def _계획잡기(cur, org: str) -> str:
+    """샘플 지출계획 5건. 🔴 **문안은 `routes_orgs._샘플계획()` 에서 가져온다.**
+
+    거기가 다시 `server/mock_data.목_계획` 을 읽는다 — 출처가 하나다. 여기에 따로
+    적으면 데모 세션(`POST /api/demo/session`)이 넣는 5건과 «갈린다», 그리고 갈린
+    다음엔 어느 쪽이 맞는지 아무도 모른다.
+    판정은 안 붙인다(`상태='draft'`) — 심사위원이 직접 눌러 보는 게 시연 동선이다.
+    """
+    from server.routes_orgs import _샘플계획
+
+    cur.execute("SELECT set_config('app.org_id', %s, true)", (org,))
+    이미 = cur.execute(
+        "SELECT count(*) FROM tenant.expense_plans WHERE org_id = %s", (org,)).fetchone()[0]
+    if 이미:
+        return f"있음({이미}건)"
+    행들 = _샘플계획()
+    for 제목, 질문원문, 사업명, 확정비목, 금액 in 행들:
+        cur.execute(
+            "INSERT INTO tenant.expense_plans "
+            "(org_id, 제목, 질문원문, 사업명, 확정비목, 금액, 상태) "
+            "VALUES (%s, %s, %s, %s, %s, %s, 'draft')",
+            (org, 제목, 질문원문, 사업명, 확정비목, 금액))
+    return f"심음({len(행들)}건)"
 
 
 def _계정잡기(cur, org: str, email: str) -> str:
@@ -122,9 +149,10 @@ def main() -> int:
         cur = conn.cursor()
         org, org상태 = _org잡기(cur, a.기관명)
         계정상태 = _계정잡기(cur, org, a.email)
+        계획상태 = _계획잡기(cur, org) if a.계획 else "건너뜀"
         if a.dry_run:
             conn.rollback()
-            print(f"\n[dry-run] 기관 {org상태} · 계정 {계정상태} — 롤백했다")
+            print(f"\n[dry-run] 기관 {org상태} · 계정 {계정상태} · 계획 {계획상태} — 롤백했다")
             return 0
         conn.commit()
     finally:
@@ -136,7 +164,7 @@ def main() -> int:
         c.execute("SELECT set_config('app.org_id', %s, true)", (org,))
         n = c.execute("SELECT count(*) FROM tenant.accounts WHERE email = %s",
                       (a.email,)).fetchone()[0]
-    print(f"\n기관 {org상태} : {org}\n계정 {계정상태} : {a.email}\n검산  : accounts {n}행 (1이어야 한다)")
+    print(f"\n기관 {org상태} : {org}\n계정 {계정상태} : {a.email}\n계획 {계획상태}\n검산  : accounts {n}행 (1이어야 한다)")
     return 0 if n == 1 else 1
 
 
