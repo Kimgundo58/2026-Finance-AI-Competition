@@ -111,6 +111,20 @@ _강등코드_제외 = re.compile(r"^(SUDDOE_|VLLM_|RUNPOD_|HF_|PYTHON)")
 _RE_강등코드_SQL = re.compile(r"'([A-Z][A-Z0-9_]{4,})'")
 
 
+# 묶음 정의는 한 곳에서만 적는다 — `설정.묶음` 과 위 집계가 갈리면 표와 run 이 안 맞는다
+_묶음정의 = {"튜닝52": ["보강", "적대적"], "held-out41": ["본세트", "공식"]}
+
+
+def _주입됨(it: dict) -> bool:
+    """이 문항에 정답 청크가 «실제로» 새로 들어갔나.
+
+    🔴 「꽂으려 했다」가 아니라 「프롬프트가 달라졌다」를 묻는다. 정답 청크가 이미
+       top-5 에 있던 문항은 꽂아도 프롬프트가 바이트 단위로 같다 — 실측 93문항 중 67건.
+    """
+    꽂 = ((it["원출력"].get("원본") or {}).get("조립") or {}).get("꽂기") or {}
+    return bool(꽂.get("주입"))
+
+
 def _강등코드_소스훑기() -> set[str]:
     """소스의 대문자 리터럴에서 코드 후보를 긁는다. **보조 닻이다.**
 
@@ -405,27 +419,33 @@ def _부분집합이름들() -> list[str]:
         return []
 
 
-def _부분집합(이름: str | None, gold_ids: str | None) -> tuple[list[int] | None, str | None]:
+def _부분집합(이름: str | None,
+           gold_ids: str | None) -> tuple[list[int] | None, str | None, str | None]:
     """🔴 부분집합은 **세트 이름이 아니라 gold_id 로 고정한다.**
     세트별로 빠지는 문항 수가 달라 이름으로 부르면 run 마다 다른 집합이 잡히고,
     튜닝분과 held-out 이 조용히 섞인다. 기준 파일은 scratchpad/P4_부분집합_0903.json.
     """
     if gold_ids:
-        return [int(x) for x in re.split(r"[,\s]+", gold_ids.strip()) if x], "직접지정"
+        return [int(x) for x in re.split(r"[,\s]+", gold_ids.strip()) if x], "직접지정", None
     if not 이름:
-        return None, None
+        return None, None, None
     경로, 표 = _부분집합표()
     if 이름 not in 표:
         sys.exit(f"부분집합 '{이름}' 이 {경로} 에 없다. 있는 것: "
                  f"{[k for k in 표 if isinstance(표[k], list)]}")
-    return list(표[이름]), f"{이름}@P4_부분집합_0903.json(기준run={표.get('기준run')})"
+    # 🔴 유보는 파일에만 두면 표에서 사라진다. `eval.runs.설정` 이 통째로 나르게 한다 —
+    #    예: P2_선택12 의 「이 12건은 전부 튜닝52 다」. 이게 없으면 다음 사람이 일반화한다.
+    return (list(표[이름]), f"{이름}@P4_부분집합_0903.json(기준run={표.get('기준run')})",
+            표.get(f"{이름}_설명"))
 
 
 def 실행(*, dry: bool, limit: int | None, 세트: list[str] | None, 라벨: str | None,
         top_k: int, 기록: bool, 변형: str = "V0", 부분집합: str | None = None,
         gold_ids: str | None = None, max_model_len: int = 40960,
         스냅샷: str | None = None) -> int:
-    ids, 부분집합표기 = _부분집합(부분집합, gold_ids)
+    ids, 부분집합표기, 부분집합유보 = _부분집합(부분집합, gold_ids)
+    if 부분집합유보:
+        print(f"🔴 이 부분집합의 유보 — 수를 옮길 때 같이 옮겨라:\n   {부분집합유보}\n")
     with psycopg.connect(DSN) as conn:
         cur = conn.cursor()
 
@@ -650,6 +670,22 @@ def 실행(*, dry: bool, limit: int | None, 세트: list[str] | None, 라벨: st
     for s in sorted({it["원출력"]["세트"] for it in items}):
         분해[f"세트:{s}"] = 지표(묶음(lambda it, s=s: it["원출력"]["세트"] == s))
 
+    # 🔴 묶음별. 통 숫자로 인용하면 «판정력» 이 아니라 «정답셋 난이도 배합» 을 잰다 —
+    #    run 191 닿음: 튜닝52 58.8% · held-out41 94.3% · 전체 76.8%. 세 수가 다 다르다.
+    for 이름, 세트들 in _묶음정의.items():
+        분해[f"묶음:{이름}"] = 지표(묶음(
+            lambda it, S=set(세트들): it["원출력"]["세트"] in S))
+
+    # 🔴 2판(꽂기) 채점 규칙 — ai-e8 확정 2026-09-03. **합산 금지.**
+    #    실측: 격리48 중 «프롬프트가 실제로 바뀐» 문항은 20 뿐이고 28 은 정답청크가
+    #    이미 top-5 에 있어 프롬프트가 바이트 단위로 같다. 온도 0 이면 1판과 같은 답이다.
+    #    합쳐 내면 「2판 ≈ 1판」이 **구조적으로** 나오고 그걸 「병목은 판정」으로 읽는다.
+    #      · 판정력 물음은 «주입됨» 에서만 답한다
+    #      · «동일» 이 1판과 다르면 그 자체가 신호다 — 온도 0 인데 달라졌다 = 비결정성
+    if INJECT:
+        분해["꽂기:주입됨"] = 지표(묶음(_주입됨))
+        분해["꽂기:동일"] = 지표(묶음(lambda it: not _주입됨(it)))
+
     # 4-way 혼동행렬 — "어디로 틀렸나" 는 일치율 한 숫자로는 안 보인다
     혼동 = {f"{a}->{b}": 0 for a in 판정4 for b in 판정4}
     for it in items:
@@ -816,10 +852,15 @@ def 실행(*, dry: bool, limit: int | None, 세트: list[str] | None, 라벨: st
                "조립전_종료": len(items) - len(탄),
                "정답청크_0건이라_못꽂음": 꽂기없음,
                "실제주입_총건": sum(len(x["주입"]) for x in 탄),
-               "이미_top5에_있던것_총건": sum(len(x["이미있던것"]) for x in 탄)}
+               "이미_top5에_있던것_총건": sum(len(x["이미있던것"]) for x in 탄),
+               # 🔴 채점 분모는 «총건» 이 아니라 이 둘이다 (ai-e8 확정)
+               "주입된_문항": sorted(it["gold_id"] for it in items if _주입됨(it)),
+               "동일한_문항": sorted(it["gold_id"] for it in items if not _주입됨(it))}
         print("\n꽂기: 조립까지 {}/{}문항 · 주입 {}건 · 이미 있던 것 {}건 · 못 꽂은 문항 {}건"
               .format(꽂기표["조립까지_간_문항"], len(items), 꽂기표["실제주입_총건"],
                       꽂기표["이미_top5에_있던것_총건"], len(꽂기없음)))
+        print("  🔴 채점 분모: 프롬프트가 «실제로 바뀐» 문항 {}  ·  «바이트 동일» {}  — 합산 금지"
+              .format(len(꽂기표["주입된_문항"]), len(꽂기표["동일한_문항"])))
         if 꽂기표["조립전_종료"]:
             print("  🔴 {}문항은 조립 «전» 에 끝났다 — 정답 청크를 못 봤다. 2판 분모에서 갈라 세라"
                   .format(꽂기표["조립전_종료"]))
@@ -835,6 +876,7 @@ def 실행(*, dry: bool, limit: int | None, 세트: list[str] | None, 라벨: st
           "채점": "결정론 4-way + 치명오답 + 근거/인용 적중",
           "변형": 변형,
           "부분집합": 부분집합표기,
+          "부분집합_유보": 부분집합유보,
           "문항수": len(items),
           "max_model_len": max_model_len,
           "관측_최대토큰_①": _관측토큰("①정규화LLM"),
@@ -853,7 +895,7 @@ def 실행(*, dry: bool, limit: int | None, 세트: list[str] | None, 라벨: st
                  "메모": "0 이면 이 run 은 «L3 없는 판정력» 을 잰 것이다"},
           # 🔴 묶음 정의. 통 숫자로 인용하면 «판정력» 이 아니라 «정답셋 난이도 배합» 을 잰다
           #    (run 191 닿음: 튜닝52 58.8% · held-out41 94.3% · 전체 76.8%).
-          "묶음": {"튜닝52": ["보강", "적대적"], "held-out41": ["본세트", "공식"]},
+          "묶음": _묶음정의,
           "git": _헤드(),
           # 코퍼스버전은 컬럼에도 들어가지만 설정에도 박는다 — 표만 보고도 갈리게
           "코퍼스버전": 코퍼스버전값,
