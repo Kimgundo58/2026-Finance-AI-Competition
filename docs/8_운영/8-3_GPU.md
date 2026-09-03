@@ -74,11 +74,18 @@ PYTHONIOENCODING=utf-8 python scripts/runpod_pod.py close   # 목록의 팟 전�
 
 ## 6. vLLM 기동
 ```bash
-export HF_HOME=/workspace/hf
-vllm serve Qwen/Qwen3-32B-AWQ --reasoning-parser qwen3 --enable-prefix-caching \
-  --max-model-len 20000 --gpu-memory-utilization 0.92 --port 8000
+bash scripts/pod_serve.sh     # --max-model-len 40960 · --reasoning-parser qwen3
 ```
-`guided_json` 은 기동 플래그가 아니라 요청 본문에 넣는다. 기동 로그에 `awq_marlin` 확인.
+🔴 **손으로 치지 마라. 기동값의 기준은 이 문서가 아니라 `scripts/pod_serve.sh` 다.** run 191 이 기준선을
+잃은 뿌리다 — 스크립트는 24576 인데 사람이 40960 으로 띄웠고 나중에 「스크립트 값 = 서빙 값」으로 읽혔다.
+띄운 뒤 `/v1/models` 로 `max_model_len` 이 **실제로** 그 값인지 읽고 로그에 `awq_marlin` 확인.
+`guided_json` 은 기동 플래그가 아니라 요청 본문에 넣는다.
+
+🔴 **40,960 을 내리면 조용히 잘린다.** 프롬프트 95건 전수 토큰 측정(2026-09-03) 기준 잘리는 문항 수 —
+`20,000 → 19/95` · `24,576 → 16/95` · `32,768 → 1/95` · **`40,960 → 0/95`**. 가장 빡빡한 조합(행분해
+on + 근거 꽂기)이 최장 36,447토큰이라 40,960 에서도 여유는 4% 뿐이다. 잘려도 에러는 안 난다 —
+B6(질문 + 출력 지시)가 맨 뒤라 **질문이 날아간 채로 답한다.** `--reasoning-parser qwen3` 도 같은
+이유로 못 뺀다: 없으면 thinking × `guided_json` 이 첫 토큰부터 문법에 걸려 공백만 뱉는다.
 
 ## 7. 사다리 5단계(캘리브레이션) 미결
 
