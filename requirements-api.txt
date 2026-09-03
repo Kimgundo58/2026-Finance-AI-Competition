@@ -1,0 +1,52 @@
+# 써도돼요 — API 컨테이너 (FastAPI + 임베딩)
+#
+# 🔴 임베딩(KURE-v1)은 CPU 로 이 컨테이너 «안에서» 돈다 (scripts/retrieve.py:145
+#    device="cpu"). 별도 서비스로 빼지 않는다 — 판정 1건이 임베딩 왕복을 한 번 더
+#    타면 SSE 하트비트(12초) 안에 못 들어온다.
+# 🔴 GPU(vLLM)는 여기 없다. requirements-gpu.txt 가 따로 있다.
+#
+# torch 는 CPU 휠로 고정한다. PyPI 기본 torch 는 CUDA 판(~2.5GB)이라
+# Cloud Run 이미지가 못 쓰게 커진다. `+cpu` 로컬버전은 아래 인덱스에만 있으므로
+# 핀 자체가 CUDA 판을 막는 자물쇠다.
+# ⚠️ `--index-url` 로 바꾸지 말 것 — 이 인덱스에는 fastapi 가 없다(2026-09-03 실측).
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+# ── 웹 계층 ───────────────────────────────────────────────────────────
+fastapi==0.141.1
+uvicorn==0.52.4              # [standard] 확장은 안 붙인다 — 로컬 실측 환경과 같게 둔다
+pydantic==2.13.4
+python-multipart==0.0.32     # routes_l3 의 File()/Form() 이 없으면 라우트 등록에서 죽는다
+httpx==0.28.1                # server/auth.py:110 이 JWKS 를 가져온다 (+ --selftest 의 TestClient)
+PyJWT[crypto]==2.13.0        # server/auth.py:120. 지연 import 라 «없어도 기동은 된다» —
+                             # 죽는 건 첫 로그인이다. [crypto] 는 Supabase 의 RS256/ES256 용
+
+# ── DB ───────────────────────────────────────────────────────────────
+psycopg==3.3.4
+pyjwt[crypto]==2.13.0   # server/auth.py — Supabase JWT 검증. 없으면 인증 경로가
+                        # 503 으로 닫혀 «거부» 는 되지만 로그인이 통째로 죽는다 (S2)
+psycopg-binary==3.3.4
+
+# ── 검색 (임베딩 + BM25) ─────────────────────────────────────────────
+torch==2.11.0+cpu
+transformers==5.14.1
+sentence-transformers==5.7.0
+numpy==2.1.3
+kiwipiepy==0.23.1            # BM25 토큰화. 색인과 쿼리가 같은 토큰화를 써야 한다
+kiwipiepy_model==0.23.0
+
+# ── L3 업로드 파싱 (routes_l3 → scripts/l3_parse) ────────────────────
+lxml==6.1.0                  # HWPML(XML)
+olefile==0.47                # HWP OLE v5
+pdfplumber==0.11.10
+pypdf==6.15.0                # stage0_extract 의 1차 PDF 판독
+python-docx==1.2.0
+
+# ── 뺀 것과 그 이유 (다시 넣기 전에 읽을 것) ─────────────────────────
+# torchvision      : 판정·파싱 경로에 grep 0건 (2026-09-03). ~500MB 를 이유 없이 진다
+# bm25s            : stage2_bm25 --verify 전용. 운영 경로가 아니다
+# requests / bs4   : 법령 크롤링 스크립트 전용. 컨테이너는 크롤링을 하지 않는다
+# pydantic-settings: 코드에 import 0건
+# httpx-sse        : SSE 는 서버가 «보내는» 쪽이다. 클라이언트 파서는 필요 없다
+
+# 이 파일을 한 줄만 고쳐도 빌더의 pip 레이어가 통째로 다시 돈다(실측 재빌드 340초).
+# 모델 2.2GB 재다운로드는 Dockerfile 의 캐시 마운트가 막는다 — bake 105초 → 20초 (실측).

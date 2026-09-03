@@ -399,7 +399,10 @@ CREATE TABLE tenant.accounts (
     account_id  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     org_id      UUID NOT NULL REFERENCES tenant.orgs(org_id) ON DELETE CASCADE,
     email       TEXT NOT NULL UNIQUE,
-    pw_hash     TEXT NOT NULL,
+    -- 🔴 NOT NULL 해제 (2026-09-03, S2 인증). Supabase 가 비밀번호를 들고 우리는
+    --    (email → org_id) 만 든다. 우리 쪽 pw_hash 는 «있으면 안 되는» 값이다.
+    --    자체 로그인을 되살릴 때만 다시 채운다 — 그때 NOT NULL 을 되걸 것.
+    pw_hash     TEXT,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -479,7 +482,13 @@ CREATE TABLE tenant.decisions (
     지연ms      JSONB,           -- 단계별 소요시간
     모델        JSONB,           -- {정규화: ..., 조립: ...}
     -- 재현성: 이 세 컬럼이 없으면 "판정 이력을 나중에 설명" 이 불가능하다 (Agent.md §6)
-    전제        JSONB,           -- LLM 출력 [1겹] 전제[] (LLM.md §3-4)
+    전제        JSONB,           -- 🔴 [2겹] 이다. 1겹이 아니다 (2026-09-03 정정)
+                                 --    orchestrate.py:762 가 넣는 값은 llm_validate.검증()
+                                 --    «통과 후» 다. 실물 키가 [근거조항·매핑·미매핑·미충족시·사실]
+                                 --    인데 `미매핑` 은 llm_validate.py:428 이 «코드로» 붙인다 —
+                                 --    1겹 스키마엔 없는 키다. 이게 직접 증거.
+                                 --    🔴 그래서 「LLM 출력 스키마의 키를 바꾸면 DB 가 깨진다」는
+                                 --       거짓이다. 2겹에서 이름이 다시 세워진다 (LLM.md §3-4)
     검색스냅샷  JSONB,           -- S번호→(chunk_id|article_id, 항호) 매핑 + top-k 목록 (LLM.md §3-7)
     코퍼스버전  TEXT             -- 판정 시점의 인덱스 버전 스탬프
 );
