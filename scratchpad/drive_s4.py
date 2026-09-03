@@ -55,8 +55,13 @@ class 가짜시계:
 
 def 만들기(제어, **환경):
     for k in ("SUDDOE_GPU_IDLE_MIN", "SUDDOE_GPU_WARN_MIN", "SUDDOE_GPU_CHECK_SEC",
-              "SUDDOE_GPU_START_SEC", "SUDDOE_GPU_POLL_SEC", "RUNPOD_API_KEY", "RUNPOD_POD_ID"):
+              "SUDDOE_GPU_START_SEC", "SUDDOE_GPU_POLL_SEC", "RUNPOD_API_KEY",
+              "RUNPOD_POD_ID", "SUDDOE_MOCK"):
         os.environ.pop(k, None)
+    # 🔴 SUDDOE_MOCK 기본값이 1(목) 이고 목 모드는 워치독을 통째로 끈다.
+    #    아래 시나리오는 «실 모드» 동작을 재는 것이므로 명시적으로 0 을 건다.
+    #    (목 가드 자체는 ⑨ 에서 따로 발동시킨다)
+    환경.setdefault("SUDDOE_MOCK", 0)
     os.environ.update({k: str(v) for k, v in 환경.items()})
     시계 = 가짜시계()
     w = gw.GPU워치독(제어, 시계=시계, 잠들기=lambda s: 시계.앞당기기(s),
@@ -184,6 +189,7 @@ importlib.reload(gw)
 os.environ.pop("RUNPOD_API_KEY", None)
 os.environ.pop("RUNPOD_POD_ID", None)
 os.environ["SUDDOE_GPU_IDLE_MIN"] = "30"
+os.environ["SUDDOE_MOCK"] = "0"
 시계7 = 가짜시계()
 w7 = gw.GPU워치독(시계=시계7, 잠들기=lambda s: None, 준비확인=lambda: True)
 print("  제어 =", type(w7.제어).__name__, "· 가능 =", w7.제어.가능, "·", w7.제어.사유)
@@ -266,3 +272,78 @@ print("  진행:", [p["설명"] for p in 진행12], "| 팟기록", 팟12.기록)
 assert "시작" in 팟12.기록, "임계 초과인데 캐시를 믿고 지나갔다"
 print("  ✅ 유휴가 임계를 넘긴 뒤엔 캐시를 안 믿는다")
 print("\n" + "=" * 72 + "\n추가 시나리오 통과\n" + "=" * 72)
+
+# ══════════════════════════════════════════════════════════════════
+줄("⑨ 🔴 목 서버가 실 팟을 끄는 사고 — SUDDOE_MOCK 가드")
+# 사고 재현: 목 서버(SUDDOE_MOCK 미설정=1)에 RunPod 키가 같이 들어간 배포
+팟13 = 가짜팟(gw.가동)
+w13, 시계13 = 만들기(팟13, SUDDOE_GPU_IDLE_MIN=30, RUNPOD_API_KEY="k", RUNPOD_POD_ID="p")
+os.environ.pop("SUDDOE_MOCK", None)         # 🔴 기본값 1 = 목. 환경변수 안 준 배포가 이렇다
+w13.목모드 = gw._목모드()                    # 미설정 상태로 다시 읽는다
+print("  SUDDOE_MOCK 미설정 → 목모드 =", w13.목모드, "· 활성 =", w13.활성)
+시계13.앞당기기(24 * 3600)                    # 목 서버는 GPU 를 안 부르니 영원히 유휴다
+r13 = w13.한번_검사()
+print("  유휴 24시간(목 서버는 늘 이렇다) → ", r13, "| 팟기록:", 팟13.기록)
+print("  기동_진행:", list(w13.기동_진행()), "| 게이트:", (w13.게이트() or "통과"))
+print("  현황:", json.dumps(w13.현황(), ensure_ascii=False))
+assert r13 == "비활성" and 팟13.기록 == [], f"🔴 목 서버가 실 팟을 건드렸다: {팟13.기록}"
+assert w13.현황()["종료예정초"] is None
+w13.시작_루프(); assert w13._스레드 is None, "목 모드인데 루프 스레드가 떴다"
+print("  ✅ 목 모드: stop 0회 · start 0회 · 스레드 0개 · 게이트 통과")
+
+줄("⑨-b 실 모드(SUDDOE_MOCK=0)에서는 그대로 발동한다 — 가드가 과하지 않은가")
+팟14 = 가짜팟(gw.가동)
+w14, 시계14 = 만들기(팟14, SUDDOE_GPU_IDLE_MIN=30, SUDDOE_MOCK=0,
+                    RUNPOD_API_KEY="k", RUNPOD_POD_ID="p")
+print("  목모드 =", w14.목모드, "· 활성 =", w14.활성)
+시계14.앞당기기(31 * 60)
+r14 = w14.한번_검사()
+print("  유휴 31분 → ", r14, "| 팟기록:", 팟14.기록)
+assert r14 == "정지함" and 팟14._상태 == gw.중지, "실 모드에서 정지가 안 됐다"
+print("  ✅ 실 모드는 정지 그대로 발동 — 가드가 실서버를 막지 않는다")
+print("\n" + "=" * 72 + "\n목 모드 가드 시나리오 통과\n" + "=" * 72)
+
+# ══════════════════════════════════════════════════════════════════
+줄("⑩ 🔴 keepalive 가 워치독을 무력화하는가 — 연장 상한")
+# 사고: 프론트가 모달 전에 keepalive 를 자동 전송한다. 탭만 열어두면 팟이 영원히 산다?
+팟15 = 가짜팟(gw.가동)
+w15, 시계15 = 만들기(팟15, SUDDOE_GPU_IDLE_MIN=30, SUDDOE_GPU_KEEPALIVE_MAX_MIN=60,
+                    RUNPOD_API_KEY="k", RUNPOD_POD_ID="p")
+print("  연장상한 =", w15.연장상한초, "초 · 유휴임계 =", w15.유휴임계초, "초")
+정지시점 = None
+for 분 in range(1, 121):                       # 2시간 동안 1분마다 keepalive 만 친다
+    시계15.앞당기기(60)
+    w15.keepalive()                            # 🔴 GPU 호출은 «한 번도» 없다
+    r = w15.한번_검사()
+    if r == "정지함":
+        정지시점 = 분
+        break
+print(f"  1분마다 keepalive · GPU 호출 0회 → {정지시점}분에 '정지함' (팟기록 {팟15.기록})")
+assert 정지시점 is not None, "🔴 keepalive 만으로 팟이 영원히 살았다 — 워치독 무력화"
+assert 90 <= 정지시점 <= 91, f"상한 60분 + 임계 30분 = 90분 근처여야 하는데 {정지시점}분"
+print("  ✅ 상한 60분 뒤로는 keepalive 를 쳐도 90분에 꺼진다")
+
+줄("⑩-b 정상 사용은 안 막는가 — 판정을 계속하면 안 꺼진다")
+팟16 = 가짜팟(gw.가동)
+w16, 시계16 = 만들기(팟16, SUDDOE_GPU_IDLE_MIN=30, SUDDOE_GPU_KEEPALIVE_MAX_MIN=60,
+                    RUNPOD_API_KEY="k", RUNPOD_POD_ID="p")
+for 분 in range(1, 241):                       # 4시간 동안 20분마다 «실제 판정»
+    시계16.앞당기기(60)
+    if 분 % 20 == 0:
+        w16.호출기록()                          # 실 GPU 호출
+    if w16.한번_검사() == "정지함":
+        raise AssertionError(f"🔴 정상 사용 중 {분}분에 꺼졌다")
+print("  4시간 동안 20분마다 판정 → 정지 0회 · 팟기록", 팟16.기록)
+print("  ✅ 실제로 쓰는 동안은 안 꺼진다 — 상한이 정상 사용을 막지 않는다")
+
+줄("⑩-c keepalive 는 «상한 안에서는» 제 역할을 한다")
+팟17 = 가짜팟(gw.가동)
+w17, 시계17 = 만들기(팟17, SUDDOE_GPU_IDLE_MIN=30, SUDDOE_GPU_KEEPALIVE_MAX_MIN=60,
+                    RUNPOD_API_KEY="k", RUNPOD_POD_ID="p")
+시계17.앞당기기(29 * 60); w17.keepalive()       # 판정 29분 뒤 모달 → 사용자가 「더 쓸게요」
+시계17.앞당기기(29 * 60)
+r17 = w17.한번_검사()
+print("  판정 후 29분에 keepalive → 다시 29분 →", r17, "(상한 60분 안이라 살아야 한다)")
+assert r17.startswith("대기"), f"상한 안인데 꺼졌다: {r17}"
+print("  ✅ 상한 안의 keepalive 는 유효 — 모달 「더 쓸게요」가 동작한다")
+print("\n" + "=" * 72 + "\nkeepalive 상한 시나리오 통과\n" + "=" * 72)

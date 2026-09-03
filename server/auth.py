@@ -46,6 +46,7 @@ from dataclasses import dataclass
 
 from fastapi import Header, HTTPException, Query
 
+from . import _common
 from ._common import _질의
 
 로그 = logging.getLogger("suddoe.auth")
@@ -167,8 +168,43 @@ def _데모해석(토큰: str) -> 주체:
 
 
 def _계정조회(email: str) -> tuple[str, str] | None:
-    """email → (org_id, account_id). 🔴 조인 열쇠가 email 인 이유는 모듈 docstring 참조."""
-    행 = _질의("SELECT org_id, account_id FROM tenant.accounts WHERE email = %s", (email,))
+    """email → (org_id, account_id). 🔴 조인 열쇠가 email 인 이유는 모듈 docstring 참조.
+
+    🔴 **「없는 계정」과 「죽은 DB」를 갈라 낸다** (2026-09-03).
+       `_질의` 는 기본이 «실패하면 빈 리스트» 인데 여기서 빈 리스트는 곧 403 이다.
+       그래서 그전까지는 **DB 가 통째로 죽어도 403「등록되지 않은 계정이다」** 였다 —
+       재현했다: DSN 을 아무도 안 듣는 포트로 돌리면 미등록 email 과 상태코드도
+       문구도 «완전히» 같다. 운영에서 이건 「시연 계정 등록이 빠졌나」를 몇 시간
+       뒤지게 만드는 종류의 오류다. 인증 경로만 `예외전파=True` 로 켜서 503 으로 뺀다.
+
+    ⚠️ 503 은 「등록 여부를 모른다」이지 「등록됐다」가 아니다. 호출부가 이걸
+       통과로 읽으면 안 된다 — 그래서 None 이 아니라 «예외» 로 나간다.
+
+    🔴 **테이블을 직접 안 읽고 `tenant.계정찾기()` 를 부른다** (2026-09-03).
+       `accounts` 정책은 `org_id = current_org()` 하나뿐인데, 이 함수는 «org 를
+       알아내려고» 읽는다 — 읽는 시점에 GUC 가 아직 없다. 그래서 비특권 롤에서는
+       0행이고 곧 403 이다. 실측:
+
+           postgres(superuser) → 찾음    ·    suddoe_app(비특권) → None → 403
+
+       로컬 `postgres` 가 superuser 라 **이 자리는 로컬에서 안 보인다.** 명부를
+       채우는 것으로도, GRANT 를 여는 것으로도 안 열린다 — 정책이 막는 것이다.
+       → `db/init/11_accounts_login.sql` 의 SECURITY DEFINER 함수로 «이메일 1건» 만
+         RLS 밖으로 낸다.
+
+    🔴 함수가 없으면 **503 으로 죽는다. 직접 SELECT 로 물러서지 않는다.**
+       물러서는 순간 superuser 인 로컬에서는 통과하고 운영에서만 0행이 되는데,
+       그건 정확히 「로컬에선 되는데 운영에서 안 되는」 오늘의 그 사고다.
+    """
+    try:
+        행 = _질의("SELECT org_id, account_id FROM tenant.계정찾기(%s)",
+                   (email,), 예외전파=True)
+    except Exception as e:                                    # noqa: BLE001
+        로그.exception("계정 조회가 DB 경로에서 실패했다 — 미등록(403)과 갈라 낸다")
+        # 🔴 사유에 예외 «문자열» 을 싣지 않는다. psycopg 의 접속 오류는 본문에
+        #    호스트·포트·사용자명을 그대로 담는다 — 401/503 응답은 인증 «전» 이라
+        #    아무나 받아 본다.
+        raise HTTPException(503, "계정 확인에 실패했습니다 — 잠시 후 다시 시도해 주세요") from e
     return (str(행[0][0]), str(행[0][1])) if 행 else None
 
 
@@ -258,7 +294,10 @@ def 현재주체(
 #
 #    임시 배선이다. 각 라우터가 `Depends(현재주체)` 로 옮겨가면 이 클래스는 지운다.
 
-_보호제외 = ("/api/health", "/api/orgs", "/api/demo/session", "/docs", "/openapi.json", "/redoc")
+# 🔴 /api/gpu 는 테넌트 데이터를 안 만지고 GPU 유휴초만 돌려준다. 게스트 경로에서도
+#    폴링되고, 프론트 fetch 래퍼가 모든 요청에 Bearer 를 붙이므로 «만료 토큰» 하나에
+#    상태 폴링이 죽으면 안 된다 — 헤더가 있든 없든 200 이어야 한다 (S4 지시).
+_보호제외 = ("/api/health", "/api/orgs", "/api/demo/session", "/docs", "/openapi.json", "/redoc", "/api/gpu")
 
 
 class OrgId주입:
@@ -297,7 +336,29 @@ class OrgId주입:
         scope["query_string"] = urlencode(쿼리).encode()
         scope["suddoe_주체"] = 주 or 주체(org_id=자기신고,
                                           출처="param" if 자기신고 else "none")
-        return await self.app(scope, receive, send)
+
+        # 🔴 **RLS 용 GUC 는 «검증된» 주체에서만 온다** (2026-09-03).
+        #    `_common._질의`/`_실행` 이 이 값을 트랜잭션마다 `app.org_id` 로 걸고,
+        #    `tenant.*` 의 `org_isolation` 정책이 그걸 본다.
+        #
+        #    `주.검증됨` 은 출처가 token·demo 일 때만 True 다. `param`(자기신고)·
+        #    `none`(게스트)에는 **세우지 않는다** — 자기신고를 GUC 에 넣으면
+        #    「클라이언트가 말한 값을 DB 에 도장 찍는」 꼴이라 RLS 가 장식이 된다.
+        #    감사에서는 「RLS 켜져 있음」으로 통과하는데 실제로는 아무것도 안 막는다.
+        #
+        #    안 세우면 `current_org()` 가 NULL → 쓰기는 RLS 가 막고 읽기는 0행이다.
+        #    거부(401)가 아니라 이 쪽을 고른 이유: 폴백은 아직 R4 로 살아 있어야 하고
+        #    (프론트 헤더 전환 전), 여기서 401 을 내면 `SUDDOE_ORG_PARAM` 스위치와
+        #    무관하게 폴백이 즉시 죽는다. 판단을 DB 층에 맡기고 «조용히 열지는» 않는다.
+        #
+        # 🔴 `finally` 에서 되돌린다. 지금은 요청마다 태스크가 새로 나서 안 새지만
+        #    (실측: 동시 8건 불일치 0), 되돌리기를 빼면 그 사실에 기대는 코드가 된다.
+        토큰 = _common.현재_org.set(
+            str(주.org_id) if (주 is not None and 주.검증됨 and 주.org_id) else None)
+        try:
+            return await self.app(scope, receive, send)
+        finally:
+            _common.현재_org.reset(토큰)
 
 
 async def _거부(send, 코드: int, 사유: str) -> None:

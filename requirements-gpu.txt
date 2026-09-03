@@ -1,24 +1,35 @@
 # 써도돼요 — vLLM 서버 (RunPod GPU). API 컨테이너와 «분리»한다.
 #
-# 🔴 requirements-api.txt 와 절대 합치지 않는다. vllm 은 자기 torch(CUDA 판)를
-#    끌고 온다 — 한 환경에 넣으면 API 쪽 CPU torch 핀이 조용히 덮인다.
-# 🔴 이 파일은 이 세션에서 «설치·기동 미검증»이다. 로컬에 GPU 도 vllm 도 없다
-#    (2026-09-03: `pip show vllm` → 없음). 아래 핀은 PyPI 최신 실측(0.28.0)일 뿐,
-#    Qwen3-32B-AWQ 로 뜬 것을 본 것이 아니다.
+# 🔴 **이 파일로 설치하지 마라. 정본은 `scripts/pod_setup.sh` + `scripts/pod_serve.sh` 다.**
+#    (2026-09-03 정정. 그 전까지 이 파일은 `vllm==0.28.0` 을 못박고 있었는데
+#     그건 PyPI 최신을 «본» 값일 뿐 아무도 띄워본 적이 없었다. 실제로 도는 건
+#     `pod_setup.sh` 가 세우는 **vllm 0.11.0** 이다 — 실측: torch 2.8.0+cu128 ·
+#     transformers 4.56.2 · CUDA 13.0 드라이버 580.159.04 · RTX 6000 Ada.)
+#
+# 🔴 이 파일로 새 팟에 깔면 **이 파일 주석이 경고하던 바로 그 사고**가 난다 —
+#    vllm 이 자기 torch(CUDA 판)를 끌고 와 드라이버와 어긋난다.
+#    `pod_setup.sh` 에는 두 번 데인 지식이 들어 있고 여기엔 하나도 없다:
+#      ① 템플릿 torch 가 CUDA 를 쓸 수 있으면 «상속»한다 (--system-site-packages)
+#         → torch 를 건드리지 않는 것이 그 스크립트의 핵심이다
+#      ② `transformers<5` 를 constraints 로 못박는다 (2026-09-02 에 재발했다)
+#
+# 설치·기동
+#     bash scripts/pod_setup.sh      # venv·vllm. 볼륨에 이미 있으면 건너뛴다
+#     bash scripts/pod_serve.sh      # 서빙
+#
+# 🔴 `--max-model-len` 은 **40960** 이다. 32768 이면 실측 최장 프롬프트
+#    (44,926자 · gold_id=377)가 초과로 잘리고, 초과가 섞이면 «잘림»과 «판정»이
+#    로그에서 안 갈린다 (eval run 191 기준선).
+#
+# 🔴 프록시(Cloudflare) 경유엔 `User-Agent` 가 필수다 — `Python-urllib` 은 1010 으로
+#    끊긴다 (`normalize_run.py:90`). curl 로 칠 땐 `-A suddoe-judge/1.0`.
 #
 # 모델은 pip 가 아니라 서빙 인자로 준다:
 #   VLLM_MODEL=Qwen/Qwen3-32B-AWQ  (normalize_run.py:55 기본값)
-#
-# 기동 (RunPod 팟 안에서):
-#   python -m vllm.entrypoints.openai.api_server \
-#     --model Qwen/Qwen3-32B-AWQ --quantization awq_marlin \
-#     --max-model-len 32768 --port 8000
+#   32B AWQ 는 ~19GB. 팟을 닫으면 사라지므로 네트워크 볼륨(HF_HOME=/workspace/hf)에 둔다.
 #
 # API 컨테이너는 여기에 OpenAI 호환 HTTP 로만 붙는다 (urllib, 라이브러리 없음)
 # — normalize_run.py:98. 그래서 이 파일의 어떤 패키지도 API 쪽에 필요 없다.
-
-vllm==0.28.0
-
-# huggingface 캐시를 팟 네트워크 볼륨에 두려면 (선택):
-#   HF_HOME=/workspace/hf
-# 32B AWQ 는 ~20GB 다. 팟을 닫으면 사라지므로 볼륨 없이는 매번 다시 받는다.
+#
+# ── 아래는 «참고용 하한»이다. 이걸로 설치하지 마라 (위 참조) ──────────────
+# vllm==0.11.0

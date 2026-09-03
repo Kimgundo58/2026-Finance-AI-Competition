@@ -16,7 +16,9 @@ fastapi==0.141.1
 uvicorn==0.52.4              # [standard] 확장은 안 붙인다 — 로컬 실측 환경과 같게 둔다
 pydantic==2.13.4
 python-multipart==0.0.32     # routes_l3 의 File()/Form() 이 없으면 라우트 등록에서 죽는다
-httpx==0.28.1                # main.py --selftest 의 TestClient 전용. 요청 경로엔 안 쓴다
+httpx==0.28.1                # server/auth.py:110 이 JWKS 를 가져온다 (+ --selftest 의 TestClient)
+PyJWT[crypto]==2.13.0        # server/auth.py:120. 지연 import 라 «없어도 기동은 된다» —
+                             # 죽는 건 첫 로그인이다. [crypto] 는 Supabase 의 RS256/ES256 용
 
 # ── DB ───────────────────────────────────────────────────────────────
 psycopg==3.3.4
@@ -45,3 +47,6 @@ python-docx==1.2.0
 # requests / bs4   : 법령 크롤링 스크립트 전용. 컨테이너는 크롤링을 하지 않는다
 # pydantic-settings: 코드에 import 0건
 # httpx-sse        : SSE 는 서버가 «보내는» 쪽이다. 클라이언트 파서는 필요 없다
+
+# 이 파일을 한 줄만 고쳐도 빌더의 pip 레이어가 통째로 다시 돈다(실측 재빌드 340초).
+# 모델 2.2GB 재다운로드는 Dockerfile 의 캐시 마운트가 막는다 — bake 105초 → 20초 (실측).

@@ -25,12 +25,19 @@ RUN pip install -r /tmp/requirements-api.txt
 
 # KURE-v1 을 HF 캐시에 구워 넣는다. SentenceTransformer 로 «실제로 로드»해서 받는다 —
 # snapshot_download 로 받으면 onnx/openvino 변형까지 딸려와 이미지가 부푼다.
+# 🔴 받는 자리와 굽는 자리를 가른다. 이 RUN 은 바로 위 pip 레이어에 매달려 있어서
+# requirements 한 줄만 고쳐도 통째로 다시 돈다 — 모델 2.2GB 재다운로드 = 실측 388초.
+# 캐시 마운트에 받아두고 이미지로 «복사»만 하면 그 재다운로드가 사라진다.
+# 캐시는 이미지에 안 남는다 — 복사본이 곧 구운 결과다(런타임 다운로드는 여전히 0).
 ENV HF_HOME=/opt/hf
-RUN python -c "\
+RUN --mount=type=cache,target=/root/.hfcache,sharing=locked \
+    mkdir -p /opt/hf \
+ && HF_HOME=/root/.hfcache python -c "\
 from sentence_transformers import SentenceTransformer; \
 m = SentenceTransformer('nlpai-lab/KURE-v1', device='cpu'); \
 m.max_seq_length = 1024; \
-print('baked:', m.encode(['워밍업']).shape)"
+print('baked:', m.encode(['워밍업']).shape)" \
+ && cp -a /root/.hfcache/. /opt/hf/
 
 # kiwipiepy 사전(BM25 토큰화)도 첫 tokenize 에서 로딩된다. 빌드에서 한 번 깨워
 # 사전 파일이 휠 안에 실제로 있는지 여기서 확인한다.
