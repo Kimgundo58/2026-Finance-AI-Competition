@@ -131,6 +131,45 @@ def 항분해(본문: str) -> list[tuple[str | None, str]]:
     return out
 
 
+# ── 블록 경계 — 🔴 **정의는 여기 하나뿐이다** (2026-09-03 · P3↔P4 합의) ──────
+# P3 의 측정표와 P4 의 `eval.runs` 가 같은 숫자를 쓰려면 「B3 이 몇 자인가」의 정의가
+# 한 곳이어야 한다. 각자 정규식을 들고 있으면 구분자 `\n\n` 을 앞뒤 어느 블록에
+# 넣느냐만으로 값이 갈린다. 그래서 함수로 내준다 — **부르는 쪽이 정의를 베끼지 마라.**
+#
+# 경계 규칙
+#   · 경계는 줄머리의 `## B<숫자>.` 매치 시작 위치다
+#   · B0 은 첫 매치 앞 전부 (헤더가 없는 유일한 블록)
+#   · 각 블록은 제 매치 시작 ~ 다음 매치 시작. 사이의 `\n\n` 은 **앞 블록**에 든다
+#   · 같은 이름이 두 번 나오면 합산한다 (V3 이 B4 를 앞으로 옮긴다)
+#   · 자수는 파이썬 문자 수다. UTF-8 바이트가 아니고 토큰도 아니다
+#   · 🔴 값들의 합은 항상 `len(프롬프트)` 와 정확히 같다 — 부르는 쪽에서 검산하라
+_RE_블록머리 = re.compile(r"^## (B\d)\.", re.M)
+
+
+def 블록분해(프롬프트: str) -> dict[str, str]:
+    """프롬프트 → {블록이름: 그 블록 원문}. 위 경계 규칙이 유일한 기준이다."""
+    자리 = [(m.start(), m.group(1)) for m in _RE_블록머리.finditer(프롬프트 or "")]
+    if not 자리:
+        return {"B0": 프롬프트 or ""}
+    out: dict[str, str] = {"B0": 프롬프트[:자리[0][0]]}
+    for k, (st, 이름) in enumerate(자리):
+        end = 자리[k + 1][0] if k + 1 < len(자리) else len(프롬프트)
+        out[이름] = out.get(이름, "") + 프롬프트[st:end]
+    return out
+
+
+def 블록자수(프롬프트: str) -> dict[str, int]:
+    """블록별 문자 수. 합 == len(프롬프트) 가 성립한다."""
+    return {k: len(v) for k, v in 블록분해(프롬프트).items()}
+
+
+def 블록해시(프롬프트: str) -> dict[str, str]:
+    """블록별 sha1 앞 12자. 「off 에서 바이트 단위 동일」 증명과 run 간 대조용."""
+    import hashlib
+    return {k: hashlib.sha1(v.encode("utf-8")).hexdigest()[:12]
+            for k, v in 블록분해(프롬프트).items()}
+
+
 def 조립(cur, 질문: str, 정규화: dict, *,
          l3: list[dict] | None = None,
          검색: list[int] | None = None,
