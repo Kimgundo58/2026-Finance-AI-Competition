@@ -135,6 +135,46 @@ class 제공자:
         raise NotImplementedError
 
 
+def 사고흔적_걷기(내용: str | None) -> tuple[str, dict]:
+    """`<think>...</think>` 사고 흔적과 코드펜스를 걷어내고 (정리된 내용, 사실) 을 돌려준다.
+
+    🔴 **공용 자리는 여기 하나뿐이다** (2026-09-04 · Q4 통합). `normalize_run.py` 가
+    이 함수를 부른다 — 복사하지 마라.
+
+    🔴 **정정 (ai-c4 재현, 2026-09-04)** — 처음엔 "판정 호출엔 이 방어가 없다"로 진단했는데
+    틀렸다. `orchestrate.py` 는 이 파일(`adapter.py`)을 **import 하지 않는다**(grep 0건) —
+    `orchestrate.py:52` `from normalize_run import LLM실패, llm_호출, 정규화` 가 실경로다.
+    즉 **판정(④)도 정규화(①)도 전부 `normalize_run.llm_호출` 하나를 탄다**, 그리고 그
+    함수는 `a70c874` 에서 이미 `사고흔적_제거` 방어를 갖고 있었다 — 판정이 무방비였던 게
+    아니다. **이 리팩터의 진짜 값은 방어 추가가 아니라 계측이다**: 옛 함수는 걷어내기만
+    하고 그 사실(사고흔적이 있었는가·몇 자였는가)을 안 남겨 빈도를 못 셌다. 지금은 남긴다.
+    `LocalVLLM.호출`(아래)에도 같은 방어를 넣어 두지만 **이 경로는 지금 orchestrate 판정에
+    안 쓰인다**(`adapter.호출`/`기본어댑터.호출` 호출자 0곳, grep 확인) — 무해하고 일관성상
+    맞지만, 다음 사람이 "판정이 이걸 탄다"고 오해하면 v3 반쪽빌드와 같은 함정이 된다.
+
+    Qwen3 는 thinking 이 기본이라 `--reasoning-parser` 가 갈라주지 못하면 `content` 가
+    `<think>...` 로 시작한 채 온다(2026-09-03 실서버 실측 — 정규화 호출 3회 연속 재현,
+    `--reasoning-parser qwen3` 가 서버에 켜져 있어도 발생했다). 걷어낸 **사실 자체**
+    (사고흔적이 있었는가·몇 자를 버렸는가)를 돌려준다 — 추측이 아니라 호출자가 빈도를
+    세게 하기 위해서다(`CLAUDE.md` "판단불가율은 «모델선택/실패경로»로 갈라 센다"와 같은 자리).
+
+    ⚠️ 여는 태그 없이 닫는 태그만 오는 경우가 있다(파서가 여는 쪽만 먹은 경우) —
+       그래서 `</think>` 를 기준으로 자른다. `내용` 이 None·빈 문자열이면 그대로 돌려준다.
+    """
+    사실 = {"사고흔적있음": False, "사고흔적길이": 0}
+    if not 내용:
+        return (내용 or ""), 사실
+    if "</think>" in 내용:
+        앞, 뒤 = 내용.rsplit("</think>", 1)
+        사실 = {"사고흔적있음": True, "사고흔적길이": len(앞) + len("</think>")}
+        내용 = 뒤
+    내용 = 내용.strip()
+    if 내용.startswith("```"):
+        내용 = re.sub(r"^```[a-zA-Z]*\s*", "", 내용)
+        내용 = re.sub(r"\s*```$", "", 내용).strip()
+    return 내용, 사실
+
+
 @dataclass
 class LocalVLLM(제공자):
     """자체/임대 GPU 의 vLLM (OpenAI 호환).
@@ -174,10 +214,16 @@ class LocalVLLM(제공자):
         with urllib.request.urlopen(req, timeout=타임아웃) as r:
             d = json.loads(r.read().decode())
         내용 = d["choices"][0]["message"]["content"]
+        # 🔴 json.loads 앞에서 걷는다 — 일관성을 위해서다. 🔴 이 경로(LocalVLLM.호출)는
+        #    지금 orchestrate 판정에 안 쓰인다(호출자 0곳) — 실판정은 `normalize_run.llm_호출`
+        #    를 탄다(사고흔적_걷기 docstring 참조). 여기서도 걷어낸 사실을 메타에 싣는 것은
+        #    이 경로가 나중에 쓰이게 될 때 같은 계측이 비어 있지 않게 하기 위해서다.
+        내용, 사고사실 = 사고흔적_걷기(내용)
         메타 = {"제공자": self.이름, "모델": 본문["model"],
                 "지연ms": int((time.time() - t) * 1000),
                 "토큰": d.get("usage", {}),
-                "종료이유": d["choices"][0].get("finish_reason")}
+                "종료이유": d["choices"][0].get("finish_reason"),
+                **사고사실}
         return (json.loads(내용) if 스키마 else 내용), 메타
 
 
