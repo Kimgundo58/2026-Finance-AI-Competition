@@ -32,6 +32,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from datetime import datetime
 
 import argparse
 import hashlib
@@ -72,6 +73,20 @@ DSN = db.DSN
 #
 # 🔴 **조용한 결손 금지.** 감싸기가 안 먹었으면 경고가 아니라 예외로 죽는다 —
 #    빈 칸이 「LLM 이 그걸 안 냈다」로 읽히면 다음 사람이 또 벽을 만난다.
+# 🔴 2판 「꽂기」 — P1(ai-2c) 사양 2026-09-03.
+#    묻는 것은 «정답 조가 top-5 에 있었으면 맞혔겠는가» 다.
+#    기존 `--isolated`(orchestrate 의 `격리근거`)는 이 물음에 답하지 못한다:
+#    그쪽은 B2·B3 를 통째로 갈아치워 **방해물 40여 개까지 같이 지운다**
+#    (격리 프롬프트가 실전의 1/7 — 자수 2,115 vs 14,258 · S번호 9 vs 42, P1 실측).
+#    그래서 좋게 나와도 「판정력」인지 「방해물 제거」인지 원리적으로 안 갈린다.
+#    꽂기는 **실전 검색 top-5 를 그대로 두고 정답 청크만 앞에 끼운다** — 방해물이 남아
+#    조건이 실전과 같다. `격리근거` 인자를 안 쓰므로 L3·게이트 경로도 실전 그대로다.
+#    🔴 orchestrate 를 안 고친다. 이미 걸어 둔 `조립` 래퍼의 `검색` 인자에 끼운다.
+#    🔴 리스트를 «다시 묶지 않고» 내용만 갈아 끼운다(`[:] =`). 재바인딩하면 래퍼가
+#       잡아 둔 옛 리스트를 계속 보게 되어 앞 문항 정답이 뒤 문항에 샌다.
+INJECT = os.environ.get("SUDDOE_EVAL_INJECT_GOLD") == "1"
+_꽂을청크: list[int] = []
+
 RAW = os.environ.get("SUDDOE_EVAL_RAW") == "1"
 RAW_PROMPT = os.environ.get("SUDDOE_EVAL_RAW_PROMPT") == "1"
 
@@ -86,6 +101,37 @@ class 포획실패(RuntimeError):
     """감싸기가 안 먹었거나 지나간 자취가 안 맞는다. run 을 저장하지 않고 죽는다."""
 
 
+# S번호 형식은 `assemble_context._s`: f"S{i:02d}". 자리수가 3 이상으로 넘어가도
+# (S100) 앞 두 자리만 잘라 세지 않게, 앞뒤에 영숫자가 안 붙는 것만 센다.
+_RE_S = re.compile(r"(?<![A-Za-z0-9])S\d{2,}(?![0-9])")
+
+
+def _헤드() -> dict:
+    """지금 돌고 있는 코드가 «어느 커밋인가». 안 박으면 다음 사람이 못 가른다.
+
+    🔴 2026-09-03 실측: 기준선 스냅샷을 뜨는 90초 사이에 HEAD 가 051b5fd -> 67ef75f
+       -> 81bb2f4 로 세 번 움직였고, 그중 하나가 B4 문장을 바꿔 93문항 중 5건의
+       프롬프트 해시가 갈렸다. 라벨에만 적으면 적는 걸 잊는다.
+    🔴 `git archive` 로 뜬 격리 사본에서 돌리면 `.git` 이 없어 git 이 답을 못 준다.
+       그때는 `SUDDOE_EVAL_GIT_HEAD` 로 «무엇을 archive 했는지» 직접 박아라.
+       모르면 None 이다 — 지어내지 않는다.
+    """
+    import subprocess
+    def _(*a):
+        try:
+            r = subprocess.run(a, capture_output=True, text=True,
+                               cwd=os.path.dirname(os.path.abspath(__file__)), timeout=10)
+            return (r.stdout.strip() or None) if r.returncode == 0 else None
+        except Exception:
+            return None
+    직접 = os.environ.get("SUDDOE_EVAL_GIT_HEAD")
+    return {"commit": _("git", "rev-parse", "HEAD") or 직접,
+            "출처": "git" if _("git", "rev-parse", "HEAD") else ("직접지정" if 직접 else None),
+            "브랜치": _("git", "rev-parse", "--abbrev-ref", "HEAD"),
+            # 🔴 dirty 면 커밋 해시만으로는 재현이 안 된다. 어느 파일이 더러운지까지 남긴다
+            "dirty": (_("git", "status", "--porcelain", "--", ".") or "").splitlines() or None}
+
+
 def _sha(s: str) -> str:
     return hashlib.sha1(s.encode("utf-8")).hexdigest()[:12]
 
@@ -98,12 +144,17 @@ def _블록분해(프롬프트: str) -> dict:
     🔴 **경계 정의는 여기 두지 않는다.** P3(ai-1e)이 `assemble_context` 에
        확정해 둔 것을 부른다 — 정의가 둘이면 P3 의 표와 이 run 이 안 맞는다.
     """
-    from assemble_context import 블록자수, 블록해시
-    자수, 해시 = 블록자수(프롬프트), 블록해시(프롬프트)
+    from assemble_context import 블록분해, 블록자수, 블록해시
+    자수, 해시, 원문 = 블록자수(프롬프트), 블록해시(프롬프트), 블록분해(프롬프트)
     # 🔴 P3 이 준 검산: 자수 합 == len(프롬프트). 안 맞으면 조립기 쪽 사고다.
     if sum(자수.values()) != len(프롬프트):
         raise 포획실패(f"블록 자수 합 {sum(자수.values())} != 프롬프트 {len(프롬프트)}")
-    return {k: {"자수": v, "sha1": 해시.get(k)} for k, v in 자수.items()}
+    # 🔴 S번호는 «자수와 따로» 센다. 행분해(P3)는 같은 근거를 더 잘게 쪼개므로
+    #    자수는 거의 그대로인데 S번호만 늘 수 있다 — 그 갈림이 인용 정확도를 가른다.
+    #    중복 제거한 개수다(같은 S번호가 두 번 나와도 1). 형식은 assemble_context._s: S01
+    return {k: {"자수": v, "sha1": 해시.get(k),
+                "S번호수": len(set(_RE_S.findall(원문.get(k, ""))))}
+            for k, v in 자수.items()}
 
 
 def 감싸기() -> None:
@@ -129,13 +180,32 @@ def 감싸기() -> None:
                                     llm_validate.검증, normalize_run.llm_호출)
 
     def w_조립(*a, **kw):
+        꽂 = None
+        if INJECT:
+            원검색 = list(kw.get("검색") or [])
+            추가 = [c for c in _꽂을청크 if c not in 원검색]
+            # 🔴 앞에 끼운다. 뒤에 붙이면 S번호가 뒤로 밀려 「닿았지만 안 봤다」와
+            #    「닿지 않았다」가 섞인다. 원래 top-5 의 «상대 순서» 는 그대로 둔다.
+            kw["검색"] = (추가 + 원검색) or None
+            꽂 = {"주입": 추가, "이미있던것": [c for c in _꽂을청크 if c in 원검색],
+                 "원검색": 원검색, "최종검색": kw["검색"] or []}
         프롬프트, s맵, 사슬 = 본_조립(*a, **kw)
         rec = {"프롬프트길이": len(프롬프트), "sha1": _sha(프롬프트),
                "블록": _블록분해(프롬프트), "s맵크기": len(s맵),
                "참조사슬수": len(사슬 or []), "변형": kw.get("변형")}
+        if 꽂 is not None:
+            rec["꽂기"] = 꽂
         if RAW_PROMPT:
             rec["프롬프트"] = 프롬프트
-        _포획["조립"] = rec
+        # 🔴 게이트 C(비목갈림)는 `판정()` 을 **재귀로 두 번** 부른다
+        #    (orchestrate.py:539~547 — 비목 후보 2개를 각각 끝까지 태운다).
+        #    그래서 «한 문항에 조립이 2회» 일어난다. 마지막 것만 남기면 프롬프트가
+        #    하나 조용히 사라지고, 길이 분포와 max-model-len 예산이 그만큼 덜 센다.
+        #    실측(dry 93): gold_id 360·441 이 여기 걸린다.
+        _포획.setdefault("조립_전부", []).append(
+            {"프롬프트길이": rec["프롬프트길이"], "sha1": rec["sha1"],
+             **({"프롬프트": 프롬프트} if RAW_PROMPT else {})})
+        _포획["조립"] = rec          # 마지막 1건 — 기존 소비자 호환
         _계수["조립"] += 1
         return 프롬프트, s맵, 사슬
 
@@ -262,6 +332,26 @@ def _인용좌표(응답: dict) -> set[tuple]:
     return out
 
 
+def _부분집합표() -> tuple[str, dict]:
+    경로 = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                      "scratchpad", "P4_부분집합_0903.json")
+    with open(경로, encoding="utf-8") as f:
+        return 경로, json.load(f)
+
+
+def _부분집합이름들() -> list[str]:
+    """🔴 `--부분집합` 의 choices 를 손으로 적지 않는다.
+
+    파일에 `격리48` 을 넣었더니 argparse 가 「invalid choice」로 막았다 —
+    `--세트` 주석이 경고해 둔 것과 **똑같은 사고를 이 인자에서 다시 냈다.**
+    목록은 파일이 갖고 있고, 코드는 읽기만 한다.
+    """
+    try:
+        return [k for k, v in _부분집합표()[1].items() if isinstance(v, list)]
+    except Exception:
+        return []
+
+
 def _부분집합(이름: str | None, gold_ids: str | None) -> tuple[list[int] | None, str | None]:
     """🔴 부분집합은 **세트 이름이 아니라 gold_id 로 고정한다.**
     세트별로 빠지는 문항 수가 달라 이름으로 부르면 run 마다 다른 집합이 잡히고,
@@ -271,10 +361,7 @@ def _부분집합(이름: str | None, gold_ids: str | None) -> tuple[list[int] |
         return [int(x) for x in re.split(r"[,\s]+", gold_ids.strip()) if x], "직접지정"
     if not 이름:
         return None, None
-    경로 = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                      "scratchpad", "P4_부분집합_0903.json")
-    with open(경로, encoding="utf-8") as f:
-        표 = json.load(f)
+    경로, 표 = _부분집합표()
     if 이름 not in 표:
         sys.exit(f"부분집합 '{이름}' 이 {경로} 에 없다. 있는 것: "
                  f"{[k for k in 표 if isinstance(표[k], list)]}")
@@ -283,7 +370,8 @@ def _부분집합(이름: str | None, gold_ids: str | None) -> tuple[list[int] |
 
 def 실행(*, dry: bool, limit: int | None, 세트: list[str] | None, 라벨: str | None,
         top_k: int, 기록: bool, 변형: str = "V0", 부분집합: str | None = None,
-        gold_ids: str | None = None, max_model_len: int = 24576) -> int:
+        gold_ids: str | None = None, max_model_len: int = 40960,
+        스냅샷: str | None = None) -> int:
     ids, 부분집합표기 = _부분집합(부분집합, gold_ids)
     with psycopg.connect(DSN) as conn:
         cur = conn.cursor()
@@ -336,11 +424,17 @@ def 실행(*, dry: bool, limit: int | None, 세트: list[str] | None, 라벨: st
               f"{'(프롬프트 전문 포함)' if RAW and RAW_PROMPT else ''}\n")
 
         import orchestrate  # 여기서 import 한다 — --help 만 볼 때 모델을 안 올리게
+        if INJECT and not RAW:
+            # 🔴 꽂기는 조립 래퍼 위에서만 돈다. 래퍼가 없으면 아무것도 안 꽂히는데
+            #    run 은 멀쩡히 끝난다 — 「2판을 돌렸다」고 믿는 채로 1판이 하나 더 생긴다.
+            sys.exit("SUDDOE_EVAL_INJECT_GOLD=1 은 SUDDOE_EVAL_RAW=1 이 필요하다 "
+                     "(꽂기는 조립 래퍼가 한다)")
         if RAW:
             감싸기()
 
         items: list[dict] = []
         오류: list[tuple[int, str]] = []
+        꽂기없음: list[int] = []      # 정답청크가 0건이라 꽂을 게 없던 문항
         t0 = time.time()
 
         for i, m in enumerate(문항, 1):
@@ -348,6 +442,11 @@ def 실행(*, dry: bool, limit: int | None, 세트: list[str] | None, 라벨: st
             사업 = eval_store.사업키(m["사업명"])
             _포획.clear()          # 문항 단위 리셋. LLM 호출은 전부 메인 스레드다
             try:
+                # 🔴 꽂기는 «문항별» 정답청크다. 매 문항 갈아 끼우지 않으면 앞 문항 것이
+                #    다음 문항에 새어 들어가 전 문항이 오염된다.
+                _꽂을청크[:] = sorted(정답청크[gid]) if INJECT else []
+                if INJECT and not _꽂을청크:
+                    꽂기없음.append(gid)
                 r = orchestrate.판정(m["질문"], 사업명=사업, dry=dry, top_k=top_k,
                                     conn=conn, 기록=False, 변형=변형)
             except Exception as e:
@@ -524,7 +623,14 @@ def 실행(*, dry: bool, limit: int | None, 세트: list[str] | None, 라벨: st
         #    이 줄은 24576 기준으로 「초과 14건」을 찍는다 — 표와 서버가 다른 수를 본다.
         #    이제 `--max-model-len` 으로 받고 `설정` 에 박는다. 기본값은 24576 그대로라
         #    안 주면 현행과 같은 줄이 나온다.
-        MML, 자당토큰 = max_model_len, 0.7   # 한국어 법령문 0.6~0.7 토큰/자 (보수적으로 상단)
+        # 🔴 0.7 은 «가정» 이었다. 2026-09-03 에 실제 Qwen3-32B-AWQ 토크나이저로
+        #    이 하네스가 뽑은 프롬프트 95건을 전부 쟀다:
+        #      토큰/자  최소 0.407 · 중앙 0.732 · **최대 0.757**
+        #      (짧을수록 토큰/자가 작고, 길수록 0.73~0.76 으로 수렴한다)
+        #    0.7 을 쓰면 가장 긴 문항에서 토큰을 **덜 세서** 없는 「OK」가 나온다.
+        #    한도는 토큰인데 여기서 세는 건 자수다 — 그래서 상한(0.76)으로 잡는다.
+        #    ⚠️ 이 줄은 여전히 «추정» 이다. 확정 수치는 밖에서 토크나이저로 잰다.
+        MML, 자당토큰 = max_model_len, 0.76
         여유 = int((MML - 3000) / 자당토큰)  # max_tokens=3000 을 뺀 입력 예산(자)
         넘 = [x for x in 길이 if x > 여유]
         p90 = 길이[min(len(길이) - 1, int(len(길이) * 0.9))]
@@ -532,6 +638,14 @@ def 실행(*, dry: bool, limit: int | None, 세트: list[str] | None, 라벨: st
               f"최장 {길이[-1]:,} · n={len(길이)}")
         print(f"  입력 예산 {여유:,}자 (max-model-len {MML:,} - max_tokens 3,000, {자당토큰}토큰/자)"
               f" -> 초과 {len(넘)}건" + ("  🔴 --max-model-len 을 올려라" if 넘 else "  OK"))
+        # 🔴 위 줄은 «문항당 1개» 를 센다. 게이트 C 재귀 문항은 조립이 2회라
+        #    실제로 서버에 나가는 프롬프트가 더 많다 — 예산은 «나간 것 전부» 로 봐야 한다.
+        전부 = sorted(x["프롬프트길이"] for it in items
+                     for x in ((it["원출력"].get("원본") or {}).get("조립_전부") or []))
+        if 전부 and len(전부) != len(길이):
+            넘2 = [x for x in 전부 if x > 여유]
+            print(f"  조립 «전부» 기준 n={len(전부)} (문항 {len(길이)} + 게이트C 재귀 "
+                  f"{len(전부)-len(길이)}) · 최장 {전부[-1]:,} -> 초과 {len(넘2)}건")
     머리 = (f"{'구간':12}{'문항':>5}{'일치율':>9}{'기준선':>8}{'초과':>8}{'치명':>6}"
             f"{'판단불가(모델)':>17}{'근거적중':>10}{'인용적중':>10}")
     print(머리)
@@ -601,6 +715,25 @@ def 실행(*, dry: bool, limit: int | None, 세트: list[str] | None, 라벨: st
     #    「이 숫자가 무엇 때문에 나왔나」를 답할 수 없다. 전부 박는다.
     #    ① 의 최대토큰은 400, ④ 는 1500 이다(자리마다 다르다) — 실제로 나간 값을
     #    래퍼가 잰 대로 적고, 안 켰으면 None 으로 둔다. 주장하지 않는다.
+    # ── 꽂기 결산 ──────────────────────────────────────────────────────
+    # 🔴 「꽂았다」와 「꽂으려 했다」는 다르다. 게이트 A·B·C 로 조립 «전에» 끝난 문항은
+    #    정답 청크를 봤을 리가 없다. 그 수를 안 세면 2판의 분모가 거짓이 된다.
+    꽂기표 = None
+    if INJECT:
+        꽂 = [((it["원출력"].get("원본") or {}).get("조립") or {}).get("꽂기") for it in items]
+        탄 = [x for x in 꽂 if x]
+        꽂기표 = {"문항": len(items), "조립까지_간_문항": len(탄),
+               "조립전_종료": len(items) - len(탄),
+               "정답청크_0건이라_못꽂음": 꽂기없음,
+               "실제주입_총건": sum(len(x["주입"]) for x in 탄),
+               "이미_top5에_있던것_총건": sum(len(x["이미있던것"]) for x in 탄)}
+        print("\n꽂기: 조립까지 {}/{}문항 · 주입 {}건 · 이미 있던 것 {}건 · 못 꽂은 문항 {}건"
+              .format(꽂기표["조립까지_간_문항"], len(items), 꽂기표["실제주입_총건"],
+                      꽂기표["이미_top5에_있던것_총건"], len(꽂기없음)))
+        if 꽂기표["조립전_종료"]:
+            print("  🔴 {}문항은 조립 «전» 에 끝났다 — 정답 청크를 못 봤다. 2판 분모에서 갈라 세라"
+                  .format(꽂기표["조립전_종료"]))
+
     def _관측토큰(태그):
         vals = {v for it in items
                 for v in [((it["원출력"].get("원본") or {}).get(태그) or [{}])[0]
@@ -617,6 +750,21 @@ def 실행(*, dry: bool, limit: int | None, 세트: list[str] | None, 라벨: st
           "관측_최대토큰_①": _관측토큰("①정규화LLM"),
           "관측_최대토큰_④": _관측토큰("④판정LLM"),
           "원본포획": RAW, "프롬프트전문": RAW and RAW_PROMPT,
+          "꽂기": 꽂기표,
+          # 🔴 「우리 평가는 L3 를 한 번도 안 재 봤다」를 run 마다 남긴다.
+          #    주장이 아니라 실측이다 — B1 블록이 실제로 몇 문항에 있었는지 센다.
+          #    2026-09-03 실측: 0/93. `eval_e2e` 가 `판정()` 에 org_id·기관ID 를 안 주고,
+          #    `eval.golden_set` 에 기관 축이 아예 없다. 결함이 아니라 **정답셋의 한계**다.
+          "L3": {"B1블록_문항수": sum(
+                     1 for it in items
+                     if "B1" in (((it["원출력"].get("원본") or {})
+                                  .get("조립") or {}).get("블록") or {})),
+                 "org_id전달": None, "기관ID전달": None,
+                 "메모": "0 이면 이 run 은 «L3 없는 판정력» 을 잰 것이다"},
+          # 🔴 묶음 정의. 통 숫자로 인용하면 «판정력» 이 아니라 «정답셋 난이도 배합» 을 잰다
+          #    (run 191 닿음: 튜닝52 58.8% · held-out41 94.3% · 전체 76.8%).
+          "묶음": {"튜닝52": ["보강", "적대적"], "held-out41": ["본세트", "공식"]},
+          "git": _헤드(),
           # 코퍼스버전은 컬럼에도 들어가지만 설정에도 박는다 — 표만 보고도 갈리게
           "코퍼스버전": 코퍼스버전값,
           # 🔴 코퍼스버전 해시는 (chunks, embedding, refs, documents, max chunk_id) 만
@@ -630,6 +778,51 @@ def 실행(*, dry: bool, limit: int | None, 세트: list[str] | None, 라벨: st
           # 🔴 P2·P3 가 켜는 플래그가 무엇이었는지 남는다. 안 남기면 다음 run 과 못 뺀다
           "SUDDOE_플래그": {k: v for k, v in sorted(os.environ.items())
                         if k.startswith("SUDDOE_")}}
+    # ── 블록 스냅샷 (`--스냅샷 <경로>`) ─────────────────────────────────
+    # 🔴 P3 의 `SUDDOE_ROWSPLIT` on/off 대조용. **off 기준선을 먼저 떠 둔다** —
+    #    on 을 돌린 뒤에 기준선을 뜨면 그건 대조가 아니라 사후 정당화다.
+    #    비교는 이 파일 두 개의 순수 diff 다(문항 순서 고정 · gold_id 키).
+    #    ⚠️ dry 에서 게이트가 먼저 닫히는 문항(`C비목갈림` 등)은 조립을 «안 탄다» —
+    #       프롬프트가 없으므로 블록도 없다. 빼지 않고 `블록:null` 로 남긴다.
+    if 스냅샷:
+        if not RAW:
+            sys.exit("--스냅샷 은 SUDDOE_EVAL_RAW=1 이 필요하다 (블록 해시는 조립 래퍼가 잡는다)")
+        찍 = {"생성": datetime.now().isoformat(timespec="seconds"), "설정": 설정,
+             "문항": {}}
+        for it in items:
+            조립 = ((it["원출력"].get("원본") or {}).get("조립") or {})
+            찍["문항"][str(it["gold_id"])] = {
+                "경로": it["원출력"].get("경로"),
+                "프롬프트길이": 조립.get("프롬프트길이"),
+                "프롬프트sha1": 조립.get("sha1"),
+                "s맵크기": 조립.get("s맵크기"),
+                "참조사슬수": 조립.get("참조사슬수"),
+                # 게이트 C 재귀 문항은 여기가 2다. `블록`·`프롬프트sha1` 은 **마지막 1건**이다
+                "조립호출수": len(((it["원출력"].get("원본") or {}).get("조립_전부") or [])),
+                "조립_전부": [{k: v for k, v in x.items() if k != "프롬프트"}
+                           for x in ((it["원출력"].get("원본") or {}).get("조립_전부") or [])],
+                "블록": 조립.get("블록")}
+        # 🔴 프롬프트 전문은 스냅샷 본문에 안 넣는다 — 스냅샷은 diff 로 읽는 파일이라
+        #    1.6MB 원문이 섞이면 「어느 블록이 변했나」가 안 보인다. 옆 파일로 뺀다.
+        #    토큰 수는 여기서 안 센다: 하네스에 transformers 를 끌어들이지 않는다
+        #    (`scripts/` 는 API 이미지에 통째로 실린다). 밖에서 재라.
+        if RAW_PROMPT:
+            옆 = 스냅샷 + ".프롬프트.jsonl"
+            with open(옆, "w", encoding="utf-8") as f:
+                for it in items:
+                    for i, x in enumerate(((it["원출력"].get("원본") or {})
+                                           .get("조립_전부") or [])):
+                        if "프롬프트" in x:
+                            f.write(json.dumps(
+                                {"gold_id": it["gold_id"], "회차": i,
+                                 "경로": it["원출력"].get("경로"),
+                                 "프롬프트": x["프롬프트"]}, ensure_ascii=False) + chr(10))
+            print("프롬프트 전문 -> " + 옆)
+        찍음 = sum(1 for v in 찍["문항"].values() if v["블록"])
+        with open(스냅샷, "w", encoding="utf-8") as f:
+            json.dump(찍, f, ensure_ascii=False, indent=1, sort_keys=True)
+        print(f"\n블록 스냅샷 -> {스냅샷}  (조립 탄 문항 {찍음}/{len(items)})")
+
     run_id = None
     if 기록:
         run_id = eval_store.기록(
@@ -663,18 +856,25 @@ def main() -> None:
                     help="A12 프롬프트 변형. V0=기준선 · V1~V6 (assemble_context.변형들)")
     # 🔴 부분집합은 gold_id 로 고정한다. 세트 이름으로 다시 뽑지 마라 — 이름이 흔들리면
     #    튜닝분과 held-out 이 섞인다.
-    ap.add_argument("--부분집합", choices=["튜닝52", "미사용41"],
-                    help="scratchpad/P4_부분집합_0903.json 의 gold_id 목록")
+    ap.add_argument("--부분집합", choices=_부분집합이름들() or None,
+                    help="scratchpad/P4_부분집합_0903.json 의 gold_id 목록 "
+                         "(선택지는 그 파일이 정한다 — 여기 손으로 적지 마라)")
     ap.add_argument("--gold-ids", dest="gold_ids", help="쉼표구분 gold_id 직접 지정")
-    ap.add_argument("--max-model-len", type=int, default=24576, dest="max_model_len",
-                    help="프롬프트 예산 계산·설정 기록용. 서버 기동값과 같게 줘라 "
-                         "(run 191 은 40960 이었는데 이 계산은 24576 로 굳어 있었다)")
+    # 🔴 기본값을 24576 -> 40960 으로 맞췄다 (2026-09-03). 24576 은 «구 77문항»
+    #    실측치이고, 서버(`pod_serve.sh`)는 이제 40960 으로 뜬다. 기본값이 서버와
+    #    다르면 이 줄이 또 없는 초과를 찍는다 — run 191 때 「초과 14건 🔴」이 그거였다.
+    #    **단일 출처는 `pod_serve.sh` 다.** 거길 바꾸면 여기도 바꿔라.
+    ap.add_argument("--max-model-len", type=int, default=40960, dest="max_model_len",
+                    help="프롬프트 예산 계산·설정 기록용. 서버 기동값과 «같게» 줘라")
+    ap.add_argument("--스냅샷", dest="스냅샷",
+                    help="블록별 자수·sha1·S번호수를 JSON 으로 뜬다 (SUDDOE_EVAL_RAW=1 필요). "
+                         "P3 행분해 on/off 대조의 기준선")
     ap.add_argument("--라벨")
     ap.add_argument("--no-log", action="store_true", help="eval.runs 에 남기지 않는다")
     a = ap.parse_args()
     실행(dry=a.dry, limit=a.limit, 세트=a.세트, 라벨=a.라벨,
        top_k=a.top_k, 기록=not a.no_log, 변형=a.변형, 부분집합=a.부분집합,
-       gold_ids=a.gold_ids, max_model_len=a.max_model_len)
+       gold_ids=a.gold_ids, max_model_len=a.max_model_len, 스냅샷=a.스냅샷)
 
 
 if __name__ == "__main__":
