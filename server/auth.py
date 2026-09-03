@@ -179,9 +179,25 @@ def _계정조회(email: str) -> tuple[str, str] | None:
 
     ⚠️ 503 은 「등록 여부를 모른다」이지 「등록됐다」가 아니다. 호출부가 이걸
        통과로 읽으면 안 된다 — 그래서 None 이 아니라 «예외» 로 나간다.
+
+    🔴 **테이블을 직접 안 읽고 `tenant.계정찾기()` 를 부른다** (2026-09-03).
+       `accounts` 정책은 `org_id = current_org()` 하나뿐인데, 이 함수는 «org 를
+       알아내려고» 읽는다 — 읽는 시점에 GUC 가 아직 없다. 그래서 비특권 롤에서는
+       0행이고 곧 403 이다. 실측:
+
+           postgres(superuser) → 찾음    ·    suddoe_app(비특권) → None → 403
+
+       로컬 `postgres` 가 superuser 라 **이 자리는 로컬에서 안 보인다.** 명부를
+       채우는 것으로도, GRANT 를 여는 것으로도 안 열린다 — 정책이 막는 것이다.
+       → `db/init/11_accounts_login.sql` 의 SECURITY DEFINER 함수로 «이메일 1건» 만
+         RLS 밖으로 낸다.
+
+    🔴 함수가 없으면 **503 으로 죽는다. 직접 SELECT 로 물러서지 않는다.**
+       물러서는 순간 superuser 인 로컬에서는 통과하고 운영에서만 0행이 되는데,
+       그건 정확히 「로컬에선 되는데 운영에서 안 되는」 오늘의 그 사고다.
     """
     try:
-        행 = _질의("SELECT org_id, account_id FROM tenant.accounts WHERE email = %s",
+        행 = _질의("SELECT org_id, account_id FROM tenant.계정찾기(%s)",
                    (email,), 예외전파=True)
     except Exception as e:                                    # noqa: BLE001
         로그.exception("계정 조회가 DB 경로에서 실패했다 — 미등록(403)과 갈라 낸다")

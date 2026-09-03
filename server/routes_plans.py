@@ -10,15 +10,23 @@ CSV 는 만들지 않는다 — 프론트 요구서 §화면7-③ 이 «브라�
 """
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from ._common import MOCK, 탭_판정, _질의, _실행
 from .models import 계획목록응답, 계획상세, 계획생성, 계획통계, 계획요약
 from . import mock_data
 
 router = APIRouter(prefix="/api/plans", tags=["지출계획"])
+
+_log = logging.getLogger(__name__)
+
+# 🔴 «본문 값을 쓴다» 와 «주인이 없다(게스트)» 를 갈라야 해서 센티넬을 둔다.
+#    None 을 기본값으로 두면 게스트를 뜻하는 None 과 구별이 안 되고, 그러면
+#    라우터가 org 를 안 넘긴 실수가 «게스트» 가 아니라 «본문 신뢰» 로 조용히 떨어진다.
+_주어지지않음 = object()
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -94,8 +102,76 @@ def _정렬(행: list[dict], 정렬: str) -> list[dict]:
 # 생성 — POST /api/plans
 # ════════════════════════════════════════════════════════════════════
 
+def _질의_저장(sql: str, 인자: tuple, 주인: str | None) -> list[tuple]:
+    """저장용 `_질의`. 🔴 **실패 사유를 갈라서 내보낸다.**
+
+    ■ 왜 갈라야 하나 (2026-09-03 · 실서버에서 실제로 헛짚었다)
+      무인증으로 `POST /api/plans` 를 치면 「DB 연결 실패」가 떴는데 **DB 는 멀쩡했다.**
+      같은 서버의 읽기가 413건을 돌려주고 있었다. 실제 기전은 이렇다:
+
+          주체 없음 → GUC 안 세움 → current_org() NULL → RLS 가 INSERT 차단(42501)
+                   → `_질의` 가 예외를 삼켜 [] → `if not 행:` → 503 「DB 연결 실패」
+
+      즉 ⓐ DB 다운 ⓑ 권한/RLS 차단 ⓒ 제약 위반이 **한 문구로 뭉개진다.**
+      `auth._계정조회()` 가 「죽은 DB」와 「없는 계정」을 가른 것과 «완전히 같은» 축이고,
+      처방도 같다 — `예외전파=True`.
+
+    ■ 🔴 `예외전파` 는 **여기 한 자리만** 켠다. `_질의` 호출부가 37곳이라 기본값을
+      바꾸면 조용하던 실패가 전부 500 으로 튄다.
+
+    ■ 🔴 사용자에게는 SQLSTATE·DB 메시지를 안 준다. psycopg 의 오류 본문에는 호스트·
+      포트·사용자명·컬럼명이 그대로 실린다. 사유는 로그에만 남기고 화면 문구는 셋으로 닫는다.
+    """
+    try:
+        return _질의(sql, 인자, 예외전파=True)
+    except Exception as e:                                    # noqa: BLE001
+        상태 = getattr(e, "sqlstate", None)
+        _log.exception("지출계획 저장 실패 — sqlstate=%s 주인=%s", 상태, 주인)
+        if 상태 == "42501":              # insufficient_privilege = RLS 가 물었다
+            if 주인 is None:
+                # 🔴 게스트다. 「권한이 없다」가 아니라 「누군지 모른다」가 맞다 —
+                #    403 으로 주면 로그인해도 안 될 것처럼 읽힌다.
+                raise HTTPException(401, "저장하려면 로그인이 필요합니다") from e
+            raise HTTPException(403, "이 기관으로 저장할 권한이 없습니다") from e
+        if 상태 is None:                 # 접속 자체가 안 됐다 (OperationalError)
+            raise HTTPException(503, "지출계획을 저장하지 못했습니다 (DB 연결 실패)") from e
+        raise HTTPException(500, "지출계획을 저장하지 못했습니다") from e
+
+
+def _계획_주인(요청: Request, 자기신고: str | None) -> str | None:
+    """계획의 «주인» 을 정한다. 🔴 **본문의 `org_id` 는 절대 쓰지 않는다.**
+
+    ■ 왜 본문을 버리나
+      본문은 클라이언트가 쓴 값이다. 그걸 그대로 INSERT 하면 남의 기관 이름으로
+      행을 심을 수 있다. 지금은 RLS 가 DB 층에서 한 번 더 막지만, 그건 «두 번째»
+      방어선이지 근거가 아니다 — `routes_l3._업로드_주인` 과 같은 처방을 같은 축에
+      적용한다 (`/api/judge` 는 이미 닫혔고 여기만 남아 있었다).
+
+    ■ 🔴 돌려주는 값은 `auth.OrgId주입` 이 GUC(`app.org_id`)에 세운 값과 «같아야»
+      한다. RLS 정책이 `org_id = current_org()` 라서, 둘이 어긋나면 토큰이 멀쩡해도
+      INSERT 가 거부된다(503). 그래서 판정식을 미들웨어와 «같은 문장» 으로 둔다:
+      `주.검증됨 and 주.org_id`. 여기를 손대려면 `auth.py` 의 그 줄도 같이 봐야 한다.
+
+    ■ 본문에 org_id 가 실려 와도 **400 으로 죽이지 않는다.** 프론트가 아직 보내고
+      있을 수 있고, 시연 중에 그걸로 멈추면 손해가 더 크다. 무시하고 로그만 남긴다.
+    """
+    주 = 요청.scope.get("suddoe_주체")
+    주인 = str(주.org_id) if (주 is not None and 주.검증됨 and 주.org_id) else None
+    if 자기신고:
+        if 주인 is None:
+            _log.warning("계획 생성 본문에 org_id=%s 가 왔지만 «검증된 주체» 가 없다 "
+                         "— 무시한다(게스트로 저장 시도)", 자기신고)
+        elif str(자기신고) != 주인:
+            _log.warning("계획 생성 org_id 불일치 — 토큰=%s 본문=%s · 토큰을 쓴다",
+                         주인, 자기신고)
+        else:
+            _log.info("계획 생성 본문이 아직 org_id 를 보낸다(값은 일치) — 프론트에서 "
+                      "빼도 된다")
+    return 주인
+
+
 @router.post("", response_model=계획상세, status_code=201)
-def 생성(body: 계획생성) -> 계획상세:
+def 생성(요청: Request, body: 계획생성) -> 계획상세:
     if MOCK:
         새 = max((p["plan_id"] for p in mock_data.목_계획), default=0) + 1
         행 = {
@@ -108,7 +184,7 @@ def 생성(body: 계획생성) -> 계획상세:
         }
         mock_data.목_계획.append(행)
         return 계획상세(**행, 할일=[], 판정상세=None)
-    return _실_생성(body)
+    return _실_생성(body, org_id=_계획_주인(요청, body.org_id))
 
 
 def _합성(body: 계획생성) -> str:
@@ -217,11 +293,20 @@ def _실_통계(org_id: str | None) -> dict:
     }
 
 
-def _실_생성(body: 계획생성) -> 계획상세:
-    """INSERT INTO tenant.expense_plans. 질문원문이 없으면 `_합성(body)` 을 쓴다."""
+def _실_생성(body: 계획생성, *, org_id=_주어지지않음) -> 계획상세:
+    """INSERT INTO tenant.expense_plans. 질문원문이 없으면 `_합성(body)` 을 쓴다.
+
+    🔴 `org_id` 는 **HTTP 경로에서 반드시 넘겨라** — `_계획_주인()` 이 검증된 주체에서
+       뽑은 값이다. 안 넘기면 `body.org_id`(자기신고)로 떨어지는데, 그건 테스트가
+       본문으로 org 를 지정하는 관례(`test_plans.py`)를 살려 두기 위한 «직접 호출»
+       전용 통로다. 라우터에서 그 통로를 타면 기관 사칭이 열린다.
+    """
+    # 🔴 **라우터는 반드시 `org_id=` 를 넘긴다.** 안 넘기면 자기신고(본문)로 떨어지고
+    #    그게 곧 기관 사칭이다. 이 통로는 테스트의 «직접 호출» 전용이다.
+    주인 = body.org_id if org_id is _주어지지않음 else org_id
     제목 = body.제목 or body.품목
     질문원문 = body.질문원문 or _합성(body)
-    행 = _질의(
+    행 = _질의_저장(
         """
         INSERT INTO tenant.expense_plans
             (org_id, 제목, 질문원문, 정규화, 사업명, 확정비목, 금액, 집행예정일, 거래처, 추가설명)
@@ -229,11 +314,15 @@ def _실_생성(body: 계획생성) -> 계획상세:
         RETURNING plan_id, 제목, 확정비목, 금액, 집행예정일, updated_at, created_at,
                   사업명, 상태, 질문원문, 거래처, 추가설명, 정규화, latest_decision_id
         """,
-        (body.org_id, 제목, 질문원문, _jsonb(body.정규화), body.사업명,
+        (주인, 제목, 질문원문, _jsonb(body.정규화), body.사업명,
          body.확정비목, body.금액, body.집행예정일, body.거래처, body.추가설명),
+        주인,
     )
     if not 행:
-        raise HTTPException(503, "지출계획을 저장하지 못했습니다 (DB 연결 실패)")
+        # 🔴 `_질의_저장` 이 예외를 다 세워 내보내므로 여기까지 «빈 리스트» 로 오는 길은
+        #    없다 (INSERT ... RETURNING 은 성공하면 반드시 1행). 남겨 두되 503 이 아니라
+        #    500 이다 — 여기 걸리면 DB 문제가 아니라 우리가 모르는 상태다.
+        raise HTTPException(500, "지출계획을 저장하지 못했습니다")
     r = 행[0]
     return 계획상세(
         plan_id=r[0], 제목=r[1], 확정비목=r[2],

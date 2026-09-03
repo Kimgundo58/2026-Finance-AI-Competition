@@ -119,16 +119,71 @@ def test_검증된_토큰이면_지출계획이_저장된다(판):
 
 
 def test_게스트는_저장하지_못한다(판):
-    """앱에서 한 겹(폴백), DB 에서 한 겹(RLS) — 지금은 DB 가 막는다."""
+    """앱에서 한 겹(폴백), DB 에서 한 겹(RLS) — 지금은 DB 가 막는다.
+
+    🔴 **상태코드까지 못 박는다.** 전엔 여기가 503 「DB 연결 실패」였다 — DB 는 멀쩡한데
+    RLS 가 문 것이었고, `_질의` 가 예외를 삼켜 «빈 리스트» 로 만들어 `if not 행:` 이
+    접속 실패와 같은 문구를 냈다. 실서버에서 그걸로 한 번 헛짚었다(중앙 실측).
+    `!= 201` 만 재면 그 뭉갬이 그대로 돌아와도 초록이다.
+    """
     생성, _, A, _ = 판
-    assert 생성(org_id=A, 토큰org=None).status_code != 201
+    r = 생성(org_id=A, 토큰org=None)
+    assert r.status_code == 401, (
+        f"게스트 저장 거절이 401 이 아니다 ({r.status_code}) — 사유가 다시 뭉개졌다. "
+        f"본문: {r.text[:200]}")
+    사유 = r.json().get("detail", "")
+    assert "DB" not in 사유, f"RLS 차단인데 DB 문제로 읽힌다: {사유!r}"
+    for 조각 in ("42501", "sqlstate", "psycopg", "row-level", "expense_plans"):
+        assert 조각 not in str(r.text), f"응답에 DB 내부 정보 «{조각}» 이 샌다"
 
 
-def test_토큰이_있어도_남의_org_로는_저장하지_못한다(판):
-    """🔴 `body.org_id` 축이다. 미들웨어는 쿼리스트링만 갈아끼우므로 본문에는 못 닿는데,
-    **RLS 가 DB 층에서 막는다** — 층을 달리한 두 번째 방어선이 실제로 무는지 잰다."""
-    생성, _, A, B = 판
-    assert 생성(org_id=B, 토큰org=A).status_code != 201
+def test_저장_실패_사유가_원인별로_갈린다(판):
+    """🔴 ⓐ DB 다운 · ⓑ 권한/RLS · ⓒ 그 밖 — 셋이 한 문구면 아무도 원인을 못 찾는다.
+    `auth._계정조회()` 가 「죽은 DB」와 「없는 계정」을 가른 것과 같은 축이다.
+    여기서는 «접속 실패» 쪽만 잰다 (RLS 쪽은 위 게스트 테스트가 401 로 잡는다).
+    """
+    from server import _common
+
+    생성, _, A, _ = 판
+    옛 = _common.DSN
+    _common.DSN = "postgresql://postgres:devpw@localhost:59999/suddoe"   # 아무도 안 듣는다
+    try:
+        r = 생성(org_id=None, 토큰org=A)
+    finally:
+        _common.DSN = 옛
+    assert r.status_code == 503, f"접속 실패가 503 이 아니다 ({r.status_code})"
+    for 조각 in ("59999", "devpw", "localhost", "psycopg", "timeout"):
+        assert 조각 not in r.text, (
+            f"503 사유에 접속정보 «{조각}» 이 실려 나간다 — 인증 «전» 응답이라 아무나 본다")
+
+
+def test_본문에_org_id_가_없어도_토큰만으로_저장된다(판):
+    """🔴 B2 회귀. 예전엔 여기가 **503** 이었다 — `_실_생성` 이 `body.org_id` 를 그대로
+    INSERT 해서, 프론트가 본문에 org_id 를 안 실으면 `org_id=NULL` 로 들어가고
+    GUC 가 A 여도 `NULL = A` 는 거짓이라 RLS 가 막았다. 토큰을 제대로 냈는데도
+    저장이 안 되는 상태였다. 이제 주인은 본문이 아니라 «검증된 주체» 에서 온다.
+    """
+    생성, 조회, A, _ = 판
+    r = 생성(org_id=None, 토큰org=A)
+    assert r.status_code == 201, (
+        f"본문 org_id 없이 저장이 안 된다 ({r.status_code}) — `_계획_주인` 이 주체를 "
+        f"못 읽었거나 GUC 와 값이 어긋났다. 본문: {r.text[:200]}")
+    assert 조회(r.json()["plan_id"], 토큰org=A).status_code == 200
+
+
+def test_본문에_남의_org_를_실어도_내_org_로_저장된다(판):
+    """🔴 `body.org_id` 축. 예전엔 「RLS 가 막아서 != 201」이었는데, 이제는
+    **앱이 본문을 버려서 내 org 로 저장된다** — 막는 대신 «못 쓰게» 만든 것이다.
+    그래서 상태코드만 보면 안 되고 «어느 기관 행이 됐는지» 를 조회로 되짚는다
+    (201 만 재면 본문이 그대로 들어가도 초록이다).
+    """
+    생성, 조회, A, B = 판
+    r = 생성(org_id=B, 토큰org=A)
+    assert r.status_code == 201, f"토큰이 멀쩡한데 저장이 안 된다 ({r.status_code})"
+    pid = r.json()["plan_id"]
+    assert 조회(pid, 토큰org=A).status_code == 200, "본문 org 가 이겨서 남의 행이 됐다"
+    assert 조회(pid, 토큰org=B).status_code == 404, (
+        "본문에 실은 org_id 로 저장됐다 — 기관 사칭이 열려 있다 (TENANT_LEAK)")
 
 
 # ── 읽기 격리 ───────────────────────────────────────────────────────
@@ -139,24 +194,3 @@ def test_남의_기관_계획은_404_다(판):
     assert 조회(pid, 토큰org=A).status_code == 200
     assert 조회(pid, 토큰org=B).status_code == 404, "남의 기관 계획이 열렸다 — TENANT_LEAK"
     assert 조회(pid, 토큰org=None).status_code == 404
-
-
-# ── 🔴 지금 «안 되는» 것 — 라우터 소유 세션에 넘긴다 ────────────────
-
-def test_본문에_org_id_가_없으면_토큰이_있어도_저장이_안_된다(판):
-    """🔴 «막는다» 가 아니라 «지금 이렇다» 를 기록하는 줄이다.
-
-    `routes_plans._실_생성` 이 `body.org_id` 를 그대로 INSERT 한다. 프론트가 본문에
-    org_id 를 안 실으면 org_id=NULL 로 들어가고, GUC 가 A 여도 `NULL = A` 는 거짓이라
-    RLS 가 막는다 → 503. **토큰을 제대로 냈는데도 저장이 안 된다.**
-
-    고칠 자리는 `routes_plans.py`(다른 세션 소유)다 — `body.org_id` 를 버리고
-    `scope["suddoe_주체"]` 를 쓰면 닫힌다 (`routes_l3._업로드_주인` 과 같은 처방).
-    🔴 그쪽이 고쳐지면 이 테스트는 빨개진다. 그때 이 함수를 지우고 위
-       `test_검증된_토큰이면...` 에 「본문 org_id 없이도 201」을 더해라.
-    """
-    생성, _, A, _ = 판
-    r = 생성(org_id=None, 토큰org=A)
-    assert r.status_code != 201, (
-        "본문 org_id 없이 저장이 됐다 — 라우터가 주체를 쓰도록 고쳐진 것 같다. "
-        "docstring 대로 이 테스트를 정리할 것")
