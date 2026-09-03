@@ -399,6 +399,20 @@ def 실행(*, dry: bool, limit: int | None, 세트: list[str] | None, 라벨: st
         rules수 = dict(zip(("총", "verified"), cur.fetchone()))
         cur.execute("SELECT 적용대상, count(*) FROM corpus.chunks GROUP BY 1 ORDER BY 2 DESC")
         적용대상분포 = {r[0]: r[1] for r in cur.fetchall()}
+        # 🔴 «어느 DB 의 어느 롤로 돌았나». 비밀번호는 담지 않는다.
+        #    ai-a3 실측: RLS 가 걸린 롤로 실판정을 돌리면 미매핑 전제 저장이 죽으면서
+        #    약 46%가 「판단불가」로 잡힌다 — 모델 판단이 아니라 저장 실패다.
+        #    ⚠️ 다만 이 하네스는 `판정(..., 기록=False)` 로 부르고 `_unmapped_적재` 는
+        #       `orchestrate.py:340` 의 `if c and 기록:` 뒤에 있어 **발화 자체를 안 한다.**
+        #       그래도 조건은 박는다 — 「안 걸렸다」를 다음 사람이 확인할 수 있어야 한다.
+        cur.execute("SELECT current_database(), current_user, "
+                    "coalesce(inet_server_addr()::text, 'local'), "
+                    "(SELECT rolbypassrls FROM pg_roles WHERE rolname = current_user), "
+                    "version()")
+        _d = cur.fetchone()
+        DB신원 = {"db": _d[0], "role": _d[1], "host": _d[2], "bypassrls": _d[3],
+                "서버": (_d[4] or "").split(" on ")[0],
+                "미매핑적재_발화": False, "근거": "판정(기록=False) · orchestrate.py:340"}
 
         # 고정 정답 좌표를 미리 읽는다 — 문항마다 재계산하지 않는다(결정성).
         정답청크: dict[int, set[int]] = {}
@@ -771,6 +785,7 @@ def 실행(*, dry: bool, limit: int | None, 세트: list[str] | None, 라벨: st
           #    본다. `corpus.rules` 와 `chunks.적용대상` 이 바뀌어도 해시는 그대로다 —
           #    그 둘은 검색 필터와 룰 경로의 입력이라 판정을 바꾼다. 따로 센다.
           "rules수": rules수, "적용대상분포": 적용대상분포,
+          "DB": DB신원,
           "GPU": os.environ.get("SUDDOE_GPU"),
           "VLLM_URL": os.environ.get("VLLM_URL"),
           "VLLM_MODEL": os.environ.get("VLLM_MODEL"),
