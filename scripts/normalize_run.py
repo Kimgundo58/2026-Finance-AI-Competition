@@ -97,7 +97,11 @@ def llm_호출(프롬프트: str, 스키마: dict | None, *,
                          "User-Agent": "suddoe-judge/1.0"})
             with urllib.request.urlopen(req, timeout=타임아웃) as r:
                 d = json.loads(r.read().decode())
-            내용 = d["choices"][0]["message"]["content"]
+            _메시지 = d["choices"][0]["message"]
+            내용 = _메시지.get("content") or ""
+            # 🔴 파서가 갈라 준 경우 `reasoning_content` 에 사고가 들어가고
+            #    `content` 는 이미 깨끗하다. 안 갈라진 경우만 여기서 걷어낸다.
+            내용 = 사고흔적_제거(내용)
             메타 = {"지연ms": int((time.time() - t) * 1000),
                    "토큰": d.get("usage", {}),
                    "종료이유": d["choices"][0].get("finish_reason"),
@@ -113,6 +117,36 @@ def llm_호출(프롬프트: str, 스키마: dict | None, *,
         except Exception as e:                                  # 타임아웃·연결 끊김 포함
             마지막 = f"{type(e).__name__}: {str(e)[:200]}"
     raise LLM실패(마지막 or "알 수 없는 실패")
+
+
+def 사고흔적_제거(내용: str) -> str:
+    """🔴 Qwen3 는 thinking 이 기본이라 `<think>...</think>` 를 «본문 앞에» 붙여 보낸다.
+
+    서버에 `--reasoning-parser qwen3` 를 줘도 갈라지지 않는 경우가 있다 — 실측
+    (2026-09-03 · 실서버): `/v1/chat/completions` 가 200 을 돌려주는데 `content` 가
+    `"<think>
+Okay, let's see. The user wants to know which category..."` 로 시작해
+    `json.loads` 가 **char 0 에서** 깨졌다. 정규화 3회 연속 동일 실패.
+
+    🔴 이 실패는 **조용하지 않다** — `LLM실패` 로 올라가고 기본값이 판단불가다.
+       그래서 「틀린 답」이 아니라 「답 없음」이 나갔다. 그건 설계대로다.
+       다만 «모델이 답을 냈는데 우리가 못 읽어서» 판단불가가 된 것이라 고친다.
+
+    ⚠️ 여는 태그 없이 닫는 태그만 오는 경우가 있다(파서가 여는 쪽만 먹은 경우).
+       그래서 `</think>` 를 기준으로 자른다 — 그 뒤가 본문이다.
+    """
+    if not 내용:
+        return 내용
+    if "</think>" in 내용:
+        내용 = 내용.rsplit("</think>", 1)[1]
+    내용 = 내용.strip()
+    # 코드펜스로 감싸 보내는 경우도 있다 — 스키마를 준 호출에서는 순수 JSON 이어야 한다
+    if 내용.startswith("```"):
+        내용 = re.sub(r"^```[a-zA-Z]*\s*", "", 내용)
+        내용 = re.sub(r"\s*```$", "", 내용).strip()
+    return 내용
+
+
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -277,8 +311,16 @@ def 정규화(질문: str, *, dry: bool = False, 비목목록: list[str] | None 
     스키마 = 호출자리1_스키마(비목목록)
     프롬프트 = _지시.format(비목=", ".join(스키마["properties"]["비목후보"]["items"]
                                        ["properties"]["비목"]["enum"]), 질문=질문)
+    # 🔴 400 이 아니라 2000 이다 (2026-09-03 실서버 실측).
+    #    Qwen3 는 thinking 이 기본이라 `<think>...</think>` 가 «출력 토큰» 을 먹는다.
+    #    서버에 `--reasoning-parser qwen3` 를 줘도 갈라지지 않는 응답이 있다 —
+    #    같은 호출에서 `reasoning_content` 는 None 이고 `content` 가 `<think>` 로 시작했다.
+    #    그 상태에서 400 이면 생각만 하다 끝나 `content` 가 `'{"'` 에서 잘린다
+    #    (`finish_reason='length'`). 정규화 3회 연속 동일 실패 — 「팔레트」가 그 사례다.
+    #    ⚠️ 잘려도 예외는 안 난다. `LLM실패` 로 올라가 판단불가가 되는데, 그건
+    #       「모델이 모른다」가 아니라 「우리가 자리를 안 줬다」다. 두 개를 갈라야 한다.
     출력, 메타 = llm_호출(프롬프트, 스키마, 모델=MODEL_1 or None,
-                       최대토큰=400, 타임아웃=타임아웃)
+                       최대토큰=2000, 타임아웃=타임아웃)
     # guided_json 이 걸려 있어도 서버가 무시했을 때를 대비해 최소 형태만 확인한다
     if not isinstance(출력, dict) or "품목" not in 출력:
         raise LLM실패(f"슬롯① 출력이 스키마 밖: {str(출력)[:200]}")
