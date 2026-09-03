@@ -9,7 +9,7 @@ DOCX → docx_extract.py (zip, python-docx). hwpx 와 같은 sniff() 로 내용�
 TXT  → 그대로
 """
 from __future__ import annotations
-import os, re, sys, zlib, struct
+import logging, os, re, sys, zlib, struct
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -287,17 +287,80 @@ def extract_txt(path: Path) -> str:
 
 
 # ── 디스패처 ─────────────────────────────────────────────────────
+_로그 = logging.getLogger(__name__)
+
+_대리_시작, _대리_끝 = 0xD800, 0xDFFF
+_상위_끝, _하위_시작 = 0xDBFF, 0xDC00
+_치환문자 = chr(0xFFFD)
+
+
+def 서러게이트_정리(text: str, 라벨: str = "") -> str:
+    """🔴 **UTF-16 대리(surrogate) 쌍을 «합치고», 못 합친 고아는 U+FFFD 로 치환한다.**
+
+    실측(2026-09-03 · 경상국립대 사업비사용안내문.hwp): 추출문에 U+DB80 U+DC7E 쌍이
+    **결합되지 않은 채** 22개(11쌍) 남는다. 실제 글자는 PUA U+F007E 인데 파이썬
+    문자열에는 «대리 코드 2개» 로 들어와 있어 **UTF-8 인코딩이 불가능하다.**
+    그대로 DB 로 가면 psycopg 가 UnicodeEncodeError 로 죽는다 — 실제로 죽었다.
+
+    🔴 그때 안 죽은 건 «우연» 이다. 그 단락들이 100자 미만이라 `split_articles` 의
+       단락 필터에 걸려 버려졌을 뿐이고, **그 필터를 고치면 바로 발현한다.**
+       그래서 이 정리가 «먼저» 있어야 한다.
+
+    🔴 **조용히 지우지 않는다.** 고아는 삭제가 아니라 U+FFFD 치환이고, 몇 개를
+       어떻게 했는지 로그에 남긴다. 글자가 사라진 걸 아무도 모르는 게 이 프로젝트가
+       반복해 데인 모양이다.
+
+    ⚠️ 정규식을 안 쓴다 — 패턴에 대리 문자를 «적어» 두려면 소스 파일 자체가 그 문자를
+       품어야 하는데, 그러면 이 파일이 UTF-8 로 저장이 안 된다(한 번 밟았다).
+    """
+    if not text:
+        return text
+    if not any(_대리_시작 <= ord(c) <= _대리_끝 for c in text):
+        return text
+    나온, 쌍수, 고아수 = [], 0, 0
+    i, n = 0, len(text)
+    while i < n:
+        o = ord(text[i])
+        if (_대리_시작 <= o <= _상위_끝 and i + 1 < n
+                and _하위_시작 <= ord(text[i + 1]) <= _대리_끝):
+            나온.append(chr(0x10000 + ((o - _대리_시작) << 10)
+                           + (ord(text[i + 1]) - _하위_시작)))
+            쌍수 += 1
+            i += 2
+            continue
+        if _대리_시작 <= o <= _대리_끝:
+            나온.append(_치환문자)          # 🔴 버리지 않는다 — 자리를 남긴다
+            고아수 += 1
+        else:
+            나온.append(text[i])
+        i += 1
+    _로그.warning("서러게이트 정리%s — 쌍 결합 %d개 · 고아 U+FFFD 치환 %d개",
+                  f"({라벨})" if 라벨 else "", 쌍수, 고아수)
+    return "".join(나온)
+
+
 def extract(path: Path):
-    """반환: ('articles', list) 또는 ('text', (str, page_offsets))"""
+    """반환: ('articles', list) 또는 ('text', (str, page_offsets))
+
+    🔴 **모든 포맷이 이 한 곳으로 나간다.** 그래서 서러게이트 정리도 여기 «한 번만»
+       둔다 — 포맷별 추출기마다 흩어 두면 새 포맷이 하나 늘 때 조용히 빠진다.
+    """
     ext = path.suffix.lower()
+    라벨 = path.name
     if ext == ".xml":
-        return "articles", extract_xml(path)
+        arts = extract_xml(path)
+        for a in arts:                       # 조문 구조 경로도 같은 위험을 진다
+            a["본문"] = 서러게이트_정리(a["본문"], 라벨)
+            if a.get("조제목"):
+                a["조제목"] = 서러게이트_정리(a["조제목"], 라벨)
+        return "articles", arts
     if ext == ".pdf":
-        return "text", extract_pdf(path)
+        본문, offs = extract_pdf(path)
+        return "text", (서러게이트_정리(본문, 라벨), offs)
     if ext in (".hwp", ".hwpx"):
-        return "text", (extract_hwp(path), {})
+        return "text", (서러게이트_정리(extract_hwp(path), 라벨), {})
     if ext == ".docx":
-        return "text", (extract_docx(path), {})
+        return "text", (서러게이트_정리(extract_docx(path), 라벨), {})
     if ext == ".txt":
-        return "text", (extract_txt(path), {})
+        return "text", (서러게이트_정리(extract_txt(path), 라벨), {})
     raise ValueError(f"지원하지 않는 형식: {ext}")

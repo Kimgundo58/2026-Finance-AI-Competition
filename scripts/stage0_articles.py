@@ -244,6 +244,11 @@ def _roman_chapters(text: str, page_offsets: dict[int, int]) -> list[dict]:
     return arts
 
 
+# 단락 폴백에서 한 조각이 가져야 할 최소 길이. 🔴 이 값 «미만» 을 버리는 게 아니라
+# 이 값을 «채울 때까지 이어 붙인다» — 버리면 표가 통째로 사라진다(위 주석 실측).
+_단락_최소 = 100
+
+
 def split_articles(text: str, page_offsets: dict[int, int] | None = None) -> tuple[list[dict], str]:
     """반환: (조 리스트, 사용한 전략 이름)"""
     text = _clean(text)
@@ -296,14 +301,41 @@ def split_articles(text: str, page_offsets: dict[int, int] | None = None) -> tup
         return romans, "roman_chapter"
 
     # ── 3순위: 단락 분할 (구조 없음) ────────────────────────────
-    paras = [p.strip() for p in re.split(r"\n{2,}", text) if len(p.strip()) >= 100]
+    #
+    # 🔴 **짧은 조각을 «버리지» 않고 «이어 붙인다».** 예전에는 100자 미만을 그냥
+    #    걸렀는데, HWP 표는 셀마다 한 줄이라 대부분 100자 미만이다. 그 결과:
+    #
+    #        경상국립대 사업비사용안내문.hwp — 원문 27,785자 → 적재 4,379자 (**16%**)
+    #        게다가 마지막 단락이 원문 15,536 에서 끊겨 **뒤 12,249자(44%)가 통째로 없었다.**
+    #        그 구간이 [첨부1~4] 비목별 집행기준·증빙서류 — 판정이 실제로 쓰는 부분이다.
+    #
+    #    L3 는 「검색 없이 통째 로드」가 전제다. 통째의 16%만 있으면 그 전제가 깨진다.
+    #    🔴 그런데 **아무 예외도 안 났다.** `파싱품질='warn'` 에 조 35개가 잡혀서
+    #       화면에는 「35개 조항 인식됨」으로 보였다 — 조용한 손실이다.
+    #
+    # 🔴 표의 «행–열 짝» 은 포기한다(셀 텍스트만 산다). 그건 이 자리에서 풀 문제가
+    #    아니고, 셀 텍스트가 이어져 있으면 L3 통째 로드에는 쓸 만하다.
+    조각 = [x.strip() for x in re.split(r"\n{2,}", text) if x.strip()]
+    묶음: list[str] = []
+    버퍼: list[str] = []
+    for x in 조각:
+        버퍼.append(x)
+        if sum(len(y) for y in 버퍼) + len(버퍼) - 1 >= _단락_최소:
+            묶음.append("\n".join(버퍼))
+            버퍼 = []
+    if 버퍼:
+        # 🔴 꼬리를 버리지 않는다. 여기서 버리던 것이 위 44% 다.
+        if 묶음:
+            묶음[-1] = 묶음[-1] + "\n" + "\n".join(버퍼)
+        else:
+            묶음.append("\n".join(버퍼))
     arts = [{
         "조번호": f"단락{i+1:03d}",
         "조제목": None,
         "조번호_int": i + 1,
         "본문": p,
         "페이지": None,
-    } for i, p in enumerate(paras)]
+    } for i, p in enumerate(묶음)]
     return arts, "paragraph"
 
 
