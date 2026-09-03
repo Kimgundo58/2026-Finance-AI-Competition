@@ -61,7 +61,7 @@ sys.path.insert(0, str(ROOT))          # `python server/main.py` 로도 server �
 
 # 🔴 공용 정의는 `server/_common.py` · 계약은 `server/models.py` 가 기준이다 (2026-09-01 동결).
 #    라우터가 main 을 import 하면 순환참조가 나서 밖으로 뺐다. 여기서 다시 정의하지 말 것.
-from server._common import (DSN, MOCK, _sse, _sse응답, _질의,      # noqa: E402
+from server._common import (DSN, MOCK, _sse, _sse응답, _실행, _질의,  # noqa: E402
                             비목_ENUM, 판정_ENUM, 창업활동비_사업 as _창업활동비_사업)
 from server.models import (F1, F3항, F4항, F5, 정규화요청,          # noqa: E402
                            판정요청, 프로필)
@@ -527,6 +527,83 @@ def _비목_정본(값: str | None) -> str | None:
     return 표.get(값) or 표.get(_비목_키(값)) or 값
 
 
+# ── 판정 캐시 — DB (Q5, 2026-09-04) ──────────────────────────────────
+#
+# 🔴 Cloud Run 재배포로 날아가던 `비용가드._캐시`(인메모리)를 인증된 요청(org 있음)에
+#    한해 DB(`tenant.judge_cache`)로 옮긴다. 키 설계·굵기 판단·설정_해시 무효화 축의
+#    이유는 `db/init/13_judge_cache.sql` 머리말이 정본이다 — 여기는 그걸 코드로 잇는다.
+#
+# 🔴 **게스트(org 없음)는 그대로 인메모리다 — DB 로 안 옮긴다.**
+#    `tenant.*` RLS 정책이 `org_id = current_org()` 라 NULL 은 어느 쪽이든 통과하지
+#    못한다(`10_rls_guc.sql` 미결 ②, 정책은 오너 결정 — 여기서 새로 풀지 않는다).
+#    게스트 캐시는 재배포로 날아가도 안전(다음 요청이 다시 계산)하니 굳이 그 정책
+#    논쟁을 지금 열 이유가 없다. `--selftest` 의 게스트 캐시 검증도 이 경로를 탄다 —
+#    바꾸면 그 검증이 깨진다.
+
+_설정_해시_캐시: tuple[float, str] | None = None
+_설정_해시_TTL = _int환경("SUDDOE_CONFIG_HASH_TTL", 300)
+
+
+def _설정_해시(강제새로: bool = False) -> str:
+    """캐시 무효화 축. 코퍼스·룰이 바뀌면 이 값이 바뀌어 캐시 조회가 미스로 본다.
+
+    `scripts/eval_store.코퍼스버전()` 과 같은 발상(청크수·임베딩수·refs수·문서수·
+    최대chunk_id)에 룰 축(룰수·검수룰수)을 더했다 — 캐시는 룰 재검수도 알아야 한다.
+    조건이 다른 run 을 안 섞는 것과 같은 이유다(CLAUDE.md 「지표를 읽을 때」).
+    🔴 TTL 로 캐시한다 — 다른 `_*_캐시` 들과 같은 이유(요청당 새 psycopg 접속 25ms).
+       DB 를 못 읽으면 `"unknown"` 을 주고 **캐시하지 않는다** — DB 가 돌아오면
+       바로 다시 잰다. `unknown` 으로 저장된 캐시 행은 없다(넣기 전에 매번 다시 잰다).
+    """
+    global _설정_해시_캐시
+    if not 강제새로 and _설정_해시_캐시 is not None:
+        받은시각, 값 = _설정_해시_캐시
+        if time.time() - 받은시각 < _설정_해시_TTL:
+            return 값
+    행 = _질의("""SELECT (SELECT count(*) FROM corpus.chunks),
+                        (SELECT count(*) FROM corpus.chunks WHERE embedding IS NOT NULL),
+                        (SELECT count(*) FROM corpus.refs),
+                        (SELECT count(*) FROM corpus.documents),
+                        (SELECT coalesce(max(chunk_id), 0) FROM corpus.chunks),
+                        (SELECT count(*) FROM corpus.rules),
+                        (SELECT count(*) FILTER (WHERE verified) FROM corpus.rules)""")
+    if not 행:
+        return "unknown"
+    n = 행[0]
+    h = hashlib.sha1("|".join(map(str, n)).encode()).hexdigest()[:10]
+    값 = f"c{n[0]}-e{n[1]}-r{n[2]}-d{n[3]}-rule{n[5]}v{n[6]}-{h}"
+    _설정_해시_캐시 = (time.time(), 값)
+    return 값
+
+
+def _판정캐시_꺼내기(k: str, org: str | None) -> Any | None:
+    """org 가 있으면 `tenant.judge_cache`(DB), 없으면 `비용가드._캐시`(인메모리)."""
+    if org is None:
+        return 가드.꺼내기(k)
+    행 = _질의(
+        'SELECT value FROM tenant.judge_cache '
+        'WHERE key=%s AND org_id=%s AND expires_at > now() AND 설정_해시=%s',
+        (k, org, _설정_해시()))
+    if not 행:
+        return None
+    가드.적중 += 1
+    # 캐시로 답하면 GPU 를 안 쓴 것이다 — 일일 카운트를 되돌려준다 (비용가드.꺼내기 와 동일 규칙)
+    가드.오늘_호출 = max(0, 가드.오늘_호출 - 1)
+    return 행[0][0]
+
+
+def _판정캐시_넣기(k: str, 값: Any, *, 종류: str, org: str | None) -> None:
+    if org is None:
+        가드.넣기(k, 값)
+        return
+    _실행(
+        'INSERT INTO tenant.judge_cache (key, org_id, 종류, value, 설정_해시, expires_at) '
+        'VALUES (%s,%s,%s,%s,%s, now() + make_interval(secs => %s)) '
+        'ON CONFLICT (key) DO UPDATE SET '
+        '  value = EXCLUDED.value, 설정_해시 = EXCLUDED.설정_해시, '
+        '  expires_at = EXCLUDED.expires_at, created_at = now()',
+        (k, org, 종류, routes_plans._jsonb(값), _설정_해시(), 가드.캐시TTL))
+
+
 @app.get("/api/vocab")
 def vocab(사업명: str | None = None) -> dict:
     """비목 enum 10종. 🔴 창업활동비는 예비창업패키지에만 있다 (§9)."""
@@ -578,7 +655,8 @@ def normalize(req: Request, body: 정규화요청):
     k = 비용가드.열쇠("normalize", (body.질문 or "").strip(),
                      body.품목, body.금액, body.용도, body.사업명,
                      body.f5.친족거래, body.f5.전직임직원업체)
-    캐시 = 가드.꺼내기(k)
+    _org = _주체org(req)
+    캐시 = _판정캐시_꺼내기(k, _org)
 
     def gen():
         yield _sse("진행", {"단계": "정규화", "설명": "질문에서 사실을 뽑는 중"})
@@ -600,7 +678,7 @@ def normalize(req: Request, body: 정규화요청):
             return
         # 목/실 공통 — 질문원문(합성 문장)을 싣는다. 저장·검색·표시 전용이다
         out.setdefault("질문원문", _합성_질문(body))
-        가드.넣기(k, out)
+        _판정캐시_넣기(k, out, 종류="normalize", org=_org)
         for 필드 in ("품목", "금액", "금액_추정여부", "용도", "비목후보"):
             if 필드 in out:
                 yield _sse("필드", {필드: out[필드]})
@@ -674,7 +752,7 @@ def judge(req: Request, body: 판정요청, 목: str | None = None):
     k = 비용가드.열쇠("judge", body.org_id, body.사업명, body.확정비목,
                      json.dumps(body.정규화, ensure_ascii=False, sort_keys=True),
                      body.f5.친족거래, body.f5.전직임직원업체, 목)
-    캐시 = 가드.꺼내기(k)
+    캐시 = _판정캐시_꺼내기(k, body.org_id)
 
     def gen():
         for 단계, 설명 in (("검색", "관련 조항을 찾는 중"),
@@ -688,7 +766,7 @@ def judge(req: Request, body: 판정요청, 목: str | None = None):
         elif MOCK:
             out = _목_판정.get(목 or "가능", _목_판정["가능"])
             _decision_id = out.pop("decision_id", None)
-            가드.넣기(k, out)
+            _판정캐시_넣기(k, out, 종류="judge", org=body.org_id)
         else:
             # 🔴 기존 이벤트 이름(`진행`)만 쓴다 — 이벤트 목록·순서는 계약이다.
             #    가동 중이면 0건이라 평상시 이벤트열은 그대로다.
@@ -720,7 +798,7 @@ def judge(req: Request, body: 판정요청, 목: str | None = None):
             # 🔴 decision_id 는 캐시에도 `결과` 응답에도 안 실린다 — 캐시에 박히면
             #    다른 요청이 남의 계획에 그 판정을 저장하려 든다 (TENANT_LEAK 류).
             _decision_id = out.pop("decision_id", None)
-            가드.넣기(k, out)
+            _판정캐시_넣기(k, out, 종류="judge", org=body.org_id)
         yield _sse("판정", {키: out.get(키) for 키 in
                           ("판정", "요약", "신뢰등급", "버전스탬프")})
         yield _sse("해야할일", out.get("해야할일", []))
@@ -1243,6 +1321,57 @@ def _selftest() -> int:
                      for x in ("()", "None", "미상", "제0조")))
     확인("확률·점수 필드가 없다 (§3 ❌)",
          not any(k in j for k in ("확률", "점수", "confidence", "score")))
+
+    # 🔴 ⓐ — `_목_판정` 이 `인용` 을 직접 박아 놔서 위 judge 자가검사는 전부 목이 서는
+    #    것만 본다. 오케가 `인용목록` 으로 돌려주는 걸 `_실_판정` 이 실제로 읽는지는
+    #    이 블록이 못 잡는다(2026-09-03 사고, docs/0-3_초록이_가린다.md ⓐ). 그래서 오케를
+    #    스키마 그대로 갈아끼우고 `_실_판정` 을 목을 통하지 않고 직접 부른다
+    #    (`tests/test_계약_키집합.py` 오케물리기 와 같은 기법 — pytest 가 안 돌아도
+    #    `--selftest` 혼자서 같은 축을 잡게 한다).
+    print("\n[실경로 판정 — 오케 키 이름을 실제로 읽는가 (ⓐ)]")
+    import sys as _sys
+    import types as _types
+    import llm_schema
+
+    def _가짜_판정(질문, **kw):
+        인용 = llm_schema.인용(s번호="S14", doc_id="D1", 조번호="제39조",
+                              조제목="기계장치", 원문="…", extraction="text")
+        전제 = llm_schema.전제(사실="협약상 참여인력이다", 근거조항="S14",
+                              매핑=["F4.역할"], 미충족시="불가")
+        # 🔴 값은 전부 「비지 않은」 센티널이다 — 실경로가 키 이름을 잘못 읽으면
+        #    폴백 기본값([]·None)이 나오므로 **빈 값 = 키 이름을 못 읽었다** 가 된다
+        #    (tests/test_계약_키집합.py 와 같은 원칙. 여기서 `참조사슬=[]` 를 주면
+        #    실경로가 못 읽어도 폴백([])과 구분이 안 돼 이 검사가 무력해진다).
+        r = llm_schema.최종응답(판정="조건부", 요약="자가검사용",
+                              해야할일=[{"항목": "사전승인 신청", "설명": "…"}],
+                              인용목록=[인용], 전제목록=[전제], 신뢰등급="B",
+                              버전스탬프="자가검사",
+                              참조사슬=[{"표기": "지침 제39조", "관계": "준용"}])
+        return r.to_dict()
+
+    _가짜_orch = _types.ModuleType("orchestrate")
+    _가짜_orch.판정 = _가짜_판정
+    _원래_orch, _원래_게이트 = _sys.modules.get("orchestrate"), _워치독.게이트
+    _sys.modules["orchestrate"] = _가짜_orch
+    _워치독.게이트 = lambda: None
+    try:
+        실경로out = _실_판정(판정요청(
+            정규화={"_원문": "디자이너가 쓸 맥북 프로 250만원", "비목후보": []},
+            사업명="예비창업패키지"))
+    finally:
+        _워치독.게이트 = _원래_게이트
+        if _원래_orch is not None:
+            _sys.modules["orchestrate"] = _원래_orch
+        else:
+            _sys.modules.pop("orchestrate", None)
+
+    계약키 = set(_목_판정["가능"])
+    빈칸 = [k for k in 계약키 if not 실경로out.get(k)]
+    확인("실경로(_실_판정)가 오케 키 이름을 전부 읽는다 — 목이 아니다",
+         not 빈칸, f"빈 키: {빈칸}" if 빈칸 else "")
+    확인("실경로 인용도 {조번호,조제목,원문,doc_id}",
+         all(set(x) >= {"조번호", "조제목", "원문", "doc_id"}
+             for x in 실경로out.get("인용", [])))
 
     print("\n[현물 제거 — f1 은 2칸]")
     pr = c.get("/api/profile").json()

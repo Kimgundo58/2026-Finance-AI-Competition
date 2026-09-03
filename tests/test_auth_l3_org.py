@@ -65,7 +65,7 @@ def 태우기(monkeypatch, tmp_path):
         return []
 
     monkeypatch.setattr(routes_l3, "_질의", _가짜질의)
-    monkeypatch.setattr(routes_l3, "파싱_배경", lambda doc_id: None)
+    monkeypatch.setattr(routes_l3, "파싱_배경", lambda doc_id, org_id: None)
     monkeypatch.setattr(routes_l3, "L3_저장소", tmp_path)
     monkeypatch.setattr(routes_l3, "MOCK", False)       # conftest 뒤에 한 번 더 못 박는다
 
