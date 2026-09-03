@@ -254,6 +254,12 @@ class L3업로드응답(BaseModel):
     조_건수: int | None = None
     dangling: list[dict[str, Any]] = Field(default_factory=list)
     메시지: str | None = None
+    # 🔴 2026-09-04 Q5 추가 — `tenant.l3_documents."파싱품질"`(대기/pass/warn/fail) 을
+    #    DB 는 이미 갖고 있었는데 응답에 안 실려 사용자가 warn/fail 을 못 봤다
+    #    (docs/9_미결.md 「L3 HWP」절). `상태` 는 파생값(완료/파싱대기/실패)이라
+    #    「조문은 뽑혔지만 품질이 낮다」(warn + 조_건수>0)를 「완료」 하나로 뭉갠다 —
+    #    이 필드가 그 구분을 프론트에 그대로 넘긴다.
+    파싱품질: Literal["대기", "pass", "warn", "fail"] | None = None
 
 
 # ════════════════════════════════════════════════════════════════════

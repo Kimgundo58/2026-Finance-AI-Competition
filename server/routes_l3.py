@@ -150,7 +150,9 @@ async def 업로드(
                             "doc_id": f"l3-mock-{uuid.uuid4().hex[:8]}"})
     응답 = _실_업로드(본문, 이름, 확장, org_id, 기관명)
     # 🔴 응답을 «보낸 뒤» 에 파싱한다. 202 Accepted 계약이라 여기서 붙들면 안 된다.
-    배경.add_task(파싱_배경, 응답.doc_id)
+    #    🔴 org_id 를 같이 넘긴다 — `파싱_배경` 이 RLS GUC 를 세우는 유일한 재료다
+    #       (그 자리가 없으면 비특권 롤에서 파싱이 매번 「doc_id 없음」으로 조용히 죽는다).
+    배경.add_task(파싱_배경, 응답.doc_id, org_id)
     return 응답
 
 
@@ -240,13 +242,24 @@ def _실_업로드(본문: bytes, 파일명: str, 확장: str,
     )
 
 
-def 파싱_배경(doc_id: str) -> None:
+def 파싱_배경(doc_id: str, org_id: str) -> None:
     """업로드 응답을 보낸 «뒤» 에 파서를 태운다.
 
     🔴 **동기로 부르면 안 된다.** 계약이 `202 Accepted` + 상태 폴링이고
        (`API_계약_v1.0.md` §7-2), 파싱은 PDF 면 초 단위다. 응답을 붙들면
        프론트의 「분석 중」 스피너가 존재 이유를 잃는다.
 
+    🔴 **2026-09-04 실측 — 이 함수는 비특권 롤(운영 `suddoe_app`)에서 «항상» 조용히
+       실패하고 있었다.** `psycopg.connect(DSN)` 은 `_common._질의`/`_실행` 이 매 호출
+       때 도는 `_org_세우기()`(GUC `app.org_id` 세팅)를 안 거치는 **생 연결**이다.
+       RLS 정책은 `org_id = current_org()` 인데 GUC 가 없으면 `current_org()` 가 NULL —
+       `tenant.l3_documents` 의 SELECT 자체가 **0행**으로 걸러진다. `l3_parse.파싱()`
+       은 이걸 「doc_id 없음」(정상 실패 사유)으로 보고 `{"ok": False, ...}` 를 **예외 없이**
+       돌려준다 — 그래서 아래 except 도 못 잡고 `파싱품질` 이 'fail' 로도 안 닫히고
+       **'대기' 에 영원히 남는다.** 로컬 기본 DSN 은 `postgres`(superuser+bypassrls)라
+       이 자리가 하루 종일 안 보였다(비특권 롤 `suddoe_app` 로 실제 업로드→파싱을
+       재현해서 잡았다). 처방: `org_id` 를 업로드 시점에 이미 아니까(호출부가 준다)
+       파싱 «전에» 이 연결에 직접 세운다 — 조회를 위해 조회 대상을 다시 몰라도 된다.
     🔴 **여기서 예외를 밖으로 던지지 마라.** 이 함수는 응답이 나간 뒤에 도는지라
        터져도 사용자에게 전달할 길이 없다 — 조용히 죽으면 상태가 '대기' 에 영원히 남는다.
        `l3_parse.파싱()` 은 자체적으로 모든 실패를 `파싱품질='fail'` 로 닫고 예외를
@@ -258,9 +271,16 @@ def 파싱_배경(doc_id: str) -> None:
 
         from l3_parse import 파싱                      # scripts/ — sys.path 는 main.py 가 잡는다
         with psycopg.connect(DSN, connect_timeout=10) as conn:
+            conn.execute("SELECT set_config('app.org_id', %s, true)", (str(org_id),))
             with conn.cursor() as cur:
-                파싱(cur, doc_id)
+                결과 = 파싱(cur, doc_id)
             conn.commit()
+        if not 결과.get("ok", True):
+            # 🔴 `파싱()` 은 실패도 예외 없이 dict 로 돌려준다 — GUC 를 세웠는데도
+            #    실패하면(파일 손상 등) 그건 진짜 실패다. 여기서도 'fail' 로 닫는다.
+            _log.error("L3 파싱 실패(예외 아님) doc_id=%s 사유=%s", doc_id, 결과.get("사유"))
+            _실행('UPDATE tenant.l3_documents SET "파싱품질" = %s WHERE doc_id = %s',
+                 ("fail", doc_id))
     except Exception as e:                              # noqa: BLE001
         _log.exception("L3 파싱 배경 작업 실패 doc_id=%s", doc_id)
         # 🔴 '대기' 로 남기면 사용자는 영원히 「분석 중」을 본다. 실패를 실패라고 말한다.
@@ -320,6 +340,13 @@ def _실_상태(doc_id: str, org_id: str | None) -> L3업로드응답:
         메시지 = f"{조_건수}개 조를 등록했습니다."
         if dangling수:
             메시지 += f" 참조 {dangling수}건은 상위 규범을 찾지 못했습니다."
+        # 🔴 2026-09-04 — `파싱품질='warn'` 인데 조문이 뽑히긴 한 경우(예: 이 계통 실물
+        #    L3 는 자기 조가 0개라 '단락NNN' 폴백으로만 뽑힌다·서식 파일이 규정으로
+        #    오인되는 경우 등, docs/9_미결.md 「L3 HWP」절)를 「완료」 하나로 뭉개던 자리다.
+        #    16% 손실 때 아무 예외도 없이 「35개 조항 인식됨」으로만 보였던 게 이 갈래다.
+        #    `상태` 어휘(완료/파싱대기/실패)는 그대로 두고 — 아래로 내려간다
+        if 파싱품질 == "warn":
+            메시지 += " (품질 확인 필요 — 조문 인식이 형식과 어긋났을 수 있습니다.)"
     elif 파싱품질 == "warn":
         # 파서가 이미 한 번 돌았고(조문 0건) 품질을 낮게 평가한 경우다 — "아직 안
         # 봤다"(대기)와는 원인이 다르다. 상태 어휘는 그대로 「파싱대기」지만 메시지로
@@ -331,4 +358,4 @@ def _실_상태(doc_id: str, org_id: str | None) -> L3업로드응답:
         메시지 = "접수했습니다. 조문 분해가 끝나면 상태가 「완료」로 바뀝니다."
 
     return L3업로드응답(doc_id=doc_id, 파일명=파일명, 확장자=확장, 상태=상태,
-                        조_건수=조_건수, dangling=[], 메시지=메시지)
+                        조_건수=조_건수, dangling=[], 메시지=메시지, 파싱품질=파싱품질)
