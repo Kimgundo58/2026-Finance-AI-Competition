@@ -1,101 +1,99 @@
 {
-  "_주석": "작업 갈래 강제 템플릿. 등록된 세션만 소유 밖 쓰기가 막히고, 미등록은 통과한다. 🔴 2026-09-02 밤에 이걸 썼는데 한 번도 발동하지 않았다 — Claude Code 는 훅 설정을 세션 시작 시점에 읽으므로, 세션을 열기 **전에** settings.local.json 배선과 이 파일의 session_id 채우기가 끝나 있어야 한다. 그날은 세션이 먼저 열렸다. 다시 쓰려면 순서를 지킬 것. 해제는 이 파일을 지우면 된다.",
-  "중앙": "",
-  "중앙이름": "ai-ae",
-  "브랜치": "cleanup/docs-py-2026-09-02",
+  "_주석": "agent 성능고도화 레인 (2026-09-03). 이 파일은 워크트리 `금융 AI공모전-agent` 전용이다 — 백엔드 세션이 도는 본 트리와 파일·브랜치가 분리돼 있다. 등록된 세션만 소유 밖 쓰기가 막히고 미등록은 통과한다. 워커가 보고한 session_id 를 중앙(ai-e8)이 채운다. 해제는 이 파일 삭제. 소유 경로는 접두사 매칭이다 — 와일드카드(*)를 쓰면 문자 그대로 비교돼 아무것도 안 걸린다(0903 실측).",
+  "중앙": "b3ac2ffa-b4c0-488b-9402-45985a41c4e4",
+  "중앙이름": "ai-e8",
+  "브랜치": "agent-perf-2026-09-03",
   "규칙": {
-    "git": "git 쓰기(add/commit/mv/checkout)는 중앙만 한다. 6세션 동시 add 는 인덱스 잠금이 충돌한다",
-    "pytest": "전체 pytest 는 중앙만 돌린다. DB 를 공유해 위양성이 난다",
-    "기록": "실제 구현.md 쓰기 금지 (W1 이 분할 중). 레인 기록은 docs/기록/_레인_*.md"
+    "git": "git 쓰기(add/commit/checkout)는 중앙(ai-e8)만. 워커는 git status/diff/log 만",
+    "pytest": "전체 pytest 는 중앙만. 워커는 자기 스크립트의 --self-test 와 단일 테스트 파일만",
+    "db": "corpus.* · tenant.* 쓰기 금지 (백엔드 세션과 DB 를 공유한다). eval.runs/run_items 는 추가만 — run 191 을 덮거나 지우지 않는다",
+    "gpu": "팟은 P4 만 연다. runpod_session 스킬 경유, 끝나면 즉시 닫는다",
+    "기록": "레인 기록은 docs/기록/_레인_P*.md 에만. 실제 구현.md 쓰기 금지"
   },
   "기준선": {
-    "태그": "baseline-0902-정리전",
-    "pytest": "140 passed · 2 xfailed (2026-09-02 마감 시점)",
-    "db": "chunks=20525 refs=44865 articles=26304 rules=72 prec=8 golden=113 decisions=73 l3art=17"
+    "run": "eval.runs run_id=191 (93문항 · 65.6% · 치명 0 · 프롬프트 초과 0 · 코퍼스 c20525-e20525-r44865-d283-107daa68)",
+    "커밋": "c38591e (cleanup/docs-py-2026-09-02 에서 분기)",
+    "db": "chunks=20525 refs=44865 articles=26304 rules=74 prec=8 golden=113(채점 93) decisions=73"
   },
   "레인": {
-    "백엔드": {
-      "이름": "백엔드 구현 (BE=ai-c7 지휘 · B1=ai-31 실행)",
-      "sessions": {},
-      "owns": [
-        "server/",
-        "db/init/",
-        "tests/",
-        "docs/7_백엔드/",
-        "docs/기록/_레인_BE.md",
-        "docs/기록/_레인_B1.md"
-      ]
-    },
     "중앙전담": {
-      "이름": "중앙(ai-ae)이 직접 잡은 파일 — 세션이 없으니 어느 워커도 못 쓴다",
-      "sessions": {},
+      "이름": "중앙(ai-e8) 직접 — 통합·커밋·검수",
+      "sessions": {
+        "ai-e8": "b3ac2ffa-b4c0-488b-9402-45985a41c4e4"
+      },
       "owns": [
         "scripts/orchestrate.py",
         "CLAUDE.md",
         "README.md",
-        ".claude/"
+        ".claude/",
+        "docs/0_현황.md",
+        "docs/9_미결.md"
       ]
     },
-    "W1": {
-      "이름": "기록 12,000줄 날짜별 분할 → Agent 실험 (ai-e5)",
-      "sessions": {},
+    "P1": {
+      "이름": "검증층 재설계 · 다음 run 스키마 · 매핑 enum (GPU 없음)",
+      "sessions": {
+        "ai-2c": "b2443fb7-b6e5-486e-824f-96b87a8aa62e"
+      },
       "owns": [
-        "docs/기록/",
-        "실제 구현.md",
-        "결과보고.md",
-        "작업 현황.md",
-        "0831_최종구현.md"
-      ]
-    },
-    "W2": {
-      "이름": "docs/1~4 신설 → 문서 용어 치환 (ai-8a)",
-      "sessions": {},
-      "owns": [
-        "docs/",
-        "docs/기록/_레인_W2.md"
-      ]
-    },
-    "W3": {
-      "이름": "scripts/_lib 공통모듈 → 코드 용어 치환 (ai-68)",
-      "sessions": {},
-      "owns": [
-        "scripts/_lib/",
-        "docs/기록/_레인_W3.md",
-        "scripts/retrieve.py",
-        "scripts/eval_store.py",
-        "scripts/rule_lookup.py",
-        "scripts/llm_schema.py",
-        "scripts/seed_rules.py",
-        "scripts/load_db.py",
-        "scripts/l3_load.py",
-        "scripts/build_refs.py",
-        "scripts/stage2_chunk.py",
-        "scripts/stage2_bm25.py",
-        "scripts/normalize_run.py",
+        "scripts/eval_replay.py",
         "scripts/llm_validate.py",
-        "scripts/build_index.py",
-        "scripts/assemble_context.py",
-        "scripts/agent_a4.py",
-        "scripts/agent_a2.py",
-        "scripts/case_search.py",
-        "scripts/judge_run.py",
-        "scripts/adapter.py",
-        "scripts/eval_e2e.py",
-        "scripts/sweep_retrieval.py",
-        "scripts/eval_retrieval.py"
+        "docs/6_LLM/6-4_검증과_강등.md",
+        "docs/기록/_레인_P1.md",
+        "scratchpad/P1_",
+        "scripts/llm_schema.py"
       ]
     },
-    "W4": {
-      "이름": "_work 아카이브 이관 → docs/5·6·8 신설 (ai-5e)",
-      "sessions": {},
+    "P2": {
+      "이름": "룰 경로 — 금지예시 적중 0/113 · 허용=가능 후보 감사 (GPU 없음 · DB 읽기만)",
+      "sessions": {
+        "ai-2b": "cdab4ea7-a6fb-4263-bb85-0ee2950050cd"
+      },
       "owns": [
-        "scripts/_work/",
-        "archive/",
+        "scripts/rule_lookup.py",
+        "scripts/seed_rules.py",
+        "scripts/review_rules.py",
+        "scripts/verify_rules.py",
         "docs/5_룰/",
-        "docs/6_LLM/",
-        "docs/8_운영/",
-        "docs/기록/_레인_W4.md",
-        "입력_적법성_점검.md"
+        "docs/9-4_판정이_조건부로_수렴한다.md",
+        "docs/9-5_룰_테이블_구조.md",
+        "docs/기록/_레인_P2.md",
+        "2026_Finance_DATA_FOR_RAG/_rules_overlay_0903.json",
+        "2026_Finance_DATA_FOR_RAG/_금지예시_별칭_0903.json",
+        "scratchpad/P2_"
+      ]
+    },
+    "P3": {
+      "이름": "프롬프트 크기 — B3 부속표 행 단위 항분해 · 중복 해설표 대표화 (dry 측정)",
+      "sessions": {
+        "ai-1e": "7fb132b8-ad47-4751-a571-67a3706c01b1"
+      },
+      "owns": [
+        "scripts/assemble_context.py",
+        "scripts/retrieve.py",
+        "docs/4_검색/4-3_참조_확장.md",
+        "docs/9-3_실측에서_나온_것.md",
+        "docs/기록/_레인_P3.md",
+        "scratchpad/P3_"
+      ]
+    },
+    "P4": {
+      "이름": "GPU 실측 — 함정 52문항 부분집합 A/B (변형 V0·V6·V1·V4 → P3·P2 반영본 → 최종 93)",
+      "sessions": {
+        "ai-e6": "bdfd9ee4-d69b-482d-8cde-0701f977bc5c"
+      },
+      "owns": [
+        "scripts/eval_e2e.py",
+        "scripts/judge_run.py",
+        "scripts/runpod_pod.py",
+        "scripts/pick_gpu.py",
+        "scripts/pod_serve.sh",
+        "scripts/pod_setup.sh",
+        "docs/6_LLM/6-3_평가와_정답셋.md",
+        "docs/8_운영/8-3_GPU.md",
+        "docs/8_운영/8-4_GPU_비용.md",
+        "docs/기록/_레인_P4.md",
+        "scratchpad/P4_"
       ]
     }
   }
