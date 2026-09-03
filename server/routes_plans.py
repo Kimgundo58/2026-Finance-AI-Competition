@@ -136,7 +136,10 @@ def 상세(plan_id: int, org_id: str | None = None) -> 계획상세:
         if not 행:
             raise HTTPException(404, f"지출계획 {plan_id} 을(를) 찾을 수 없습니다")
         할일 = [t for t in mock_data.목_할일 if t["plan_id"] == plan_id]
-        return 계획상세(**행, 정규화=행.get("정규화", {}), 할일=할일, 판정상세=None)
+        # 🔴 `생성()` 이 만든 행에는 "정규화" 키가 이미 있고 시드 5건에는 없다.
+        #    `**행` 과 `정규화=` 를 같이 쓰면 새 계획 조회가 TypeError → 500 이었다.
+        return 계획상세(**{**행, "정규화": 행.get("정규화") or {}},
+                       할일=할일, 판정상세=None)
     return _실_상세(plan_id, org_id)
 
 
