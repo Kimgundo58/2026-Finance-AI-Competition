@@ -46,6 +46,7 @@ from dataclasses import dataclass
 
 from fastapi import Header, HTTPException, Query
 
+from . import _common
 from ._common import _질의
 
 로그 = logging.getLogger("suddoe.auth")
@@ -319,7 +320,29 @@ class OrgId주입:
         scope["query_string"] = urlencode(쿼리).encode()
         scope["suddoe_주체"] = 주 or 주체(org_id=자기신고,
                                           출처="param" if 자기신고 else "none")
-        return await self.app(scope, receive, send)
+
+        # 🔴 **RLS 용 GUC 는 «검증된» 주체에서만 온다** (2026-09-03).
+        #    `_common._질의`/`_실행` 이 이 값을 트랜잭션마다 `app.org_id` 로 걸고,
+        #    `tenant.*` 의 `org_isolation` 정책이 그걸 본다.
+        #
+        #    `주.검증됨` 은 출처가 token·demo 일 때만 True 다. `param`(자기신고)·
+        #    `none`(게스트)에는 **세우지 않는다** — 자기신고를 GUC 에 넣으면
+        #    「클라이언트가 말한 값을 DB 에 도장 찍는」 꼴이라 RLS 가 장식이 된다.
+        #    감사에서는 「RLS 켜져 있음」으로 통과하는데 실제로는 아무것도 안 막는다.
+        #
+        #    안 세우면 `current_org()` 가 NULL → 쓰기는 RLS 가 막고 읽기는 0행이다.
+        #    거부(401)가 아니라 이 쪽을 고른 이유: 폴백은 아직 R4 로 살아 있어야 하고
+        #    (프론트 헤더 전환 전), 여기서 401 을 내면 `SUDDOE_ORG_PARAM` 스위치와
+        #    무관하게 폴백이 즉시 죽는다. 판단을 DB 층에 맡기고 «조용히 열지는» 않는다.
+        #
+        # 🔴 `finally` 에서 되돌린다. 지금은 요청마다 태스크가 새로 나서 안 새지만
+        #    (실측: 동시 8건 불일치 0), 되돌리기를 빼면 그 사실에 기대는 코드가 된다.
+        토큰 = _common.현재_org.set(
+            str(주.org_id) if (주 is not None and 주.검증됨 and 주.org_id) else None)
+        try:
+            return await self.app(scope, receive, send)
+        finally:
+            _common.현재_org.reset(토큰)
 
 
 async def _거부(send, 코드: int, 사유: str) -> None:
