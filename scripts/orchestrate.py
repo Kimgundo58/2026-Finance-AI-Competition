@@ -348,7 +348,15 @@ def _unmapped_적재(cur, 전제들: list[dict], *, 사업명, 비목) -> None:
     D1-b 가 그 제약을 넣기 전에는 `발생횟수+1` 이 영영 안 걸려 결핍 루프가 죽는다.
     제약이 아직 없으면 ON CONFLICT 가 터지므로, 없으면 조용히 INSERT 만 한다.
     """
+    # 🔴 try/except «만» 으로는 부족하다. 비자동커밋 연결에서는 실패한 문장이 트랜잭션을
+    #    abort 시켜 **뒤따르는 decisions INSERT 가 25P02 로 같이 죽는다**(0903 ai-b2 실측).
+    #    SAVEPOINT 로 이 함수만 되감아야 판정 저장이 산다. autocommit 이면 SAVEPOINT 자체가
+    #    쓸 수 없으므로(트랜잭션 블록 밖) 연결 모드를 보고 건다.
+    _sp = False
     try:
+        if not getattr(getattr(cur, "connection", None), "autocommit", True):
+            cur.execute("SAVEPOINT _unmapped_적재")
+            _sp = True
         있음 = cur.execute("""SELECT 1 FROM pg_constraint
                                WHERE conrelid='tenant.unmapped_premise'::regclass
                                  AND contype='u'""").fetchone()
@@ -356,15 +364,24 @@ def _unmapped_적재(cur, 전제들: list[dict], *, 사업명, 비목) -> None:
             인자 = ((p.get("사실") or "")[:500], json.dumps(p.get("매핑") or [],
                     ensure_ascii=False), 사업명, 비목)
             _unmapped_한건(cur, 있음, 인자)
+        if _sp:
+            cur.execute("RELEASE SAVEPOINT _unmapped_적재")
     except Exception as e:
+        if _sp:
+            try:
+                cur.execute("ROLLBACK TO SAVEPOINT _unmapped_적재")
+            except Exception:
+                pass                      # 되감기까지 실패하면 판정 저장은 어차피 못 산다
         # 🔴 **통계 적재가 판정을 죽이면 안 된다.** 이 함수는 (5) 전제해소 안에서
         #    판정 본류로 불린다(:341 ← :684). 예외를 안 막으면 비특권 롤에서
         #    `42501`(RLS 정책 통과 실패)이 그대로 올라가 바깥 except 로 빠지고,
         #    **멀쩡히 난 판정이 통째로 실패 응답이 된다** (0903 ai-b2 운영 실측:
         #    INSERT 컬럼에 org_id 가 없어 `tenant.unmapped_premise` 정책을 못 넘는다).
         #    로컬에서 안 보였던 건 `postgres` 가 BYPASSRLS 라서다.
-        #    org_id 누락과 접근 경로(SECURITY DEFINER 여부)는 별건으로 남았다 —
-        #    그건 스키마 결정이고, 이 try 는 그 결정과 무관하게 그 자체로 옳다.
+        #    🔴 **로그에만 남긴다.** 강등사유에 넣으면 「내부 오류」가 사용자 화면 어휘로
+        #    새고, 판단불가 통계에도 계속 섞인다 (ai-43 지적).
+        #    접근 경로(정책 0개인 전사 통계표)는 스키마 결정이라 별건으로 남았다 —
+        #    이 try 는 그 결정과 무관하게 그 자체로 옳다.
         sys.stderr.write("[unmapped 적재 실패 · 판정은 계속한다] "
                          + type(e).__name__ + ": " + str(e) + chr(10))
         return
@@ -427,6 +444,11 @@ def _빈응답(판정: str, 요약: str, **추가) -> dict:
     기본 = dict(판정=판정, 요약=요약, 해야할일=[], 인용목록=[], 전제목록=[],
                 신뢰등급=None, 버전스탬프=None, 참조사슬=[], 강등사유=[], 미매핑전제=[])
     기본.update(추가)
+    # 🔴 「판단불가」가 **모델의 판단인가 실패인가**를 집계에서 갈라야 한다 (CLAUDE.md).
+    #    지금까지는 `실패단계` 문자열이 유일한 단서였고, 그걸 아는 사람만 갈랐다.
+    #    (0903 실측: 미매핑 전제 하나가 트랜잭션을 죽여 판정이 조용히 판단불가로 닫히는
+    #     경로가 실재했다 — 그 값이 모델의 판단불가와 한 통에 섞여 있었다.)
+    기본["실패경로"] = "실패단계" in 추가
     return 기본
 
 
