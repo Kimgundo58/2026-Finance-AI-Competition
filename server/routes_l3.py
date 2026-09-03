@@ -20,12 +20,12 @@ import zipfile
 from pathlib import Path
 
 from fastapi import (APIRouter, BackgroundTasks, File, Form, HTTPException,
-                     UploadFile)
+                     Request, UploadFile)
 
 from ._common import DSN, MOCK, ROOT, _질의, _실행
 from .models import L3업로드응답
 from .routes_plans import _org조건
-from . import mock_data
+from . import auth, mock_data
 
 _log = logging.getLogger("suddoe.l3")
 
@@ -72,13 +72,56 @@ def 실제형식(본문: bytes) -> str:
     return "알수없음"
 
 
+def _업로드_주인(요청: Request, 자기신고: str) -> str:
+    """이 업로드가 «어느 기관» 것인지 서버가 정한다.
+
+    🔴 **업로드의 org_id 는 `auth.OrgId주입` 이 못 막는다** (2026-09-03 재현).
+       그 미들웨어는 `scope["query_string"]` 만 갈아끼우는데 이 경로의 org_id 는
+       **multipart Form 필드**라 손이 안 닿는다. 같은 요청·같은 토큰으로 두 축을
+       나란히 태워 확인했다 — 쿼리스트링 축은 토큰 주인으로 «교정» 됐는데
+       (`GET /api/l3/{doc_id}?org_id=<남의 org>` → SELECT 인자가 토큰의 org),
+       Form 축은 **남의 기관 UUID 가 그대로 INSERT 에 박혔다.**
+       그 값이 `l3_documents`·`l3_articles` 의 org_id 가 되고 그게 판정 검색의
+       기관 축이므로, **남의 기관에 규정을 심을 수 있었다.**
+
+    🔴 고칠 자리가 미들웨어가 «아닌» 이유: 미들웨어에서 multipart 를 뜯으면
+       `receive` 를 소진해 스트리밍 업로드가 깨진다 (30MB 파일을 메모리에 두 번
+       얹는다). 미들웨어는 검증된 주체를 `scope["suddoe_주체"]` 에 이미 넣어 두므로
+       라우터가 그걸 «집어» 쓰면 된다 — 그게 이 함수다.
+
+    🔴 `SUDDOE_ORG_PARAM=0` 으로도 이 축은 안 닫힌다 — 실측했다. 그 스위치는
+       미들웨어의 «쿼리» 자기신고만 본다. 토큰 없이 Form 에 남의 org 를 실으면
+       스위치를 꺼도 202 였다. 그래서 여기서 스위치를 «직접» 한 번 더 본다.
+       (`auth.` 를 붙여 «속성으로» 읽는다 — 값을 복사해 오면 테스트가 못 끈다)
+
+    ⚠️ 자기신고 값의 UUID 검사는 여기서 «하지 않는다». 목 경로 계약 테스트가
+       `org-test-1` 같은 비-UUID 를 보내고 있어서, 검사를 넣으면 인증과 무관한
+       기존 테스트가 깨진다. 실 경로에서 비-UUID 는 INSERT 가 거부해 400 으로 닫힌다.
+    """
+    주 = 요청.scope.get("suddoe_주체")
+    if 주 is not None and 주.검증됨 and 주.org_id:
+        if 자기신고 and str(자기신고) != str(주.org_id):
+            # 정상 프론트는 이런 요청을 안 만든다. 사고든 공격이든 흔적이 남는 게 낫다.
+            _log.warning("L3 업로드 org_id 불일치 — 토큰=%s Form=%s · 토큰을 쓴다",
+                         주.org_id, 자기신고)
+        return str(주.org_id)                      # 🔴 토큰이 이긴다
+    if not auth.ORG_PARAM_허용:
+        raise HTTPException(401, "기관을 확인할 수 없습니다 — 로그인이 필요합니다.")
+    return 자기신고
+
+
 @router.post("/upload", response_model=L3업로드응답, status_code=202)
 async def 업로드(
+    요청: Request,
     배경: BackgroundTasks,
     파일: UploadFile = File(...),
     org_id: str = Form(...),
     기관명: str | None = Form(None),
 ) -> L3업로드응답:
+    # 🔴 «맨 앞» 이다. 아래 검사들이 org_id 를 안 쓰긴 하지만, 나중에 누가
+    #    org 별 한도·중복 검사를 끼워 넣을 때 자기신고 값이 쓰이면 안 된다.
+    org_id = _업로드_주인(요청, org_id)
+
     이름 = 파일.filename or ""
     확장 = 이름.rsplit(".", 1)[-1].lower() if "." in 이름 else ""
 

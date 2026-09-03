@@ -65,7 +65,10 @@ from server._common import (DSN, MOCK, _sse, _sse응답, _질의,      # noqa: E
                             비목_ENUM, 판정_ENUM, 창업활동비_사업 as _창업활동비_사업)
 from server.models import (F1, F3항, F4항, F5, 정규화요청,          # noqa: E402
                            판정요청, 프로필)
-from server import routes_l3, routes_plans, routes_tasks           # noqa: E402
+from server import (auth, gpu_watchdog, routes_l3, routes_orgs,     # noqa: E402
+                    routes_plans, routes_tasks)
+
+_워치독 = gpu_watchdog.워치독
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -219,10 +222,19 @@ _목_판정: dict[str, dict] = {
     "가능": {
         "판정": "가능",
         "요약": "1인 1대 한도 내에서 구매 가능합니다.",
+        # 🔴 `code` 는 `corpus.check_items` 의 **실제 마스터 값만** 쓴다. 지어내면 화면이
+        #    그 code 로 마스터 설명을 조회하다 조용히 빈손이 된다. 마스터에 맞는 항목이
+        #    없으면 `code: None` 으로 두고 `구분` 을 안 붙인다 — 실경로 규칙과 같다.
+        # 🔴 SSE 는 `code`(영문), 저장 할일(`models.할일`)은 `코드`(한글)다.
+        #    **이름을 통일하지 않는다** — 앞은 프론트 계약, 뒤는 DB 컬럼 계약이라 둘 다
+        #    정본이다. 「목 키집합 == 실경로 키집합」 회귀 테스트는 이 한 쌍을 예외로 둔다.
         "해야할일": [
-            {"항목": "비교견적 2곳 이상 확보", "설명": "50만원 이상 구매는 비교견적을 남깁니다."},
-            {"항목": "사업비 카드로 결제", "설명": "현금·개인카드 결제는 인정되지 않습니다."},
-            {"항목": "자산 등록", "설명": "취득일로부터 30일 이내에 자산으로 등록합니다."},
+            {"code": "비교견적준비", "구분": "결제전", "유형": "기타",
+             "항목": "비교견적 2곳 이상 확보", "설명": "50만원 이상 구매는 비교견적을 남깁니다."},
+            {"code": "사업비카드사용", "구분": "결제전", "유형": "기타",
+             "항목": "사업비 카드로 결제", "설명": "현금·개인카드 결제는 인정되지 않습니다."},
+            {"code": "자산등록", "구분": "결제후", "유형": "기타",
+             "항목": "자산 등록", "설명": "취득일로부터 30일 이내에 자산으로 등록합니다."},
         ],
         "인용": [
             {"조번호": "제39조", "조제목": "기계장치",
@@ -250,8 +262,13 @@ _목_판정: dict[str, dict] = {
         "판정": "조건부",
         "요약": "사전승인을 받으면 구매할 수 있습니다.",
         "해야할일": [
-            {"항목": "사전승인 신청", "설명": "100만원 이상 기계장치는 주관기관 사전승인이 필요합니다."},
-            {"항목": "비교견적 2곳 이상 확보", "설명": "50만원 이상 구매는 비교견적을 남깁니다."},
+            # 🔴 마스터에 기계장치 사전승인 code 가 없다 (`seed_check_items.py` 기계장치
+            #    4건: 중고개인거래아님·범용SW사전검토·사무용집기아님·자산등록).
+            #    없는 code 를 지어내지 않고 `구분` 도 안 붙인다.
+            {"code": None,
+             "항목": "사전승인 신청", "설명": "100만원 이상 기계장치는 주관기관 사전승인이 필요합니다."},
+            {"code": "비교견적준비", "구분": "결제전", "유형": "기타",
+             "항목": "비교견적 2곳 이상 확보", "설명": "50만원 이상 구매는 비교견적을 남깁니다."},
         ],
         "인용": [
             {"조번호": "제39조", "조제목": "기계장치",
@@ -270,7 +287,9 @@ _목_판정: dict[str, dict] = {
         "판정": "불가",
         "요약": "개인 명의 구매는 사업비로 집행할 수 없습니다.",
         "해야할일": [
-            {"항목": "법인·사업자 명의로 재구매", "설명": "구매 명의가 사업자와 일치해야 합니다."},
+            # 🔴 마스터에 「구매 명의」 code 가 없다 (`출원인명의확인` 은 무형자산 전용).
+            {"code": None,
+             "항목": "법인·사업자 명의로 재구매", "설명": "구매 명의가 사업자와 일치해야 합니다."},
         ],
         "인용": [
             {"조번호": "제36조", "조제목": "사업비의 집행",
@@ -314,11 +333,23 @@ _목_프로필 = {"f1": F1().model_dump(), "f3": [], "f4": []}
 app = FastAPI(title="써도돼요 API", version="0.1.0",
               description="창업지원금 지출비 사전승인 판정. `프론트 연동 사양.md` §8 계약.")
 
+# ── 인증·테넌트 귀속 (2026-09-03 배선) ──────────────────────────────────
+# 🔴 CORS 보다 «먼저» add 한다. add_middleware 는 마지막에 넣은 것이 «바깥» 이라,
+#    이 순서라야 CORS 가 바깥에 서서 401·503 응답에도 Access-Control-Allow-Origin 이
+#    붙는다. 반대로 두면 인증 거부가 CORS 밖으로 나가 브라우저 콘솔엔 「CORS 차단」
+#    으로 찍히고, 프론트는 «인증 문제» 라는 걸 영영 모른다. (검증 세션 실측:
+#     CORS→auth 순서 = 401 에 ACAO «없음» / auth→CORS 순서 = 401 에 ACAO 있음)
+# 🔴 목 모드에선 붙이지 않는다. 목 서버엔 SUDDOE_JWKS_URL 도 DB 도 없어서, 로그인한
+#    프론트가 보내는 Bearer 를 검증하려다 «/api 전 경로»가 503(JWKS 미설정) 또는
+#    403(계정 조회 빈 결과)이 된다. 목은 지금처럼 ?org_id= 자기신고로 돈다.
+if not MOCK:
+    app.add_middleware(auth.OrgId주입)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o for o in os.environ.get(
         "SUDDOE_CORS", "http://localhost:3000,http://localhost:5173").split(",") if o],
-    allow_methods=["GET", "POST", "PUT", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -328,6 +359,13 @@ app.add_middleware(
 app.include_router(routes_plans.router)
 app.include_router(routes_tasks.router)
 app.include_router(routes_l3.router)
+app.include_router(routes_orgs.router)         # 기관 목록 — org_id 를 «안» 싣는다
+app.include_router(gpu_watchdog.router)        # /api/gpu/status · keepalive
+
+# 🔴 IDLE_MIN=0 이면 스레드조차 만들지 않는다. 목 모드 가드는 gpu_watchdog 안에 있다
+#    — 목 서버는 GPU 를 안 부르니 «영원히 유휴» 라, 가드가 없으면 30분 뒤 목이
+#    실 팟에 stop 을 쏜다 (S4 가 재현·차단 확인).
+_워치독.시작_루프()
 
 
 def _관리자(token: str | None) -> None:
@@ -547,6 +585,11 @@ def normalize(req: Request, body: 정규화요청):
             yield _sse("결과", 캐시)
             yield _sse("완료", {"캐시": True})
             return
+        # 🔴 첫 진행 이벤트 «뒤» 다. 앞에 두면 팟 상태 조회(타임아웃 15초)가
+        #    첫 바이트를 막아 화면이 최대 15초 빈다.
+        if not MOCK and body.질문 and body.질문.strip():
+            for 진 in _워치독.기동_진행():
+                yield _sse("진행", 진)
         try:
             out = dict(_목_정규화) if MOCK else _실_정규화(body)
         except Exception as e:                                # noqa: BLE001
@@ -579,6 +622,21 @@ def _합성_질문(body: 정규화요청) -> str:
     return f"{사업}{body.용도 or ''} {body.품목 or ''} {만원}을 사도 되나요?".strip()
 
 
+def _주체org(req: Request) -> str | None:
+    """검증된 주체의 org_id. 없으면 None.
+
+    🔴 `auth.OrgId주입` 은 **쿼리스트링만** 갈아끼운다. org_id 가 들어오는 축이 셋인데
+       미들웨어가 닿는 건 하나뿐이다:
+           쿼리스트링  ?org_id=      → 미들웨어가 교정한다 ✅
+           multipart   Form(...)     → 못 닿는다 (routes_l3._업로드_주인 이 따로 막는다)
+           요청 본문    body.org_id   → 못 닿는다 ← 여기가 이 함수의 자리
+       본문을 미들웨어에서 고치려면 `receive` 를 소진해야 하고 그러면 SSE·업로드가 깨진다.
+       라우터가 `scope["suddoe_주체"]` 를 집어 쓰는 쪽이 맞다.
+    """
+    주 = req.scope.get("suddoe_주체")
+    return 주.org_id if 주 is not None and 주.검증됨 else None
+
+
 @app.post("/api/judge")
 def judge(req: Request, body: 판정요청, 목: str | None = None):
     """화면 4 → 5 / 6 / 7. SSE.
@@ -605,6 +663,12 @@ def judge(req: Request, body: 판정요청, 목: str | None = None):
     # 🔴 비목과 같은 자리에서 닫는다. 여기를 통과하면 `orchestrate.판정()` 이 이 값을
     #    그대로 쓰고, `rule_lookup.비목계통()` 이 모르는 표기를 「창업」으로 삼켜버린다.
     body.사업명 = _사업명_정본(body.사업명)
+    # 🔴 토큰이 있으면 본문의 org_id 를 «버린다». 안 하면 판정이 org_id=None 으로 돌아
+    #    L3(주관기관 규정)가 아예 안 실리고, 아래 비용가드 열쇠도 org 없이 잡혀
+    #    A 기관의 판정이 B 기관에 나간다 (위 열쇠 주석의 TENANT_LEAK 이 그것이다).
+    #    프론트는 본문에 org_id 를 안 싣는다 — 지금까지 실 경로가 전부 None 이었다.
+    if (_주 := _주체org(req)) is not None:
+        body.org_id = _주
 
     k = 비용가드.열쇠("judge", body.org_id, body.사업명, body.확정비목,
                      json.dumps(body.정규화, ensure_ascii=False, sort_keys=True),
@@ -625,6 +689,10 @@ def judge(req: Request, body: 판정요청, 목: str | None = None):
             _decision_id = out.pop("decision_id", None)
             가드.넣기(k, out)
         else:
+            # 🔴 기존 이벤트 이름(`진행`)만 쓴다 — 이벤트 목록·순서는 계약이다.
+            #    가동 중이면 0건이라 평상시 이벤트열은 그대로다.
+            for 진 in _워치독.기동_진행():
+                yield _sse("진행", 진)
             # 🔴 별도 스레드에서 돌리고 짧은 주기로 폴링한다 — 대기 중에는 SSE 주석
             #    (`: keep-alive`)만 흘린다. **새 이벤트 이름을 안 만든다** — 이벤트
             #    목록·순서는 계약이고 D 의 테스트가 그대로 잠근다. 무한정 기다리되
@@ -759,8 +827,14 @@ def admin_warmup(x_admin_token: str | None = Header(default=None)) -> dict:
     결과 = {}
     t = time.time()
     try:
-        from retrieve import 질문벡터  # type: ignore
-        질문벡터("워밍업")
+        # 🔴 `retrieve.질문벡터` 는 **실재하지 않는다.** 실제 공개 표면은
+        #    `워밍업()`·`임베딩()` 이다. 그래서 이 갈래는 항상 ImportError 로
+        #    떨어졌고, `/admin/warmup` 은 **아무것도 데우지 못했다**
+        #    (2026-09-03 ai-98 실측: `{"임베딩": "실패 ImportError"}`).
+        #    8-5 §7 은 워밍업 응답을 배포 go/no-go 로 쓰는데 그게 항상 실패를
+        #    가리키고 있었다. 이름을 고치지 말고 **실재하는 이름을 부른다.**
+        from retrieve import 워밍업  # type: ignore
+        워밍업()
         결과["임베딩"] = f"{time.time() - t:.1f}초"
     except Exception as e:                                    # noqa: BLE001
         # 🔴 예전에는 `orchestrate._임베딩` 으로 되짚었다. 밑줄 심볼이라 Agent 쪽이
@@ -774,6 +848,7 @@ def admin_warmup(x_admin_token: str | None = Header(default=None)) -> dict:
         결과["vLLM"] = f"{time.time() - t:.1f}초"
     except Exception as e:                                    # noqa: BLE001
         결과["vLLM"] = f"미가동 ({type(e).__name__})"
+    _워치독.호출기록()          # 🔴 워밍업도 GPU 사용이다. 30분 뒤 죽으면 안 된다
     가드.워밍업시각 = datetime.now(timezone.utc).isoformat()
     return {"워밍업": 결과, "시각": 가드.워밍업시각}
 
@@ -804,19 +879,64 @@ def _http오류(req: Request, exc: HTTPException):
 # 실호출 경로 — A 의 모듈이 준비되면 여기만 산다
 # ════════════════════════════════════════════════════════════════════
 
+def _폼_비목후보(품목: str | None, 용도: str, 금액: float | None,
+              사업명: str | None) -> list[dict]:
+    """폼 값(구조화)에서 비목후보만 뽑는다 — 호출 자리 ①. `_실_정규화` 전용 헬퍼.
+
+    🔴 응답 모양은 자연어 경로와 **동일**하다 — `[{"비목", "신뢰도"}]`. 스키마의
+       `비목후보` 조각을 `호출자리1_스키마()` 에서 그대로 떼어 쓰므로 enum 10종이
+       guided_json 으로 닫힌다 (목록을 여기 다시 적으면 두 경로가 갈린다).
+    🔴 실패는 판정을 죽이지 않는다 — 빈 배열로 물러난다. 비목은 화면 9 에서 사용자가
+       확정하므로 여기서 못 뽑아도 흐름이 끊기지 않는다 (자연어 경로는 반대로 예외를
+       올린다 — 거기선 품목·금액까지 이 호출로 뽑기 때문에 물러설 자리가 없다).
+    """
+    try:
+        from normalize_run import MODEL_1, llm_호출, 호출자리1_스키마
+        스키마 = {"type": "object", "additionalProperties": False,
+                 "required": ["비목후보"],
+                 "properties": {"비목후보":
+                                호출자리1_스키마(비목_ENUM)["properties"]["비목후보"]}}
+        금액문 = f"{int(금액):,}원" if 금액 is not None else "미상"
+        프롬프트 = (
+            "창업지원금으로 아래 지출을 하려 한다. 어느 비목으로 집행되는지 "
+            "목록 안에서만 고르라.\n"
+            "확신이 없으면 **비우거나 둘을 나란히** 둔다. 억지로 하나를 고르지 마라 — "
+            "갈리면 코드가 두 경로를 모두 판정한다.\n"
+            "판정을 하지 마라. 가능·불가를 여기서 말하지 않는다.\n\n"
+            f"품목: {품목}\n금액: {금액문}\n용도: {용도 or '(적지 않음)'}\n"
+            + (f"사업명: {사업명}\n" if 사업명 else "")
+            + f"\n비목 목록: {', '.join(비목_ENUM)}")
+        출력, _메타 = llm_호출(프롬프트, 스키마, 모델=MODEL_1 or None,
+                          최대토큰=200, 타임아웃=60)
+        후보 = (출력 or {}).get("비목후보") if isinstance(출력, dict) else None
+        # 🔴 enum 밖을 먼저 버리고 «그다음에» 3건으로 자른다. 순서를 바꾸면 앞자리에
+        #    낀 enum 밖 한 건이 멀쩡한 후보를 밀어낸다 (스키마 maxItems 도 3이다).
+        return [{"비목": c["비목"], "신뢰도": float(c.get("신뢰도") or 0.0)}
+                for c in (후보 or [])
+                if isinstance(c, dict) and c.get("비목") in 비목_ENUM][:3]
+    except Exception:                                         # noqa: BLE001
+        _log.exception("폼 경로 비목후보 추출 실패 — 빈 후보로 간다")
+        return []
+
+
 def _실_정규화(body: 정규화요청) -> dict:
     if body.질문 and body.질문.strip():
+        _워치독.게이트()      # 못 깨우면 raise → 기존 except → 판단불가
         from normalize_run import 정규화
         out, _메타 = 정규화(body.질문, 비목목록=비목_ENUM)
     else:
-        # 🔴 폼 경로 — 품목·금액·용도가 이미 구조화돼 왔다. 다시 LLM 으로 뽑을 게 없다
-        #    (합성 문장을 되짚어 넣는 건 정보를 잃는다). 비목후보는 화면 9 에서
-        #    사용자가 직접 확정하므로 여기서 추측하지 않는다.
+        # 🔴 폼 경로 — 품목·금액·용도는 이미 구조화돼 왔다. 그 셋은 다시 뽑지 않는다.
+        #    비목후보만 LLM 으로 채운다 (2026-09-03 오너 결정 Q3). 원칙 위반이 아니라
+        #    **복귀**다 — 「판정 1건 = LLM 2회(① 정규화 · ④ 조립)」에서 폼 경로는 ①을
+        #    건너뛰어 1회만 쓰고 있었다. 이 호출로 정확히 2회가 된다.
+        #    🔴 `_합성_질문()` 문장을 되먹이지 않는다 (필드→문장→필드는 정보를 잃는다).
+        #       구조화된 값을 그대로 프롬프트에 넣는다.
         용도 = body.용도 or ""
         if body.추가설명:
             용도 = f"{용도} ({body.추가설명})".strip()
         out = {"품목": body.품목, "금액": body.금액, "금액_추정여부": False,
-               "용도": 용도, "비목후보": []}
+               "용도": 용도, "비목후보": _폼_비목후보(body.품목, 용도, body.금액,
+                                                body.사업명)}
     out.setdefault("결제수단", None)
     out.setdefault("구매명의", None)
     out.setdefault("신청일", None)
@@ -826,12 +946,106 @@ def _실_정규화(body: 정규화요청) -> dict:
     #    키가 있다 없다 하면 프론트가 `'하위항목' in 결과` 로 분기할 때 갈린다
     #    (§8 「실서버로 갈아끼워도 프론트 코드는 한 줄도 안 바뀐다」, 2026-09-01 ai-14).
     out.setdefault("하위항목", None)
+    # 🔴 내부 키는 여기서 벗긴다 — `누락필드`·`_출처` 는 `normalize_run.정규화` 의 산출물
+    #    이지 API 계약이 아니다 (`tests/test_contract.py` 「정규화결과」는 선택 키가
+    #    **빈 집합**이라 늘어난 키도 위반으로 잡는다). 목 모드엔 원래 없어서 목으로
+    #    개발한 프론트가 실서버에서만 키를 두 개 더 받고 있었다 — 목에 맞춰 실을 깎는다
+    #    (2026-09-03 S3). 필요해지면 계약에 먼저 올리고 세 경로에 같이 싣는다.
+    out.pop("누락필드", None)
+    out.pop("_출처", None)
     return out
 
 
+def _할일_중복제거(할일: list) -> list:
+    """🔴 조립 응답에 반복 생성이 나온다 — 같은 항목이 그대로 화면에 찍힌다.
+
+    실측 (2026-09-03 ai-98): 자연어 원문주입 판에서 `해야할일` 10건이 **전부 같은
+    항목**이었고 중복 제거 없이 그대로 사용자에게 나갔다 (completion 1151/1500).
+
+    🔴 순서를 보존한다 — LLM 이 중요도 순으로 낸다는 보장은 없지만, 재정렬하면
+       같은 질문에 화면 순서가 달라져 재현성이 깨진다.
+    🔴 개수를 줄이는 것이 목적이 아니다 — 같은 코드에 다른 항목(사전승인·증빙서·
+       자산등록)은 정상이다. 그래서 `code` 만이 아니라 **세 필드 전부**를 키로 쓴다.
+    """
+    본, 본것 = [], set()
+    for h in 할일 or []:
+        if not isinstance(h, dict):
+            continue
+        k = (h.get("code"), h.get("항목"), h.get("설명"))
+        if k in 본것:
+            continue
+        본것.add(k)
+        본.append(h)
+    return 본
+
+
+_체크마스터_캐시: tuple[float, dict[str, tuple[str, str]]] | None = None
+_체크마스터_캐시TTL = _int환경("SUDDOE_CHECKITEM_TTL", 300)
+
+
+def _체크마스터() -> dict[str, tuple[str, str]]:
+    """`check_items.code → (구분, 유형)`. 🔴 못 읽으면 **빈 dict** — 호출부가 안 붙인다.
+
+    🔴 **표를 통째로 캐시한다.** `code = ANY(...)` 로 요청마다 좁혀 치는 것보다 적다 —
+       `_질의()` 는 호출마다 psycopg 접속을 새로 열어(`main.py:400` 실측 약 25ms)
+       비용이 행 수가 아니라 **접속 수**에 붙기 때문이다. 52행 고정 마스터라
+       (실측 2026-09-03 ai-43: 결제전 43 · 결제후 9) 통째로 들고 있어도 싸다.
+    🔴 **빈 표는 캐시하지 않는다** — `_사업명_표()` 와 같은 이유다. DB 가 깜빡인
+       순간을 5분간 물고 있으면 그 사이 전 판정이 `구분` 없이 나간다.
+    """
+    global _체크마스터_캐시
+    if _체크마스터_캐시 is not None:
+        받은시각, 표 = _체크마스터_캐시
+        if time.time() - 받은시각 < _체크마스터_캐시TTL:
+            return 표
+    표: dict[str, tuple[str, str]] = {
+        c: (구분, 유형) for c, 구분, 유형 in
+        _질의('SELECT "code", "구분", "유형" FROM corpus.check_items')}
+    if 표:                              # 🔴 성공한 것만 캐시한다
+        _체크마스터_캐시 = (time.time(), 표)
+    return 표
+
+
+def _할일_보강(할일: list) -> list:
+    """`code` 로 마스터를 봐서 `구분`·`유형` 을 얹는다 (§3-5 Q2). **LLM 호출 증가 0.**
+
+    프론트가 저장 뒤 다시 읽어서 구분을 알아내고 있었다 — 목 모드에선 영영 못 갈랐다.
+
+    🔴 **LLM 이 내지 않는다.** 조립 스키마의 `해야할일` 은 `{code, 항목, 설명}` 뿐이고
+       (`llm_schema.py:106`), `구분`·`유형` 의 정본은 `corpus.check_items` 컬럼이다
+       (`02_frontend.sql:28·33` — "서버가 항목 텍스트로 분류하면 마스터가 늘 때 갱신이
+       빠진다"). 코드가 조회해 얹는 자리다.
+    🔴 **`check_items.구분` 이 2종(결제전·결제후)인 것은 `models.할일.구분` 3종과
+       모순이 아니다.** 이 마스터는 «AI 가 만드는 할일» 의 폐쇄 목록이고 AI 할일은
+       결제 시점 기준이라 둘로 닫힌다. 「집행」은 사용자 직접 추가(`할일생성`)와 캘린더
+       집행 일정에서 온다 — 즉 3종은 할일 테이블 전체의 어휘, 2종은 그 부분집합이다.
+       CHECK 를 늘리면 AI 가 「집행」을 낼 수 있게 돼 어휘가 흐려진다 (2026-09-03 중앙 판단).
+    🔴 **마스터에 없는 code 면 안 붙인다.** 임의로 「결제전」을 박으면 없는 걸 있는
+       것처럼 만든다 — 화면은 그 값을 마스터에서 온 것으로 읽는다.
+    🔴 **DB 가 죽어도 판정을 죽이지 않는다** — `구분` 없이 지금 모양 그대로 나간다.
+    """
+    표 = _체크마스터()
+    if not 표:
+        return 할일
+    본 = []
+    for h in 할일 or []:
+        m = 표.get(h.get("code")) if isinstance(h, dict) else None
+        본.append({**h, "구분": m[0], "유형": m[1]} if m else h)
+    return 본
+
+
 def _실_판정(body: 판정요청) -> dict:
+    _워치독.게이트()
     import orchestrate
-    질문 = body.정규화.get("_원문") or body.정규화.get("질문") or ""
+    # 🔴 `질문원문` 을 빼먹어 옳에 있는 원문을 두고 문장을 다시 만들고 있었다.
+    #    `모델의 생성`이 아니라 계약 필드다 (`models.py:100·191·232`, `main.py:585` 가 싣는다).
+    #    실측 (2026-09-03 ai-98): 되짚은 문장 `"맥북 프로 디자이너가 쓸 2500000원"` 으로
+    #    정규화를 다시 돌렸더니 `비목후보` 가 `[{"비목":"기계장치","신뢰도":1}]` → `[]` 로
+    #    죽었다. 같은 질문인데 인용 3건→1건·할일 10건→1건 으로 갈렸다 —
+    #    **사용자 확정값이 조용히 덤인다.** CLAUDE.md 가 못박은 그 자리:
+    #    «`_합성_질문()` 문장을 되먹이지 않는다 — 필드→문장→필드는 정보를 잃는다».
+    질문 = (body.정규화.get("_원문") or body.정규화.get("질문")
+          or body.정규화.get("질문원문") or "")
     if not 질문:
         # 정규화 결과만 온 경우 — 품목·용도·금액으로 되짚어 문장을 만든다
         조각 = [str(body.정규화.get(k)) for k in ("품목", "용도") if body.정규화.get(k)]
@@ -842,14 +1056,35 @@ def _실_판정(body: 판정요청) -> dict:
     #    (orchestrate.py:405, 2026-09-01 ai-25 시그니처 확장 · ai-14 후속 지시).
     #    🔴 그래도 persist.py 의 UPDATE 는 아직 걷어내지 마라 —
     #       실측으로 decisions.plan_id 가 채워지는 걸 확인한 뒤에나 A 가 정리한다.
-    r = orchestrate.판정(질문, 사업명=body.사업명, org_id=body.org_id, plan_id=body.plan_id)
+    # 🔴 사용자가 화면 9 에서 확정한 비목을 엔진에 넘긴다 (2026-09-03 오너 결정 Q2).
+    #    `orchestrate.py:500` 이 후보를 이 값으로 필터하고, 없으면
+    #    `{"출처": "갈래고정"}` 으로 세워 그 비목으로 판정한다. 덤으로 `:512` 의
+    #    비목갈림 재귀가 끊긴다 — 사용자가 이미 골랐으니 두 경우를 보여줄 이유가 없다.
+    r = orchestrate.판정(질문, 사업명=body.사업명, org_id=body.org_id, plan_id=body.plan_id,
+                       _비목고정=body.확정비목 or None)
+    전제 = r.get("전제") or r.get("전제목록") or []
+    # 🔴 후보에 없는 비목을 고정하면 «그 비목으로 본 판정» 이 나온다 — 조용히 내보내면
+    #    사용자는 시스템이 동의한 걸로 읽는다 (2026-09-03 오너 결정 R7). 새 SSE 이벤트를
+    #    만들지 않고 `전제` 맨 앞에 한 줄 얹는다 — 이벤트 이름·순서가 계약이다.
+    후보 = [n for n in (_비목_정본(c.get("비목")) if isinstance(c, dict) else None
+                      for c in (body.정규화.get("비목후보") or [])) if n]
+    if body.확정비목 and 후보 and body.확정비목 not in 후보:
+        # 🔴 조사는 「로」로 고정한다 — 비목 10종이 모두 모음으로 끝난다(비·치·료).
+        #    「이라는/라는」류를 쓰면 비목마다 문장이 틀린다.
+        전제 = [{"사실": f"비목을 「{body.확정비목}」로 보고 판정했습니다 — 정규화가 제시한 "
+                      f"후보({' · '.join(후보)})에 없는 비목을 직접 고르셨습니다",
+                "근거조항": None, "매핑": [], "미충족시": "판단불가"}, *전제]
     # 오케 반환값 → API 계약 (`프론트 연동 사양.md` §8). 이름이 다른 것만 옮긴다
     return {
         "판정": r.get("판정", "판단불가"),
         "요약": r.get("요약", ""),
-        "해야할일": r.get("해야할일", []),
-        "인용": r.get("인용", []),
-        "전제": r.get("전제") or r.get("전제목록") or [],
+        "해야할일": _할일_보강(_할일_중복제거(r.get("해야할일", []))),
+        # 🔴 오케는 `인용목록` 으로 돌려준다 (`llm_schema.최종응답`). `r.get("인용")` 만 써서
+        #    실서버 판정 전수가 화면 7(근거) 무지로 나갔다 (2026-09-03 ai-43 실측).
+        #    목 응답(`_목_판정`)은 `인용` 을 직접 박아 놓아 테스트가 전부 통과했다 —
+        #    목과 실경로의 키 이름이 달란 것이 결함이다. 아래 `전제` 와 같은 폴백 모양으로 맞춘다.
+        "인용": r.get("인용") or r.get("인용목록") or [],
+        "전제": 전제,
         "신뢰등급": r.get("신뢰등급"),
         "버전스탬프": r.get("버전스탬프"),
         "참조사슬": r.get("참조사슬", []),
