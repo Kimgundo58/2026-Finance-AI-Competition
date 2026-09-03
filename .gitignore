@@ -4,7 +4,9 @@ __pycache__/
 venv/
 .env
 .env.*
-!.env.example      # 이름만 든 견본이다 — 값이 없어 커밋한다
+# 🔴 .gitignore 는 «줄 끝 주석»을 안 받는다. 같은 줄에 # 를 쓰면
+#    패턴에 통째로 붙어 아무것도 안 걸린다 (2026-09-03 에 이걸로 한 번 놓쳤다)
+!.env.example
 *.log
 .DS_Store
 Thumbs.db
