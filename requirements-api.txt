@@ -47,3 +47,6 @@ python-docx==1.2.0
 # requests / bs4   : 법령 크롤링 스크립트 전용. 컨테이너는 크롤링을 하지 않는다
 # pydantic-settings: 코드에 import 0건
 # httpx-sse        : SSE 는 서버가 «보내는» 쪽이다. 클라이언트 파서는 필요 없다
+
+# 이 파일을 한 줄만 고쳐도 빌더의 pip 레이어가 통째로 다시 돈다(실측 재빌드 340초).
+# 모델 2.2GB 재다운로드는 Dockerfile 의 캐시 마운트가 막는다 — bake 105초 → 20초 (실측).

@@ -167,8 +167,27 @@ def _데모해석(토큰: str) -> 주체:
 
 
 def _계정조회(email: str) -> tuple[str, str] | None:
-    """email → (org_id, account_id). 🔴 조인 열쇠가 email 인 이유는 모듈 docstring 참조."""
-    행 = _질의("SELECT org_id, account_id FROM tenant.accounts WHERE email = %s", (email,))
+    """email → (org_id, account_id). 🔴 조인 열쇠가 email 인 이유는 모듈 docstring 참조.
+
+    🔴 **「없는 계정」과 「죽은 DB」를 갈라 낸다** (2026-09-03).
+       `_질의` 는 기본이 «실패하면 빈 리스트» 인데 여기서 빈 리스트는 곧 403 이다.
+       그래서 그전까지는 **DB 가 통째로 죽어도 403「등록되지 않은 계정이다」** 였다 —
+       재현했다: DSN 을 아무도 안 듣는 포트로 돌리면 미등록 email 과 상태코드도
+       문구도 «완전히» 같다. 운영에서 이건 「시연 계정 등록이 빠졌나」를 몇 시간
+       뒤지게 만드는 종류의 오류다. 인증 경로만 `예외전파=True` 로 켜서 503 으로 뺀다.
+
+    ⚠️ 503 은 「등록 여부를 모른다」이지 「등록됐다」가 아니다. 호출부가 이걸
+       통과로 읽으면 안 된다 — 그래서 None 이 아니라 «예외» 로 나간다.
+    """
+    try:
+        행 = _질의("SELECT org_id, account_id FROM tenant.accounts WHERE email = %s",
+                   (email,), 예외전파=True)
+    except Exception as e:                                    # noqa: BLE001
+        로그.exception("계정 조회가 DB 경로에서 실패했다 — 미등록(403)과 갈라 낸다")
+        # 🔴 사유에 예외 «문자열» 을 싣지 않는다. psycopg 의 접속 오류는 본문에
+        #    호스트·포트·사용자명을 그대로 담는다 — 401/503 응답은 인증 «전» 이라
+        #    아무나 받아 본다.
+        raise HTTPException(503, "계정 확인에 실패했습니다 — 잠시 후 다시 시도해 주세요") from e
     return (str(행[0][0]), str(행[0][1])) if 행 else None
 
 
