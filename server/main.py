@@ -606,6 +606,21 @@ def _합성_질문(body: 정규화요청) -> str:
     return f"{사업}{body.용도 or ''} {body.품목 or ''} {만원}을 사도 되나요?".strip()
 
 
+def _주체org(req: Request) -> str | None:
+    """검증된 주체의 org_id. 없으면 None.
+
+    🔴 `auth.OrgId주입` 은 **쿼리스트링만** 갈아끼운다. org_id 가 들어오는 축이 셋인데
+       미들웨어가 닿는 건 하나뿐이다:
+           쿼리스트링  ?org_id=      → 미들웨어가 교정한다 ✅
+           multipart   Form(...)     → 못 닿는다 (routes_l3._업로드_주인 이 따로 막는다)
+           요청 본문    body.org_id   → 못 닿는다 ← 여기가 이 함수의 자리
+       본문을 미들웨어에서 고치려면 `receive` 를 소진해야 하고 그러면 SSE·업로드가 깨진다.
+       라우터가 `scope["suddoe_주체"]` 를 집어 쓰는 쪽이 맞다.
+    """
+    주 = req.scope.get("suddoe_주체")
+    return 주.org_id if 주 is not None and 주.검증됨 else None
+
+
 @app.post("/api/judge")
 def judge(req: Request, body: 판정요청, 목: str | None = None):
     """화면 4 → 5 / 6 / 7. SSE.
@@ -632,6 +647,12 @@ def judge(req: Request, body: 판정요청, 목: str | None = None):
     # 🔴 비목과 같은 자리에서 닫는다. 여기를 통과하면 `orchestrate.판정()` 이 이 값을
     #    그대로 쓰고, `rule_lookup.비목계통()` 이 모르는 표기를 「창업」으로 삼켜버린다.
     body.사업명 = _사업명_정본(body.사업명)
+    # 🔴 토큰이 있으면 본문의 org_id 를 «버린다». 안 하면 판정이 org_id=None 으로 돌아
+    #    L3(주관기관 규정)가 아예 안 실리고, 아래 비용가드 열쇠도 org 없이 잡혀
+    #    A 기관의 판정이 B 기관에 나간다 (위 열쇠 주석의 TENANT_LEAK 이 그것이다).
+    #    프론트는 본문에 org_id 를 안 싣는다 — 지금까지 실 경로가 전부 None 이었다.
+    if (_주 := _주체org(req)) is not None:
+        body.org_id = _주
 
     k = 비용가드.열쇠("judge", body.org_id, body.사업명, body.확정비목,
                      json.dumps(body.정규화, ensure_ascii=False, sort_keys=True),

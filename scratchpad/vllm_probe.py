@@ -139,7 +139,10 @@ class H(BaseHTTPRequestHandler):
                 "프롬프트_뒤": 프롬[-400:] if len(프롬) > 400 else "",
                 "HTTP": 코드, "지연ms": 지연, "오류": 오류,
                 "usage": 응답.get("usage"),
-                "응답_앞": 내용[:600],
+                "종료이유": (응답.get("choices") or [{}])[0].get("finish_reason"),
+                # 🔴 전문을 남긴다. 재실행된 정규화가 원본과 «다른가» 를 재려면
+                #    잘린 응답으로는 못 센다 (중앙 지시 2026-09-03).
+                "응답_전문": 내용,
             })
             print(f"  [{번호}] {self.path}  {코드}  {지연}ms  "
                   f"prompt={len(프롬)}자  guided={bool(요청.get('guided_json'))}",
