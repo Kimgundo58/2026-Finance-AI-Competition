@@ -258,7 +258,10 @@ def 현재주체(
 #
 #    임시 배선이다. 각 라우터가 `Depends(현재주체)` 로 옮겨가면 이 클래스는 지운다.
 
-_보호제외 = ("/api/health", "/api/orgs", "/api/demo/session", "/docs", "/openapi.json", "/redoc")
+# 🔴 /api/gpu 는 테넌트 데이터를 안 만지고 GPU 유휴초만 돌려준다. 게스트 경로에서도
+#    폴링되고, 프론트 fetch 래퍼가 모든 요청에 Bearer 를 붙이므로 «만료 토큰» 하나에
+#    상태 폴링이 죽으면 안 된다 — 헤더가 있든 없든 200 이어야 한다 (S4 지시).
+_보호제외 = ("/api/health", "/api/orgs", "/api/demo/session", "/docs", "/openapi.json", "/redoc", "/api/gpu")
 
 
 class OrgId주입:

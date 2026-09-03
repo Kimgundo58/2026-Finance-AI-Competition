@@ -16,7 +16,9 @@ fastapi==0.141.1
 uvicorn==0.52.4              # [standard] 확장은 안 붙인다 — 로컬 실측 환경과 같게 둔다
 pydantic==2.13.4
 python-multipart==0.0.32     # routes_l3 의 File()/Form() 이 없으면 라우트 등록에서 죽는다
-httpx==0.28.1                # main.py --selftest 의 TestClient 전용. 요청 경로엔 안 쓴다
+httpx==0.28.1                # server/auth.py:110 이 JWKS 를 가져온다 (+ --selftest 의 TestClient)
+PyJWT[crypto]==2.13.0        # server/auth.py:120. 지연 import 라 «없어도 기동은 된다» —
+                             # 죽는 건 첫 로그인이다. [crypto] 는 Supabase 의 RS256/ES256 용
 
 # ── DB ───────────────────────────────────────────────────────────────
 psycopg==3.3.4

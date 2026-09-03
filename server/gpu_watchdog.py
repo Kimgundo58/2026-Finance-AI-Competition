@@ -30,6 +30,8 @@
     RUNPOD_POD_ID             대상 팟. 없으면 «제어 불가»
     RUNPOD_REST               기본 https://rest.runpod.io/v1
     VLLM_URL                  준비 확인 대상 (`scripts/adapter.py` 와 같은 변수)
+    SUDDOE_MOCK               🔴 1(기본)이면 워치독 전체 비활성 — 목 서버가 실 팟을
+                              끄거나 켜는 사고를 막는다. `_목모드()` 가 기준
 """
 from __future__ import annotations
 
@@ -59,6 +61,21 @@ def _int환경(키: str, 기본: int) -> int:
         return int(os.environ.get(키, 기본))
     except ValueError:
         return 기본
+
+
+def _목모드() -> bool:
+    """🔴 **목 서버가 실 GPU 팟을 끄는 사고를 여기서 막는다.**
+
+    목 서버는 GPU 를 «절대» 안 부른다 (`judge` 는 `elif MOCK` 분기에서 닫히고
+    `_실_판정` 까지 안 간다). 그래서 목 서버의 유휴 시각은 **영원히 안 갱신된다** —
+    워치독을 그대로 두면 30분 뒤 목 서버가 실 팟에 stop 을 쏜다. 켜는 쪽도 같다:
+    목 서버가 팟을 깨우면 아무도 안 쓰는 GPU 가 돈다.
+
+    `SUDDOE_MOCK` 기본값이 **1** 이라(`server/_common.py:23`) 더 위험하다 —
+    환경변수를 안 준 배포는 전부 목이다. 식을 `_common.MOCK` 과 같게 유지한다
+    (import 하지 않는 이유는 이 모듈이 `_common` 없이도 단독으로 돌아야 하기 때문).
+    """
+    return os.environ.get("SUDDOE_MOCK", "1") == "1"
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -177,6 +194,7 @@ class GPU워치독:
                  시계: Callable[[], float] = time.monotonic,
                  잠들기: Callable[[float], None] = time.sleep,
                  준비확인: Callable[[], bool] = _vllm_준비):
+        self.목모드 = _목모드()
         self.제어 = 제어 if 제어 is not None else 기본제어()
         self.시계, self.잠들기, self.준비확인 = 시계, 잠들기, 준비확인
         self.유휴임계초 = _int환경("SUDDOE_GPU_IDLE_MIN", 30) * 60
@@ -193,8 +211,13 @@ class GPU워치독:
     # ── 활성 여부 ───────────────────────────────────────────────────
     @property
     def 활성(self) -> bool:
-        """SUDDOE_GPU_IDLE_MIN=0 → 워치독 전체 비활성. 정지도 기동도 안 한다."""
-        return self.유휴임계초 > 0
+        """비활성이면 정지도 기동도 안 한다. 상태 API 는 그대로 산다.
+
+        두 가지가 비활성으로 접힌다:
+          · `SUDDOE_GPU_IDLE_MIN=0` — 심사 당일 이걸 건다
+          · 🔴 **목 모드** — 목 서버는 GPU 를 안 부르니 영원히 유휴다 (`_목모드` 참조)
+        """
+        return (not self.목모드) and self.유휴임계초 > 0
 
     # ── ① 마지막 호출 시각 ─────────────────────────────────────────
     def 호출기록(self) -> None:
@@ -296,9 +319,9 @@ class GPU워치독:
         이벤트로 감싼다. 🔴 새 이벤트 이름을 만들면 프론트 파서가 깨진다.
         이미 가동 중이면 **아무것도 yield 하지 않는다** (평상시 이벤트열이 안 바뀐다).
         """
-        if not self.제어.가능:
+        if self.목모드 or not self.제어.가능:
             self.호출기록()
-            return                       # 우리가 끈 적이 없다. 깨울 것도 없다
+            return          # 목이거나(깨울 이유 없다) 우리가 끈 적이 없다(깨울 것도 없다)
         # 🔴 팟을 멈추는 주체는 이 워치독뿐이다. 한 번 「가동」으로 확인해 뒀고 그 뒤로
         #    유휴가 임계를 안 넘겼으면 정지가 발동했을 리 없다 —
         #    판정 한 건마다 RunPod API 를 치지 않는다. (밖에서 콘솔로 끈 경우는 못 잡는다.
@@ -338,7 +361,7 @@ class GPU워치독:
         상태 조회가 흔들린다고 판정이 막히면 안 된다.
         """
         self.호출기록()
-        if not self.제어.가능:
+        if self.목모드 or not self.제어.가능:
             return
         if self._팟상태 in (중지, 기동중):
             raise GPU기동실패(f"AI 서버가 준비되지 않았습니다 (상태={self._팟상태})")
