@@ -106,6 +106,33 @@ class 포획실패(RuntimeError):
 _RE_S = re.compile(r"(?<![A-Za-z0-9])S\d{2,}(?![0-9])")
 
 
+_RE_강등코드 = re.compile(r'"([A-Z][A-Z0-9_]{4,})"')
+_강등코드_제외 = re.compile(r"^(SUDDOE_|VLLM_|RUNPOD_|HF_|PYTHON)")
+
+
+def _강등코드목록() -> tuple[list[str], str]:
+    """강등코드 «전량». 발화한 것만 세면 「안 울린 코드」가 기록에서 사라진다.
+
+    🔴 목록을 이 파일에 손으로 박지 않는다. P1(ai-2c)이 21종이라 했고 원본을 훑으니
+       **22종**이었다 — 베끼는 순간 그 오차가 run 에 굳는다. 소스에서 뽑는다.
+       (`llm_validate.py:325`·`:541` 도 자기 주석에 「강등코드 22종」이라 적어 두었다)
+    🔴 f-string 등으로 만들어지는 코드는 이 훑기가 못 잡는다. 그래서 «관측된 코드 중
+       목록에 없는 것» 을 따로 세어 시끄럽게 만든다 — 조용히 빠지는 쪽이 나쁘다.
+    """
+    여기 = os.path.dirname(os.path.abspath(__file__))
+    본 = set()
+    출처 = []
+    for f in ("llm_validate.py", "orchestrate.py"):
+        try:
+            with open(os.path.join(여기, f), encoding="utf-8") as fh:
+                본 |= {m for m in _RE_강등코드.findall(fh.read())
+                      if not _강등코드_제외.match(m)}
+            출처.append(f)
+        except OSError:
+            pass
+    return sorted(본), "+".join(출처) or "없음"
+
+
 def _헤드() -> dict:
     """지금 돌고 있는 코드가 «어느 커밋인가». 안 박으면 다음 사람이 못 가른다.
 
@@ -622,7 +649,25 @@ def 실행(*, dry: bool, limit: int | None, 세트: list[str] | None, 라벨: st
     if not 근거측정:
         for g in [전체, *분해.values()]:
             g["근거적중률"] = None
+    # 🔴 P1(ai-2c) 요청: run 마다 강등코드 «전량» 을 0 포함해 남긴다.
+    #    「안 울린 0」은 뜻이 서로 다르다 — 정답셋으로 원리적으로 못 태우는 0
+    #    (`PRECEDENCE_FLIP`·`TENANT_LEAK` — L3 0/93 · org_id None),
+    #    guided_json 이 앞에서 막아서 나는 건강한 0(`INVALID_JUDGMENT` 등),
+    #    그냥 조건 미충족인 0. 어느 0 이 다음 run 에서 1 이 되는지가 신호다.
+    #    2판(꽂기)은 근거를 꽂으니 `PREMISE_UNMAPPED`·`CITE_HANG_MISMATCH` 가
+    #    움직여야 정상이고, 안 움직이면 그게 사고다.
+    코드목록, 코드출처 = _강등코드목록()
+    강등표 = {c: 코드빈도.get(c, 0) for c in 코드목록}
+    목록밖 = sorted(set(코드빈도) - set(코드목록))
+    for c in 목록밖:
+        강등표[c] = 코드빈도[c]
+    print(f"\n강등코드 {len(코드목록)}종 중 발화 {sum(1 for v in 강등표.values() if v)}종"
+          f" (출처 {코드출처})")
+    if 목록밖:
+        print(f"  🔴 목록에 «없는» 코드가 울렸다: {목록밖} — 훑기가 못 잡는 자리가 있다")
+
     지표전체 = {**전체, "분해": 분해, "혼동": 혼동, "강등코드빈도": 코드빈도,
+              "강등코드표": 강등표, "강등코드_목록출처": 코드출처, "강등코드_목록밖": 목록밖,
               "경로빈도": 경로빈도, "근거측정": 근거측정,
               "소요초": round(경과, 1), "오류": len(오류)}
 
