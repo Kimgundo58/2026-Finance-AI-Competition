@@ -207,8 +207,12 @@ def _금지적중(cur, 품목, 용도, 사업명, 비목):
     return _B_금지적중(cur, 품목, 용도, 사업명, 비목) if _B_금지적중 else None   # STUB: B
 
 
-def _effective(cur, 사업명, 비목, 기관ID=None):
-    return _B_effective(cur, 사업명, 비목, 기관ID) if _B_effective else None    # STUB: B
+def _effective(cur, 사업명, 비목, 기관ID=None, 수치=None):
+    # 🔴 `수치=` 를 안 넘겨서 (2)-e 금액비교가 실판정 경로에서 **한 번도 안 돌았다**
+    #    (0903 ai-a3 발견 · ai-43 재확인 · 전수 `grep "수치="` 결과가 자가검사 한 곳뿐이었다).
+    #    한도 붙은 비목은 프롬프트에 늘 「비교 불가 — 기준값 없음」이 나갔다.
+    #    CLAUDE.md 확정 원칙 「금액 비교는 코드가 한다」가 통로만 있고 안 이어져 있었다.
+    return _B_effective(cur, 사업명, 비목, 기관ID, 수치=수치) if _B_effective else None  # STUB: B
 
 
 def _게이팅(l3룰) -> dict:
@@ -567,7 +571,10 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool 
 
         # ── (2)-d 효력 결정 · (2)-e 금액 비교 ────────────────────────────
         t = time.time()
-        룰 = _effective(cur, 사업명, 비목, 기관ID) if 비목 else None
+        # 🔴 None 인 키는 넣지 않는다. `금액비교()` 가 `수치.get()` 으로 읽으니 결과는 같지만,
+        #    빈 값을 실어 보내면 「넘겼는데 비교가 안 됐다」와 「넘길 게 없었다」가 안 갈린다.
+        수치 = {k: v for k, v in (("금액", 정규.get("금액")),) if v is not None}
+        룰 = _effective(cur, 사업명, 비목, 기관ID, 수치=수치 or None) if 비목 else None
         잰다("effective_rule", t)
 
         # ── 게이트 A: 금지목록 적중 → 즉답 "불가". LLM 0회 ───────────────
