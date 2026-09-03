@@ -288,6 +288,62 @@ def cmd_close(args) -> None:
         print(f"잔액 ${bal['clientBalance']} · 시간당 지출 ${bal.get('currentSpendPerHr', 0)}")
 
 
+# ── roundtrip — gpu_watchdog.RunPod팟 실물 검증 (Q2, 2026-09-04) ──────
+
+def cmd_roundtrip(args) -> None:
+    """`gpu_watchdog.RunPod팟` 이 실제 팟에서도 돌아가는지 — stop→status→start→status
+    를 찍고 끝난다. **판단은 안 넣는다** — 창이 열렸을 때 15분 안에 끝나야 해서
+    대화형 분기가 없다. 사람/중앙이 산출 JSON 을 보고 판단한다.
+
+    🔴 `RUNPOD_API_KEY` 가 필요하다 — `runpodctl` 이 쓰는 저장된 키와는 별개다
+    (`gpu_watchdog.RunPod팟` 은 REST 를 직접 친다, `runpodctl` 을 안 거친다).
+    vLLM 은 안 띄운다 — REST 응답 스키마 확인이 이 명령의 전부다 (`pod_serve.sh` 는
+    별도로 켠다).
+
+    사전 자가검토(실물 없이 한 것)는 `tests/test_gpu_watchdog.py`
+    `test_상태해석_실물_스키마_커버리지` 참고 — RunPod 공식 OpenAPI 스키마 기준
+    분기는 다 섰다. 이 명령이 확인하는 건 그 다음 단계: **타이밍** —
+    `desiredStatus` 가 "expected"(목표) 라 실제 부팅 전에 RUNNING 을 줄 수도 있다는
+    가설을 실물로 본다(`--settle` 대기 전/후를 같이 찍는 이유).
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from server.gpu_watchdog import RunPod팟          # noqa: E402  (여기서만 쓴다)
+
+    키 = os.environ.get("RUNPOD_API_KEY", "")
+    if not 키:
+        sys.exit("RUNPOD_API_KEY 가 없다. gpu_watchdog.RunPod팟 은 REST 를 직접 치므로 "
+                  "runpodctl 의 저장된 키와 별개로 이 env 가 있어야 한다.")
+
+    팟 = RunPod팟(키, args.pod_id)
+    단계들: list[dict] = []
+
+    def 찍기(이름: str, 값) -> None:
+        단계들.append({"단계": 이름, "값": 값,
+                     "시각": datetime.now(timezone.utc).isoformat()})
+        print(f"[{이름}] {값}")
+
+    찍기("초기상태", 팟.상태())
+    찍기("정지호출결과", 팟.정지())
+    찍기("정지직후상태", 팟.상태())
+    if args.settle:
+        print(f"  {args.settle}초 대기 (상태 반영 지연 관찰용)...")
+        time.sleep(args.settle)
+        찍기(f"정지후_{args.settle}s_상태", 팟.상태())
+    찍기("시작호출결과", 팟.시작())
+    찍기("시작직후상태", 팟.상태())
+    if args.settle:
+        time.sleep(args.settle)
+        찍기(f"시작후_{args.settle}s_상태", 팟.상태())
+
+    out = {"pod_id": args.pod_id, "단계": 단계들, "결론": None}   # 결론은 사람이 채운다
+    산출 = Path(__file__).resolve().parent.parent / "scratchpad" / "Q2_roundtrip_result.json"
+    산출.parent.mkdir(parents=True, exist_ok=True)
+    산출.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"\n산출: {산출}")
+    print("🔴 판단은 안 넣었다 — 정지직후상태가 실제로 «중지» 인지, 시작직후상태가 "
+          "settle 전/후로 다른지(타이밍 갭)를 사람이 본다.")
+
+
 # ── 워치독 ──────────────────────────────────────────────────────────
 
 def watchdog_spawn(pod_id: str, hours: float) -> None:
@@ -333,6 +389,13 @@ def main() -> None:
     c = sub.add_parser("close", help="팟 삭제 후 실물 확인")
     c.add_argument("pod_id", nargs="?")
     c.set_defaults(fn=cmd_close)
+
+    rt = sub.add_parser("roundtrip",
+                         help="REST start/stop 실물 검증 (Q2 전용) — 상태만 찍는다, 판단 없음")
+    rt.add_argument("pod_id")
+    rt.add_argument("--settle", type=int, default=5,
+                     help="각 호출 뒤 상태 재확인 전 대기초 (기본 5, 0=끔)")
+    rt.set_defaults(fn=cmd_roundtrip)
 
     w = sub.add_parser("_watchdog", help=argparse.SUPPRESS)
     w.add_argument("pod_id")
