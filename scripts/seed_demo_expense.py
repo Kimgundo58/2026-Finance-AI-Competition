@@ -78,10 +78,15 @@ def _가짜_판정(질문, **kw):
     #    `persist._실_저장()` 은 그 행을 **UPDATE 로 잇기만** 하지 INSERT 는 안 한다
     #    (persist.py 머리말 「decisions 에 INSERT 하지 않는다」). 그래서 가짜 오케도
     #    이 INSERT 를 대신 해줘야 한다 — 안 하면 `decision_id=None` → 저장이
-    #    "decision_id 없음" 으로 거부된다(1차 시도 실측). 이 스크립트는 로컬
-    #    postgres(superuser)로 도니 RLS 는 안 걸리지만, org_id 는 명시로 정확히 넣는다.
+    #    "decision_id 없음" 으로 거부된다(1차 시도 실측).
+    #    🔴 2026-09-04 (ai-c4) — GUC 를 세운다. 원래 「로컬 postgres(superuser)로 도니
+    #       RLS 안 걸린다」는 전제였는데, 운영 seed 는 비특권 롤 suddoe_app 으로 돈다 —
+    #       GUC 없이 이 INSERT 를 하면 RLS(org_id=current_org())가 막아 0행 → decision_id
+    #       None → 저장 거부다(정확히 CLAUDE.md 「로컬 superuser 라 안 보이던 게 운영에서
+    #       터진다」 자리). org_id 는 kw 로 이미 아니까 이 연결에도 직접 세운다.
     정규화결과 = kw.get("정규화결과") or {}
     with psycopg.connect(DSN) as conn:
+        conn.execute("SELECT set_config('app.org_id', %s, true)", (kw.get("org_id"),))
         row = conn.execute(
             """INSERT INTO tenant.decisions
                    (org_id, "사업명", 질문원문, 정규화, 비목, 금액, 판정, 신뢰등급,
