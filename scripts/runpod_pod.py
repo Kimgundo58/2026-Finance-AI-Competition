@@ -208,6 +208,12 @@ def cmd_open(args) -> None:
         cmd += ["--ports", args.ports]
     if args.container_disk:
         cmd += ["--container-disk-in-gb", str(args.container_disk)]
+    if args.docker_args:
+        # 🔴 RunPod REST `dockerStartCmd` — Pod 객체에 영구 저장된다(2026-09-04 openapi
+        # 확인). «완전 무인」의 전제: 볼륨과 짝지으면 stop→start 뒤에도 이 커맨드가
+        # 다시 실행된다(검증은 다음 GPU 창 — 이번 팟은 볼륨이 없어 여기서 못 잰다).
+        # 예: --docker-args "bash /workspace/pod_setup.sh && bash /workspace/pod_serve.sh"
+        cmd += ["--docker-args", args.docker_args]
 
     print(f"여는 중: {gpu_id}  (자동종료 {args.hours}h — 로컬 워치독, 서버 보장 아님)")
     print("  " + " ".join(["runpodctl", *cmd]))
@@ -380,6 +386,9 @@ def main() -> None:
     o.add_argument("--volume-id", help="네트워크 볼륨. 생성 시점에만 붙는다")
     o.add_argument("--ports", help="예: '8888/http,22/tcp'. 나중에 못 바꾼다")
     o.add_argument("--container-disk", type=int)
+    o.add_argument("--docker-args",
+                   help="완전 무인용: 팟 (재)기동마다 자동 실행할 커맨드. "
+                        "볼륨과 짝지어야 의미있다(볼륨 없으면 재시작마다 디스크가 지워진다)")
     o.add_argument("--wait-timeout", default="10m")
     o.add_argument("--cpu", action="store_true",
                    help="CPU 팟. 볼륨에 venv 를 까는 등 GPU 가 필요 없는 준비 작업용")
