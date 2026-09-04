@@ -495,6 +495,18 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool 
         #    붙들고 있으면 다른 세션의 DDL·VACUUM 이 막힌다. 쓰기는 단문 INSERT 하나뿐이라
         #    문장 단위 원자성으로 충분하다.
         conn = conn or db.connect(connect_timeout=5, autocommit=True)
+        # 🔴 새로 연 커넥션은 요청 미들웨어(server/auth.OrgId주입)가 세운 GUC 를 «못»
+        #    물려받는다 — 완전히 다른 커넥션이다. `app.org_id` 를 여기서 직접 세우지
+        #    않으면 (7) decisions_적재 의 INSERT 가 `org_isolation` RLS
+        #    (org_id = current_org())에 막혀 비특권 롤에서 0행이 되고, decision_id 가
+        #    조용히 NULL 로 나간다 — 판정 내용은 정상인데 이력에만 안 남는다.
+        #    2026-09-04 GPU 창 실판정에서 드러났다(item6). 로컬 postgres 는
+        #    superuser+bypassrls 라 이 자리가 안 보였다(docs/0-3 ⓒ 패턴).
+        #    autocommit 이라 is_local=false(세션 레벨)로 세워 이후 INSERT 문장까지 유지한다.
+        #    🔴 conn 을 «받은» 경우(닫기=False)는 호출자가 이미 GUC 를 세웠다고 보고
+        #    안 건드린다. org_id 가 없으면(게스트·단건 평가) 종전과 바이트 단위로 같다.
+        if 닫기 and org_id:
+            conn.execute("SELECT set_config('app.org_id', %s, false)", (str(org_id),))
     except Exception as e:
         # `Agent.md` §8: DB 연결 실패 → 503. 판정을 추측으로 만들지 않는다.
         return _빈응답("판단불가", "데이터베이스에 연결할 수 없어 판정을 내리지 않았습니다.",
@@ -779,6 +791,13 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool 
                     #    그 문항의 «판단불가» 는 모델의 선택이 아니라 실패경로다.
                         "종료이유": 메타4.get("종료이유"),
                         "토큰": 메타4.get("토큰"),
+                        # 🔴 사고흔적(Qwen3 <think> 걷어낸 사실)을 판정에도 남긴다
+                        #    (2026-09-04 Q4). normalize_run.llm_호출 메타엔 이미 실리는데
+                        #    이 화이트리스트에서 버려지고 있었다 — 판정 출력토큰이 캡에
+                        #    근접(run192 최대 1447/1500)해 정규화처럼 사고가 토큰을 먹는지
+                        #    보려면 이 값이 있어야 한다.
+                        "사고흔적있음": 메타4.get("사고흔적있음"),
+                        "사고흔적길이": 메타4.get("사고흔적길이"),
                         "요청": {"최대토큰": 판정_최대토큰, "온도": 온도}})
         return _마무리(conn, cur, 응답, 기록=기록, 닫기=닫기, 질문=질문,
                     사업명=사업명, org_id=org_id, 기관ID=기관ID,
