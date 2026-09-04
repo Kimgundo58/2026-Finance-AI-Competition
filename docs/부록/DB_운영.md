@@ -30,7 +30,7 @@
 2. 왼쪽 메뉴에서 **Containers** 클릭
 3. **`suddoe`** 라는 묶음이 보입니다. 왼쪽 화살표(▶)를 누르면 펼쳐집니다
 
-```
+```text
 ▼ suddoe                          ← 이 프로젝트 그룹
     suddoe-db       Running   5432:5432
     suddoe-pgweb    Running   8081:8081
@@ -71,7 +71,7 @@
 
 왼쪽에서 **`v_적재현황`**을 누르면 표별로 데이터가 몇 건 들어왔는지 한눈에 보입니다.
 
-```
+```text
 01. corpus.documents      0
 02. corpus.doc_articles   0
 03. corpus.chunks         0
@@ -147,7 +147,7 @@
 
 ### 지금 들어 있는 양 (2026-09-01 실측)
 
-```
+```text
 corpus.documents        283      corpus.chunks        20,518
 corpus.doc_articles  26,301      corpus.chunk_terms  1,148,718
 corpus.refs          44,865      corpus.rules             72
@@ -205,7 +205,7 @@ docker compose down -v
 
 비밀번호를 바꾸고 싶으면 `db` 폴더에 `.env` 파일을 만들고:
 
-```
+```bash
 POSTGRES_PASSWORD=원하는비밀번호
 ```
 
@@ -227,7 +227,7 @@ POSTGRES_PASSWORD=원하는비밀번호
 
 ## 8. 구성 파일
 
-```
+```text
 db/
 ├─ docker-compose.yml     ← 컨테이너 2개 정의
 ├─ init/

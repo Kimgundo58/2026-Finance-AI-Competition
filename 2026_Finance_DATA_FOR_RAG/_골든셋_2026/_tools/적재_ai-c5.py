@@ -81,7 +81,12 @@ def main(적용: bool) -> int:
     with db.connect() as conn:                      # autocommit 아님 — 트랜잭션 하나로 묶는다
         cur = conn.cursor()
         for 파일, q, _ in 통과:
+            # 🔴 표식만 넣고 원본을 덮으면 저작자가 쓴 판정 근거가 DB 에서 사라진다.
+            #    2026-09-04 에 실제로 그렇게 잃었다가 파일에서 되살렸다. 앞에 붙인다.
             메모 = f"{적재표식} · {파일}"
+            원본 = (q.get("검수메모") or "").strip()
+            if 원본:
+                메모 += " | " + 원본
             q = {**q, "검수메모": 메모}
             행 = [json.dumps(q.get(c), ensure_ascii=False) if c in JSONB else q.get(c)
                   for c in 컬럼]
