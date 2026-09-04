@@ -5,7 +5,7 @@
 - 하루 무인 운전의 유일한 하드 가드는 무엇인가
 - `SUDDOE_GPU_IDLE_MIN` 을 다시 켤 때 몇 분으로 하는가
 
-## 0. 오늘 실측이 뒤집은 것 — 「비용가드 넷」은 코드에 없었다
+## 0. 오늘 실측이 뒤집은 것 — 비용가드 넷은 코드에 없었다
 
 `내일_작업_3건_0904.md`·`8-3_GPU.md` 가 적은 "동시 팟 1 · 하루 깨우기 3회 · 수명 1시간 ·
 잔액 경보"는 **정책 문장이었지 코드가 아니었다**(2026-09-04 코드 읽기 확인).
@@ -17,7 +17,7 @@
 | 수명 1시간 | `scripts/runpod_pod.py open --hours` 뿐 (수동 오픈 전용, 이 워치독과 다른 경로) | 그대로 — 자동-wake 경로엔 아직 없음 |
 | 잔액 경보 | 없음 | **서버 프로세스에서 구현 불가로 확정.** 아래 §3 |
 
-## 0-1. 🔴 운영엔 `RUNPOD_API_KEY`·`RUNPOD_POD_ID` 가 아예 없다 — 그게 헬스체크를 가렸다
+## 0-1. 운영엔 `RUNPOD_API_KEY`·`RUNPOD_POD_ID` 가 아예 없다 — 그게 헬스체크를 가렸다
 
 2026-09-04 `gcloud run services describe suddoe-api --region=asia-northeast3` 로 직접 확인:
 env 도 secretRef 도 `RUNPOD_API_KEY`·`RUNPOD_POD_ID` 를 안 싣는다(`VLLM_URL`·`SUDDOE_DSN`·
@@ -27,7 +27,7 @@ env 도 secretRef 도 `RUNPOD_API_KEY`·`RUNPOD_POD_ID` 를 안 싣는다(`VLLM_
 **원인 사슬** (ai-d7/Q1 이 2026-09-04 운영에서 잡은 증상이 계기다 — `/api/gpu/status` 가
 `상태:가동` 인데 `/api/normalize`·`/api/judge` 는 전부 `LLM실패`/`판단불가` 였다):
 
-```
+```text
 RUNPOD_API_KEY 없음 → 팟제어.가능=False → _팟상태 는 영원히 알수없음
   → 현황() 이 프론트 3값 계약(가동|중지|기동중) 을 지키려고 알수없음→가동 으로 접는다
   → /status 는 팟이 완전히 죽어도 「가동」 을 준다
@@ -35,7 +35,7 @@ RUNPOD_API_KEY 없음 → 팟제어.가능=False → _팟상태 는 영원히 �
 
 **처방**: `현황()` 에 `vLLM_응답` 필드를 추가했다 — `제어.가능`·`활성` 과 **무관하게** vLLM
 `/health` 를 직접 물어서 얹는다(`검사주기초`=60s 캐시, HTTP 는 락 밖에서 — `/status` 는
-프론트 폴링 핫패스라 지연이 다른 요청을 막으면 안 된다). 「상태」 3값 계약 자체는 안 건드렸다
+프론트 폴링 핫패스라 지연이 다른 요청을 막으면 안 된다). 상태 3값 계약 자체는 안 건드렸다
 — `상태:가동`·`vLLM_응답:false` 조합이 바로 이 사각지대의 신호다. `tests/test_gpu_watchdog.py`
 가 제어불가 상황에서도 이 필드가 채워지는지 확인한다.
 
@@ -61,7 +61,7 @@ Cloud Run 타임아웃에 먼저 끊긴다(`server/main.py:592·695` 가 그 자
 `SUDDOE_GPU_WAKE_DAILY_CAP`(기본 3, UTC 자정 리셋). 한도를 넘으면 `제어.시작()` 을
 **아예 안 부른다** — RunPod 에 쏘고 실패하는 게 아니라 시도 자체를 안 한다. 팟상태는
 `중지` 로 남고 `게이트()` 가 판단불가로 닫는다. 이미 가동 중인 팟을 계속 쓰는 것,
-이미 기동중인 상태를 폴링하는 것은 캡을 안 먹는다 — «새 stop→start 왕복» 만 센다.
+이미 기동중인 상태를 폴링하는 것은 캡을 안 먹는다. 새 stop→start 왕복만 센다.
 
 🔴 **오늘 QA 리허설·테스터 여럿이 15분 넘게 쉬었다 다시 들어오는 패턴이 반복되면
 3회는 금방 찬다.** 오너·중앙이 QA 창 동안만 캡을 올릴지(예: 8) 판단할 것 — 이 문서는
@@ -71,10 +71,12 @@ Cloud Run 타임아웃에 먼저 끊긴다(`server/main.py:592·695` 가 그 자
 
 2026-09-04 `https://rest.runpod.io/v1/openapi.json` 대조: REST v1 에 `/user`·잔액
 엔드포인트가 **없다**. `/billing/pods`·`/billing/endpoints`·`/billing/networkvolumes`
-뿐이고 전부 과거 사용량이지 «지금 잔액» 이 아니다. `scripts/runpod_pod.py:cmd_close`
-가 잔액을 찍는 건 `runpodctl user`(GraphQL 경유, CLI 전용)다 — 그 바이너리는 배포
-이미지에 없다. → **잔액 관찰은 사람이 로컬에서 `runpod_pod.py ls`/`close` 로 하는 것이
-정본**이다. `server/gpu_watchdog.py::팟제어.잔액()` 은 이유를 남기고 항상 `None`.
+뿐이고 전부 과거 사용량이다. 지금 잔액이 아니다.
+
+`scripts/runpod_pod.py:cmd_close` 가 잔액을 찍는 건 `runpodctl user` 다(GraphQL 경유, CLI 전용).
+그 바이너리는 배포 이미지에 없다.
+
+**잔액 관찰은 사람이 로컬에서 `runpod_pod.py ls`/`close` 로 하는 것이 정본이다.** `server/gpu_watchdog.py::팟제어.잔액()` 은 이유를 남기고 항상 `None`.
 
 ## 4. 다중 인스턴스 유휴 판단 — 아직 못 닫은 구멍
 
@@ -93,7 +95,7 @@ Cloud Run 타임아웃에 먼저 끊긴다(`server/main.py:592·695` 가 그 자
 
 ## 6. QA 당일 사전 기동 운용안
 
-```
+```text
 시작 20분 전  runpod_pod.py ls 로 팟 0개 확인 → 팟 생성(볼륨 fv5cl1y1ww, US-KS-2)
               → pod_serve.sh 로 vLLM 기동 → /v1/models 로 max_model_len=40960 확인
 시작 5분 전   더미 호출 1회(워밍업) → /api/gpu/status 로 「가동」 확인
