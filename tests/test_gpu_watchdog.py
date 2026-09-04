@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -319,6 +320,51 @@ def test_현황에_vllm_응답_필드가_있다_제어불가_상황에서도():
     확인("제어불가라도 vLLM_응답 필드가 채워진다", 현황["vLLM_응답"] is False)
     확인("«상태» 는 여전히 가동으로 접힌다(계약 안 건드림) — 그래서 vLLM_응답이 필요하다",
         현황["상태"] == gw.가동)
+
+
+def test_실제_vllm_준비는_UserAgent를_싣는다():
+    """🔴 2026-09-04 GPU 창 실측 회귀 — RunPod 앞단 Cloudflare 가 기본 urllib UA
+    (`Python-urllib/3.x`)를 봇으로 읽어 403(1010)으로 끊는다(`normalize_run.py:90`·
+    `adapter.py:207` 과 같은 자리, 여기가 세 번째였다). UA 없이 다시 퇴행하면 이 테스트가
+    잡는다 — 실제 네트워크는 안 쓴다, urlopen 호출만 가로챈다."""
+    잡힌_요청 = {}
+
+    class 가짜응답:
+        status = 200
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    def 가짜_urlopen(req, timeout=None):
+        잡힌_요청["req"] = req
+        잡힌_요청["timeout"] = timeout
+        return 가짜응답()
+
+    with patch.object(gw.urllib.request, "urlopen", side_effect=가짜_urlopen):
+        with patch.dict("os.environ", {"VLLM_URL": "https://example-proxy.runpod.net"}):
+            결과 = gw._vllm_준비()
+
+    확인("헬스체크는 True 를 돌려준다(가짜 200)", 결과 is True)
+    요청 = 잡힌_요청["req"]
+    확인("Request 객체를 쓴다(맨 url 문자열이 아니라 — 헤더를 실으려면 필수)",
+        isinstance(요청, gw.urllib.request.Request))
+    확인("User-Agent 헤더가 실린다", 요청.get_header("User-agent") not in (None, ""))
+    확인("URL 이 /health 로 끝난다", 요청.full_url.endswith("/health"))
+
+
+def test_vllm_준비_실패는_이제_로그로_남는다(caplog):
+    """전엔 `except Exception: return False` 로 사유가 통째로 삼켜졌다 — 그래서
+    운영에서 «왜» false 인지 아무도 몰랐다. 이제 경고 로그에 사유가 남는지 확인한다."""
+    def 터지는_urlopen(req, timeout=None):
+        raise TimeoutError("simulated timeout")
+
+    with patch.object(gw.urllib.request, "urlopen", side_effect=터지는_urlopen):
+        with patch.dict("os.environ", {"VLLM_URL": "https://example-proxy.runpod.net"}):
+            import logging
+            with caplog.at_level(logging.WARNING, logger="suddoe.gpu"):
+                결과 = gw._vllm_준비()
+
+    확인("실패하면 False", 결과 is False)
+    확인("경고 로그에 예외 종류가 찍힌다", any("TimeoutError" in r.message for r in caplog.records))
 
 
 # ════════════════════════════════════════════════════════════════════

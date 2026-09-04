@@ -34,6 +34,13 @@ set -euo pipefail
 VENV=/workspace/venv
 export HF_HOME=/workspace/hf
 export VLLM_USE_V1=1
+# 🔴 2026-09-04 무인 2단계 실측 — torch.compile 캐시가 기본 `~/.cache/vllm`(컨테이너
+# 루트, 휘발)에 있어 stop→start 마다 컴파일을 매번 새로 했다(볼륨 팟에서 89초 실측).
+# `VLLM_CACHE_ROOT` 는 vLLM 이 실제로 읽는 진짜 env var 다(`python -c
+# "import vllm.envs as e; print(e.VLLM_CACHE_ROOT)"` 로 확인, 기본값이 그 경로였다).
+# 볼륨으로 옮기면 재기동마다 캐시를 재사용해 무인 자동 재기동이 빨라질 것으로 기대한다
+# — 아직 «두 번째 재기동이 실제로 짧아지는지»는 검증 전이다(다음 재기동에서 확인).
+export VLLM_CACHE_ROOT=/workspace/vllm_cache
 
 MAX_MODEL_LEN="${MAX_MODEL_LEN:-40960}"
 REASONING_PARSER="${REASONING_PARSER-qwen3}"   # 🔴 `:-` 가 아니라 `-` 다. `:-` 면 REASONING_PARSER="" 로도 파서를 못 뺀다
