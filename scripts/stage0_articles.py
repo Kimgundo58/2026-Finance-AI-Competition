@@ -12,7 +12,7 @@
 from __future__ import annotations
 import re
 
-import table_splice  # noqa: E402  [참고N]/[붙임N] 표 섹션을 _tables.json 으로 갈아끼운다
+import table_splice  # noqa: E402  [참고N]/[붙임N] «오염된» 표 섹션만 _tables.json 으로 갈아끼운다
 
 # 1순위: 제N조(제목) — 법령·지침·규정·규칙
 RE_JO = re.compile(r"제\s*(\d+)\s*조(?:\s*의\s*(\d+))?\s*\(([^)\n]{1,50})\)")
@@ -255,10 +255,12 @@ def split_articles(text: str, page_offsets: dict[int, int] | None = None,
                     doc_id: str | None = None) -> tuple[list[dict], str]:
     """반환: (조 리스트, 사용한 전략 이름)
 
-    🔴 `doc_id`(2026-09-04 추가) — 주면 [참고N]/[붙임N] 표 섹션의 본문을
-       `_tables.json`(Stage 0-T 셀 단위 추출)로 갈아끼운다. 그 라벨의 표가 없으면
-       원문을 그대로 둔다 — `table_splice.붙임_교체()` 문서 참조. `doc_id` 를 안 주면
-       (기존 호출부 그대로) 이 전까지와 완전히 동일하게 동작한다(회귀 없음).
+    🔴 `doc_id`(2026-09-04 추가) — 주면 [참고N]/[붙임N] 조 중 **오염된 것만**
+       `_tables.json`(Stage 0-T 셀 단위 추출)로 갈아끼운다. 오염 판정은 조 단위로
+       기계가 한다(`table_splice.오염됐나()` — 세로 한 글자 줄 3+회) — 어느 라벨이
+       깨졌는지 사람이 미리 단정하지 않는다. 오염이 없거나 표가 없으면 원문을
+       그대로 둔다 — `table_splice.붙임_교체()` 문서 참조. `doc_id` 를 안 주면
+       (기존 호출부 그대로) 이전과 완전히 동일하게 동작한다(회귀 없음).
     """
     text = _clean(text)
     page_offsets = dict(sorted((page_offsets or {}).items()))
