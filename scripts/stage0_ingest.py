@@ -138,7 +138,7 @@ def main():
                     strategy, raw_text = "xml_native", "\n".join(a["본문"] for a in arts)
                 else:
                     raw_text, page_offsets = payload
-                    arts, strategy = split_articles(raw_text, page_offsets)
+                    arts, strategy = split_articles(raw_text, page_offsets, doc_id=doc_id)
 
                 v = validate(arts, strategy)
                 if not v["ok"]:
