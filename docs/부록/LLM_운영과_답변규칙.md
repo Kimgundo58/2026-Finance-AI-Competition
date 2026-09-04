@@ -54,7 +54,7 @@ DC 교차표·명령·비용·함정은 **`GPU Guideline.md`** 가 정본.
 
 ## 2. 어댑터
 
-```
+```text
                     판정 오케스트레이터
                            |
                     LLMAdapter.complete(msgs, schema)
