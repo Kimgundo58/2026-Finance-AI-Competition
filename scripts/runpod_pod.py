@@ -77,7 +77,18 @@ def rp(*args: str, check: bool = True) -> dict | list:
 
 
 def pods_live() -> list[dict]:
+    """`pod list` 기본값 — **가동 중인 것만.** 비용 표시용이다(정지된 팟은 GPU 요금이 안 붙는다)."""
     d = rp("pod", "list")
+    return d if isinstance(d, list) else (d or {}).get("pods") or []
+
+
+def pods_all() -> list[dict]:
+    """🔴 2026-09-04 실측 버그 수정 — `pod list`(--all 없이) 는 **정지된 팟을 안 보여준다.**
+    `cmd_ls` 의 고스트 정리가 이걸로 `live` 를 대조했더니, 완전 무인 검증으로 «의도적으로
+    정지시킨» 팟(`5ofl00dpzidchp`, RUNPOD_POD_ID 로 고정해 계속 쓸 것)이 "실물이 없다" 로
+    오판돼 대장에서 지워졌다 — 무인 운전 중인 팟이 하루에도 여러 번 이렇게 «사라질» 수
+    있다는 뜻이라 위험하다. 존재 여부 판단은 반드시 이 함수(`--all`)로 한다."""
+    d = rp("pod", "list", "--all")
     return d if isinstance(d, list) else (d or {}).get("pods") or []
 
 
@@ -169,7 +180,10 @@ def cmd_ls(args) -> None:
             print(f"🔴 대장에 없는 팟 {len(stray)}개: {stray}")
             print("   이 스크립트를 거치지 않고 열렸거나, 대장이 지워졌다. 필요 없으면 닫을 것.")
 
-    ghosts = [i for i in led if i not in {p.get("id") for p in live}]
+    # 🔴 `live`(가동중만) 이 아니라 `pods_all()`(정지 포함) 로 존재 여부를 본다 —
+    #    정지된 팟을 "실물 없음" 으로 오판해 대장에서 지우면 안 된다(무인 운전이 그 상태다)
+    존재 = {p.get("id") for p in pods_all()}
+    ghosts = [i for i in led if i not in 존재]
     if ghosts:
         print(f"\n대장에만 있고 실물이 없는 항목 {len(ghosts)}개 — 정리한다: {ghosts}")
         for i in ghosts:
