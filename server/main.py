@@ -548,8 +548,16 @@ def _설정_해시(강제새로: bool = False) -> str:
     """캐시 무효화 축. 코퍼스·룰이 바뀌면 이 값이 바뀌어 캐시 조회가 미스로 본다.
 
     `scripts/eval_store.코퍼스버전()` 과 같은 발상(청크수·임베딩수·refs수·문서수·
-    최대chunk_id)에 룰 축(룰수·검수룰수)을 더했다 — 캐시는 룰 재검수도 알아야 한다.
+    최대chunk_id)에 룰 축을 더했다 — 캐시는 룰 재검수도 알아야 한다.
     조건이 다른 run 을 안 섞는 것과 같은 이유다(CLAUDE.md 「지표를 읽을 때」).
+
+    🔴 **2026-09-04 정정(ai-c5 지적) — 룰 축이 처음엔 개수 둘(룰수·검수룰수)뿐이었다.**
+       그러면 **칸 단위 UPDATE**(행수·verified 는 그대로 두고 `금지예시`·`허용` 같은
+       내용만 고치는 수정 — rule 440 「틀린 불가」 수정이 정확히 이 모양이다)는
+       해시를 안 바꾼다 → 캐시가 계속 적중 → **룰을 고쳐도 프론트는 옛 판정을 계속 본다.**
+       그래서 판정에 실제로 쓰이는 컬럼 전부를 rule_id 순으로 이어붙여 md5 한다
+       (`corpus.rules` 실측 컬럼명 — 배열은 `array_to_string`, `근거` 는 jsonb 라 `::text`).
+       한 칸만 바뀌어도 이 문자열이 달라진다 — 개수 축과 다른 자리다.
     🔴 TTL 로 캐시한다 — 다른 `_*_캐시` 들과 같은 이유(요청당 새 psycopg 접속 25ms).
        DB 를 못 읽으면 `"unknown"` 을 주고 **캐시하지 않는다** — DB 가 돌아오면
        바로 다시 잰다. `unknown` 으로 저장된 캐시 행은 없다(넣기 전에 매번 다시 잰다).
@@ -565,12 +573,24 @@ def _설정_해시(강제새로: bool = False) -> str:
                         (SELECT count(*) FROM corpus.documents),
                         (SELECT coalesce(max(chunk_id), 0) FROM corpus.chunks),
                         (SELECT count(*) FROM corpus.rules),
-                        (SELECT count(*) FILTER (WHERE verified) FROM corpus.rules)""")
+                        (SELECT count(*) FILTER (WHERE verified) FROM corpus.rules),
+                        (SELECT coalesce(md5(string_agg(
+                             rule_id::text || '|' || coalesce("사업명",'') || '|' ||
+                             coalesce(비목,'') || '|' || 허용 || '|' ||
+                             사전승인::text || '|' || coalesce(사전승인_조건,'') || '|' ||
+                             coalesce(한도_유형,'') || '|' || coalesce(한도_값::text,'') || '|' ||
+                             coalesce(한도_단위,'') || '|' ||
+                             coalesce(array_to_string(증빙,'~'),'') || '|' ||
+                             coalesce(array_to_string(금지예시,'~'),'') || '|' ||
+                             coalesce(array_to_string(허용예시,'~'),'') || '|' ||
+                             근거::text || '|' || verified::text,
+                             '#' ORDER BY rule_id)), 'empty')
+                         FROM corpus.rules)""")
     if not 행:
         return "unknown"
     n = 행[0]
     h = hashlib.sha1("|".join(map(str, n)).encode()).hexdigest()[:10]
-    값 = f"c{n[0]}-e{n[1]}-r{n[2]}-d{n[3]}-rule{n[5]}v{n[6]}-{h}"
+    값 = f"c{n[0]}-e{n[1]}-r{n[2]}-d{n[3]}-rule{n[5]}v{n[6]}-rc{str(n[7])[:8]}-{h}"
     _설정_해시_캐시 = (time.time(), 값)
     return 값
 
