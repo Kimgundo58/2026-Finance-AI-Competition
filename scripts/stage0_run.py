@@ -236,10 +236,10 @@ def 분해(path: Path, layer: str | None = None) -> tuple[list[dict], str]:
     #    2단·4분면 조판 해소도 이 경로에만 있다.
     if path.suffix.lower() == ".pdf":
         text, meta = pdftext.extract_meta(path)
-        return split_articles(text, meta.get("page_offsets") or {})
+        return split_articles(text, meta.get("page_offsets") or {}, doc_id=path.stem)
 
     _, (text, offsets) = extract(path)
-    return split_articles(text, offsets)
+    return split_articles(text, offsets, doc_id=path.stem)
 
 
 def main() -> None:

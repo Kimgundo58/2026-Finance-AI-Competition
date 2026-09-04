@@ -12,6 +12,8 @@
 from __future__ import annotations
 import re
 
+import table_splice  # noqa: E402  [참고N]/[붙임N] 표 섹션을 _tables.json 으로 갈아끼운다
+
 # 1순위: 제N조(제목) — 법령·지침·규정·규칙
 RE_JO = re.compile(r"제\s*(\d+)\s*조(?:\s*의\s*(\d+))?\s*\(([^)\n]{1,50})\)")
 # 1순위 보조: 제목 없는 제N조
@@ -249,12 +251,20 @@ def _roman_chapters(text: str, page_offsets: dict[int, int]) -> list[dict]:
 _단락_최소 = 100
 
 
-def split_articles(text: str, page_offsets: dict[int, int] | None = None) -> tuple[list[dict], str]:
-    """반환: (조 리스트, 사용한 전략 이름)"""
+def split_articles(text: str, page_offsets: dict[int, int] | None = None,
+                    doc_id: str | None = None) -> tuple[list[dict], str]:
+    """반환: (조 리스트, 사용한 전략 이름)
+
+    🔴 `doc_id`(2026-09-04 추가) — 주면 [참고N]/[붙임N] 표 섹션의 본문을
+       `_tables.json`(Stage 0-T 셀 단위 추출)로 갈아끼운다. 그 라벨의 표가 없으면
+       원문을 그대로 둔다 — `table_splice.붙임_교체()` 문서 참조. `doc_id` 를 안 주면
+       (기존 호출부 그대로) 이 전까지와 완전히 동일하게 동작한다(회귀 없음).
+    """
     text = _clean(text)
     page_offsets = dict(sorted((page_offsets or {}).items()))
 
     본칙, 부칙, 붙임들, base = _cut_sections(text)
+    붙임들 = table_splice.붙임_교체(doc_id, 붙임들)
 
     # ── 1순위: 제N조(제목) ──────────────────────────────────────
     ms = [m for m in RE_JO.finditer(본칙) if not _is_citation(본칙, m.start(), m.end())]
