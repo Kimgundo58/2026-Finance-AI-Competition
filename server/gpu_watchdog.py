@@ -202,11 +202,23 @@ def 기본제어() -> 팟제어:
 
 
 def _vllm_준비() -> bool:
+    """🔴 2026-09-04 GPU 창 실측 — `vLLM_응답` 이 팟이 멀쩡한데도 계속 `false` 였다.
+    원인은 **User-Agent 누락**이다. RunPod `*.proxy.runpod.net` 앞단 Cloudflare 가
+    `Python-urllib/3.x`(기본 UA)를 봇으로 읽어 403(code 1010)으로 끊는다 — 이 프로젝트가
+    이미 두 번 겪은 자리다(`normalize_run.py:90` 2026-09-01 실측, `adapter.py:207` 2026-09-03
+    ai-98 실측 — 그때는 `/admin/warmup` 이 죽었다). 여기가 **세 번째**였다. 판정 호출
+    (`normalize_run.llm_호출`)이 되는데 이 헬스체크만 `false` 인 게 그 증거였다 — 같은
+    프록시에 UA 있는 요청은 통과하고 없는 요청만 막힌 것.
+    타임아웃도 5→10 으로 넉넉히 준다(비용 없음 — 검사주기초 만큼만 캐시되는 자리라
+    호출 빈도가 낮다). 실패 사유는 이제 로그에 남는다 — 다음에 또 `false` 가 나오면
+    추측하지 않고 로그를 본다."""
     url = os.environ.get("VLLM_URL", "http://localhost:8000").rstrip("/") + "/health"
+    req = urllib.request.Request(url, headers={"User-Agent": "suddoe-gpu/1.0"})
     try:
-        with urllib.request.urlopen(url, timeout=5) as r:
+        with urllib.request.urlopen(req, timeout=10) as r:
             return 200 <= r.status < 300
-    except Exception:                                             # noqa: BLE001
+    except Exception as e:                                        # noqa: BLE001
+        _log.warning("vLLM 헬스체크 실패 — %s: %s (url=%s)", type(e).__name__, e, url)
         return False
 
 
