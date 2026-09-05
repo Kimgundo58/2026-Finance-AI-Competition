@@ -32,6 +32,8 @@ if (sys.stdout.encoding or "").lower().replace("-", "") != "utf8":
 
 ROOT = Path(__file__).resolve().parent.parent
 용어사전_경로 = ROOT / "2026_Finance_DATA_FOR_RAG" / "_비목_어휘집.json"
+# 🔴 어휘집과 «다른 파일» 이다. 어휘집은 build_item_vocab.py 가 통째로 덮어쓴다
+비목정의_경로 = ROOT / "2026_Finance_DATA_FOR_RAG" / "_비목_정의.json"
 
 # ════════════════════════════════════════════════════════════════════════════
 # 폐쇄 목록
@@ -54,6 +56,28 @@ def 비목_enum(경로: Path | None = None) -> list[str]:
     if 대기:
         print(f"⚠️ 어휘집 enum_검수대기 {len(대기)}종 — 정본 확정 전이다", file=sys.stderr)
     return list(v["guided_json_enum"])
+
+
+def 비목_정의(경로: Path | None = None) -> dict[str, str]:
+    """비목 이름 -> 정의 한 줄. 정규화(①) 프롬프트 «설명» 전용이다.
+
+    🔴 `guided_json` enum 은 이 파일을 «보지 않는다». 폐쇄 목록의 기준 문서는
+    여전히 `_비목_어휘집.json` 하나다 — 여기서 정의가 빠지거나 늘어도 모델이
+    고를 수 있는 값은 안 변한다. 설명이 느는 것뿐이다.
+
+    🔴 왜 `_비목_어휘집.json` 에 「정의」 키를 더하지 «않았나». 그 파일은
+    `scripts/archive/indexing/build_item_vocab.py` 가 생성한다. 그 스크립트는 `doc` 를
+    새로 짜서 `write_text` 로 통째로 덮어쓴다(build_item_vocab.py:388) — 손으로 더한
+    키는 다음 재생성 때 «조용히» 사라진다. 그래서 별도 파일로 뺐다.
+
+    파일이 없으면 빈 dict 를 돌려준다. 정의는 «있으면 좋은 것» 이지 없다고 정규화가
+    죽어야 할 것이 아니다 — 호출자가 이름만으로 된 종전 프롬프트로 돌아간다.
+    """
+    p = 경로 or 비목정의_경로
+    if not p.exists():
+        print(f"⚠️ 비목 정의 파일이 없다: {p} — 이름만으로 프롬프트를 만든다", file=sys.stderr)
+        return {}
+    return dict(json.loads(p.read_text(encoding="utf-8"))["정의"])
 
 
 # ════════════════════════════════════════════════════════════════════════════
