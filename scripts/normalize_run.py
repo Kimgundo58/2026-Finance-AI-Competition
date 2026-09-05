@@ -103,11 +103,21 @@ def llm_호출(프롬프트: str, 스키마: dict | None, *,
             # 🔴 파서가 갈라 준 경우 `reasoning_content` 에 사고가 들어가고
             #    `content` 는 이미 깨끗하다. 안 갈라진 경우만 여기서 걷어낸다.
             내용, 사고사실 = 사고흔적_걷기(내용)
+            # 🔴 F1(레인F, 2026-09-05) — **정상 분리된 사고는 지금까지 한 번도 안 쟀다.**
+            #    `사고흔적_걷기()` 는 `content` 안에 `<think>` 가 «섞여 들어온»(파서 실패)
+            #    경우만 본다. `--reasoning-parser qwen3` 가 정상 동작하면 사고는
+            #    `reasoning_content` 로 깨끗이 갈라지는데, 그 경우는 위 사고사실이
+            #    항상 {있음:False, 길이:0} 으로 찍혀 「사고를 안 했다」로 잘못 읽힌다.
+            #    완료토큰 예산(`max_tokens`)은 이 필드와 무관하게 똑같이 먹히므로
+            #    (사고도 생성 토큰이다) 이 길이를 안 재면 F1 의 분포 자체가 반쪽이다.
+            추론content = _메시지.get("reasoning_content") or ""
             메타 = {"지연ms": int((time.time() - t) * 1000),
                    "토큰": d.get("usage", {}),
                    "종료이유": d["choices"][0].get("finish_reason"),
                    "모델": 본문["model"], "재시도": 회차,
-                   **사고사실}
+                   **사고사실,
+                   "추론content있음": bool(추론content),
+                   "추론content길이": len(추론content)}
             if 스키마 is None:
                 return 내용, 메타
             try:

@@ -193,8 +193,27 @@ class RunPod팟(팟제어):
             return False
 
 
+def _팟id() -> str:
+    """`ops.gpu_pod.pod_id` 우선 · `RUNPOD_POD_ID` env 폴백 (2026-09-05).
+
+    🔴 env 만 보던 때의 실패가 이거다 — 2026-09-05 실측에서 `RUNPOD_POD_ID` 가
+       이미 terminate 된 팟(`5ofl00dpzidchp`)을 가리키고 있었고, `wake` 는
+       `POST /pods/{id}/start`(**정지된 팟을 켜는** 동작)뿐이라 켤 대상이 없었다.
+       DB 를 보게 하면 팟이 바뀌어도 Cloud Run 재배포가 필요 없다.
+    """
+    try:
+        from _lib import db                                       # noqa: PLC0415
+        with db.connect() as conn:
+            r = conn.execute("SELECT pod_id FROM ops.gpu_pod WHERE id='default'").fetchone()
+        if r and r[0]:
+            return str(r[0])
+    except Exception:                                             # noqa: BLE001
+        pass                # 스키마 미적용·DB 없음 — env 로 간다 (되돌릴 수 있어야 한다)
+    return os.environ.get("RUNPOD_POD_ID", "")
+
+
 def 기본제어() -> 팟제어:
-    키, 팟 = os.environ.get("RUNPOD_API_KEY", ""), os.environ.get("RUNPOD_POD_ID", "")
+    키, 팟 = os.environ.get("RUNPOD_API_KEY", ""), _팟id()
     if not 키 or not 팟:
         _log.info("GPU 워치독: 제어 불가 (키·팟id 없음) — 상태만 보고하고 끄지 않는다")
         return 팟제어()
@@ -212,7 +231,15 @@ def _vllm_준비() -> bool:
     타임아웃도 5→10 으로 넉넉히 준다(비용 없음 — 검사주기초 만큼만 캐시되는 자리라
     호출 빈도가 낮다). 실패 사유는 이제 로그에 남는다 — 다음에 또 `false` 가 나오면
     추측하지 않고 로그를 본다."""
-    url = os.environ.get("VLLM_URL", "http://localhost:8000").rstrip("/") + "/health"
+    # 🔴 주소는 `adapter.vllm_url()` 로 얻는다 — `ops.gpu_pod` 우선 · env 폴백 (2026-09-05).
+    #    판정 경로(`adapter.LocalVLLM`)와 **같은 주소**를 봐야 한다. 갈리면 「팟은 가동인데
+    #    모델은 죽어있다」를 감추던 09-04 사고가 다른 모양으로 되살아난다.
+    try:
+        from adapter import vllm_url                              # noqa: PLC0415
+        base = vllm_url()
+    except Exception:                                             # noqa: BLE001
+        base = os.environ.get("VLLM_URL", "http://localhost:8000")
+    url = base.rstrip("/") + "/health"
     req = urllib.request.Request(url, headers={"User-Agent": "suddoe-gpu/1.0"})
     try:
         with urllib.request.urlopen(req, timeout=10) as r:
