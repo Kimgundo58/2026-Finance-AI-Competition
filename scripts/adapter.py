@@ -175,9 +175,46 @@ def 사고흔적_걷기(내용: str | None) -> tuple[str, dict]:
     return 내용, 사실
 
 
+# ── vLLM 주소 해석 — `ops.gpu_pod` 우선 · env 폴백 ─────────────────────────────
+# 🔴 왜 DB 인가 (`db/init/14_gpu_pod.sql`): 팟을 새로 열면 프록시 주소가 바뀌는데
+#    `VLLM_URL` 이 Cloud Run 환경변수라 고치려면 **재배포**가 필요했다. 그러면
+#    「GPU 가 혼자 켜진다」가 사람 손을 또 부른다. 2026-09-05 실측에서 실제로
+#    `RUNPOD_POD_ID` 가 이미 terminate 된 팟을 가리키고 있었다.
+#
+# 🔴 **매 호출마다 DB 를 왕복하지 않는다.** 판정 1건이 지금 92초인데 그걸 줄이는 게
+#    이 작업의 목적이라, 여기서 왕복을 늘리면 앞뒤가 안 맞는다. TTL 캐시를 둔다.
+# 🔴 **env 폴백을 반드시 남긴다.** 행이 없거나 `vllm_url` 이 NULL 이면 지금 동작 그대로다.
+#    SQL 파일 주석의 지시이기도 하고, 되돌릴 수 있어야 배선을 믿을 수 있다.
+_URL캐시: dict[str, object] = {"값": None, "시각": 0.0}
+_URL_TTL = float(os.environ.get("SUDDOE_VLLM_URL_TTL", "30"))
+
+
+def vllm_url(*, 강제갱신: bool = False) -> str:
+    """`ops.gpu_pod.vllm_url` → 없으면 `VLLM_URL` env → 없으면 localhost."""
+    env폴백 = os.environ.get("VLLM_URL", "http://localhost:8000")
+    now = time.time()
+    if not 강제갱신 and _URL캐시["값"] and now - float(_URL캐시["시각"]) < _URL_TTL:
+        return str(_URL캐시["값"])
+    값 = env폴백
+    try:
+        with db.connect() as conn:
+            r = conn.execute("SELECT vllm_url FROM ops.gpu_pod WHERE id='default'").fetchone()
+        if r and r[0]:
+            값 = str(r[0]).rstrip("/")
+    except Exception:                                    # noqa: BLE001
+        # 🔴 DB 가 없거나 표가 없어도 «판정이 죽으면» 안 된다. 조용히 env 로 간다.
+        #    (스키마 미적용 환경·로컬 테스트·마이그레이션 전 배포가 전부 여기로 온다)
+        값 = env폴백
+    _URL캐시["값"], _URL캐시["시각"] = 값, now
+    return 값
+
+
 @dataclass
 class LocalVLLM(제공자):
     """자체/임대 GPU 의 vLLM (OpenAI 호환).
+
+    🔴 주소는 `vllm_url()` 로 얻는다 — `ops.gpu_pod` 우선, 없으면 env 폴백.
+       팟을 새로 열 때마다 Cloud Run 을 재배포하지 않으려는 것이다 (`db/init/14_gpu_pod.sql`).
 
     ⚠️ RunPod 는 3자 하드웨어지만 **외부 API 제공자가 아니다.** 우리가 띄운 프로세스에
        우리가 HTTP 를 친다. `LLM.md` §1 이 "제출본·데모는 테스트 데이터만 다루므로
@@ -188,7 +225,7 @@ class LocalVLLM(제공자):
     외부: bool = field(default_factory=lambda:
                        os.environ.get("SUDDOE_VLLM_SELF_HOSTED", "1") != "1")
     활성: bool = True
-    url: str = field(default_factory=lambda: os.environ.get("VLLM_URL", "http://localhost:8000"))
+    url: str = field(default_factory=lambda: vllm_url())
 
     def 호출(self, 프롬프트, 스키마, s, *, 온도, 타임아웃):
         본문 = {

@@ -458,8 +458,18 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool 
        격리근거: list[dict] | None = None, 주입: str | None = None,
        게이트임계: float | None = None, 온도: float = 0.0,
        변형: str = "V0", _비목고정: str | None = None,
-       정규화결과: dict | None = None) -> dict:
+       정규화결과: dict | None = None,
+       폐포사용: bool = True) -> dict:
     """(1)~(7). 동결 인터페이스 — 시그니처를 협의 없이 바꾸지 않는다.
+
+    `폐포사용`: **A1(레인A, 2026-09-05) — 기본값이 현행 동작인 키워드 전용 스위치.**
+                False 면 (4) 조립에 B3(참조 확장·폐포)을 안 넣는다. 실측(오늘 92초 중
+                판정LLM 66초 · 그중 프롬프트 26,115자의 76.4%가 B3)에서 폐포가 지연의
+                주범으로 보이는데, 폐포가 정확도에 얼마나 기여하는지 잰 적이 없어서
+                **재려고** 만든 스위치다 — 끄는 게 목적이 아니라 on/off 를 비교하는 게 목적.
+                🔴 `검색()` 은 그대로 폐포를 계산해 돌려준다(C 의 자리라 안 건드린다).
+                여기서는 **조립에 넘기지만 않는다** — top5·게이트값·참조사슬은 전부 그대로다.
+                True(기본)면 이 스위치를 넣기 전과 바이트 단위로 같다.
 
     `dry=True` : LLM 을 부르지 않는다. (1) 은 규칙 정규화, (4) 는 프롬프트 조립까지만.
                  **GPU 를 열기 전에 77문항이 끝까지 도는지** 보는 것이 목적이다.
@@ -607,7 +617,10 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool 
                     #    아니다. 안 물려주면 재귀 안에서 (1)이 또 돌아 품목이 미세하게
                     #    달라진다(:520 주석이 그 사고를 적어 둔 자리다). 물려주면
                     #    갈래 2개당 LLM 2회도 같이 준다. None 이면 종전과 같다.
-                        정규화결과=정규화결과)
+                        정규화결과=정규화결과,
+                        # 🔴 A1: 안 물려주면 갈래 재귀가 기본값(True)으로 되돌아가
+                        #    부모가 끈 폐포가 자식 갈래에서 도로 켜진다.
+                        폐포사용=폐포사용)
                 r["비목"] = c["비목"]
                 결과.append(r)
             응답 = dict(결과[0])
@@ -697,7 +710,10 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool 
         t = time.time()
         프롬프트, s맵, 사슬 = 조립(cur, 질문, 정규, l3=l3본문 or None,
                         검색=검색결과["top5"] or None,
-                        폐포=검색결과["폐포"] or None,
+                        # 🔴 A1: 폐포사용=False 면 B3 을 조립에 안 넣는다. `검색()` 은
+                        #    그대로 계산해 돌려주므로 `검색결과["폐포"]`·게이트값·
+                        #    참조사슬은 스위치와 무관하게 항상 그대로다.
+                        폐포=(검색결과["폐포"] or None) if 폐포사용 else None,
                         룰결과=b4_문장(룰), f요약=b5_문장(cur, org_id),
                         참조사슬=검색결과["참조사슬"], 변형=변형, 격리근거=격리근거)
         잰다("조립", t)
@@ -718,7 +734,7 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool 
                        참조사슬=검색결과["참조사슬"], dry=True,
                        프롬프트길이=len(프롬프트), s맵크기=len(s맵),
                        s맵={k: list(v) for k, v in s맵.items()},
-                       b4=bool(룰), b1=len(l3본문),
+                       b4=bool(룰), b1=len(l3본문), 폐포사용=폐포사용,
                        지연ms={**지연, "총": int((time.time() - t0) * 1000)},
                        모델={"호출수": 0})
             return _마무리(conn, cur, 응답, 기록=False, 닫기=닫기)
@@ -784,7 +800,7 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool 
                    s맵={k: list(v) for k, v in s맵.items()},
                    유사사례=_사례(cur, 질문, 응답.get("판정")),
                    지연ms={**지연, "총": int((time.time() - t0) * 1000)},
-                   변형=변형,
+                   변형=변형, 폐포사용=폐포사용,
                    모델={"호출수": 정규화호출 + 1, "변형": 변형, "정규화": 메타1.get("모델"),
                         "판정": 메타4.get("모델"), "판정지연ms": 메타4.get("지연ms"),
                         # 🔴 잘림을 사후에 판별할 수 있게 남긴다. finish_reason=="length" 면
@@ -934,7 +950,10 @@ def main() -> None:
                     help="A12 프롬프트 변형. V0=기준선 · V1~V6 (assemble_context.변형들)")
     ap.add_argument("--eval-log", action="store_true", dest="eval_log",
                     help="eval.runs 에 기록 (D 의 eval_store 경유)")
+    ap.add_argument("--폐포", choices=["on", "off"], default="on",
+                    help="A1 — B3(참조 확장) 을 조립에 넣을지. 기본 on(기존 동작)")
     a = ap.parse_args()
+    폐포사용 = a.폐포 != "off"
 
     print(f"모듈 상태: " + " ".join(f"{k}={'실물' if v else 'STUB'}"
                                 for k, v in 모듈상태.items()), file=sys.stderr)
@@ -946,7 +965,7 @@ def main() -> None:
             # 🔴 dry 로 돈다. vLLM 없이도 5경로가 **각자 제 단계에서** 걸려야 한다 —
         #    서버가 없어서 (1) 에서 다 죽으면 아무것도 검증한 게 아니다.
             r = 판정(a.q or "노트북 200만원 구매해도 되나요", 사업명=a.사업명,
-                    dry=True, 기록=False, 주입=f)
+                    dry=True, 기록=False, 주입=f, 폐포사용=폐포사용)
             ok = r["판정"] == "판단불가"
             나쁨 += 0 if ok else 1
             print(f"{'✅' if ok else '🔴'} 주입={f:8} 판정={r['판정']:6} "
@@ -973,7 +992,8 @@ def main() -> None:
         t0 = time.time()
         for gid, 세트, q, 사업, 정답, 적용범위 in rows:
             사업키 = None if (적용범위 or (사업 or "").startswith("공통")) else 사업
-            r = 판정(q, 사업명=사업키, dry=a.dry, 기록=not a.no_log, 변형=a.변형)
+            r = 판정(q, 사업명=사업키, dry=a.dry, 기록=not a.no_log, 변형=a.변형,
+                    폐포사용=폐포사용)
             out.append({"gold_id": gid, "세트": 세트, "정답": 정답, **r})
             print(f"{gid:3} [{세트:4}] 게이트={r.get('게이트')} 경로={r.get('경로')} "
                   f"S={r.get('s맵크기', len(r.get('s맵') or {}))} "
@@ -994,7 +1014,7 @@ def main() -> None:
                 rid = _기록({"종류": "e2e",
                            "설정": {"변형": a.변형, "사업필터": 사업필터,
                                   "게이트B임계": 게이트B_임계, "dry": a.dry,
-                                  "top_k": 5, "온도": 0.0},
+                                  "top_k": 5, "온도": 0.0, "폐포사용": 폐포사용},
                            "문항수": len(out),
                            "지표": {"일치율": 일치 / n * 100, "치명오답률": 치명 / n * 100,
                                   "판단불가율": 불가 / n * 100,
@@ -1022,7 +1042,8 @@ def main() -> None:
 
     if not a.q:
         ap.error("--q · --golden · --fault 중 하나")
-    r = 판정(a.q, 사업명=a.사업명, org_id=a.org_id, dry=a.dry, 기록=not a.no_log)
+    r = 판정(a.q, 사업명=a.사업명, org_id=a.org_id, dry=a.dry, 기록=not a.no_log,
+            폐포사용=폐포사용)
     print(json.dumps(r, ensure_ascii=False, indent=2, default=str))
 
 
