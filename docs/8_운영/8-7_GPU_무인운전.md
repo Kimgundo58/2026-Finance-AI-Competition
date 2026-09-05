@@ -17,9 +17,16 @@
 | 수명 1시간 | `scripts/archive/cli/runpod_pod.py open --hours` 뿐 (수동 오픈 전용, 이 워치독과 다른 경로) | 그대로 — 자동-wake 경로엔 아직 없음 |
 | 잔액 경보 | 없음 | **서버 프로세스에서 구현 불가로 확정.** 아래 §3 |
 
-## 0-1. 운영엔 `RUNPOD_API_KEY`·`RUNPOD_POD_ID` 가 아예 없다 — 그게 헬스체크를 가렸다
+## 0-1. (2026-09-04 관측, 2026-09-05 낡음) 운영엔 키가 없었다 — 그게 헬스체크를 가렸다
 
-2026-09-04 `gcloud run services describe suddoe-api --region=asia-northeast3` 로 직접 확인:
+✅ **2026-09-05 뒤집힘.** 같은 명령(`gcloud run services describe suddoe-api
+--region=asia-northeast3 --format="value(spec.template.spec.containers[0].env)"`)으로
+재확인하니 **둘 다 secretKeyRef 로 연결돼 있다** — `RUNPOD_POD_ID=5ofl00dpzidchp` ·
+`RUNPOD_API_KEY`(시크릿) · `SUDDOE_GPU_WAKE_DAILY_CAP=8` · `SUDDOE_GPU_IDLE_MIN=15`.
+아래 09-04 관측(키 없음)과 그 원인 사슬 분석은 **당시 사실**로 남기되, 지금 상태를
+설명하지 않는다.
+
+2026-09-04 관측: `gcloud run services describe` 로 직접 확인 —
 env 도 secretRef 도 `RUNPOD_API_KEY`·`RUNPOD_POD_ID` 를 안 싣는다(`VLLM_URL`·`SUDDOE_DSN`·
 `SUDDOE_ADMIN_TOKEN` 등만 있다). `gcloud secrets list` 에도 `RUNPOD_API_KEY` 라는 이름의
 시크릿이 없다(현재 활성 프로젝트 기준 — 다른 프로젝트/계정에 있을 가능성은 남는다).
@@ -58,7 +65,7 @@ Cloud Run 타임아웃에 먼저 끊긴다(`server/main.py:592·695` 가 그 자
 
 ## 2. 하루 깨우기 캡
 
-`SUDDOE_GPU_WAKE_DAILY_CAP`(기본 3, UTC 자정 리셋). 한도를 넘으면 `제어.시작()` 을
+`SUDDOE_GPU_WAKE_DAILY_CAP`(기본 3, 운영 실측 2026-09-05 값 **8** — UTC 자정 리셋). 한도를 넘으면 `제어.시작()` 을
 **아예 안 부른다** — RunPod 에 쏘고 실패하는 게 아니라 시도 자체를 안 한다. 팟상태는
 `중지` 로 남고 `게이트()` 가 판단불가로 닫는다. 이미 가동 중인 팟을 계속 쓰는 것,
 이미 기동중인 상태를 폴링하는 것은 캡을 안 먹는다. 새 stop→start 왕복만 센다.
@@ -82,16 +89,21 @@ Cloud Run 타임아웃에 먼저 끊긴다(`server/main.py:592·695` 가 그 자
 
 `GPU워치독._마지막호출`·`_팟상태` 는 프로세스 메모리다. `maxScale 3` 이면 인스턴스마다
 따로 들고 있다 — 인스턴스 A 로 트래픽이 30분 안 오면 A 는 정지를 쏘는데, 그 순간
-인스턴스 B 가 판정을 실행 중일 수 있다. `db/init/14_gpu_pod.sql`(제안, 미적용)의
-`last_call_at` 컬럼이 이걸 닫기 위한 자리 — 코드 배선은 별도 작업, 오늘 밤 범위 아님.
+인스턴스 B 가 판정을 실행 중일 수 있다. `db/init/14_gpu_pod.sql`의 `last_call_at` 컬럼이
+이걸 닫기 위한 자리 — **코드 배선은 아직 별개로 안 됐다**(아래와 혼동 금지).
 
-## 5. `SUDDOE_GPU_IDLE_MIN` 재활성 값 제안
+✅ **팟 주소 DB 이전은 배선 완료(2026-09-05, `c0fb014`)** — `scripts/adapter.py::vllm_url()`·
+`server/gpu_watchdog.py::_팟id()` 가 `ops.gpu_pod`(id='default')를 우선 읽고 env 로 폴백한다
+(30초 캐시). 🔴 **남은 것: wake 가 새 팟을 "만드는" 경로는 아직 없다.** 지금도
+`POST /pods/{id}/start`(정지된 기존 팟 켜기)뿐이다 — 팟을 새로 만들면 여전히
+`ops.gpu_pod` 행을 사람이 갱신해야 한다.
 
-지금 0(워치독 전체 비활성) → 중앙이 v4 에서 되돌린다. 제안: **15분.**
+## 5. `SUDDOE_GPU_IDLE_MIN` 재활성 값
+
+✅ **적용됨(2026-09-05 확인) — 15분.** 제안 당시 근거:
 - 30분(기존 기본값)은 QA 세션 사이 자연스러운 휴지에도 안 꺼져 예산을 깎는다
 - 5분은 화면 읽는 시간만으로 다음 판정이 10~12분 콜드부팅을 다시 맞는다 — QA 경험을 죽인다
 - 15분은 "커피 브레이크 길이"는 견디고, 방치는 최대 15분 유휴 비용으로 막는다
-→ 최종 값은 오너·중앙 결정. 근거만 여기 남긴다.
 
 ## 6. QA 당일 사전 기동 운용안
 
@@ -106,4 +118,4 @@ QA 중         키보드 앞엔 아무도 없어도 워치독이 유휴 15분 �
 
 ## 관련 문서
 
-[[8-3_GPU]] · [[8-4_GPU_비용]] · `db/init/14_gpu_pod.sql`(제안) · `tests/test_gpu_watchdog.py`
+[[8-3_GPU]] · [[8-4_GPU_비용]] · `db/init/14_gpu_pod.sql`(배선완료) · `tests/test_gpu_watchdog.py`
