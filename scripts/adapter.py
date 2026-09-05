@@ -209,6 +209,46 @@ def vllm_url(*, 강제갱신: bool = False) -> str:
     return 값
 
 
+def _재시도가능(e: Exception) -> bool:
+    """«멱등한 실패» 만 True (2026-09-05 · J1 레인, run 194 실패 96건 원인 조사).
+
+    🔴 판단 기준은 «서버에 닿기 전에 끊겼는가» 다. `urllib.request.urlopen` 은
+    `h.request()`(요청 전송) 실패만 `URLError` 로 감싸고, `h.getresponse()`
+    (응답 대기·읽기) 단계의 실패는 원래 타입 그대로 새 나간다 — 그래서 실측
+    강등사유 문자열이 갈린다: `URLError: getaddrinfo failed`(DNS·connect 단계,
+    요청이 아예 안 나감) 는 감싸진 것이고, `TimeoutError: The read operation
+    timed out`·`RemoteDisconnected`(응답을 기다리다 끊김) 는 감싸이지 않은
+    원본 타입이다. 즉 **`URLError`(그리고 그 서브클래스가 아닌 순수
+    `ConnectionError`) 만 "요청이 서버에 안 닿았다" 를 뜻한다.**
+
+    `TimeoutError`(읽기 타임아웃)와 `HTTPError`(524 포함)는 여기서 제외한다 —
+    요청이 이미 서버에 도달해 vLLM 이 생성을 시작했을 수 있다. 그 상태에서
+    재시도하면 같은 프롬프트를 GPU 가 두 번 생성한다(요금 2배 + 동시성 부하 가중).
+    `urllib.error.HTTPError` 는 `URLError` 의 서브클래스라 `isinstance` 순서를
+    반드시 지킨다.
+
+    🔴 **실경로(`normalize_run.llm_호출`)는 이 정책을 따르지 않는다 — 의도적으로
+    다르다.** 그쪽 `재시도=1` 은 `TimeoutError`·`HTTPError` 를 포함해 모든 예외를
+    재시도한다. run 194 실측(`scratchpad/보고_J1_0905.md` §③)으로 그 "묻지마
+    재시도"가 정규화 38건·판정 10건, 도합 48건을 실제로 살리고 있다는 게
+    확인됐다(ai-04, 2026-09-05) — 이 도메인의 vLLM 추론 호출은 DB 를 쓰지 않는
+    순수 조회성이라 "두 번 생성" 의 대가가 GPU 요금뿐이고, 지금 우선순위는
+    요금 절약보다 성공률이다. 즉 **여기(`LocalVLLM`)의 좁은 정책이 "옳고"
+    실경로가 "틀린" 게 아니다** — 이 경로는 지금 orchestrate 가 안 쓰는 죽은
+    코드라 안전 쪽으로 좁게 짜 둔 것뿐이다. 이 파일을 실제 배선에 올리게 되면
+    (§ `LocalVLLM` 클래스 docstring) 이 정책부터 실경로와 맞출지 다시 정해야
+    한다 — **"두 파일이 다르니 통일하자"며 이 좁은 정책을 실경로에 그대로
+    옮기면 그 48건이 판단불가로 되돌아간다.**
+    """
+    if isinstance(e, urllib.error.HTTPError):
+        return False
+    if isinstance(e, urllib.error.URLError):
+        return True
+    if isinstance(e, ConnectionError):        # RemoteDisconnected 포함
+        return True
+    return False
+
+
 @dataclass
 class LocalVLLM(제공자):
     """자체/임대 GPU 의 vLLM (OpenAI 호환).
@@ -227,7 +267,7 @@ class LocalVLLM(제공자):
     활성: bool = True
     url: str = field(default_factory=lambda: vllm_url())
 
-    def 호출(self, 프롬프트, 스키마, s, *, 온도, 타임아웃):
+    def 호출(self, 프롬프트, 스키마, s, *, 온도, 타임아웃, 재시도: int = 1):
         본문 = {
             "model": os.environ.get("VLLM_MODEL", s.기본모델),
             "messages": [{"role": "user", "content": 프롬프트}],
@@ -246,22 +286,35 @@ class LocalVLLM(제공자):
                      #    `Python-urllib/3.x` 를 봇으로 읽는다. `normalize_run.py:90` 에만
                      #    붙어 있어 «반쪽만 고쳐진» 상태였다 (2026-09-03 ai-98 실측:
                      #    UA 없음→403 / UA 있음→200). 이 자리가 `/admin/warmup` 을 죽였다.
+                     #    지우지 마라.
                      "User-Agent": "suddoe/1.0"})
-        t = time.time()
-        with urllib.request.urlopen(req, timeout=타임아웃) as r:
-            d = json.loads(r.read().decode())
-        내용 = d["choices"][0]["message"]["content"]
-        # 🔴 json.loads 앞에서 걷는다 — 일관성을 위해서다. 🔴 이 경로(LocalVLLM.호출)는
-        #    지금 orchestrate 판정에 안 쓰인다(호출자 0곳) — 실판정은 `normalize_run.llm_호출`
-        #    를 탄다(사고흔적_걷기 docstring 참조). 여기서도 걷어낸 사실을 메타에 싣는 것은
-        #    이 경로가 나중에 쓰이게 될 때 같은 계측이 비어 있지 않게 하기 위해서다.
-        내용, 사고사실 = 사고흔적_걷기(내용)
-        메타 = {"제공자": self.이름, "모델": 본문["model"],
-                "지연ms": int((time.time() - t) * 1000),
-                "토큰": d.get("usage", {}),
-                "종료이유": d["choices"][0].get("finish_reason"),
-                **사고사실}
-        return (json.loads(내용) if 스키마 else 내용), 메타
+        # 🔴 재시도 없음 → 재시도 있음 (2026-09-05 · J1, run 194 실패 96건 조사).
+        #    `_재시도가능()` 이 «서버에 안 닿고 끊긴» 경우만 골라 재시도한다 — 읽기
+        #    타임아웃·HTTPError(524 포함)는 이미 생성이 시작됐을 수 있어 재시도하면
+        #    GPU 가 같은 프롬프트를 두 번 생성한다. `scratchpad/보고_J1_0905.md` 참고.
+        for 회차 in range(재시도 + 1):
+            t = time.time()
+            try:
+                with urllib.request.urlopen(req, timeout=타임아웃) as r:
+                    d = json.loads(r.read().decode())
+                내용 = d["choices"][0]["message"]["content"]
+                # 🔴 json.loads 앞에서 걷는다 — 일관성을 위해서다. 🔴 이 경로(LocalVLLM.호출)는
+                #    지금 orchestrate 판정에 안 쓰인다(호출자 0곳) — 실판정은
+                #    `normalize_run.llm_호출` 를 탄다(사고흔적_걷기 docstring 참조).
+                #    여기서도 걷어낸 사실을 메타에 싣는 것은 이 경로가 나중에 쓰이게
+                #    될 때 같은 계측이 비어 있지 않게 하기 위해서다.
+                내용, 사고사실 = 사고흔적_걷기(내용)
+                메타 = {"제공자": self.이름, "모델": 본문["model"],
+                        "지연ms": int((time.time() - t) * 1000),
+                        "토큰": d.get("usage", {}),
+                        "종료이유": d["choices"][0].get("finish_reason"),
+                        "재시도": 회차,
+                        **사고사실}
+                return (json.loads(내용) if 스키마 else 내용), 메타
+            except Exception as e:                                # noqa: BLE001
+                if 회차 < 재시도 and _재시도가능(e):
+                    continue
+                raise
 
 
 @dataclass
@@ -349,8 +402,15 @@ class LLMAdapter:
         return 살아있는[0]
 
     # ── 호출 ────────────────────────────────────────────────────────
+    # 🔴 180 → 240 (2026-09-05 · J1, run 194 실패 96건 조사). ⚠️ **RunPod 프록시
+    #    (Cloudflare)를 경유하는 한 이 값은 의미가 없다** — 실측 천장이 약 125초라
+    #    240 에 닿기 훨씬 전에 HTTP 524 로 먼저 끊긴다(`scratchpad/보고_J1_0905.md`
+    #    §②). 지금 240 을 넣는 건 "프록시 경유에서 524 를 못 푼다"는 결론과 안
+    #    모순되게, 이 경로(현재 죽은 코드)가 나중에 **프록시를 안 타는 경로**
+    #    (SSH 터널 등)로 쓰이게 될 때를 대비한 상한일 뿐이다. 프록시 경유 524 는
+    #    타임아웃이 아니라 스트리밍·동시성·터널 중 하나로 풀어야 한다.
     def 호출(self, 호출자리이름: str, 프롬프트: str, 스키마: dict | None = None, *,
-             온도: float = 0.0, 타임아웃: int = 180,
+             온도: float = 0.0, 타임아웃: int = 240,
              제공자강제: str | None = None) -> tuple[dict | str, dict]:
         try:
             s = 슬롯표[호출자리이름]
