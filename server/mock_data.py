@@ -115,7 +115,7 @@ def 목_통계() -> dict:
         "날짜_사용자수정": True, "상태": "집행예정", "계획제목": "개발용 노트북 구매",
     },
     # 🔴 결제후 3건 — 화면 11 「결제 후 필요 증빙」이 늘 빈칸이던 자리다.
-    #    코드·오프셋은 `scripts/seed_check_items.py` 의 실제 값과 맞췄다 —
+    #    코드·오프셋은 `scripts/archive/seed/seed_check_items.py` 의 실제 값과 맞췄다 —
     #    실서버는 `corpus.check_items` 에서 같은 코드로 구분을 푼다.
     {
         "task_id": 15, "plan_id": 1, "출처": "ai", "코드": "세금계산서수취",

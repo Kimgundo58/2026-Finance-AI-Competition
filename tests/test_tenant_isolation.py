@@ -125,7 +125,7 @@ def 세계():
         if len(기관) < 2:
             pytest.skip(
                 f"L3 문서를 가진 기관이 {len(기관)}곳뿐이다 (2곳 필요) — "
-                "scripts/seed_l3_fixture.py 로 픽스처를 넣어라. "
+                "scripts/archive/seed/seed_l3_fixture.py 로 픽스처를 넣어라. "
                 "🔴 아무 기관으로 물러나지 않는다: 그러면 L3 격리 검증이 조용히 사라진다")
         s.A, s.B = str(기관[0][0]), str(기관[1][0])
 

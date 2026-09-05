@@ -20,7 +20,7 @@ scripts/_test_out.txt
 
 # ── Stage 0 파생물 ──────────────────────────────────────────────
 # 조 본문 전량 덤프(74MB). 원본 코퍼스를 JSON 으로 복제한 것이라 저장소에 두지 않는다.
-# `python scripts/stage0_run.py` 로 언제든 재생성된다. 메타데이터는 _stage0_report.json 에 있다.
+# `python scripts/archive/indexing/stage0_run.py` 로 언제든 재생성된다. 메타데이터는 _stage0_report.json 에 있다.
 2026_Finance_DATA_FOR_RAG/_stage0_articles.json
 
 # 파서 진단·측정의 **중간 산출물**만 제외한다. 검증 스크립트(*.py)는 문서가
