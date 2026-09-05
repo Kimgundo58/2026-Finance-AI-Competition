@@ -328,6 +328,14 @@ def split_articles(text: str, page_offsets: dict[int, int] | None = None,
     # 🔴 표의 «행–열 짝» 은 포기한다(셀 텍스트만 산다). 그건 이 자리에서 풀 문제가
     #    아니고, 셀 텍스트가 이어져 있으면 L3 통째 로드에는 쓸 만하다.
     조각 = [x.strip() for x in re.split(r"\n{2,}", text) if x.strip()]
+    if len(조각) <= 1:
+        # 🔴 빈 줄이 없는 문서(예: LibreOffice 변환 docx — 문단마다 단일 개행만
+        #    나온다)는 위 분할이 «통째로 한 조각»을 낸다 → 조 1건(수만 자).
+        #    (L3_시연적재_안내.md §5-4②, 실측: 원본 969회 빈줄·조 203 vs 변환본
+        #    0회·조 1 → 단일 개행 기준 재분할 시 209, 원본 수준으로 회복)
+        #    빈 줄이 «있는» 문서(기존 입력)는 위에서 이미 갈라졌으니 여기 안 온다 —
+        #    기존 동작에 회귀가 없다.
+        조각 = [x.strip() for x in re.split(r"\n", text) if x.strip()]
     묶음: list[str] = []
     버퍼: list[str] = []
     for x in 조각:
