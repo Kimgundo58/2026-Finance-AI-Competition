@@ -18,7 +18,7 @@
 
 **`격리감사_0902.md` 의 "org_id 를 응답에 안 싣는다"는 방어가 아니다.** 2026-09-03 에
 `org_id = uuid5(uuid5(DNS,"suddoe.org"), 공백뗀 기관명)` 을 재계산해 **413행 중 411행(99.5%)**
-을 기관명만으로 맞혔다. 네임스페이스는 `scripts/load_org_programs.py:42` 에 그대로 있다.
+을 기관명만으로 맞혔다. 네임스페이스는 `scripts/archive/seed/load_org_programs.py:42` 에 그대로 있다.
 실질 방어는 `SUDDOE_ORG_PARAM=0` 하나뿐이다 (`server/auth.py:63`).
 
 ## 인용된 루트 md 7벌은 2026-09-02 에 지워졌다

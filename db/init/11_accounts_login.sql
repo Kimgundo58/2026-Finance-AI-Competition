@@ -173,4 +173,4 @@ $$;
 --   («로그인이 된다») 눈으로는 못 가른다 — 적용한 뒤 반드시 직접 SELECT 를 따로 재라.
 -- · 닭-달걀 ①(`POST /api/demo/session` 이 orgs 를 만든다)은 여기서 안 푼다.
 --   앱이 uuid 를 먼저 뽑아 GUC 에 세우고 같은 값으로 INSERT 하면 정책 변경 없이
---   통과한다(실측) — `scripts/seed_demo.py::_org잡기` 가 그 길이다.
+--   통과한다(실측) — `scripts/archive/seed/seed_demo.py::_org잡기` 가 그 길이다.

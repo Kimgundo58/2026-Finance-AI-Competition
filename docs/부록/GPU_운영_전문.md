@@ -44,9 +44,9 @@ RTX A4000(16GB) · A5000/4090(24GB) · A6000(48GB) 중 **재고 있는 싼 것**
 
 ```bash
 export RUNPOD_API_KEY=...
-python scripts/pick_gpu.py --task embed        # 프리셋: embed | llm8b | judge
-python scripts/pick_gpu.py --min-vram 24       # 직접 지정
-python scripts/pick_gpu.py --task judge --need-volume
+python scripts/archive/cli/pick_gpu.py --task embed        # 프리셋: embed | llm8b | judge
+python scripts/archive/cli/pick_gpu.py --min-vram 24       # 직접 지정
+python scripts/archive/cli/pick_gpu.py --task judge --need-volume
 ```
 
 `runpodctl gpu list` 를 실행 시점에 조회해 **VRAM 충족 × 재고 있음** 으로 거르고 $/h 로 정렬한다.
@@ -78,8 +78,8 @@ DC 에 없어서 못 썼다. 그래서 선택기는 가격만 보지 않고 제�
 **정본은 사람이 닫는 것이다.** 워치독은 사고 방지용이지 설계가 아니다.
 
 ```bash
-PYTHONIOENCODING=utf-8 python scripts/runpod_pod.py ls       # 도는 팟 + 경과 비용
-PYTHONIOENCODING=utf-8 python scripts/runpod_pod.py close    # 대장의 팟 전부
+PYTHONIOENCODING=utf-8 python scripts/archive/cli/runpod_pod.py ls       # 도는 팟 + 경과 비용
+PYTHONIOENCODING=utf-8 python scripts/archive/cli/runpod_pod.py close    # 대장의 팟 전부
 runpodctl user                                                # 잔액·시간당 지출
 ```
 
@@ -120,7 +120,7 @@ A40 함정(§1 상단)과 같은 구조다. **카드가 여러 종 있는 DC 를
 
 ```bash
 # 팟 생성 시 볼륨을 붙인다 — 🔴 나중에 못 붙인다 (§7)
-python scripts/runpod_pod.py open --gpu "NVIDIA L40" --hours 2     --template-id runpod-torch-v280 --dc US-KS-2 --volume-id fv5cl1y1ww
+python scripts/archive/cli/runpod_pod.py open --gpu "NVIDIA L40" --hours 2     --template-id runpod-torch-v280 --dc US-KS-2 --volume-id fv5cl1y1ww
 ```
 
 한국에서 가장 가까운 볼륨 지원 DC 는 AP-JP-1 이지만 H100 SXM 만 있고 재고 LOW 다.

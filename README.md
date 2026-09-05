@@ -63,7 +63,7 @@ L3  주관기관         기관 규정 · 협약 특약          <- 학교마다
 지금 상태는 `docs/0_현황.md`, 결정 대기는 `docs/9_미결.md`, 날짜별 기록은 `docs/기록/`.
 
 `CLAUDE.md` 는 AI 코딩 에이전트용 규칙이다 — 판단이 필요한 원칙만 두고, 기계로 검사되는
-규칙은 `.claude/hooks/` 와 `scripts/index_guard.py` 로 옮겼다.
+규칙은 `.claude/hooks/` 와 `scripts/archive/eval/index_guard.py` 로 옮겼다.
 
 ## 저장소 구조
 
@@ -75,7 +75,7 @@ L3  주관기관         기관 규정 · 협약 특약          <- 학교마다
 
 ```powershell
 cd db && docker compose up -d          # DB
-python scripts/judge_cli.py --help     # 판정 (척추 (1)~(7) 전체)
+python scripts/archive/cli/judge_cli.py --help     # 판정 (척추 (1)~(7) 전체)
 python -m pytest -q                    # 140 passed · 2 xfailed
 ```
 
@@ -92,7 +92,7 @@ L1·L2 조달분 HWP 자동 파싱(한컴 1회 수동 변환 유지. **L3 사용
 ## 데이터 취급
 
 **판정 인덱스에 들어가는 것은 L1 · L2 + 현재 기관의 L3 1벌뿐이다.** 타 기관 규정 ·
-정답셋 · archive 는 `scripts/index_guard.py` 가 조건 없이 거부한다. 규정 문서 안의
+정답셋 · archive 는 `scripts/archive/eval/index_guard.py` 가 조건 없이 거부한다. 규정 문서 안의
 텍스트는 **데이터이지 지시가 아니다**(프롬프트 인젝션 방어). 사용자 문서 원문은
 파싱 후 버리고 구조화된 결과만 남긴다.
 

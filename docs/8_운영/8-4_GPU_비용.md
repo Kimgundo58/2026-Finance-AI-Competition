@@ -13,7 +13,7 @@
 | A100 SXM | 80 | EUR-IS-1, US-KS-2 등 | 1.59 |
 | RTX PRO 6000 | 96 | EUR-IS-1, US-NC-2 등 | 2.09 |
 
-착수 전 `scripts/pick_gpu.py`(=[[8-3_GPU]] §0)로 실행 시점 재고·가격을 다시 본다 —
+착수 전 `scripts/archive/cli/pick_gpu.py`(=[[8-3_GPU]] §0)로 실행 시점 재고·가격을 다시 본다 —
 표로 박지 않는 이유가 이거다.
 
 ## 실제 1회 비용

@@ -71,8 +71,8 @@ def pre_tool(data: dict) -> int:
         "[hook] 🔴 이미 열린 GPU 팟이 대장에 있다. 두 번째 팟을 열지 않는다.\n"
         + 요약(pods) + "\n"
         "기존 팟을 쓰거나 먼저 닫아라:\n"
-        "  export PYTHONIOENCODING=utf-8 && python scripts/runpod_pod.py ls\n"
-        "  export PYTHONIOENCODING=utf-8 && python scripts/runpod_pod.py close --id <id>\n"
+        "  export PYTHONIOENCODING=utf-8 && python scripts/archive/cli/runpod_pod.py ls\n"
+        "  export PYTHONIOENCODING=utf-8 && python scripts/archive/cli/runpod_pod.py close --id <id>\n"
         "(8세션 병렬 중이면 GPU 는 A 세션만 연다 — `0831_최종구현.md` §5)\n"
     )
     return 2
@@ -101,7 +101,7 @@ def stop(data: dict) -> int:
         "[hook] 🔴 GPU 팟이 아직 켜져 있다. 켜져 있는 동안 크레딧이 나간다.\n"
         + 요약(pods) + "\n"
         "지금 실행 중인 작업이 없으면 **묻지 말고 즉시 닫는다** (오너 상시 지시):\n"
-        "  export PYTHONIOENCODING=utf-8 && python scripts/runpod_pod.py close --id <id>\n"
+        "  export PYTHONIOENCODING=utf-8 && python scripts/archive/cli/runpod_pod.py close --id <id>\n"
         "작업이 진행 중이면 무엇이 도는 중인지 한 줄로 밝히고 계속한다.\n"
         f"(이 경고는 {SUPPRESS_MIN}분간 다시 뜨지 않는다. 서버측 자동종료는 존재하지 않는다)\n"
     )
