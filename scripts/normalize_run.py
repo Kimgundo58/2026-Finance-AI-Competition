@@ -92,8 +92,18 @@ def llm_호출(프롬프트: str, 스키마: dict | None, *,
             #    `Python-urllib/3.x` 를 봇으로 보고 **403 error code 1010** 으로 끊는다
             #    (2026-09-01 실측 — 같은 요청이 curl 로는 통과했다).
             #    로컬 vLLM 직결에서는 무해하고, 프록시 경유에서만 필요하다.
+            # 🔴 주소는 호출 «시점» 에 푼다 — 모듈 상수 `VLLM` 로 굳히면 안 된다.
+            #    `ops.gpu_pod` 로 팟 주소를 옮긴 뒤(2026-09-05) 이 자리만 import 시점의
+            #    env 를 들고 있어서 정규화가 `localhost:8000` 을 쳤고, 판정 전체가
+            #    「(1) 정규화 실패: WinError 10061 연결 거부」로 죽었다. adapter·
+            #    gpu_watchdog 만 고치고 여기를 빠뜨린 결과다 — **세 자리가 같이 움직인다.**
+            try:
+                from adapter import vllm_url                       # noqa: PLC0415
+                base = vllm_url()
+            except Exception:                                      # noqa: BLE001
+                base = VLLM
             req = urllib.request.Request(
-                f"{VLLM}/v1/chat/completions", data=data,
+                f"{base}/v1/chat/completions", data=data,
                 headers={"Content-Type": "application/json",
                          "User-Agent": "suddoe-judge/1.0"})
             with urllib.request.urlopen(req, timeout=타임아웃) as r:
@@ -103,11 +113,21 @@ def llm_호출(프롬프트: str, 스키마: dict | None, *,
             # 🔴 파서가 갈라 준 경우 `reasoning_content` 에 사고가 들어가고
             #    `content` 는 이미 깨끗하다. 안 갈라진 경우만 여기서 걷어낸다.
             내용, 사고사실 = 사고흔적_걷기(내용)
+            # 🔴 F1(레인F, 2026-09-05) — **정상 분리된 사고는 지금까지 한 번도 안 쟀다.**
+            #    `사고흔적_걷기()` 는 `content` 안에 `<think>` 가 «섞여 들어온»(파서 실패)
+            #    경우만 본다. `--reasoning-parser qwen3` 가 정상 동작하면 사고는
+            #    `reasoning_content` 로 깨끗이 갈라지는데, 그 경우는 위 사고사실이
+            #    항상 {있음:False, 길이:0} 으로 찍혀 「사고를 안 했다」로 잘못 읽힌다.
+            #    완료토큰 예산(`max_tokens`)은 이 필드와 무관하게 똑같이 먹히므로
+            #    (사고도 생성 토큰이다) 이 길이를 안 재면 F1 의 분포 자체가 반쪽이다.
+            추론content = _메시지.get("reasoning_content") or ""
             메타 = {"지연ms": int((time.time() - t) * 1000),
                    "토큰": d.get("usage", {}),
                    "종료이유": d["choices"][0].get("finish_reason"),
                    "모델": 본문["model"], "재시도": 회차,
-                   **사고사실}
+                   **사고사실,
+                   "추론content있음": bool(추론content),
+                   "추론content길이": len(추론content)}
             if 스키마 is None:
                 return 내용, 메타
             try:
@@ -188,6 +208,48 @@ _지시 = """다음 문장은 창업지원금으로 무언가를 사거나 지�
 비목 목록: {비목}
 
 질문: {질문}"""
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# F2 프롬프트 변형 — 🔴 정규화(①) 지연의 76%가 사고(reasoning_content, F1 실측
+# 중앙 1,691자·p90 4,065자)다. 판정(④)의 A12(`assemble_context.변형들`)와 같은
+# 방식 — **후보를 먼저 선언**하고 채택 기준(속도만이 아니라 정확도도, F1 기준선
+# 63%)을 결과 보기 전에 못박는다. `enable_thinking=false` 는 안 쓴다
+# (`--reasoning-parser qwen3` 를 끄는 효과가 있고, 과거 guided_json×thinking
+# 무한루프의 조건을 되살릴 위험이 있다 — 프롬프트로만 유도한다).
+# ════════════════════════════════════════════════════════════════════════════
+_지시_짧게 = ("\n\n생각은 짧게 한다 — 위 다섯 항목을 확인하는 데 필요한 만큼만 사고하고, "
+           "여러 경우의 수를 길게 따지지 않는다. 결론이 서면 바로 JSON 을 출력하라.")
+
+# 🔴 예시의 비목은 **의도적으로 형태만 보여준다.** "재료비" 정답 자체는 F1
+#    표본에 실재하는 물음(gold_id=556, 알루미늄 판재)과 겹치지 않게 새로 지었다 —
+#    표본 문항을 예시로 쓰면 그 문항만 "정답을 알려준" 채 채점하게 된다.
+# 🔴 중괄호를 **두 겹**으로 쓴다 — 이 문자열이 `_지시_조립()` 을 거쳐 최종적으로
+#    `.format(비목=..., 질문=...)` 을 한 번 더 타므로, 홑겹이면 예시의 JSON 리터럴을
+#    포맷 자리표시자로 오인해 `KeyError` 가 난다(실측 — 처음 짤 때 이렇게 터졌다).
+_지시_예시 = ('예시\n질문: 시제품에 쓸 방수 커넥터 40만원 사도 되나요?\n'
+             '출력: {{"품목":"방수 커넥터","금액":400000,"금액_추정여부":false,'
+             '"용도":"시제품 제작","비목후보":[{{"비목":"재료비","신뢰도":0.9}}],'
+             '"누락필드":[]}}')
+
+_변형들: dict[str, str] = {
+    "N0": "기준선 — 원문 그대로",
+    "N1": "끝에 「생각은 짧게」 지시 한 문단 추가",
+    "N2": "질문 앞에 1-shot 예시(사고 과정 없이 최종 JSON 만) 추가 — 출력 형태를 먼저 보여준다",
+    "N3": "N1 + N2 병합",
+}
+
+
+def _지시_조립(변형: str = "N0") -> str:
+    """변형별 지시문. `_지시` 원문은 그대로 두고 여기서만 이어붙인다."""
+    if 변형 not in _변형들:
+        raise ValueError(f"모르는 정규화 프롬프트 변형: {변형} (알려진 것: {list(_변형들)})")
+    본문 = _지시
+    if 변형 in ("N2", "N3"):
+        본문 = 본문.replace("질문: {질문}", _지시_예시 + "\n\n질문: {질문}")
+    if 변형 in ("N1", "N3"):
+        본문 = 본문 + _지시_짧게
+    return 본문
 
 
 # ── dry 규칙 정규화 — 배관 검증 전용 ────────────────────────────────────────
@@ -293,13 +355,18 @@ def 규칙_정규화(질문: str) -> dict:
 
 
 def 정규화(질문: str, *, dry: bool = False, 비목목록: list[str] | None = None,
-         타임아웃: int = 60) -> tuple[dict, dict]:
-    """(정규화 JSON, 메타). 실패는 예외로 올린다 — 부르는 쪽이 판단불가로 닫는다."""
+         타임아웃: int = 60, 변형: str = "N0") -> tuple[dict, dict]:
+    """(정규화 JSON, 메타). 실패는 예외로 올린다 — 부르는 쪽이 판단불가로 닫는다.
+
+    `변형` : F2(레인F) 프롬프트 실험 — `_변형들` 참고. **기본 N0 는 스위치 넣기 전과
+             바이트 단위로 같은 프롬프트**를 만든다(`_지시` 원문 그대로).
+    """
     if dry:
         return 규칙_정규화(질문), {"지연ms": 0, "모델": "규칙(dry)", "토큰": {}}
     스키마 = 호출자리1_스키마(비목목록)
-    프롬프트 = _지시.format(비목=", ".join(스키마["properties"]["비목후보"]["items"]
-                                       ["properties"]["비목"]["enum"]), 질문=질문)
+    프롬프트 = _지시_조립(변형).format(
+        비목=", ".join(스키마["properties"]["비목후보"]["items"]
+                      ["properties"]["비목"]["enum"]), 질문=질문)
     # 🔴 400 이 아니라 2000 이다 (2026-09-03 실서버 실측).
     #    Qwen3 는 thinking 이 기본이라 `<think>...</think>` 가 «출력 토큰» 을 먹는다.
     #    서버에 `--reasoning-parser qwen3` 를 줘도 갈라지지 않는 응답이 있다 —
@@ -324,6 +391,8 @@ def main() -> None:
     ap.add_argument("--q", help="질문 한 줄")
     ap.add_argument("--golden", action="store_true", help="골든셋 전량")
     ap.add_argument("--dry", action="store_true", help="LLM 없이 규칙으로")
+    ap.add_argument("--변형", default="N0",
+                    help="F2 프롬프트 변형. N0=기준선 · N1~N3 (normalize_run._변형들)")
     a = ap.parse_args()
 
     if a.golden:
@@ -331,12 +400,12 @@ def main() -> None:
             rows = conn.execute("SELECT gold_id, 질문 FROM eval.golden_set "
                                 "ORDER BY gold_id").fetchall()
         for gid, q in rows:
-            out, _ = 정규화(q, dry=a.dry)
+            out, _ = 정규화(q, dry=a.dry, 변형=a.변형)
             print(f"{gid:3} {json.dumps(out, ensure_ascii=False)}")
         return
     if not a.q:
         ap.error("--q 또는 --golden")
-    out, 메타 = 정규화(a.q, dry=a.dry)
+    out, 메타 = 정규화(a.q, dry=a.dry, 변형=a.변형)
     print(json.dumps(out, ensure_ascii=False, indent=2))
     print(f"\n{메타}")
 
