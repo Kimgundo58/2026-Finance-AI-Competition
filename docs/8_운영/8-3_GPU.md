@@ -16,8 +16,8 @@
 임베딩에 A100(80GB)을 잡는 건 8GB 짜리 일에 10배 쓰는 것이다.
 
 ```bash
-python scripts/pick_gpu.py --task embed        # embed | llm8b | judge 프리셋
-python scripts/pick_gpu.py --min-vram 24
+python scripts/archive/cli/pick_gpu.py --task embed        # embed | llm8b | judge 프리셋
+python scripts/archive/cli/pick_gpu.py --min-vram 24
 ```
 
 ## 1. 확정 구성
@@ -40,8 +40,8 @@ GPU·DC 별 단가는 [[8-4_GPU_비용]].
 **원칙은 사람이 닫는 것이다.**
 
 ```bash
-PYTHONIOENCODING=utf-8 python scripts/runpod_pod.py ls      # 도는 팟 + 경과비용
-PYTHONIOENCODING=utf-8 python scripts/runpod_pod.py close   # 목록의 팟 전부
+PYTHONIOENCODING=utf-8 python scripts/archive/cli/runpod_pod.py ls      # 도는 팟 + 경과비용
+PYTHONIOENCODING=utf-8 python scripts/archive/cli/runpod_pod.py close   # 목록의 팟 전부
 ```
 
 ## 3. 흐름 (1회 세션)
@@ -99,4 +99,4 @@ B6(질문 + 출력 지시)가 맨 뒤라 **질문이 날아간 채로 답한다.
 
 ## 관련 문서
 
-[[6-1_호출_설계]] · [[8-1_실행_절차]] · [[8-4_GPU_비용]] · [[8-5_GPU_무인운전]]
+[[6-1_호출_설계]] · [[8-1_실행_절차]] · [[8-4_GPU_비용]] · [[8-7_GPU_무인운전]]

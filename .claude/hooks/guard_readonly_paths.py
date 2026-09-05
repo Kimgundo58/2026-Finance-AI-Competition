@@ -6,7 +6,7 @@
 넷 다 "고칠 일이 없는데 실수로 고쳐지면 조용히 오염되는" 구역이라 훅에서 막는다.
 (구 CLAUDE.md L109-110·L124)
 
-인덱스 투입 차단은 별개다 — scripts/index_guard.py 가 담당한다.
+인덱스 투입 차단은 별개다 — scripts/archive/eval/index_guard.py 가 담당한다.
 """
 import json
 import sys

@@ -11,7 +11,7 @@
 🔴 2026-09-04 실측(코드 읽기, 실행 아님) — «넷 다 이미 있다» 는 틀렸다:
      동시 팟 1개    → 코드 가드 없음. RUNPOD_POD_ID 가 한 개 값이라는 구조로만 성립
      하루 깨우기 3회 → 이 커밋 전까지 코드 어디에도 없었다. 이 파일에서 새로 테스트
-     수명 1시간     → `scripts/runpod_pod.py`(수동 팟 오픈용)에만 있다. 이 워치독과 다른 코드경로
+     수명 1시간     → `scripts/archive/cli/runpod_pod.py`(수동 팟 오픈용)에만 있다. 이 워치독과 다른 코드경로
      잔액 경보      → RunPod REST v1 에 잔액 엔드포인트가 없다(openapi.json 확인).
                      서버 프로세스에서는 구현 불가 — `gpu_watchdog.팟제어.잔액()` 참고
    → 이 파일이 실제로 태우는 것은 **유휴 정지**와 **하루 깨우기 캡** 둘뿐이다.
@@ -221,7 +221,7 @@ def test_현황에_깨우기_카운터가_실린다():
 # ③ `_상태해석` — 실물 없이, RunPod 공식 OpenAPI 스키마 기준으로 «분기가 다 서는가»
 #    🔴 이것만으론 «스키마가 맞다» 를 증명 못 한다 — 「실물이 오면 즉시 갈린다」
 #    까지가 이 테스트의 몫이다(중앙 지시, 2026-09-04). 실물 확인은 항목1(왕복 창)
-#    이 연 뒤 `scripts/runpod_pod.py roundtrip` 으로 한다.
+#    이 연 뒤 `scripts/archive/cli/runpod_pod.py roundtrip` 으로 한다.
 #
 #    2026-09-04 `https://rest.runpod.io/v1/openapi.json` 대조 결과(WebFetch):
 #      · GET /pods/{id} 의 상태 필드는 **`desiredStatus` 하나뿐**이다.

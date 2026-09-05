@@ -77,7 +77,7 @@ CREATE TABLE corpus.documents (
     시행일        DATE,
     status        TEXT NOT NULL CHECK (status IN ('active','superseded','reference')),
     -- 2026-08-28 제거된 컬럼: 근거가 두 번 갈아끼워졌고 두 번째도 무너졌다.
-    --   옛 근거(타 대학 24건 제외)      -> scripts/index_guard.py 가 코드로 막는다
+    --   옛 근거(타 대학 24건 제외)      -> scripts/archive/eval/index_guard.py 가 코드로 막는다
     --   새 근거(멀티테넌시)             -> org_id + tenant 스키마 분리 + RLS (RAG.md §2-3)
     --   실사용(저품질 파싱 판정 제외)   -> parse_quality 가 원래 그 필드다
     parse_quality TEXT NOT NULL DEFAULT 'high' CHECK (parse_quality IN ('high','low')),

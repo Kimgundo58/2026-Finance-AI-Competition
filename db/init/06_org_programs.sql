@@ -81,7 +81,7 @@ COMMENT ON COLUMN tenant.org_programs.연도출처 IS
 
 -- 🔴 `tenant.orgs.사업명` 은 이제 파생값이다. 정본은 이 테이블이다.
 --    지금 지우지 않는다 — 읽는 코드를 아직 아무도 전수로 세지 않았다.
---    (`scripts/agent_a2.py:171` 이 읽는 것까지는 확인했다)
+--    (`scripts/archive/agents/agent_a2.py:171` 이 읽는 것까지는 확인했다)
 COMMENT ON COLUMN tenant.orgs."사업명" IS
     '파생값. 정본은 tenant.org_programs 다 (2026-09-02). 연도를 못 담아서 분리했다';
 

@@ -123,7 +123,7 @@ class 팟제어:
         2026-09-04 확인: RunPod REST v1(`openapi.json`)에 `/user`·잔액 조회
         엔드포인트가 **없다** — `/billing/pods`·`/billing/endpoints`·
         `/billing/networkvolumes` 뿐이고 전부 과거 사용량이지 «지금 잔액» 이 아니다.
-        `scripts/runpod_pod.py:cmd_close` 가 잔액을 찍는 건 `runpodctl user`
+        `scripts/archive/cli/runpod_pod.py:cmd_close` 가 잔액을 찍는 건 `runpodctl user`
         (GraphQL 경유, CLI 전용) 다 — 그 바이너리는 배포 이미지에 없다.
         잔액 관찰은 **사람이 로컬에서 `runpod_pod.py ls`/`close` 로 하는 것이 정본**이다.
         여기 자리를 남긴 이유는 다음 사람이 REST 로 될 거라 믿고 또 «미검증 스키마» 를

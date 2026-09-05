@@ -6,7 +6,7 @@
 통째로 깨진다 (오너 결정 R4). 대신 `SUDDOE_ORG_PARAM=0` 한 줄로 끌 수 있게 뺐다.
 
 🔴 **org_id 는 비밀이 아니다 — 측정으로 확인했다.**
-   `scripts/load_org_programs.py` 가 `org_id = uuid5(uuid5(NAMESPACE_DNS,"suddoe.org"), 공백뗀 기관명)`
+   `scripts/archive/seed/load_org_programs.py` 가 `org_id = uuid5(uuid5(NAMESPACE_DNS,"suddoe.org"), 공백뗀 기관명)`
    으로 만든다. 네임스페이스 문자열이 레포 안에 그대로 있고 기관명은 공개 정보라,
    **413행 중 411행의 org_id 를 이름만으로 재계산했다** (남은 2행은 L3 픽스처 — 다른 네임스페이스).
    그러므로 「org_id 를 응답에 안 실으니까 아무도 모른다」는 방어가 아니다.
