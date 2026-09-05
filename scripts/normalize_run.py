@@ -48,7 +48,7 @@ from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _lib import db  # noqa: E402
-from llm_schema import 비목_enum  # noqa: E402
+from llm_schema import 비목_enum, 비목_정의  # noqa: E402
 from adapter import 사고흔적_걷기  # noqa: E402  # 🔴 공용 방어 — 정의는 adapter.py 하나뿐이다
 
 DSN = db.DSN
@@ -299,6 +299,26 @@ def 호출자리1_스키마(비목목록: list[str] | None = None) -> dict:
     }
 
 
+def _비목_블록(enum: list[str]) -> str:
+    """`비목 목록:` 자리에 들어갈 «이름 + 정의» 여러 줄.
+
+    🔴 왜 정의를 넣나. 종전에는 이름 10개를 쉼표로 이어 붙인 한 줄이었다 — 모델은
+    「지급수수료」가 무슨 뜻인지 «모른 채» 골랐다 (1순위 비목 정확도 65.1% ·
+    후보를 아예 못 낸 문항 26%). 이 자리는 B0 과 달리 캐시 프리픽스가 아니라서
+    (아래 `_지시` 주석) 길이를 늘려도 프롬프트 캐시가 안 깨진다.
+
+    🔴 정의가 없는 비목은 «이름만» 낸다. 지어내지 않는다. 파일이 통째로 없으면
+    종전 프롬프트(이름을 쉼표로 이은 한 줄)와 사실상 같아진다 — 회귀가 아니라 폴백이다.
+    """
+    정의 = 비목_정의()
+    if not 정의:
+        return ", ".join(enum)
+    빠짐 = [b for b in enum if b not in 정의]
+    if 빠짐:
+        print(f"⚠️ 비목 정의 없음 {len(빠짐)}종 {빠짐} — 이름만 넣는다", file=sys.stderr)
+    return "\n".join(f"- {b} — {정의[b]}" if b in 정의 else f"- {b}" for b in enum)
+
+
 # ── 프롬프트. B0 과 달리 캐시 프리픽스가 아니므로 비목 목록을 안에 넣어도 된다 ──
 _지시 = """다음 문장은 창업지원금으로 무언가를 사거나 지출하려는 사람의 질문이다.
 판정에 필요한 사실만 뽑아 JSON 으로 정규화하라.
@@ -314,7 +334,8 @@ _지시 = """다음 문장은 창업지원금으로 무언가를 사거나 지�
 
 판정을 하지 마라. 가능·불가를 여기서 말하지 않는다. 사실만 뽑는다.
 
-비목 목록: {비목}
+비목 목록 (이 이름만 쓴다)
+{비목}
 
 질문: {질문}"""
 
@@ -488,8 +509,8 @@ def 정규화(질문: str, *, dry: bool = False, 비목목록: list[str] | None 
         return 규칙_정규화(질문), {"지연ms": 0, "모델": "규칙(dry)", "토큰": {}}
     스키마 = 호출자리1_스키마(비목목록)
     프롬프트 = _지시_조립(변형).format(
-        비목=", ".join(스키마["properties"]["비목후보"]["items"]
-                      ["properties"]["비목"]["enum"]), 질문=질문)
+        비목=_비목_블록(스키마["properties"]["비목후보"]["items"]
+                     ["properties"]["비목"]["enum"]), 질문=질문)
     # 🔴 400 이 아니라 2000 이다 (2026-09-03 실서버 실측).
     #    Qwen3 는 thinking 이 기본이라 `<think>...</think>` 가 «출력 토큰» 을 먹는다.
     #    서버에 `--reasoning-parser qwen3` 를 줘도 갈라지지 않는 응답이 있다 —
