@@ -47,7 +47,17 @@ def 적재(run_id: int):
                                        (run_id,)).fetchall():
             gc[gid].append((cid, doc))
         길이 = dict(c.execute("SELECT chunk_id, length(text) FROM corpus.chunks").fetchall())
-    return 머리, rows, gc, 길이
+        # 🔴 «구조적 미도달» 갈래 — 정답청크가 **전부** `retrieval_scope='폐포전용'` 인 문항.
+        #    검색 후보에 아예 안 들어가므로 어떤 임베딩으로도 못 닿는다.
+        #    ⚠️ **세는 규칙을 반드시 같이 적는다.** 「전부」냐 「하나라도」냐로 수가 갈린다 —
+        #       run 194 에서 전부=38건, 하나라도=39건(gold 565 가 경계)이다. 38 vs 39 의
+        #       차이가 그것이고, 규칙을 안 적으면 두 사람이 다른 수를 들고 싸운다.
+        못찾음 = {r[0] for r in c.execute("""
+                SELECT gc.gold_id FROM eval.golden_chunks gc JOIN corpus.chunks ch USING (chunk_id)
+                GROUP BY gc.gold_id
+                HAVING count(*) = count(*) FILTER (WHERE ch.retrieval_scope='폐포전용')
+                """).fetchall()}
+    return 머리, rows, gc, 길이, 못찾음
 
 
 def 원인(o: dict, 적중: bool) -> str:
@@ -78,7 +88,7 @@ def _분위(v: list[int]) -> str:
 
 def main() -> int:
     run_id = int(sys.argv[1])
-    머리, rows, gc, 길이 = 적재(run_id)
+    머리, rows, gc, 길이, 못찾음 = 적재(run_id)
     if not rows:
         print(f"run {run_id} 문항 0건 — 아직 안 끝났거나 없는 run 이다")
         return 1
@@ -224,6 +234,30 @@ def main() -> int:
     for k, (h, t) in sorted(문서표.items(), key=lambda x: x[1][0] / max(x[1][1], 1)):
         if t >= 5:
             print(f"      {str(k)[:46]:<48} {h:>3}/{t:<4} {h / t * 100:5.1f}%")
+
+    # ── 판정 축 / 인용 축을 «갈라» 본다 (오너 결정 2026-09-05) ─────────────
+    # 🔴 한 숫자로 합치지 마라. 합치면 「판정은 되는데 근거를 못 댄다」는 가장 설명력 있는
+    #    대비가 사라진다. 분모를 줄여 좋아 보이게 만드는 것(⑶ 38건 제외)은 «기각» 됐다 —
+    #    이 프로젝트가 「76.8% 단독 인용은 부풀림」으로 이미 한 번 데인 자리다.
+    print("\n판정 축 / 인용 축 — 갈래별 (🔴 한 숫자로 합치지 마라)")
+    print("    갈래 정의: 정답청크가 «전부» retrieval_scope='폐포전용' 이면 «구조적 미도달».")
+    print("               「하나라도」로 세면 수가 달라진다 (run194 전부=38 / 하나라도=39)")
+    print(f"      {'갈래':<12}{'n':>5}{'판정됨':>7}{'판정정확도':>11}{'근거도달':>9}{'인용적중':>9}")
+    for 이름, 갈래 in (("나머지", [(r, o) for r, o in zip(rows, O) if r[0] not in 못찾음]),
+                     ("구조적미도달", [(r, o) for r, o in zip(rows, O) if r[0] in 못찾음])):
+        if not 갈래:
+            continue
+        판정됨 = [(r, o) for r, o in 갈래 if not o.get("실패단계")]
+        # 🔴 분자와 분모를 **같은 집합**에서 뽑는다. 「적중 전체 ÷ 판정됨」으로 세면
+        #    «실패했는데 정답» 6건이 분자에만 들어가 정확도가 부풀고, run 194 에서는
+        #    그 오차가 갈래 간 «순서를 뒤집었다» (65.7/71.4 → 실제 63.5/61.9).
+        맞 = sum(1 for r, _ in 판정됨 if r[3])
+        근 = sum(1 for _, o in 갈래 if o.get("근거적중"))
+        인 = sum(1 for _, o in 갈래 if o.get("인용적중"))
+        d = max(len(판정됨), 1)
+        print(f"      {이름:<12}{len(갈래):>5}{len(판정됨):>7}"
+              f"{맞 / d * 100:>10.1f}%{근 / len(갈래) * 100:>8.1f}%{인 / len(갈래) * 100:>8.1f}%")
+    print("      ⚠️ 판정정확도 분모는 «판정됨»(실패경로 제외), 근거·인용 분모는 «갈래 전체» 다")
 
     print("\n강등코드 × 정오 — «오답을 골라내는가» (판정에 배선할지의 근거)")
     코드표: dict[str, list[int]] = defaultdict(lambda: [0, 0])
