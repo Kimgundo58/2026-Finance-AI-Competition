@@ -126,18 +126,18 @@ def 판정_스키마(s번호들: list[str] | None = None,
         "properties": {
             "판정": {"type": "string", "enum": list(판정_ENUM)},
             "요약": {"type": "string", "minLength": 1, "maxLength": 300},
-            # 🔴 §3-4 원문은 `{항목, 설명}` 2필드다. `코드들` 을 주면 **`code` 를 추가**해
-            #    `check_items.code` 폐쇄 목록으로 닫는다 — `02_frontend.sql` 이
-            #    "code 는 guided_json enum 으로 그대로 들어간다" 고 요구하기 때문이다.
-            #    두 사양이 어긋나 있어 인자로 갈랐다. 안 주면 §3-4 모양 그대로다.
+            # 🔴 2026-09-06(레인 H, ai-8c 승인) — `코드들` 이 있으면 LLM 은 **code 하나만**
+            #    고른다. `인용`(S번호만 LLM, 나머지는 코드)과 같은 원칙 — code 는 안정
+            #    식별자이고(`체크코드_enum` 독스트링), 항목·설명은 `corpus.check_items`
+            #    에서 코드가 채운다(`llm_validate.py::체크항목_본문()`). §3-4 원문은
+            #    `{항목, 설명}` LLM 저작 2필드였는데, 그건 code 가 «없을 때»(아래 else,
+            #    폴백)만 남긴다 — 폴백은 손대지 않는다(같이 고치면 무너진다).
             "해야할일": {
                 "type": "array", "maxItems": 10,
                 "items": ({
                     "type": "object", "additionalProperties": False,
-                    "required": ["code", "항목", "설명"],
-                    "properties": {"code": {"type": "string", "enum": list(코드들)},
-                                   "항목": {"type": "string", "minLength": 1},
-                                   "설명": {"type": "string"}},
+                    "required": ["code"],
+                    "properties": {"code": {"type": "string", "enum": list(코드들)}},
                 } if 코드들 else {
                     "type": "object", "additionalProperties": False,
                     "required": ["항목", "설명"],
@@ -153,7 +153,19 @@ def 판정_스키마(s번호들: list[str] | None = None,
                     "type": "object", "additionalProperties": False,
                     "required": ["사실", "근거조항", "매핑", "미충족시"],
                     "properties": {
-                        "사실": {"type": "string", "minLength": 1},
+                        # 🔴 2026-09-06(레인 H, ai-8c 승인) — minLength 1 -> 5.
+                        #    실측(run 195 원출력 전제.사실 180개): 길이<=4 가 100건
+                        #    (55.6%) «전부» 가비지였다 — S번호 패턴 76건("S03" 등)
+                        #    + 맨 단어 24건("용도"·"증빙"·"인건비"). 예외 0건.
+                        #    반대로 정상 사실도 7자·9자에 실재한다("사전승인 완료"
+                        #    7자·"수량 과하지 않음" 9자) — 오너 초안 12는 이 둘을
+                        #    «수집 손실» 시킨다. 5는 그 손실 없이 확인된 가비지를 막는다.
+                        #    🔴 **부분 방어다.** 문법 제약은 지식을 만들지 않는다 —
+                        #    실패의 «모양»을 바꿀 뿐이다. "시제품 제작"(6자) 류 명사구가
+                        #    5~14자 구간에 이미 섞여 있어, 이후 5자 이상으로 늘어난
+                        #    가비지가 나올 수 있다. 실제로 줄어드는지는 GPU 를 켜야
+                        #    안다 — 이 세션은 그걸 확인하지 않았다(할 수 없었다).
+                        "사실": {"type": "string", "minLength": 5},
                         "근거조항": s번호,
                         # F필드 경로의 **참조 목록**. 수식 금지 — 계산은 룰에서 코드가 한다
                         "매핑": {"type": "array", "items": {"type": "string"}, "maxItems": 8},
@@ -212,11 +224,32 @@ class 인용:
 
 @dataclass
 class 전제:
+    """`사실`·`매핑`·`미충족시`는 LLM 이, 근거조항의 문서 해석은 `인용`과 같은
+    원칙으로 코드가 채운다 (2026-09-06 레인 H).
+
+    🔴 `근거조항`(S번호)이 `인용`과 «같은 s맵 체계»를 쓰는데도 문서명·조번호·원문으로
+    안 풀려서, 화면(`server/inquiry.py`)에 "지침은 「S03」 이 정하고 있습니다" 처럼
+    내부 번호가 그대로 나갈 뻔했다. `인용` 과 같은 필드를 같은 방식으로 더한다 —
+    채우는 자리도 `인용`과 같다: 조립기(3)가 아니라 (6) 검증·강등기다
+    (`llm_validate.py::검증()` 의 `s번호_메타()` 조회를 그대로 재사용한다).
+
+    🔴 `인용`과 달리 DB 조회가 비어도(`CITE_DB_MISSING`처럼) 전제 자체를 폐기하지
+    않는다 — `사실` 은 그 자체로 유효한 정보이고(사용자가 확인해야 할 것),
+    근거 문서를 못 찾은 것은 «인용문 완성 실패» 이지 «사실 자체의 무효» 가 아니다.
+    이때는 doc_id 이하가 전부 None 으로 남고, 화면 쪽(`inquiry.py`)이 이미
+    "필드가 없으면 그 문장을 통째로 뺀다" 원칙을 갖고 있어 안전하게 흡수된다.
+    """
     사실: str                                   # LLM
     근거조항: Optional[str]                     # LLM (S번호). 없으면 (5)에서 폐기
     매핑: list[str] = field(default_factory=list)   # LLM — F필드 경로 참조 목록
     미충족시: str = "불가"                      # LLM
     미매핑: bool = False                        # 코드 — F 스키마에 없는 경로가 섞였나
+    # ── 코드가 채운다 (S번호 → DB 치환. `인용`과 같은 패턴·같은 이유) ────
+    doc_id: Optional[str] = None                # 코드 — s맵 → DB
+    조번호: Optional[str] = None                # 코드
+    조제목: Optional[str] = None                # 코드
+    원문: Optional[str] = None                  # 코드 — S번호 → DB 원문 치환. **생성 금지**
+    원문범위: Optional[str] = None              # 코드 — '항' | '조전체' | '청크'
 
 
 @dataclass
