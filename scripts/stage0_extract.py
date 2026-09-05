@@ -156,6 +156,67 @@ def extract_pdf(path: Path) -> tuple[str, dict[int, int]]:
 
 
 # ── HWP ──────────────────────────────────────────────────────────
+def _find_soffice() -> str | None:
+    """LibreOffice `soffice` 실행 파일 경로. 없으면 None(호출부가 폴백한다)."""
+    import shutil as _sh
+
+    후보 = [
+        os.environ.get("SOFFICE_BIN"),
+        _sh.which("soffice"),
+        r"C:\Program Files\LibreOffice\program\soffice.exe",
+        r"C:\Program Files (x86)\LibreOffice\program\soffice.exe",
+        "/usr/bin/soffice",
+        "/usr/local/bin/soffice",
+    ]
+    for c in 후보:
+        if c and Path(c).exists():
+            return c
+    return None
+
+
+def _libreoffice_docx(path: Path) -> Path | None:
+    """구형 `.hwp`(OLE) 를 LibreOffice+H2Orestart 로 `.docx` 변환한다. 실패하면 `None`.
+
+    `hwp_extract.py` 는 PARA_TEXT 레코드만 훑어 표 구조가 없다. LibreOffice 로
+    docx 를 거치면 `docx_extract._walk_table()` 의 표 걷기를 그대로 태울 수 있다
+    (L3_시연적재_안내.md §5-3, 검증됨). 실패는 예외로 올리지 않고 `None` 을 돌려준다 —
+    호출부(`extract_hwp`)가 기존 `hwp_extract` 경로로 폴백한다. 지금 동작을 잃지 않는다.
+
+    🔴 **ASCII 임시 파일명으로 복사한 뒤 변환한다.** 한글 파일명은 H2Orestart(Java)
+       인코딩 문제로 깨진다(§5-4①: `FileNotFoundException: /tmp/L3_???…hwp`).
+    """
+    import shutil, subprocess, tempfile, uuid
+
+    soffice = _find_soffice()
+    if not soffice:
+        return None
+    try:
+        with tempfile.TemporaryDirectory(prefix="hwp2docx_") as tmp_s:
+            tmp = Path(tmp_s)
+            src = tmp / f"{uuid.uuid4().hex}.hwp"
+            shutil.copy(path, src)
+            proc = subprocess.run(
+                [soffice, "--headless", "--norestore", "--convert-to", "docx",
+                 "--outdir", str(tmp), str(src)],
+                capture_output=True, timeout=180,
+            )
+            out = src.with_suffix(".docx")
+            if proc.returncode != 0 or not out.exists():
+                _로그.warning(
+                    "LibreOffice 변환 실패(%s): rc=%s stderr=%s",
+                    path.name, proc.returncode, (proc.stderr or b"")[:300],
+                )
+                return None
+            # tmp 디렉터리가 with 종료 시 지워지므로, 그 전에 영속 위치로 옮겨 돌려준다.
+            keep_dir = Path(tempfile.mkdtemp(prefix="hwp2docx_out_"))
+            keep = keep_dir / out.name
+            shutil.copy(out, keep)
+            return keep
+    except Exception as e:
+        _로그.warning("LibreOffice 변환 예외(%s): %s", path.name, e)
+        return None
+
+
 def _extract_hwpml(path: Path) -> str:
     """확장자는 .hwp 지만 실제 내용이 HWPML(XML) 인 파일.
     (예: 국가법령정보센터에서 내려받은 서울대 규정)"""
@@ -219,6 +280,17 @@ def extract_hwp(path: Path) -> str:
     kind = sniff(path)
     if kind.startswith("HWP-DRM"):
         raise HwpProtectedError(f"{kind} ({path.name})")
+
+    # 🔴 구형 .hwp(OLE) 는 표 구조가 없다(hwp_extract 는 PARA_TEXT 만 훑는다).
+    #    LibreOffice+H2Orestart 로 .docx 를 거쳐 docx_extract 의 표 걷기를 태운다.
+    #    실패하면(LibreOffice 미설치·변환 오류·재파싱 실패) 기존 경로로 폴백한다 —
+    #    지금 동작을 절대 잃지 않는다. 검증: scratchpad/인H_hwp갈래.md
+    변환됨 = _libreoffice_docx(path)
+    if 변환됨:
+        try:
+            return extract_docx(변환됨)
+        except Exception as e:
+            _로그.warning("LibreOffice 변환본 파싱 실패(%s) — 기존 경로로 폴백: %s", path.name, e)
 
     from hwp_extract import extract
 
