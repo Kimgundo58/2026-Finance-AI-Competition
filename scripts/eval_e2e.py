@@ -205,6 +205,15 @@ def _sha(s: str) -> str:
     return hashlib.sha1(s.encode("utf-8")).hexdigest()[:12]
 
 
+def _b0해시(변형: str) -> str | None:
+    """그 run 이 실제로 쓴 B0 의 바이트 해시. 계측이 본 실행을 죽이면 안 되니 감싼다."""
+    try:
+        import assemble_context
+        return _sha(assemble_context.b0(변형))
+    except Exception:
+        return None
+
+
 def _블록분해(프롬프트: str) -> dict:
     """B0~B6 구간별 자수·sha1.
 
@@ -582,6 +591,11 @@ def 실행(*, dry: bool, limit: int | None, 세트: list[str] | None, 라벨: st
                     "강등사유": r.get("강등사유") or [],
                     "경로": r.get("경로"),
                     "실패단계": r.get("실패단계"),
+                    # 🔴 2026-09-05 — 이게 없어서 Run A 의 실패경로 30여 건을 스택으로
+                    #    못 짚었다. `orchestrate.py:832` 가 응답에 넣어 두는데 여기서
+                    #    안 베끼고 있었다. 예외 «이름»은 `강등사유` 에 남지만 어느 줄에서
+                    #    났는지는 스택이 있어야 안다.
+                    "트레이스": r.get("트레이스"),
                     "게이트값": 검색.get("게이트값"),
                     # 🔴 `orchestrate.판정()` 은 **dry 분기에서만** 이걸 채운다 —
                     #    실전 update 에는 이 키가 없어서 run 191 은 93/93 None 이었다.
@@ -664,6 +678,24 @@ def 실행(*, dry: bool, limit: int | None, 세트: list[str] | None, 라벨: st
                     gid, r, err = f.result()
                     결과[gid] = (m, r, err)
                     완료 += 1
+                    # 🔴 «완료되는 대로» 한 줄. 저장은 아래에서 원래 순서로 다시 한다 —
+                    #    이 print 는 관측용이라 items 를 만들지 않는다(순서 오염 금지).
+                    try:
+                        _정답 = m["정답판정"]
+                        _예측 = (r.get("판정") or "판단불가") if not err else f"오류:{err[:40]}"
+                        _검색 = r.get("검색") or {}
+                        _top5 = list(_검색.get("top5") or [])
+                        _근 = "○" if set(_top5) & 정답청크[gid] else "✗"
+                        _인 = "○" if _인용좌표(r) & 정답좌표[gid] else "✗"
+                        _치 = " 🔴치명" if _치명(_정답, _예측) else ""
+                        _경 = r.get("경로") or ""
+                        _강 = ",".join(r.get("강등코드") or [])
+                        _표 = "OK" if _예측 == _정답 else "XX"
+                        print(f"  [{완료}/{len(문항)}] gold={gid} {_표} 정답={_정답} "
+                              f"예측={_예측}{_치} | 근거{_근} 인용{_인} | {_경}"
+                              + (f" 강등={_강}" if _강 else ""), flush=True)
+                    except Exception as _e:      # 관측이 본 실행을 죽이면 안 된다
+                        print(f"  [{완료}/{len(문항)}] gold={gid} (표시실패 {_e})", flush=True)
                     if 완료 % 10 == 0 or 완료 == len(문항):
                         print(f"  {완료}/{len(문항)} · {time.time()-t0:.0f}초", flush=True)
             # 🔴 완료 순서(=응답이 빨리 온 순서)가 아니라 **문항 원래 순서**로 저장한다 —
@@ -936,6 +968,13 @@ def 실행(*, dry: bool, limit: int | None, 세트: list[str] | None, 라벨: st
           "정답고정": "eval.golden_chunks(D3)",
           "채점": "결정론 4-way + 치명오답 + 근거/인용 적중",
           "변형": 변형,
+          # 🔴 2026-09-05 — `변형` 이름만으로는 «그 변형의 문면이 그날 무엇이었는지» 를
+          #    못 잡는다. `git` 의 `dirty` 는 파일 경로만 나열해서(`M assemble_context.py`)
+          #    커밋 전에 B0 를 두세 번 고쳐가며 돌린 run 들이 전부 같은 값으로 찍힌다.
+          #    바이트 단위 해시를 같이 둬야 「이 run 이 어떤 B0 로 돌았나」가 닫힌다.
+          #    F축 스키마가 바뀌어 허용경로 목록이 달라지는 것도 이 해시가 잡는다
+          #    (git commit 으로는 못 잡는 드리프트다).
+          "b0_sha1": _b0해시(변형),
           # 🔴 A1·A2(레인A 2026-09-05). 조건이 다른 run 끼리 수치를 빼면 안 된다는
           #    원칙 — 여기 안 박히면 다음 run 과 뭐가 다른지 못 가린다.
           "폐포사용": 폐포사용, "동시": 동시,
