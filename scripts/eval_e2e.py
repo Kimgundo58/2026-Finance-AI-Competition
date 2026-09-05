@@ -488,6 +488,10 @@ def 실행(*, dry: bool, limit: int | None, 세트: list[str] | None, 라벨: st
 
         # 비교 앵커 재료. `with` 밖(집계 절)에서는 conn 이 닫혀 있어 여기서 미리 읽는다.
         코퍼스버전값 = eval_store.코퍼스버전(cur)
+        # 🔴 정답지 고정도 지문을 뜬다 (2026-09-06). 코퍼스는 지문이 있는데 정답지는
+        #    라벨뿐이라 비대칭이었다 — `eval_store.골든고정()` 주석 참조. conn 이 닫히기
+        #    전에 여기서 읽는다 (코퍼스버전값과 같은 이유).
+        골든고정값 = eval_store.골든고정(cur)
         cur.execute("SELECT count(*), count(*) FILTER (WHERE verified) FROM corpus.rules")
         rules수 = dict(zip(("총", "verified"), cur.fetchone()))
         cur.execute("SELECT 적용대상, count(*) FROM corpus.chunks GROUP BY 1 ORDER BY 2 DESC")
@@ -988,7 +992,7 @@ def 실행(*, dry: bool, limit: int | None, 세트: list[str] | None, 라벨: st
         return sorted(vals) or None
 
     설정 = {"dry": dry, "top_k": top_k, "세트": 세트, "limit": limit,
-          "정답고정": "eval.golden_chunks(D3)",
+          "정답고정": {"표": "eval.golden_chunks(D3)", "지문": 골든고정값},
           "채점": "결정론 4-way + 치명오답 + 근거/인용 적중",
           "변형": 변형,
           # 🔴 2026-09-05 — `변형` 이름만으로는 «그 변형의 문면이 그날 무엇이었는지» 를

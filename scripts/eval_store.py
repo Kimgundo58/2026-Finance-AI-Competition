@@ -57,6 +57,38 @@ def 코퍼스버전(cur) -> str:
     return f"c{n[0]}-e{n[1]}-r{n[2]}-d{n[3]}-{h}"
 
 
+def 골든고정(cur) -> str:
+    """**정답지 고정**(`eval.golden_chunks`)의 상태를 한 문자열로 압축한다.
+
+    🔴 왜 따로 두는가 (2026-09-06). `코퍼스버전()` 은 «검색 대상» 만 본다.
+    그런데 hit@k 는 «검색 대상» 과 «정답 청크 집합» 둘 다에 달려 있고, 후자는
+    `설정` 에 `"정답고정": "eval.golden_chunks(D3)"` 라는 **문자열 하나**로만 남아 있었다 —
+    run 194 와 195 가 글자 하나 안 다르다. 즉 기록이 아니라 라벨이었다.
+    실측: 0단계 표복구로 golden_chunks 가 404 -> 399 행이 됐는데 그 라벨은 안 변했다.
+
+    🔴 `매칭방법 분포`를 반드시 넣는다. 같은 날 «행 수는 그대로인데 매칭방법만 바뀌는»
+    일이 실제로 났다 — gold 380·389 가 표 복구로 근거원문이 청크에 축자로 잡히면서
+    `조번호`(그 조의 청크 전부를 정답으로 치는 폴백) -> `원문일치`(정확히 1개)로 올라섰다.
+    (총행, 실패행, gold_id 종수, max gc_id) 만으로는 이게 안 잡히는데, 정답 청크 집합이
+    달라졌으니 hit@k 는 움직인다. 분포가 있어야 「정밀도가 올랐다」와 「행이 줄었다」가 갈린다.
+
+    🔴 이 지문이 다른 두 run 은 hit@k 를 **빼면 안 된다** (`CLAUDE.md` 「조건이 다른 run
+    끼리 hit@k·일치율을 빼지 않는다」). 지문이 «없는» run 은 이 함수가 생기기 전 run 이다 —
+    옛 run 의 설정을 소급해 채우지 않는다. 그날의 기록이 아니게 된다.
+    """
+    cur.execute("""
+        SELECT (SELECT count(*) FROM eval.golden_chunks),
+               (SELECT count(*) FROM eval.golden_chunks WHERE 매칭방법='실패'),
+               (SELECT count(DISTINCT gold_id) FROM eval.golden_chunks),
+               (SELECT coalesce(max(gc_id),0) FROM eval.golden_chunks)""")
+    n = cur.fetchone()
+    cur.execute("SELECT 매칭방법, count(*) FROM eval.golden_chunks GROUP BY 1 ORDER BY 1")
+    분포 = cur.fetchall()
+    씨앗 = "|".join(map(str, n)) + "|" + ",".join(f"{k}:{v}" for k, v in 분포)
+    h = hashlib.sha1(씨앗.encode()).hexdigest()[:8]
+    return f"g{n[0]}-f{n[1]}-q{n[2]}-{h}"
+
+
 def _git커밋() -> str | None:
     try:
         out = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
