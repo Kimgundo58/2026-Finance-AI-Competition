@@ -28,6 +28,8 @@
     PYTHONIOENCODING=utf-8 python scripts/eval_e2e.py              # 실전. GPU 창에서
     PYTHONIOENCODING=utf-8 python scripts/eval_e2e.py --limit 5 --dry
     PYTHONIOENCODING=utf-8 python scripts/eval_e2e.py --세트 본세트
+    PYTHONIOENCODING=utf-8 python scripts/eval_e2e.py --폐포 off    # A1 — B3 없이 재기
+    PYTHONIOENCODING=utf-8 python scripts/eval_e2e.py --동시 3      # A2 — 문항 3개씩 동시
 """
 from __future__ import annotations
 
@@ -201,6 +203,15 @@ def _헤드() -> dict:
 
 def _sha(s: str) -> str:
     return hashlib.sha1(s.encode("utf-8")).hexdigest()[:12]
+
+
+def _b0해시(변형: str) -> str | None:
+    """그 run 이 실제로 쓴 B0 의 바이트 해시. 계측이 본 실행을 죽이면 안 되니 감싼다."""
+    try:
+        import assemble_context
+        return _sha(assemble_context.b0(변형))
+    except Exception:
+        return None
 
 
 def _블록분해(프롬프트: str) -> dict:
@@ -442,7 +453,7 @@ def _부분집합(이름: str | None,
 def 실행(*, dry: bool, limit: int | None, 세트: list[str] | None, 라벨: str | None,
         top_k: int, 기록: bool, 변형: str = "V0", 부분집합: str | None = None,
         gold_ids: str | None = None, max_model_len: int = 40960,
-        스냅샷: str | None = None) -> int:
+        스냅샷: str | None = None, 폐포사용: bool = True, 동시: int = 1) -> int:
     ids, 부분집합표기, 부분집합유보 = _부분집합(부분집합, gold_ids)
     if 부분집합유보:
         print(f"🔴 이 부분집합의 유보 — 수를 옮길 때 같이 옮겨라:\n   {부분집합유보}\n")
@@ -509,7 +520,8 @@ def 실행(*, dry: bool, limit: int | None, 세트: list[str] | None, 라벨: st
         print(f"E2E {'드라이런' if dry else '실전'} · {len(문항)}문항 "
               f"(세트={','.join(세트) if 세트 else '전체'}"
               f"{' · 부분집합=' + 부분집합표기 if 부분집합표기 else ''}) · "
-              f"top_k={top_k} · 변형={변형} · 원본포획={'on' if RAW else 'off'}"
+              f"top_k={top_k} · 변형={변형} · 폐포사용={폐포사용} · 동시={동시} · "
+              f"원본포획={'on' if RAW else 'off'}"
               f"{'(프롬프트 전문 포함)' if RAW and RAW_PROMPT else ''}\n")
 
         import orchestrate  # 여기서 import 한다 — --help 만 볼 때 모델을 안 올리게
@@ -521,37 +533,50 @@ def 실행(*, dry: bool, limit: int | None, 세트: list[str] | None, 라벨: st
         if RAW:
             감싸기()
 
-        items: list[dict] = []
-        오류: list[tuple[int, str]] = []
-        꽂기없음: list[int] = []      # 정답청크가 0건이라 꽂을 게 없던 문항
-        t0 = time.time()
+        # 🔴 A2(레인A, 2026-09-05) — `--동시 > 1` 은 RAW·INJECT 와 같이 못 쓴다.
+        #    `_포획`·`_꽂을청크` 는 전역이고 문항 단위로 지우고 채운다(위 `감싸기()`,
+        #    아래 순차 루프). 두 문항이 동시에 돌면 한쪽이 지운 걸 다른 쪽이 읽는다 —
+        #    「레인 지표는 서로 오염된다」와 같은 반이다. 격리(contextvars·프로세스 분리)
+        #    없이 그냥 스레드로 감싸면 조용히 틀린 값이 나오므로, 여기서는 **막는다**.
+        if 동시 > 1 and (RAW or INJECT):
+            sys.exit(
+                "🔴 --동시 > 1 은 SUDDOE_EVAL_RAW=1 · SUDDOE_EVAL_INJECT_GOLD=1 과 "
+                "같이 못 쓴다 — 그 둘은 전역 `_포획`·`_꽂을청크` 를 문항 단위로 지우고 "
+                "채우는데, 문항이 동시에 돌면 서로 덮어쓴다(격리 미구현). "
+                "--동시 1 로 돌리거나 그 환경변수들을 꺼라.")
 
-        for i, m in enumerate(문항, 1):
+        def _판정호출(m: dict, *, conn) -> tuple[int, dict, str | None]:
+            """1문항 판정. (gold_id, r, 오류메시지) — 오류면 r 은 판단불가 스텁.
+
+            🔴 순차·병렬 두 경로가 **이 함수 하나**를 부른다. 갈라 두면 언젠가
+            한쪽만 고치고 다른 쪽을 잊는다(이 프로젝트가 여러 번 겪은 사고 형태).
+            `conn` 은 호출부가 정한다 — 순차는 공유 커넥션을, 병렬은 `None`(문항마다
+            제 커넥션)을 준다. psycopg 커넥션은 스레드 간 공유가 안 된다
+            (`orchestrate._병렬_l3`·`_병렬_검색` 이 이미 같은 이유로 그렇게 한다).
+            """
             gid = m["gold_id"]
             사업 = eval_store.사업키(m["사업명"])
-            _포획.clear()          # 문항 단위 리셋. LLM 호출은 전부 메인 스레드다
             try:
-                # 🔴 꽂기는 «문항별» 정답청크다. 매 문항 갈아 끼우지 않으면 앞 문항 것이
-                #    다음 문항에 새어 들어가 전 문항이 오염된다.
-                _꽂을청크[:] = sorted(정답청크[gid]) if INJECT else []
-                if INJECT and not _꽂을청크:
-                    꽂기없음.append(gid)
                 r = orchestrate.판정(m["질문"], 사업명=사업, dry=dry, top_k=top_k,
-                                    conn=conn, 기록=False, 변형=변형)
+                                    conn=conn, 기록=False, 변형=변형,
+                                    폐포사용=폐포사용)
+                return gid, r, None
             except Exception as e:
-                오류.append((gid, f"{type(e).__name__}: {e}"))
                 traceback.print_exc(limit=2)
                 # 🔴 예외도 판단불가다. 조용히 빼면 분모가 흔들린다 (계약 §7).
                 r = {"판정": "판단불가", "요약": f"[예외] {type(e).__name__}",
                      "강등코드": [], "강등사유": [f"eval_e2e 예외: {e}"],
                      "경로": "예외", "인용목록": []}
+                return gid, r, f"{type(e).__name__}: {e}"
 
+        def _채점항목(gid: int, m: dict, r: dict) -> dict:
+            """`_판정호출` 의 결과 하나를 `items` 행 하나로. 순차·병렬 공용."""
             예측 = r.get("판정") or "판단불가"
             정답 = m["정답판정"]
             검색 = r.get("검색") or {}
             top5 = list(검색.get("top5") or [])
 
-            items.append({
+            return {
                 "gold_id": gid,
                 "예측": 예측,
                 "정답": 정답,
@@ -566,6 +591,11 @@ def 실행(*, dry: bool, limit: int | None, 세트: list[str] | None, 라벨: st
                     "강등사유": r.get("강등사유") or [],
                     "경로": r.get("경로"),
                     "실패단계": r.get("실패단계"),
+                    # 🔴 2026-09-05 — 이게 없어서 Run A 의 실패경로 30여 건을 스택으로
+                    #    못 짚었다. `orchestrate.py:832` 가 응답에 넣어 두는데 여기서
+                    #    안 베끼고 있었다. 예외 «이름»은 `강등사유` 에 남지만 어느 줄에서
+                    #    났는지는 스택이 있어야 안다.
+                    "트레이스": r.get("트레이스"),
                     "게이트값": 검색.get("게이트값"),
                     # 🔴 `orchestrate.판정()` 은 **dry 분기에서만** 이걸 채운다 —
                     #    실전 update 에는 이 키가 없어서 run 191 은 93/93 None 이었다.
@@ -610,9 +640,72 @@ def 실행(*, dry: bool, limit: int | None, 세트: list[str] | None, 라벨: st
                     "적용범위": m["적용범위"],
                     "사업명": m["사업명"],
                 },
-            })
-            if i % 10 == 0 or i == len(문항):
-                print(f"  {i}/{len(문항)} · {time.time()-t0:.0f}초", flush=True)
+            }
+
+        items: list[dict] = []
+        오류: list[tuple[int, str]] = []
+        꽂기없음: list[int] = []      # 정답청크가 0건이라 꽂을 게 없던 문항
+        t0 = time.time()
+
+        if 동시 <= 1:
+            # 순차 — 기존 경로. **바이트 단위로 종전과 같다**(A2 검사점).
+            for i, m in enumerate(문항, 1):
+                gid = m["gold_id"]
+                _포획.clear()          # 문항 단위 리셋. LLM 호출은 전부 메인 스레드다
+                # 🔴 꽂기는 «문항별» 정답청크다. 매 문항 갈아 끼우지 않으면 앞 문항 것이
+                #    다음 문항에 새어 들어가 전 문항이 오염된다.
+                _꽂을청크[:] = sorted(정답청크[gid]) if INJECT else []
+                if INJECT and not _꽂을청크:
+                    꽂기없음.append(gid)
+                _, r, err = _판정호출(m, conn=conn)
+                if err:
+                    오류.append((gid, err))
+                items.append(_채점항목(gid, m, r))
+                if i % 10 == 0 or i == len(문항):
+                    print(f"  {i}/{len(문항)} · {time.time()-t0:.0f}초", flush=True)
+        else:
+            # 병렬 — A2(레인A 2026-09-05). RAW·INJECT 는 위 가드가 이미 막았다.
+            # 🔴 `conn=None` — 판정마다 제 커넥션을 연다. 순차 경로의 공유 `conn` 을
+            #    그대로 스레드에 넘기면 psycopg 커넥션이 동시에 두 스레드에서 쓰여
+            #    깨진다(순차 경로는 절대 이렇게 바꾸지 않는다 — 그게 위 등가성의 근거다).
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            결과: dict[int, tuple[dict, dict, str | None]] = {}
+            완료 = 0
+            with ThreadPoolExecutor(max_workers=동시) as ex:
+                fut = {ex.submit(_판정호출, m, conn=None): m for m in 문항}
+                for f in as_completed(fut):
+                    m = fut[f]
+                    gid, r, err = f.result()
+                    결과[gid] = (m, r, err)
+                    완료 += 1
+                    # 🔴 «완료되는 대로» 한 줄. 저장은 아래에서 원래 순서로 다시 한다 —
+                    #    이 print 는 관측용이라 items 를 만들지 않는다(순서 오염 금지).
+                    try:
+                        _정답 = m["정답판정"]
+                        _예측 = (r.get("판정") or "판단불가") if not err else f"오류:{err[:40]}"
+                        _검색 = r.get("검색") or {}
+                        _top5 = list(_검색.get("top5") or [])
+                        _근 = "○" if set(_top5) & 정답청크[gid] else "✗"
+                        _인 = "○" if _인용좌표(r) & 정답좌표[gid] else "✗"
+                        _치 = " 🔴치명" if _치명(_정답, _예측) else ""
+                        _경 = r.get("경로") or ""
+                        _강 = ",".join(r.get("강등코드") or [])
+                        _표 = "OK" if _예측 == _정답 else "XX"
+                        print(f"  [{완료}/{len(문항)}] gold={gid} {_표} 정답={_정답} "
+                              f"예측={_예측}{_치} | 근거{_근} 인용{_인} | {_경}"
+                              + (f" 강등={_강}" if _강 else ""), flush=True)
+                    except Exception as _e:      # 관측이 본 실행을 죽이면 안 된다
+                        print(f"  [{완료}/{len(문항)}] gold={gid} (표시실패 {_e})", flush=True)
+                    if 완료 % 10 == 0 or 완료 == len(문항):
+                        print(f"  {완료}/{len(문항)} · {time.time()-t0:.0f}초", flush=True)
+            # 🔴 완료 순서(=응답이 빨리 온 순서)가 아니라 **문항 원래 순서**로 저장한다 —
+            #    안 그러면 run 마다 items 순서가 흔들려 파일 diff 로 대조가 안 된다.
+            for m in 문항:
+                gid = m["gold_id"]
+                _, r, err = 결과[gid]
+                if err:
+                    오류.append((gid, err))
+                items.append(_채점항목(gid, m, r))
 
         경과 = time.time() - t0
 
@@ -875,6 +968,16 @@ def 실행(*, dry: bool, limit: int | None, 세트: list[str] | None, 라벨: st
           "정답고정": "eval.golden_chunks(D3)",
           "채점": "결정론 4-way + 치명오답 + 근거/인용 적중",
           "변형": 변형,
+          # 🔴 2026-09-05 — `변형` 이름만으로는 «그 변형의 문면이 그날 무엇이었는지» 를
+          #    못 잡는다. `git` 의 `dirty` 는 파일 경로만 나열해서(`M assemble_context.py`)
+          #    커밋 전에 B0 를 두세 번 고쳐가며 돌린 run 들이 전부 같은 값으로 찍힌다.
+          #    바이트 단위 해시를 같이 둬야 「이 run 이 어떤 B0 로 돌았나」가 닫힌다.
+          #    F축 스키마가 바뀌어 허용경로 목록이 달라지는 것도 이 해시가 잡는다
+          #    (git commit 으로는 못 잡는 드리프트다).
+          "b0_sha1": _b0해시(변형),
+          # 🔴 A1·A2(레인A 2026-09-05). 조건이 다른 run 끼리 수치를 빼면 안 된다는
+          #    원칙 — 여기 안 박히면 다음 run 과 뭐가 다른지 못 가린다.
+          "폐포사용": 폐포사용, "동시": 동시,
           "부분집합": 부분집합표기,
           "부분집합_유보": 부분집합유보,
           "문항수": len(items),
@@ -905,7 +1008,12 @@ def 실행(*, dry: bool, limit: int | None, 세트: list[str] | None, 라벨: st
           "rules수": rules수, "적용대상분포": 적용대상분포,
           "DB": DB신원,
           "GPU": os.environ.get("SUDDOE_GPU"),
-          "VLLM_URL": os.environ.get("VLLM_URL"),
+          # 🔴 env 가 아니라 «실제로 친 주소» 를 남긴다 (2026-09-05). 팟 주소를
+          #    `ops.gpu_pod` 로 옮긴 뒤 env 는 낡은 팟을 가리킬 수 있고, 그 값을
+          #    남기면 run 재현이 «다른 서버» 를 가리킨다. 이 프로젝트는 조건이 다른
+          #    run 끼리 수치를 빼면 안 된다는 규칙이라 이 기록이 근거 자체다.
+          "VLLM_URL": _실제_vllm_url(),
+          "VLLM_URL_env": os.environ.get("VLLM_URL"),
           "VLLM_MODEL": os.environ.get("VLLM_MODEL"),
           "RUNPOD_POD_ID": os.environ.get("RUNPOD_POD_ID"),
           # 🔴 P2·P3 가 켜는 플래그가 무엇이었는지 남는다. 안 남기면 다음 run 과 못 뺀다
@@ -975,6 +1083,16 @@ def 실행(*, dry: bool, limit: int | None, 세트: list[str] | None, 라벨: st
     return run_id or 0
 
 
+
+def _실제_vllm_url() -> str | None:
+    """run 설정에 남길 «실제로 친» vLLM 주소. `ops.gpu_pod` 우선 · env 폴백."""
+    try:
+        from adapter import vllm_url
+        return vllm_url()
+    except Exception:                                             # noqa: BLE001
+        return os.environ.get("VLLM_URL")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry", action="store_true", help="LLM 없이 배관만. GPU 열기 전 필수")
@@ -1004,10 +1122,21 @@ def main() -> None:
                          "P3 행분해 on/off 대조의 기준선")
     ap.add_argument("--라벨")
     ap.add_argument("--no-log", action="store_true", help="eval.runs 에 남기지 않는다")
+    # 🔴 A1(레인A 2026-09-05). 기본 on — 스위치를 넣기 전과 바이트 단위로 같다.
+    ap.add_argument("--폐포", choices=["on", "off"], default="on",
+                    help="B3(참조 확장·폐포) 을 조립에 넣을지. 기본 on(기존 동작). "
+                         "off 면 프롬프트가 줄어든다 — 정확도 기여는 아직 안 쟀다")
+    # 🔴 A2(레인A 2026-09-05). 기본 1(순차) — RAW·INJECT 는 1로 고정이다(위 가드).
+    #    GPU 동시성 상한은 `pod_serve.sh` 부팅 로그 실측(KV cache/프롬프트토큰) 참고 —
+    #    폐포 on(약 26k토큰)이면 약 3, off(약 5.5k토큰)면 더 갈 수 있다. 고정하지 않는다.
+    ap.add_argument("--동시", type=int, default=1,
+                    help="eval 문항 동시 처리 수. 1=순차(기존). RAW·INJECT 캡처는 "
+                         "전역 상태라 --동시>1 과 같이 못 쓴다")
     a = ap.parse_args()
     실행(dry=a.dry, limit=a.limit, 세트=a.세트, 라벨=a.라벨,
        top_k=a.top_k, 기록=not a.no_log, 변형=a.변형, 부분집합=a.부분집합,
-       gold_ids=a.gold_ids, max_model_len=a.max_model_len, 스냅샷=a.스냅샷)
+       gold_ids=a.gold_ids, max_model_len=a.max_model_len, 스냅샷=a.스냅샷,
+       폐포사용=(a.폐포 != "off"), 동시=a.동시)
 
 
 if __name__ == "__main__":
