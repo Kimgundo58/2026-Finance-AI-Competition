@@ -1,122 +1,81 @@
 {
-  "_주석": "QA 직전 판 레인 (2026-09-04). 본 트리 `금융 AI공모전` 전용이다. 중앙은 ai-c4. 등록된 세션만 소유 밖 쓰기가 막히고 미등록은 통과한다 — 그래서 워커는 반드시 등록한다. 소유 경로는 접두사 매칭이다. 와일드카드(*)를 쓰면 문자 그대로 비교돼 아무것도 안 걸린다(0903 실측). 해제는 이 파일 삭제. agent-perf 레인 내용은 `_lanes.agent-perf.json.bak` 로 옮겨 뒀다.",
-  "중앙": "bb7e338a-d913-4202-8466-a41bd5feb1c6",
-  "중앙이름": "ai-c4",
-  "브랜치": "main 에서 레인별 브랜치를 판다 — 중앙만 판다",
+  "_주석": "2026-09-05 오너 라운드(판정 flow) 판. 중앙은 ai-04. 등록된 세션만 소유 밖 쓰기가 막히고 미등록은 통과한다 — 그래서 워커는 반드시 등록한다. 소유 경로는 접두사 매칭이다. 해제는 이 파일 삭제. 이전 QA 판(2026-09-04, 중앙 ai-c4)은 `git show 3134ce5:.claude/_lanes.json` 으로 꺼낸다 — 옆에 둔 `_lanes.2026-09-04-QA.json.bak` 은 «gitignore 대상이라 추적되지 않는» 사본이니 그걸 정본으로 믿지 마라.",
+  "_작성규칙": [
+    "owns 에는 «완전한 파일명» 이나 «/ 로 끝나는 디렉터리» 만 적는다. 비교가 p.startswith(own) 이라 경로 «경계» 를 안 본다 — `scripts/llm` 같은 중간 접두사를 적으면 `scripts/llm_schema.py` 까지 삼킨다 (ai-36 실측 2026-09-05).",
+    "레인끼리 owns 를 겹치지 마라. 소유레인() 이 최장일치로 «하나» 만 고르고 동점이면 먼저 순회된 쪽이 이긴다 — 진 쪽은 «자기 파일도» 못 쓴다. 공유 폴더(scratchpad/)는 아무에게도 주지 않는다. 무소유는 통과다.",
+    "와일드카드(*)를 쓰면 문자 그대로 비교돼 아무것도 안 걸린다 (0903 실측).",
+    "🔴 이 파일은 «본 트리» 기준이다. guard_lanes.ROOT 가 훅 파일 위치에서 나오므로, 세션 cwd 가 본 트리면 이 파일이 걸린다. J1·J2 는 별도 워크트리(`금융 AI공모전-J1` / `-J2`)에서 작업하는데 그 경로는 ROOT 로 시작하지 않아 상대() 가 절대경로를 그대로 돌려주고 «어느 레인도 소유하지 않아 통과» 한다. 즉 J1·J2 의 owns 는 «본 트리를 건드리지 못하게» 하는 자물쇠이지 워크트리 작업을 막는 게 아니다 — 워크트리 격리는 물리 분리로 이미 돼 있다."
+  ],
+  "중앙": "e5d918c1-76e2-4644-9937-35d2db9c71f7",
+  "중앙이름": "ai-04",
+  "브랜치": "origin/main 에서 레인별 브랜치를 판다 — 중앙만 판다. 오늘 판정 브랜치는 work/판정-0905",
   "규칙": {
-    "git": "git 쓰기(add/commit/checkout/stash)·PR·머지·배포는 전부 중앙(ai-c4)만. 워커는 status/diff/log 만. 세션이 여럿이면 인덱스가 잠긴다",
+    "git": "git 쓰기(add/commit/checkout/stash/merge)·PR·머지는 전부 중앙(ai-04)만. 워커는 status/diff/log 만. 세션이 여럿이면 인덱스가 잠긴다",
     "pytest": "전체 pytest 는 중앙만. 워커는 자기 파일의 --self-test 와 단일 테스트 파일만 — DB 를 공유해서 위양성이 난다",
-    "운영": "Cloud SQL·Cloud Run·Vercel·RunPod 에 «쓰는» 명령은 중앙 승인 없이 치지 않는다. 읽기는 자유",
-    "gpu": "🔴 오너 지시 — GPU 과사용 절대 금지. 팟은 오늘 «한 벌»만, 중앙이 열고 중앙이 닫는다. 워커는 팟을 만들지 않는다. 상한 1개·2시간",
-    "패키지": "requirements-api.txt 는 중앙 소유. 새 서드파티 도입 금지 — 필요하면 패키지명을 먼저 보낸다",
+    "gpu": "🔴 팟은 중앙이 열고 중앙이 닫는다. 워커는 팟을 만들지 않는다. 워크트리엔 `_runpod_open.json`(대장)이 없어 구조적으로도 막혀 있다. 로컬 워치독은 «최선노력» 이고 PC 가 자면 같이 죽는다 — 마감을 워치독에 맡기지 말고 끝나면 손으로 닫는다",
+    "DB": "eval.golden_set·corpus.* 쓰기 금지(조회는 자유). 정답셋 수정은 오너 승인 사안이다. ops.gpu_pod 는 중앙만 쓴다",
     "인코딩": "실행 시 export PYTHONIOENCODING=utf-8 (훅이 한글 명령을 막는다)",
-    "보고": "「구현했다」가 아니라 「무엇을 돌려서 무엇이 나왔나」. 관측과 추론을 문단으로 가른다. 수치엔 조건(문항수·분모·롤·코퍼스버전)을 붙인다. rowcount·HTTP 200·pytest 초록으로 통과시키지 않는다 — 새 트랜잭션 되읽기로 확인한다"
+    "보고": "「구현했다」가 아니라 「무엇을 돌려서 무엇이 나왔나」. 관측과 추론을 문단으로 가른다. 수치엔 조건(문항수·분모·롤·코퍼스버전)을 붙인다. rowcount·HTTP 200·pytest 초록으로 통과시키지 않는다",
+    "부재": "🔴 «없다» 는 «내가 본 N 곳에는 없다» 로만 적는다. 정말 없다고 말하려면 «있으면 반드시 보일 조건» 을 만들어서 안 보이는 걸 확인한다 — 2026-09-05 에 이걸로 세 번 틀렸다(524 미재현·dirty 범위·워치독 실재)"
   },
   "기준선": {
-    "커밋": "0907409 (origin/main · PR #21 = a70c874 정규화 2000 포함)",
-    "배포": "Cloud Run suddoe-api 이미지 api:v3 (2026-09-03 22:00 KST)",
-    "🔴 v3 실측": "컨테이너 안 파일로 확정 — orchestrate.py 는 main 과 byte 동일(SAVEPOINT 91fd456 «있다»). 그러나 normalize_run.py 는 «어느 커밋과도 안 맞는다» — 사고흔적_제거() 는 들어갔는데 최대토큰은 400 이다. 즉 v3 는 더러운 워킹트리에서 빌드됐고 재현 불가능하다",
-    "db": "PROD accounts 2행(prototype·test → 경상국립대 창업중심대학사업단) · orgs 420 · tenant.plans 는 «없다»",
-    "org": "경상국립대학교 창업중심대학사업단 cfeba091-251a-5ae4-8cc9-88c6e6679440 (데모 기관 · 사업=창업중심대학)"
+    "커밋": "3134ce5 (origin/main)",
+    "판정브랜치": "work/판정-0905 — J1 전송계층 + J2① 계측 + 스트리밍 ON + dirty 인코딩 수정",
+    "run": "Run A = run 194 (295문항 · 일치율 44.7% · 🔴 실제 42.7% · 실패경로 96건). Run B 진행 중",
+    "프록시천장": "125.8초 — stream=false 는 그 위에서 HTTP 524. 스트리밍이 해제한다(실측 977572c)",
+    "재현근거": "🔴 dirty 하나로 판단하지 마라. dirty(scripts/ 만 본다) + 코퍼스버전 + rules수 + 적용대상분포 넷을 같이 본다"
   },
   "레인": {
     "중앙전담": {
-      "이름": "중앙(ai-c4) — 판단·검수·통합·배포",
-      "sessions": {},
+      "이름": "중앙(ai-04) — 판정 flow 총괄·검수·병합·GPU·git",
+      "sessions": { "ai-04": "e5d918c1-76e2-4644-9937-35d2db9c71f7" },
       "owns": [
-        "scripts/orchestrate.py",
+        "scripts/",
+        "docs/",
+        "server/",
+        "db/",
+        "tests/",
+        ".claude/",
         "CLAUDE.md",
         "README.md",
-        ".claude/",
-        "docs/0_현황.md",
-        "docs/9_미결.md",
         "requirements-api.txt",
         "Dockerfile"
       ]
     },
-    "Q1": {
-      "이름": "신원과 저장 (배관)",
-      "sessions": { "ai-d7": "832f51cb-1f77-4bd2-87ee-f5628d9d7474" },
+    "J1": {
+      "이름": "타임아웃·전송 계층 — 작업은 워크트리 `금융 AI공모전-J1`",
+      "sessions": { "ai-9a": "1efd8d85-d3c7-4585-9f27-a759c1ab7fc0" },
       "owns": [
-        "server/auth.py",
-        "server/routes_orgs.py",
-        "server/persist.py",
-        "db/init/",
-        "scripts/archive/seed/seed_demo.py",
-        "tests/test_rls_",
-        "tests/test_교차점_",
-        "docs/2_구조/2-4_배포와_인증.md",
-        "scratchpad/Q1_"
-      ],
-      "_예외": "db/init/13_judge_cache.sql 은 Q5, db/init/14_gpu_pod.sql 은 Q2 에게 열어 줬다"
-    },
-    "Q2": {
-      "이름": "GPU 무인 운전",
-      "sessions": { "ai-c6": "27f2497d-43bd-48bf-9f2d-6f4593a4cb4b" },
-      "owns": [
-        "server/gpu_watchdog.py",
-        "server/routes_gpu.py",
-        "scripts/archive/cli/runpod_pod.py",
-        "scripts/archive/cli/pick_gpu.py",
-        "scripts/pod_serve.sh",
-        "scripts/pod_setup.sh",
-        "db/init/14_gpu_pod.sql",
-        "docs/8_운영/8-3_GPU.md",
-        "docs/8_운영/8-4_GPU_비용.md",
-        "scratchpad/Q2_"
-      ]
-    },
-    "Q4": {
-      "이름": "판정 속도 — 출력토큰·캐시키 (Q3 «맞나» 와 분리. Q4 는 «빠른가»)",
-      "sessions": { "ai-f2": "56d56fd1-b58b-4670-bff0-2b9011273eba" },
-      "owns": [
-        "scripts/retrieve.py",
-        "scripts/assemble_context.py",
         "scripts/adapter.py",
-        "docs/4_검색/4-3_참조_확장.md",
-        "docs/9-3_실측에서_나온_것.md",
-        "scratchpad/Q4_"
-      ],
-      "_주의": "scripts/orchestrate.py 는 중앙 소유다 — 패치를 «제안» 하고 중앙이 친다"
-    },
-    "Q5": {
-      "이름": "API 표면 · 판정캐시 DB 이전 · L3(경상국립대) · 데모데이터",
-      "sessions": { "ai-a4": "01ed7da9-5e39-40ec-a5af-3efcf45c382f" },
-      "owns": [
-        "server/main.py",
-        "server/routes_plans.py",
-        "server/routes_tasks.py",
-        "server/routes_l3.py",
-        "server/inquiry.py",
-        "scripts/archive/seed/seed_check_items.py",
-        "scripts/archive/seed/seed_l3_fixture.py",
-        "scripts/l3_parse.py",
-        "scripts/l3_load.py",
-        "db/init/13_judge_cache.sql",
-        "tests/test_계약_키집합.py",
-        "docs/7_백엔드/",
-        "scratchpad/Q5_"
+        "scripts/normalize_run.py"
       ]
     },
-    "Q6": {
-      "이름": "프론트(경상국립대 전환) · QA 준비물 · 건국대 제거",
-      "sessions": { "ai-36": "6d4590a5-7e18-4b2b-b90c-37f6a00a90bf" },
+    "J2": {
+      "이름": "계측·허용경로 — 작업은 워크트리 `금융 AI공모전-J2`",
+      "sessions": { "ai-f4": "46c24f48-e4aa-42c1-a186-5477045e04e2" },
       "owns": [
-        "docs/QA/",
-        "docs/부록/",
-        "scratchpad/Q6_"
-      ],
-      "_프론트": "../2026-Finance-AI-Competition_Frontend 전체 (본 트리 밖이라 이 파일이 못 막는다 — 규칙으로만 건다). 브랜치는 파되 push·PR·머지는 중앙",
-      "_금지": "docs/기록/ 은 본문 수정 금지. 머리에 배너만 단다 (중앙 결정 2026-09-04)"
+        "scripts/orchestrate.py",
+        "scripts/llm_validate.py",
+        "scripts/assemble_context.py"
+      ]
+    },
+    "J3": {
+      "이름": "검색 P2 설계 — 읽기 전용. 산출은 scratchpad/ 에만",
+      "sessions": { "ai-ce": "4c98eb78-db3c-47a6-a014-6e34e4a7124a" },
+      "owns": []
+    },
+    "J4": {
+      "이름": "골든셋 검산 — 읽기 전용. 산출은 scratchpad/ 에만",
+      "sessions": { "ai-92": "14c1aed8-4e35-446d-98ff-20946fc1f5c4" },
+      "owns": []
     },
     "감시": {
-      "이름": "감시 — 코드·파일·git 을 치지 않는다. 중앙이 틀리는 것만 잡는다",
-      "sessions": { "ai-a7": "미보고" },
+      "이름": "관리·검토(ai-36) — 코드·git 을 치지 않는다. 중앙이 틀리는 것만 잡는다",
+      "sessions": { "ai-36": "7ec68123-ad2a-4b11-8b84-2669d41e82c0" },
       "owns": []
     }
   },
-  "안 여는 것": {
-    "Q3": "판정 품질 재측정 — GPU 직렬 시간이 6시간을 넘긴다. Q6 의 「알려진 것 목록」이 그 자리를 대신한다",
-    "F1~F4": "리팩토링·py 정리·md 전면 최신화 — 전 파일을 건드려 다른 레인 커밋과 정면충돌한다. Q1~Q6 머지 «뒤» 단독으로 연다"
+  "미등록": {
+    "ai-35": "🔴 등록하지 않는다 — 오너가 「다운된 세션」으로 확인했다(2026-09-05). 미등록이라 훅을 통과한다. 되살아나 본 트리를 건드리면 그때 등록한다. ops.gpu_pod.updated_by 에 이 이름이 14:42 로 찍혀 있으니 GPU 를 만진 이력은 있다"
   }
 }
