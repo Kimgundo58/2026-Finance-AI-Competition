@@ -1,5 +1,5 @@
 {
- "생성": "scripts/apply_goldenset_fixes.py",
+ "생성": "scripts/archive/eval/apply_goldenset_fixes.py",
  "원본": [
   "2026_Finance_DATA_FOR_RAG\\_골든셋\\_골든셋_초안.json",
   "2026_Finance_DATA_FOR_RAG\\_골든셋_스테이징\\적대적세트_초안.json"
