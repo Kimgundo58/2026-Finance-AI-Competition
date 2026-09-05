@@ -188,7 +188,16 @@ def _헤드() -> dict:
     import subprocess
     def _(*a):
         try:
+            # 🔴 `encoding="utf-8"` 을 «반드시» 준다 (2026-09-05 ai-04 실측).
+            #    `text=True` 만 주면 Windows 에서 locale(cp949)로 디코딩한다. 이 저장소는
+            #    파일명에 한글이 흔해서 `git status --porcelain` 이 UnicodeDecodeError 로
+            #    터졌고, 아래 `except Exception` 이 그걸 삼켜 **`dirty` 가 조용히 None 이
+            #    됐다.** None 은 "깨끗하다" 가 아니라 "못 쟀다" 인데 읽는 쪽은 구분이 안 된다
+            #    — 재현성 기록이 통째로 거짓말이 되는 자리다(CLAUDE.md 「잴 수 없는 것을
+            #    값이 0 으로 읽지 마라」). run 194 때는 미추적 파일이 ASCII 뿐이라 안 터졌다.
+            #    `errors="replace"` 는 그래도 못 읽는 바이트가 있을 때 예외 대신 문자를 남긴다.
             r = subprocess.run(a, capture_output=True, text=True,
+                               encoding="utf-8", errors="replace",
                                cwd=os.path.dirname(os.path.abspath(__file__)), timeout=10)
             return (r.stdout.strip() or None) if r.returncode == 0 else None
         except Exception:
