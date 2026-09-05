@@ -74,7 +74,7 @@ QA/(2)             QA 시나리오 · 버그 리포트 양식
 ## 충돌하면 무엇을 믿나
 
 1. **코드가 기준인 것** — 문서와 어긋나면 코드를 믿는다
-   `scripts/pdftext.py` · `db/init/01_schema.sql` · `scripts/index_guard.py` ·
+   `scripts/pdftext.py` · `db/init/01_schema.sql` · `scripts/archive/eval/index_guard.py` ·
    `법령 PDF/_law_sources.json` · `2026_Finance_DATA_FOR_RAG/_refs.json` ·
    `2026_Finance_DATA_FOR_RAG/_precedence_rules.json`
 2. **실측이 기준인 것** — 수치는 DB 와 SessionStart 훅이 이긴다

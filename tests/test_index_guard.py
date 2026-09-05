@@ -7,6 +7,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+# 🔴 2026-09-05 index_guard.py 가 scripts/archive/eval/ 로 이관됐다 — 서빙 경로에 안 쓰여서.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "archive" / "eval"))
 from index_guard import IndexGuardError, assert_indexable, is_indexable  # noqa: E402
 
 BLOCKED = [

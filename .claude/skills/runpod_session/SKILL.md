@@ -15,7 +15,7 @@ description: GPU 가 필요한 작업(임베딩·LLM 추론·판정·학습)을 
    서버측 자동종료가 없으므로 **세션이 죽으면 팟은 그냥 계속 돈다.**
    `open --hours N` 이 거는 로컬 워치독은 최선노력일 뿐 방어선이 아니다 —
    PC 가 꺼지면 같이 죽는다. 마지막 방어선은 **잔액**이고, 정본은 **사람이 닫는 것**이다
-2. **팟을 만들면 즉시 대장에 적는다** (`scripts/runpod_pod.py open` 이 자동으로 한다).
+2. **팟을 만들면 즉시 대장에 적는다** (`scripts/archive/cli/runpod_pod.py open` 이 자동으로 한다).
    대장은 `.claude/_runpod_open.json` — 컨텍스트가 날아가도 팟 id 가 남는다
 3. **작업이 끝나면 결과를 로컬로 회수한 뒤에 묻는다.** 회수 전에 닫으면 컨테이너 디스크와
    함께 산출물이 증발한다
@@ -42,10 +42,10 @@ $/h 오름차순    ||                           ||                       ||    
 ## ① GPU 고르기
 
 ```bash
-PYTHONIOENCODING=utf-8 python scripts/pick_gpu.py --task embed
+PYTHONIOENCODING=utf-8 python scripts/archive/cli/pick_gpu.py --task embed
 ```
 
-프리셋은 `scripts/pick_gpu.py` 의 `TASKS` 가 정본이다 — `embed`(8GB) · `llm8b`(24GB) ·
+프리셋은 `scripts/archive/cli/pick_gpu.py` 의 `TASKS` 가 정본이다 — `embed`(8GB) · `llm8b`(24GB) ·
 `judge`(48GB). **요구 VRAM 은 가격이 아니라 모델 크기에서 나온다.** 새 작업이면 프리셋을
 추가하고 `why` 에 근거(가중치 + 활성값)를 같이 적는다.
 
@@ -56,7 +56,7 @@ PYTHONIOENCODING=utf-8 python scripts/pick_gpu.py --task embed
 ## ② 열기
 
 ```bash
-PYTHONIOENCODING=utf-8 python scripts/runpod_pod.py open \
+PYTHONIOENCODING=utf-8 python scripts/archive/cli/runpod_pod.py open \
     --gpu "NVIDIA RTX A5000" --hours 1 --template-id <pytorch>
 ```
 
@@ -85,8 +85,8 @@ PYTHONIOENCODING=utf-8 python scripts/runpod_pod.py open \
 닫기:
 
 ```bash
-PYTHONIOENCODING=utf-8 python scripts/runpod_pod.py close        # 대장의 팟 전부
-PYTHONIOENCODING=utf-8 python scripts/runpod_pod.py close <id>   # 하나만
+PYTHONIOENCODING=utf-8 python scripts/archive/cli/runpod_pod.py close        # 대장의 팟 전부
+PYTHONIOENCODING=utf-8 python scripts/archive/cli/runpod_pod.py close <id>   # 하나만
 ```
 
 닫은 뒤 `runpod_pod.py ls` 로 **실제로 사라졌는지 확인하고 보고한다.** 명령이 성공했다는 것과
@@ -97,7 +97,7 @@ PYTHONIOENCODING=utf-8 python scripts/runpod_pod.py close <id>   # 하나만
 이 스킬이 붙은 세션을 시작하면, GPU 작업을 하기 전에 먼저 한 번:
 
 ```bash
-PYTHONIOENCODING=utf-8 python scripts/runpod_pod.py ls
+PYTHONIOENCODING=utf-8 python scripts/archive/cli/runpod_pod.py ls
 ```
 
 지난 세션이 열어놓고 죽은 팟이 있으면 여기서 잡힌다. 있으면 **작업을 시작하기 전에** 사용자에게

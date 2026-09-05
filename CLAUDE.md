@@ -3,7 +3,7 @@
 「써도돼요」 — 창업지원금 지출비 사전승인 판정 서비스. 금융 AI 공모전 6주 MVP.
 
 > **판단이 필요한 원칙만 둔다.** 기계가 검사할 규칙은 `.claude/hooks/` 와
-> `scripts/index_guard.py`, 실측은 SessionStart 훅에 있다.
+> `scripts/archive/eval/index_guard.py`, 실측은 SessionStart 훅에 있다.
 > 읽기 순서 **`docs/README.md`** · 지금 상태 `docs/0_현황.md` · 결정 대기 `docs/9_미결.md`.
 
 ## 확정 원칙 — 재논의 금지
@@ -64,7 +64,7 @@ L3  주관기관(대학 산단 등)    기관 규정·협약 특약            �
   `layer IN ('L1','L2') AND 적용대상 IN ('창업기업','공통')`, L3 는 `org_id = :현재기관`
   별도 경로 — 다른 테이블이라 누수가 구조적으로 불가능하다
 
-→ `scripts/index_guard.py` 가 코드로 강제한다. **새 인덱싱 경로는 반드시 이걸 태운다.**
+→ `scripts/archive/eval/index_guard.py` 가 코드로 강제한다. **새 인덱싱 경로는 반드시 이걸 태운다.**
 
 ## 사업 스코프
 

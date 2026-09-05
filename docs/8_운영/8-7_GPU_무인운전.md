@@ -14,7 +14,7 @@
 |---|---|---|
 | 동시 팟 1 | 코드 가드 없음 | 여전히 없음 — `RUNPOD_POD_ID` 가 단일값이라는 구조로만 성립. 사람이 `runpod_pod.py ls` 로 감사 |
 | 하루 3회 | 없음 | `server/gpu_watchdog.py` `SUDDOE_GPU_WAKE_DAILY_CAP`(기본 3) — 신설, `tests/test_gpu_watchdog.py` 로 발동 확인 |
-| 수명 1시간 | `scripts/runpod_pod.py open --hours` 뿐 (수동 오픈 전용, 이 워치독과 다른 경로) | 그대로 — 자동-wake 경로엔 아직 없음 |
+| 수명 1시간 | `scripts/archive/cli/runpod_pod.py open --hours` 뿐 (수동 오픈 전용, 이 워치독과 다른 경로) | 그대로 — 자동-wake 경로엔 아직 없음 |
 | 잔액 경보 | 없음 | **서버 프로세스에서 구현 불가로 확정.** 아래 §3 |
 
 ## 0-1. 운영엔 `RUNPOD_API_KEY`·`RUNPOD_POD_ID` 가 아예 없다 — 그게 헬스체크를 가렸다
@@ -73,7 +73,7 @@ Cloud Run 타임아웃에 먼저 끊긴다(`server/main.py:592·695` 가 그 자
 엔드포인트가 **없다**. `/billing/pods`·`/billing/endpoints`·`/billing/networkvolumes`
 뿐이고 전부 과거 사용량이다. 지금 잔액이 아니다.
 
-`scripts/runpod_pod.py:cmd_close` 가 잔액을 찍는 건 `runpodctl user` 다(GraphQL 경유, CLI 전용).
+`scripts/archive/cli/runpod_pod.py:cmd_close` 가 잔액을 찍는 건 `runpodctl user` 다(GraphQL 경유, CLI 전용).
 그 바이너리는 배포 이미지에 없다.
 
 **잔액 관찰은 사람이 로컬에서 `runpod_pod.py ls`/`close` 로 하는 것이 정본이다.** `server/gpu_watchdog.py::팟제어.잔액()` 은 이유를 남기고 항상 `None`.
