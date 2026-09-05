@@ -969,7 +969,12 @@ def 실행(*, dry: bool, limit: int | None, 세트: list[str] | None, 라벨: st
           "rules수": rules수, "적용대상분포": 적용대상분포,
           "DB": DB신원,
           "GPU": os.environ.get("SUDDOE_GPU"),
-          "VLLM_URL": os.environ.get("VLLM_URL"),
+          # 🔴 env 가 아니라 «실제로 친 주소» 를 남긴다 (2026-09-05). 팟 주소를
+          #    `ops.gpu_pod` 로 옮긴 뒤 env 는 낡은 팟을 가리킬 수 있고, 그 값을
+          #    남기면 run 재현이 «다른 서버» 를 가리킨다. 이 프로젝트는 조건이 다른
+          #    run 끼리 수치를 빼면 안 된다는 규칙이라 이 기록이 근거 자체다.
+          "VLLM_URL": _실제_vllm_url(),
+          "VLLM_URL_env": os.environ.get("VLLM_URL"),
           "VLLM_MODEL": os.environ.get("VLLM_MODEL"),
           "RUNPOD_POD_ID": os.environ.get("RUNPOD_POD_ID"),
           # 🔴 P2·P3 가 켜는 플래그가 무엇이었는지 남는다. 안 남기면 다음 run 과 못 뺀다
@@ -1037,6 +1042,16 @@ def 실행(*, dry: bool, limit: int | None, 세트: list[str] | None, 라벨: st
     if 치명:
         sys.exit(2)          # 🔴 비0 종료로 머지를 막는다
     return run_id or 0
+
+
+
+def _실제_vllm_url() -> str | None:
+    """run 설정에 남길 «실제로 친» vLLM 주소. `ops.gpu_pod` 우선 · env 폴백."""
+    try:
+        from adapter import vllm_url
+        return vllm_url()
+    except Exception:                                             # noqa: BLE001
+        return os.environ.get("VLLM_URL")
 
 
 def main() -> None:
