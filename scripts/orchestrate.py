@@ -114,9 +114,8 @@ _B_effective = _옵션임포트("rule_lookup", "effective_rule")     # STUB: B
 _B_게이팅 = _옵션임포트("rule_lookup", "l3_게이팅")              # STUB: B
 _E_로드 = _옵션임포트("l3_load", "로드")                         # STUB: E
 _E_l3룰 = _옵션임포트("l3_load", "l3룰")                         # STUB: E
-_F_사례 = _옵션임포트("case_search", "유사사례")                  # STUB: F
 
-모듈상태 = {"C": bool(_C_검색), "B": bool(_B_effective), "E": bool(_E_로드), "F": bool(_F_사례)}
+모듈상태 = {"C": bool(_C_검색), "B": bool(_B_effective), "E": bool(_E_로드)}
 
 
 def 워밍업() -> None:
@@ -719,7 +718,6 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool 
                         강등코드=[], 경로="+".join(경로))
             응답.update(게이트="B", 비목=비목, 정규화=정규, 검색=검색결과,
                        참조사슬=검색결과["참조사슬"],
-                       유사사례=_사례(cur, 질문, "판단불가"),
                        지연ms={**지연, "총": int((time.time() - t0) * 1000)},
                        모델={"호출수": 정규화호출})
             return _마무리(conn, cur, dict(응답, **갈림필드), 기록=기록, 닫기=닫기, 질문=질문,
@@ -825,7 +823,6 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool 
                    증빙목록=증빙_발급처(cur, 룰),      # H-3 「결제 후」 — 룰.증빙 그대로, 지어내지 않음
                    전제해소=해소, 강등코드=코드, 강등사유=사유,
                    s맵={k: list(v) for k, v in s맵.items()},
-                   유사사례=_사례(cur, 질문, 응답.get("판정")),
                    지연ms={**지연, "총": int((time.time() - t0) * 1000)},
                    변형=변형, 폐포사용=폐포사용,
                    모델={"호출수": 정규화호출 + 1, "변형": 변형, "정규화": 메타1.get("모델"),
@@ -910,16 +907,6 @@ def _병렬_검색(질문, 사업명, top_k):
     except Exception as e:
         return {"top5": [], "폐포": [], "참조사슬": [], "게이트값": 0.0,
                 "dangling": [], "후보수": 0}, f"{type(e).__name__}: {e}"
-
-
-def _사례(cur, 질문, 판정값):
-    """🔴 판정이 판단불가로 **확정된 뒤에만** 부른다 (`RAG.md` §2-2 · F5 함수 레벨 강제)."""
-    if 판정값 != "판단불가" or not _F_사례:
-        return []
-    try:
-        return _F_사례(cur, 질문, k=3, 판정=판정값)
-    except Exception:
-        return []
 
 
 def _마무리(conn, cur, 응답: dict, *, 기록: bool, 닫기: bool,
