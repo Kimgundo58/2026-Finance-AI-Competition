@@ -411,11 +411,26 @@ def _org_컨텍스트(cur, org_id: str) -> None:
     cur.execute("SELECT set_config('app.org_id', %s, true)", (str(org_id),))
 
 
-def 로드(cur, org_id: str, 사업명: str | None = None) -> list[dict[str, Any]]:
+def 로드(cur, org_id: str, 사업명: str | None = None,
+       비목: str | None = None) -> list[dict[str, Any]]:
     """현재 기관의 L3 조문을 **검색 없이 통째로** 돌려준다 (`RAG.md` §4-1).
 
     사업비 관련 장만. `status='active'` 문서만 — `superseded` 를 같이 실으면
     구판 조문이 컨텍스트에 섞여 개정 전 한도를 인용한다.
+
+    ━━ 비목 재정렬 (2026-09-07) — `SUDDOE_L3_비목순` = off | on (기본 off) ━━━━━
+    `비목` 을 주고 스위치가 켜져 있으면, 그 비목에 걸리는 조를 **앞으로 옮긴다.**
+    🔴 **떨어뜨리지 않는다.** 순서만 바꾼다. 레인 Q(ai-db) 실측이 근거다:
+         데모 org 207조 중 비목추정 성공 123 / 실패 84
+         그런데 **매치 123개가 «전부 본문 전용»** 이다 — 제목매치 0건.
+         원인: 이 org 는 `조제목` 이 207/207 전부 NULL 이다(원본이 세부관리기준이
+         아니라 「사업비사용안내문.hwp」·「변경신청서양식.hwp」라 조·항 구조가 없다).
+       즉 「제목 적중만 믿고 좁힌다」로 가면 이 org 의 룰 123개가 «통째로 사라진다».
+       org 마다 조제목 커버리지가 0~100% 로 갈린다는 사실 자체가, 게이트 없는
+       필터링이 왜 위험한지의 근거다.
+    🔴 기본값이 off 인 이유 — 이건 B1 블록의 «순서» 를 바꾸므로 판정이 달라질 수
+       있다. 코퍼스 동기화 후 기준선을 뜬 «다음에» 이것 하나만 켜서 재야 무엇 때문에
+       숫자가 변했는지 가를 수 있다(A12 채택 기준과 같은 규율).
     """
     org_id = _org정규화(org_id)
     if org_id is None:
@@ -428,8 +443,30 @@ def 로드(cur, org_id: str, 사업명: str | None = None) -> list[dict[str, Any
         " WHERE a.org_id = %s AND d.org_id = %s AND d.status = 'active' "
         " ORDER BY a.조번호_int NULLS LAST, a.조번호",
         (org_id, org_id)).fetchall()
-    return [{"article_id": aid, "조번호": 조, "조제목": 제목, "본문": 본문}
-            for aid, 조, 제목, 본문, 장, _ in rows if 사업비관련장(장)]
+    조문 = [{"article_id": aid, "조번호": 조, "조제목": 제목, "본문": 본문}
+           for aid, 조, 제목, 본문, 장, _ in rows if 사업비관련장(장)]
+    return _비목순_재정렬(cur, 조문, 비목)
+
+
+def _비목순_재정렬(cur, 조문: list[dict[str, Any]],
+               비목: str | None) -> list[dict[str, Any]]:
+    """비목에 걸리는 조를 앞으로. **한 건도 안 버린다** (위 docstring 참조).
+
+    안정 정렬이라 그룹 «안의» 순서(조번호 순)는 그대로다. 스위치가 꺼져 있거나
+    비목이 없으면 입력 리스트를 «그대로» 돌려준다 — 예전과 바이트 단위로 같다.
+    """
+    if os.environ.get("SUDDOE_L3_비목순", "off") != "on" or not 비목 or not 조문:
+        return 조문
+    try:
+        vocab = 비목어휘(cur)
+    except Exception:                                    # noqa: BLE001
+        return 조문            # 어휘를 못 읽으면 재정렬을 포기한다. 판정은 안 죽인다
+    걸림 = [a for a in 조문
+           if 비목추정(a.get("조제목"), a.get("본문") or "", vocab) == 비목]
+    if not 걸림:
+        return 조문
+    _id = {id(a) for a in 걸림}
+    return 걸림 + [a for a in 조문 if id(a) not in _id]
 
 
 def l3룰(cur, org_id: str, 비목: str) -> dict[str, Any] | None:
