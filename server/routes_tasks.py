@@ -18,6 +18,7 @@ from datetime import timedelta
 from fastapi import APIRouter, HTTPException, Query
 
 from ._common import MOCK, _질의, _실행
+from . import l3_deadline
 from .models import (할일, 할일동기화, 할일동기화응답, 할일목록응답, 할일생성, 할일수정)
 from . import mock_data
 from .routes_plans import _org조건
@@ -242,13 +243,46 @@ def _할일_조회(task_id: int) -> 할일:
     return 할일(**_행_할일(행[0]))
 
 
-def _체크항목_조회(코드: str) -> tuple[str | None, int | None]:
-    """`corpus.check_items` 에서 `구분`·`기본_오프셋일` 을 가져온다.
+def _체크항목_조회(코드: str) -> tuple[str | None, int | None, str | None]:
+    """`corpus.check_items` 에서 `구분`·`기본_오프셋일`·`기한근거` 를 가져온다.
 
-    🔴 둘 다 LLM 이 만드는 게 아니라 코드가 붙인다 (`프로토타입_해부_구현명세.md` §4-4).
+    🔴 셋 다 LLM 이 만드는 게 아니라 코드가 붙인다 (`프로토타입_해부_구현명세.md` §4-4).
+
+    🔴 `기한근거` 를 «같이» 돌려주는 것이 이 함수의 요점이다 (2026-09-06).
+       `기본_오프셋일` 은 52행 중 **45행이 규정 근거가 없다**(`기한근거='운영기본값'`).
+       근거를 안 보고 쓰면 우리가 정한 관행이 화면에서 «규정상 기한» 으로 읽힌다.
+       판단은 `_due계산()` 이 한다 — 여기서는 재료를 빠짐없이 넘기기만 한다.
     """
-    행 = _질의('SELECT 구분, 기본_오프셋일 FROM corpus.check_items WHERE code = %s', (코드,))
-    return (행[0][0], 행[0][1]) if 행 else (None, None)
+    행 = _질의('SELECT 구분, 기본_오프셋일, "기한근거" FROM corpus.check_items WHERE code = %s',
+              (코드,))
+    return (행[0][0], 행[0][1], 행[0][2]) if 행 else (None, None, None)
+
+
+def _due계산(집행예정일, org_id: str | None, 항목: str, 설명: str | None,
+            오프셋: int | None, 기한근거: str | None) -> str | None:
+    """`due_date` — **규정 근거가 있을 때만** 만든다. 없으면 `None`.
+
+    `None` 은 «체크리스트에는 남고 캘린더에는 안 뜬다» 는 뜻이다 (`models.py:169`).
+    할일이 사라지는 게 아니라 «날짜만» 안 붙는다.
+
+    갈래는 셋이다:
+      ① `기한근거='규정근거'`  → `기본_오프셋일` 을 그대로 쓴다. 이미 규정에서 온 값이다
+      ② 그 밖(운영기본값·미확정·NULL) → `l3_deadline` 이 이 기관 L3 에서 찾는다
+      ③ L3 에도 없으면        → **날짜를 만들지 않는다**
+
+    🔴 ②에서 L3 가 「사업 종료 후 30일 이내」처럼 «집행예정일로 환산 못 하는» 기준을
+       쓰면 `l3_deadline` 이 `None` 을 준다 — 추측해서 띄우지 않는다. 그 판단은
+       그 모듈에 있고 여기서 되풀이하지 않는다.
+    """
+    if 집행예정일 is None:
+        return None
+    if 기한근거 == "규정근거" and 오프셋 is not None:
+        return (집행예정일 + timedelta(days=오프셋)).isoformat()
+    찾음 = l3_deadline.기한_해석(org_id, 항목, 설명)
+    if 찾음 is not None:
+        일수, _근거 = 찾음
+        return (집행예정일 + timedelta(days=일수)).isoformat()
+    return None
 
 
 def _유형_맵(코드들: set) -> dict:
@@ -302,16 +336,14 @@ def _실_동기화(plan_id: int, body: 할일동기화, org_id: str | None = Non
     for 항목, 설명, 코드 in 작업:
         if 코드:
             코드매칭수 += 1
-        구분, 오프셋 = _체크항목_조회(코드) if 코드 else (None, None)
+        구분, 오프셋, 기한근거 = _체크항목_조회(코드) if 코드 else (None, None, None)
         구분 = 구분 or "결제전"
         유형 = 유형맵.get(코드, "기타") if 코드 else "기타"   # 🔴 캘린더 배지축 — 판정 4-way 와 무관
         # 🔴 기본_오프셋일 은 부호가 방향이다 — 음수(결제전) = 그만큼 전, 양수(결제후) = 그만큼 후.
         #    "집행일 기준 며칠 전" 이라는 컬럼 주석과 달리 실측(52행)은 -14~-3 이 결제전,
         #    0~30 이 결제후로 부호가 나뉘어 있다. 뺄셈이 아니라 덧셈이다.
-        새_due = (
-            (집행예정일 + timedelta(days=오프셋)).isoformat()
-            if 집행예정일 is not None and 오프셋 is not None else None
-        )
+        # 🔴 2026-09-06 — 그 값을 «근거 없이» 쓰지 않는다. 판단은 `_due계산()` 으로 옮겼다.
+        새_due = _due계산(집행예정일, 계획org, 항목, 설명, 오프셋, 기한근거)
 
         기존행 = 코드맵.get(코드) if 코드 else 항목맵.get(항목)
         if 기존행:
