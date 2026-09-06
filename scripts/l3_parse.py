@@ -78,15 +78,21 @@ from stage0_articles import split_articles, validate  # noqa: E402
 
 DSN = os.environ.get("SUDDOE_DSN", "postgresql://postgres:devpw@localhost:5432/suddoe")
 
-# ── VLM 판독 — ai-47 이 `vlm_extract.py` 를 아직 안 냈으면 «조용히 스킵» 이 아니라
-#    stderr 에 남기고 스킵한다. 생기면 import 가 저절로 성공해 이 분기가 켜진다.
+# ── VLM/Document AI 판독 — 레인 D(2026-09-06) «판독기 선택을 환경변수 한 개로».
+#    `SUDDOE_L3_판독기 = vlm | docai` (기본 vlm). 계약이 같아(`extract(path) ->
+#    (본문, 페이지오프셋)`) import 만 바꿔 끼운다 — 아래 호출 코드는 한 글자도 안 고친다.
+#    둘 다 없거나 고른 쪽이 없으면 «조용히 스킵» 이 아니라 stderr 에 남기고 스킵한다.
+_L3_판독기 = os.environ.get("SUDDOE_L3_판독기", "vlm")
 try:
-    from vlm_extract import extract as _vlm추출  # noqa: E402
-    #  제안 인터페이스(ai-47과 맞출 것): _vlm추출(path: Path) -> tuple[str, dict[int,int]]
+    if _L3_판독기 == "docai":
+        from docai_extract import extract as _vlm추출  # noqa: E402
+    else:
+        from vlm_extract import extract as _vlm추출  # noqa: E402
+    #  계약: _vlm추출(path: Path) -> tuple[str, dict[int,int]]
     #  — extract_pdf()·extract_hwp() 와 같은 모양(본문, 페이지오프셋)으로 맞췄다.
 except ImportError as _e:
     _vlm추출 = None
-    print(f"⚠️ scripts/vlm_extract.py 를 못 찾았다({_e}) — VLM 분기는 항상 스킵된다. "
+    print(f"⚠️ scripts/{_L3_판독기}_extract.py 를 못 찾았다({_e}) — 판독 분기는 항상 스킵된다. "
           "생기면 코드 수정 없이 붙는다.", file=sys.stderr)
 
 _VLM_캐시_디렉터리 = Path(os.environ.get("SUDDOE_VLM_CACHE_DIR",
