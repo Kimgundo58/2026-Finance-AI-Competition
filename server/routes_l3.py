@@ -23,7 +23,7 @@ from fastapi import (APIRouter, BackgroundTasks, File, Form, HTTPException,
                      Request, UploadFile)
 
 from ._common import DSN, MOCK, ROOT, _질의, _실행
-from .models import L3업로드응답
+from .models import L3업로드응답, L3현재문서, L3현재문서목록응답
 from .routes_plans import _org조건
 from . import auth, mock_data
 
@@ -160,6 +160,38 @@ async def 업로드(
     #       (그 자리가 없으면 비특권 롤에서 파싱이 매번 「doc_id 없음」으로 조용히 죽는다).
     배경.add_task(파싱_배경, 응답.doc_id, org_id)
     return 응답
+
+
+@router.get("/current", response_model=L3현재문서목록응답)
+def 현재문서(org_id: str | None = None) -> L3현재문서목록응답:
+    """org 에 「지금 적용 중」인 L3 문서 목록 — doc_id 없이 물을 방법이 없던 것
+    (ai-9d 조사, `lib/orgs.ts:107 적용중_기준파일` 하드코딩 대체용).
+
+    🔴 **`/{doc_id}` 보다 먼저 등록돼야 한다** — 안 그러면 FastAPI 가
+       `GET /api/l3/current` 를 `doc_id="current"` 로 먹어 아래 `상태()` 로 새서
+       404("L3 문서 current 을(를) 찾을 수 없습니다")가 난다. 라우터 등록 순서가
+       곧 매칭 순서다(파이썬 함수 순서 = 데코레이터 실행 순서).
+    🔴 `status='active'` 인 것만 준다 — `superseded`(구판)를 같이 주면 화면이 구판을
+       「적용 중」으로 그린다(ai-33 지시). org_id 가 없으면(게스트) 빈 목록 —
+       `l3_documents.org_id` 가 NOT NULL 이라 `_org조건(None,...)` 은 항상 0행이고,
+       그게 맞다(게스트는 남의 기관은커녕 자기 L3 자체가 없다).
+    """
+    if MOCK:
+        return L3현재문서목록응답(문서=[])
+    조건, org인자 = _org조건(org_id, "d")
+    행 = _질의(
+        f'SELECT d.doc_id, d."원본파일명", d.version, d."시행일", d."파싱품질", '
+        f'       (SELECT count(*) FROM tenant.l3_articles a WHERE a.doc_id = d.doc_id) '
+        f'  FROM tenant.l3_documents d '
+        f' WHERE {조건} AND d.status = \'active\' '
+        f' ORDER BY d.created_at DESC',
+        org인자,
+    )
+    return L3현재문서목록응답(문서=[
+        L3현재문서(doc_id=str(doc_id), 원본파일명=이름, version=버전,
+                시행일=시행일.isoformat() if 시행일 else None,
+                파싱품질=파싱품질, 조_건수=건수)
+        for doc_id, 이름, 버전, 시행일, 파싱품질, 건수 in 행])
 
 
 @router.get("/{doc_id}", response_model=L3업로드응답)
