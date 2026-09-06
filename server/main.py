@@ -577,7 +577,14 @@ def _설정_해시(강제새로: bool = False) -> str:
                         (SELECT coalesce(md5(string_agg(
                              rule_id::text || '|' || coalesce("사업명",'') || '|' ||
                              coalesce(비목,'') || '|' || 허용 || '|' ||
-                             사전승인::text || '|' || coalesce(사전승인_조건,'') || '|' ||
+                             사전승인::text || '|' ||
+                             -- 🔴 2026-09-06 배열화 — TEXT[] 가 됐다. 원소 순서(삽입·append
+                             -- 순서)가 흔들리면 «내용은 같은데 문자열이 달라» 캐시가 매번
+                             -- 깨진다. 정렬해서 순서를 고정한다(원소 순서를 계약으로
+                             -- 강제하는 대신 — 그쪽은 쓰기 경로마다 지켜야 해서 더 깨지기 쉽다).
+                             coalesce(array_to_string(
+                                 (SELECT array_agg(x ORDER BY x)
+                                    FROM unnest(사전승인_조건) AS x), '~'), '') || '|' ||
                              coalesce(한도_유형,'') || '|' || coalesce(한도_값::text,'') || '|' ||
                              coalesce(한도_단위,'') || '|' ||
                              coalesce(array_to_string(증빙,'~'),'') || '|' ||
