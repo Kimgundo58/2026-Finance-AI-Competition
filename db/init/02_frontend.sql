@@ -218,7 +218,6 @@ CREATE OR REPLACE VIEW corpus.v_적재현황 AS
 SELECT '01. corpus.documents'      AS 테이블, count(*) AS 건수 FROM corpus.documents
 UNION ALL SELECT '02. corpus.doc_articles',     count(*) FROM corpus.doc_articles
 UNION ALL SELECT '03. corpus.chunks',           count(*) FROM corpus.chunks
-UNION ALL SELECT '04. corpus.case_chunks',      count(*) FROM corpus.case_chunks
 UNION ALL SELECT '05. corpus.rules',            count(*) FROM corpus.rules
 UNION ALL SELECT '06. corpus.precedence_rules', count(*) FROM corpus.precedence_rules
 UNION ALL SELECT '07. corpus.refs',             count(*) FROM corpus.refs

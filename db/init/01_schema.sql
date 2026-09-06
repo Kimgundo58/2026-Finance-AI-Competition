@@ -165,17 +165,12 @@ COMMENT ON COLUMN corpus.chunks.text IS '원문 문자열 그대로. 인용 검�
 --    (retrieval_scope 로 진입점을 좁히면 1만 미만으로 떨어질 수 있다 — 그래서 먼저 잰다)
 
 -- ════════════════════════════════════════════════════════════════
--- corpus 4. case_chunks : 사례 인덱스 (B등급). 물리적으로 분리한다.
+-- corpus 4. (비어 있음) — case_chunks 는 2026-09-06 오너 결정으로 «드랍했다»
+--   판단불가 경로에 사례를 붙이지 않는다. 193행은
+--   scratchpad/_백업_case_chunks_0906.json 에 백업돼 있다.
+--   🔴 «물리 분리 원칙 자체는 남는다» — 판정 인덱스는 여전히 L1·L2 + 현재 기관 L3 뿐이고,
+--      타 기관 규정(L4)·정답셋은 절대 넣지 않는다. 사라진 것은 «사례 테이블» 이지 «경계» 가 아니다.
 -- ════════════════════════════════════════════════════════════════
-CREATE TABLE corpus.case_chunks (
-    case_id     BIGSERIAL PRIMARY KEY,
-    doc_id      TEXT NOT NULL REFERENCES corpus.documents(doc_id) ON DELETE CASCADE,
-    출처도메인  TEXT NOT NULL,   -- R&D | 보조금 | 창업
-    question    TEXT NOT NULL,
-    answer      TEXT NOT NULL,
-    embedding   extensions.vector(1024)     -- question 을 임베딩한다 (answer 아님)
-);
-COMMENT ON TABLE corpus.case_chunks IS '판단불가 경로에서만 조회. 판정 근거로 인용 금지.';
 
 -- ════════════════════════════════════════════════════════════════
 -- corpus 5. rules : 룰 테이블 (fast path). 벡터 없음.
@@ -188,7 +183,12 @@ CREATE TABLE corpus.rules (
     비목          TEXT NOT NULL,
     허용          TEXT NOT NULL CHECK (허용 IN ('가능','조건부','불가')),
     사전승인      BOOLEAN NOT NULL DEFAULT FALSE,
-    사전승인_조건 TEXT,
+    -- 🔴 2026-09-06 TEXT -> TEXT[]. 한 행이 조건을 «둘 이상» 담아야 한다 —
+    --   L1 과 L2 는 «충돌» 이 아니라 «다른 사실» 이라 병합에서 둘 다 살아야 하고(rule_lookup `_조건합`),
+    --   룰 제안도 append 로 들어와야 한다. 스칼라이던 동안은 «덮어쓰기» 밖에 없어서
+    --   제안 23건 중 22건이 기존 조건을 지웠을 상황이었다(2026-09-06 실측).
+    --   NULL 은 NULL 로 둔다 — 빈 배열로 바꾸면 「없다」와 「빈 값」이 섞인다.
+    사전승인_조건 TEXT[],
     한도_유형     TEXT CHECK (한도_유형 IN ('비율','금액','개수') OR 한도_유형 IS NULL),
     한도_값       NUMERIC,
     한도_단위     TEXT,
@@ -203,6 +203,27 @@ CREATE TABLE corpus.rules (
     UNIQUE (layer, 기관ID, 사업명, 비목)
 );
 CREATE INDEX ix_rules_lookup ON corpus.rules (사업명, 비목);
+
+-- 🔴 2026-09-06 오너 결정 — corpus.rules 의 TRUNCATE 를 «막는다».
+--   `scripts/archive/seed/seed_rules.py` 가 TRUNCATE + 재삽입이고 스스로 "유일한 소유자" 라
+--   선언하는데, 그 파일의 rows() 는 «2026-09-02 스냅샷» 이다. 이후 DB 변경(배열 append 121건 ·
+--   L1 단서 7행 · 사전승인_조건 UNION · 골든셋 판정 5건)이 거기 «없다». 재적재하면 되돌릴 수
+--   없이 사라진다. 그 파일은 archive/ 라 읽기 전용이므로 «DB 쪽에» 관문을 둔다 —
+--   어느 경로로 들어오든(적재 스크립트 · 검수툴 · 수기 SQL) 똑같이 막힌다.
+--   🔴 정말 재적재해야 하면 사람이 이 트리거를 «의도적으로» 떨군다:
+--      DROP TRIGGER trg_rules_truncate_금지 ON corpus.rules;
+CREATE OR REPLACE FUNCTION corpus.f_rules_truncate_금지() RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION
+    '🔴 corpus.rules TRUNCATE 는 막혀 있다 (2026-09-06 오너 결정). '
+    'seed_rules.py 의 rows() 는 2026-09-02 스냅샷이고 이후 DB 변경이 거기 없다. '
+    '재적재하면 되돌릴 수 없이 사라진다. '
+    '정말 필요하면 사람이 DROP TRIGGER trg_rules_truncate_금지 ON corpus.rules; 를 «의도적으로» 친다.';
+END $$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_rules_truncate_금지
+  BEFORE TRUNCATE ON corpus.rules
+  FOR EACH STATEMENT EXECUTE FUNCTION corpus.f_rules_truncate_금지();
 COMMENT ON COLUMN corpus.rules.verified IS 'false 인 룰만으로 "가능" 판정 금지. 조문 인용 동반 필수.';
 -- ⚠️ 미결: layer='L3' 행은 기관 데이터다 (rule_base.md §3-1 overlay).
 --    corpus 는 "전 사용자 공통" 스키마인데 여기에 기관별 행이 섞인다.
@@ -540,7 +561,7 @@ CREATE TABLE eval.golden_set (
     검수메모    TEXT
 );
 COMMENT ON TABLE eval.golden_set IS
-  '절대 corpus.chunks / corpus.case_chunks 에 넣지 말 것 (정답 유출). Supabase 덤프 대상도 아니다.';
+  '절대 corpus.chunks 에 넣지 말 것 (정답 유출). Supabase 덤프 대상도 아니다.';
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -558,7 +579,6 @@ CREATE VIEW corpus.v_적재현황 AS
 SELECT '01. corpus.documents'      AS 테이블, count(*) AS 건수 FROM corpus.documents
 UNION ALL SELECT '02. corpus.doc_articles',     count(*) FROM corpus.doc_articles
 UNION ALL SELECT '03. corpus.chunks',           count(*) FROM corpus.chunks
-UNION ALL SELECT '04. corpus.case_chunks',      count(*) FROM corpus.case_chunks
 UNION ALL SELECT '05. corpus.rules',            count(*) FROM corpus.rules
 UNION ALL SELECT '06. corpus.precedence_rules', count(*) FROM corpus.precedence_rules
 UNION ALL SELECT '07. corpus.refs',             count(*) FROM corpus.refs

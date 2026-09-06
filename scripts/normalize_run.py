@@ -48,7 +48,7 @@ from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _lib import db  # noqa: E402
-from llm_schema import 비목_enum  # noqa: E402
+from llm_schema import 비목_enum, 비목_정의  # noqa: E402
 from adapter import 사고흔적_걷기  # noqa: E402  # 🔴 공용 방어 — 정의는 adapter.py 하나뿐이다
 
 DSN = db.DSN
@@ -61,12 +61,104 @@ class LLM실패(Exception):
     """vLLM 호출·파싱 실패. 부르는 쪽은 이걸 잡아 **판단불가**로 닫는다 (`Agent.md` §8)."""
 
 
+# ════════════════════════════════════════════════════════════════════════════
+# 🔴 스트리밍 — RunPod 프록시(Cloudflare)의 **125초 천장**을 걷어내는 자리
+# ════════════════════════════════════════════════════════════════════════════
+# run 194 (295문항) 실측이 이 상수를 확정했다:
+#     성공한 판정 «단일 시도» 지연  p50 72.0초 · p90 109.5초 · p99 123.4초 · **max 124.8초**
+#     125초를 넘긴 성공 시도        **0건**
+#     HTTP 524 로 죽은 시도들       전부 ~125.5초 (250.7~253.0초 = 2회 시도 합)
+#   ⇒ 분포가 124.8초에서 «잘려» 있다. 이건 우리 클라이언트(타임아웃 180초)가 아니라
+#     프록시가 자르는 것이다. **클라이언트 타임아웃을 올려도 이 천장은 안 움직인다.**
+#
+# 왜 스트리밍이 푸나: 524 는 「origin 이 제한 시간 안에 응답을 «시작» 하지 않았다」다.
+# `stream=true` 면 TTFT(실측 2.41초)에 첫 바이트가 나가고 그 뒤로는 토큰마다 흐른다 —
+# 응답이 이미 시작됐으므로 524 의 조건 자체가 성립하지 않는다.
+#   · 판정 결과는 안 바뀐다. 온도 0 · 같은 본문 · guided_json 은 logits 단계라 전송 방식과 무관하다.
+#     **이건 전송 계층 수정이지 판정 변수가 아니다.**
+#   · 🔴 그래도 «믿고 넘어가지» 않는다. 켜기 전에 같은 프롬프트로 스트리밍/비스트리밍
+#     A/B 를 돌려 524 가 실제로 사라지는지 본다 (`--stream-ab`).
+#   · 끄는 길을 남긴다 — `SUDDOE_LLM_STREAM=0` 이면 종전 경로 그대로다.
+#
+# ⚠️ 타임아웃의 «뜻» 이 갈린다. 비스트리밍에서 `타임아웃` 은 응답 전체를 기다리는 시간이고,
+#    스트리밍에서는 소켓 타임아웃이 **조각 사이 간격**에만 걸린다. 그래서 총 마감을
+#    따로 잰다 — 안 그러면 서버가 조금씩 뱉으며 영원히 붙들 수 있다.
+# ✅ **검증 완료 — 기본값을 "1"로 올린다 (2026-09-05 · ai-04, 팟 n41bny9uuppbdl A100).**
+#    `scratchpad/인계_0905/천장_결정시험.py` 실측. 한 요청이 «확실히» 125초를 넘도록
+#    `ignore_eos=True` + `max_tokens=12000` 으로 강제해서 잰 값이다:
+#
+#        ⓐ stream=false   HTTP 524   125.91초
+#        ⓑ stream=true    성공       214.44초 (12,000토큰 · TTFB 1.68초 · 조각 11,998)
+#        ⓒ stream=false   HTTP 524   125.74초      ← 재현됐다. 우연이 아니다
+#
+#    ⇒ 천장은 **125.8초**이고, 스트리밍은 그 위로 214초를 통과시킨다.
+#
+# 🔴 여기까지 오는 데 시험을 두 번 버렸다. 남겨 둔다 — 같은 함정이 또 온다:
+#    ⑴ 1차: `max_tokens=2000` 이라 요청이 36초에 끝났다. 524 가 «안 났다» 가 아니라
+#       **125초에 닿지도 않았다.** 「524 안 남 = 천장 없음」으로 읽을 뻔했다
+#    ⑵ 2차: 토큰을 12,000 으로 올렸는데 모델이 5,773토큰에서 스스로 멈춰(finish_reason
+#       ='stop') 100.9초에 끝났다. **생성 길이를 프롬프트로 «부탁» 하면 시험 조건을
+#       우리가 못 정한다.** `ignore_eos` 로 «강제» 해야 조건이 선다
+#    ⇒ CLAUDE.md 「잴 수 없는 것을 값이 0 으로 읽지 마라」가 걸린 자리다.
+#
+# 판정 결과가 안 바뀐다는 것도 실측으로 확인됐다 — 2차 시험에서 stream=false 와
+# stream=true 가 **completion_tokens 5,773 · 본문 12,013자로 정확히 같은 출력**을 냈다.
+# 전송 계층 수정이라는 주장이 추론이 아니라 관측이다.
+#
+# 끄는 길은 그대로 남는다 — `SUDDOE_LLM_STREAM=0`.
+_스트리밍기본 = os.environ.get("SUDDOE_LLM_STREAM", "1") == "1"
+_무응답한계 = int(os.environ.get("SUDDOE_LLM_STREAM_IDLE", "60"))   # 조각 사이 최대 공백
+
+
+def _sse_수집(r, *, 데드라인: float) -> dict:
+    """vLLM 의 SSE 스트림을 모아 **비스트리밍 응답과 같은 모양**의 dict 로 돌려준다.
+
+    호출부가 스트리밍 여부를 몰라도 되게 하는 게 목적이다 — 아래 파싱·메타 조립 코드가
+    두 갈래로 갈리면 한쪽만 고쳐지는 사고가 난다(`adapter.py` UA 가 그랬다).
+
+    `reasoning_content` 도 같이 모은다. Qwen3 는 사고가 여기로 갈라져 나가는데,
+    이걸 안 모으면 F1 계측이 다시 반쪽이 된다.
+    """
+    조각: list[str] = []
+    추론조각: list[str] = []
+    종료이유 = None
+    usage: dict = {}
+    for raw in r:                       # HTTPResponse 는 줄 단위로 순회된다
+        if time.time() > 데드라인:
+            raise TimeoutError("스트리밍 총 마감 초과 — 조각은 오는데 안 끝난다")
+        줄 = raw.decode("utf-8", "replace").strip()
+        if not 줄.startswith("data:"):
+            continue                    # 빈 줄·주석(`: ping`) 은 버린다
+        몸통 = 줄[5:].strip()
+        if 몸통 == "[DONE]":
+            break
+        try:
+            d = json.loads(몸통)
+        except json.JSONDecodeError:
+            continue
+        if d.get("usage"):
+            usage = d["usage"]          # stream_options.include_usage 로 마지막에 온다
+        for ch in d.get("choices") or []:
+            델타 = ch.get("delta") or {}
+            if 델타.get("content"):
+                조각.append(델타["content"])
+            if 델타.get("reasoning_content"):
+                추론조각.append(델타["reasoning_content"])
+            if ch.get("finish_reason"):
+                종료이유 = ch["finish_reason"]
+    return {"choices": [{"message": {"content": "".join(조각),
+                                     "reasoning_content": "".join(추론조각)},
+                         "finish_reason": 종료이유}],
+            "usage": usage}
+
+
 def llm_호출(프롬프트: str, 스키마: dict | None, *,
             모델: str | None = None,
             온도: float = 0.0,
             최대토큰: int = 1500,
-            타임아웃: int = 180,
-            재시도: int = 1) -> tuple[Any, dict]:
+            타임아웃: int = 240,          # 🔴 180→240, adapter.LLMAdapter.호출 과 통일
+            재시도: int = 1,
+            스트리밍: bool | None = None) -> tuple[Any, dict]:
     """vLLM OpenAI 호환 엔드포인트. (파싱된 출력, 메타).
 
     온도 0 고정이 기본이다 — 재현성이 이 도메인의 **요건**이지 편의가 아니다
@@ -75,13 +167,22 @@ def llm_호출(프롬프트: str, 스키마: dict | None, *,
     스키마 위반은 1회 재시도한다 (`Agent.md` §8 "(4) 스키마 위반 → 1회 재시도").
     guided_json 이 걸려 있으면 사실상 안 일어나지만, 서버가 그 키를 무시했을 때
     (위 주석의 무음 실패) 여기서 걸린다.
+
+    `타임아웃` 은 **한 번의 시도**에 걸리는 총 마감이다. 재시도가 붙으므로 최악은 2배다.
+    스트리밍에서는 소켓 타임아웃(조각 사이 공백)이 `_무응답한계`, 총 마감이 `타임아웃` 이다.
     """
+    스트리밍 = _스트리밍기본 if 스트리밍 is None else 스트리밍
     본문 = {"model": 모델 or MODEL,
             "messages": [{"role": "user", "content": 프롬프트}],
             "temperature": 온도,
             "max_tokens": 최대토큰}
     if 스키마 is not None:
         본문["guided_json"] = 스키마          # 🔴 최상위. extra_body 로 감싸지 않는다
+    if 스트리밍:
+        본문["stream"] = True
+        # 🔴 이게 없으면 usage 가 «안 온다». 토큰 수는 잘림(finish_reason=length) 판별의
+        #    한쪽 축이라 비워두면 run 194 에서 고친 계측 구멍이 되살아난다.
+        본문["stream_options"] = {"include_usage": True}
     data = json.dumps(본문, ensure_ascii=False).encode()
 
     마지막 = None
@@ -106,8 +207,16 @@ def llm_호출(프롬프트: str, 스키마: dict | None, *,
                 f"{base}/v1/chat/completions", data=data,
                 headers={"Content-Type": "application/json",
                          "User-Agent": "suddoe-judge/1.0"})
-            with urllib.request.urlopen(req, timeout=타임아웃) as r:
-                d = json.loads(r.read().decode())
+            if 스트리밍:
+                # 🔴 소켓 타임아웃은 «조각 사이 간격»(`_무응답한계`)에만 건다 — 총 마감
+                #    (`타임아웃`)을 그대로 넣으면 서버가 계속 조각을 뱉는 한 소켓이 안
+                #    끊겨 스트리밍의 의미가 없어진다. 총 마감은 `_sse_수집` 이 `데드라인`
+                #    으로 따로 지킨다 (초과 시 TimeoutError, 재시도 로직이 그대로 잡는다).
+                with urllib.request.urlopen(req, timeout=_무응답한계) as r:
+                    d = _sse_수집(r, 데드라인=t + 타임아웃)
+            else:
+                with urllib.request.urlopen(req, timeout=타임아웃) as r:
+                    d = json.loads(r.read().decode())
             _메시지 = d["choices"][0]["message"]
             내용 = _메시지.get("content") or ""
             # 🔴 파서가 갈라 준 경우 `reasoning_content` 에 사고가 들어가고
@@ -190,6 +299,26 @@ def 호출자리1_스키마(비목목록: list[str] | None = None) -> dict:
     }
 
 
+def _비목_블록(enum: list[str]) -> str:
+    """`비목 목록:` 자리에 들어갈 «이름 + 정의» 여러 줄.
+
+    🔴 왜 정의를 넣나. 종전에는 이름 10개를 쉼표로 이어 붙인 한 줄이었다 — 모델은
+    「지급수수료」가 무슨 뜻인지 «모른 채» 골랐다 (1순위 비목 정확도 65.1% ·
+    후보를 아예 못 낸 문항 26%). 이 자리는 B0 과 달리 캐시 프리픽스가 아니라서
+    (아래 `_지시` 주석) 길이를 늘려도 프롬프트 캐시가 안 깨진다.
+
+    🔴 정의가 없는 비목은 «이름만» 낸다. 지어내지 않는다. 파일이 통째로 없으면
+    종전 프롬프트(이름을 쉼표로 이은 한 줄)와 사실상 같아진다 — 회귀가 아니라 폴백이다.
+    """
+    정의 = 비목_정의()
+    if not 정의:
+        return ", ".join(enum)
+    빠짐 = [b for b in enum if b not in 정의]
+    if 빠짐:
+        print(f"⚠️ 비목 정의 없음 {len(빠짐)}종 {빠짐} — 이름만 넣는다", file=sys.stderr)
+    return "\n".join(f"- {b} — {정의[b]}" if b in 정의 else f"- {b}" for b in enum)
+
+
 # ── 프롬프트. B0 과 달리 캐시 프리픽스가 아니므로 비목 목록을 안에 넣어도 된다 ──
 _지시 = """다음 문장은 창업지원금으로 무언가를 사거나 지출하려는 사람의 질문이다.
 판정에 필요한 사실만 뽑아 JSON 으로 정규화하라.
@@ -205,7 +334,8 @@ _지시 = """다음 문장은 창업지원금으로 무언가를 사거나 지�
 
 판정을 하지 마라. 가능·불가를 여기서 말하지 않는다. 사실만 뽑는다.
 
-비목 목록: {비목}
+비목 목록 (이 이름만 쓴다)
+{비목}
 
 질문: {질문}"""
 
@@ -355,18 +485,32 @@ def 규칙_정규화(질문: str) -> dict:
 
 
 def 정규화(질문: str, *, dry: bool = False, 비목목록: list[str] | None = None,
-         타임아웃: int = 60, 변형: str = "N0") -> tuple[dict, dict]:
+         타임아웃: int = 240, 변형: str = "N0") -> tuple[dict, dict]:
     """(정규화 JSON, 메타). 실패는 예외로 올린다 — 부르는 쪽이 판단불가로 닫는다.
 
     `변형` : F2(레인F) 프롬프트 실험 — `_변형들` 참고. **기본 N0 는 스위치 넣기 전과
              바이트 단위로 같은 프롬프트**를 만든다(`_지시` 원문 그대로).
+
+    🔴 **60 → 240 (2026-09-05 · J1, run 194 실패 96건 조사).** 60 은 의도된 값이
+    아니라 이 함수 자신의 시그니처 기본값이 `llm_호출()` 의 실제 기본값(180)을
+    가려 온 불일치였다 — `orchestrate.py:544` 가 `타임아웃` 을 안 넘기고 이 함수를
+    부르니 매 정규화 호출이 조용히 60초로 잘렸다. 성공한 정규화의 중앙값(45.7초,
+    run 194)이 이미 그 벽에 붙어 있었고, 실패 74건은 전부 "TimeoutError: read
+    operation timed out" 다 — 모델이 못 푼 게 아니라 자리를 안 준 것이다.
+    240 은 `adapter.py` 의 `LLMAdapter.호출` 기본값과 맞춘 값이다(같은 파일 두
+    자리가 다른 기본값을 갖는 게 이번 사고의 원인이었다). ⚠️ RunPod 프록시
+    (Cloudflare)의 실측 천장은 약 125초라 — 240 을 다 채우기 전에 단일 시도가
+    125초를 넘기면 이 값과 무관하게 HTTP 524 로 끊긴다. 즉 이 상향은 「60~125초
+    사이에 있던 정규화」만 직접 구하고, 「125초를 넘는 정규화」는 스트리밍
+    (`SUDDOE_LLM_STREAM`, 아직 실측 검증 전)이 있어야 한다 —
+    `scratchpad/보고_J1_0905.md` §① 참고.
     """
     if dry:
         return 규칙_정규화(질문), {"지연ms": 0, "모델": "규칙(dry)", "토큰": {}}
     스키마 = 호출자리1_스키마(비목목록)
     프롬프트 = _지시_조립(변형).format(
-        비목=", ".join(스키마["properties"]["비목후보"]["items"]
-                      ["properties"]["비목"]["enum"]), 질문=질문)
+        비목=_비목_블록(스키마["properties"]["비목후보"]["items"]
+                     ["properties"]["비목"]["enum"]), 질문=질문)
     # 🔴 400 이 아니라 2000 이다 (2026-09-03 실서버 실측).
     #    Qwen3 는 thinking 이 기본이라 `<think>...</think>` 가 «출력 토큰» 을 먹는다.
     #    서버에 `--reasoning-parser qwen3` 를 줘도 갈라지지 않는 응답이 있다 —
