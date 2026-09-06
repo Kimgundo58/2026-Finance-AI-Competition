@@ -1069,7 +1069,7 @@ def _폼_비목후보(품목: str | None, 용도: str, 금액: float | None,
        올린다 — 거기선 품목·금액까지 이 호출로 뽑기 때문에 물러설 자리가 없다).
     """
     try:
-        from normalize_run import MODEL_1, llm_호출, 호출자리1_스키마
+        from normalize_run import MODEL_1, llm_호출, 호출자리1_스키마, _별칭_힌트
         스키마 = {"type": "object", "additionalProperties": False,
                  "required": ["비목후보"],
                  "properties": {"비목후보":
@@ -1100,6 +1100,15 @@ def _폼_비목후보(품목: str | None, 용도: str, 금액: float | None,
         return [{"비목": c["비목"], "신뢰도": float(c.get("신뢰도") or 0.0)}
                 for c in (후보 or [])
                 if isinstance(c, dict) and c.get("비목") in 비목_ENUM][:3]
+    except NameError:
+        # 🔴 2026-09-07 — 이 자리를 «따로» 잡는다. 배선 실수(import 누락 등)는
+        #    「LLM 이 못 골랐다」가 아니라 «코드가 안 돈다» 인데, 아래 넓은 except 가
+        #    똑같이 빈 배열로 삼켜서 화면에서는 구분이 안 된다. 실제로 그랬다 —
+        #    `_별칭_힌트` 를 부르면서 import 를 빠뜨렸고, NameError 가 조용히 먹혀
+        #    「AI 추천 배지가 사라졌다」로만 보였다(0.18초 만에 빈 배열).
+        #    스택을 남기고 «다시 올린다» — 배선 사고는 조용히 지나가면 안 된다.
+        _log.exception("폼 경로 비목후보 — 배선 오류(NameError). 삼키지 않는다")
+        raise
     except Exception:                                         # noqa: BLE001
         _log.exception("폼 경로 비목후보 추출 실패 — 빈 후보로 간다")
         return []
