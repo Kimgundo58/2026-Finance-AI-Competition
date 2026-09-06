@@ -117,15 +117,37 @@ def 체크항목_본문(codes: set[str] | None = None, dsn: str | None = None) -
     항목·설명은 여기서 DB 원문 그대로 채운다. `codes` 를 주면 그 안으로 좁힌다
     (호출부가 이미 `체크코드_enum(사업명=...)` 로 사업 범위를 알기 때문).
     """
+    # 🔴 2026-09-07 — `사업명`·`비목` 을 같이 싣는다. 둘 다 NULL 인 항목이
+    #    «모든 지출에 걸리는 공통 필수» 다(부가세제외·비교견적준비·사업비카드사용·
+    #    협약기간내집행·거래처증빙수취·세금계산서수취 6개). 아래 `_공통필수()` 가 쓴다.
+    #    기존 키(항목·설명)는 그대로라 호출부·테스트 스텁이 안 깨진다.
     with db.connect(dsn) as conn:
         if codes:
             rows = conn.execute(
-                'SELECT code, "항목", "설명" FROM corpus.check_items WHERE code = ANY(%s)',
+                'SELECT code, "항목", "설명", "사업명", "비목" '
+                'FROM corpus.check_items WHERE code = ANY(%s)',
                 (list(codes),)).fetchall()
         else:
             rows = conn.execute(
-                'SELECT code, "항목", "설명" FROM corpus.check_items').fetchall()
-    return {r[0]: {"항목": r[1], "설명": r[2]} for r in rows}
+                'SELECT code, "항목", "설명", "사업명", "비목" '
+                'FROM corpus.check_items').fetchall()
+    return {r[0]: {"항목": r[1], "설명": r[2], "사업명": r[3], "비목": r[4]} for r in rows}
+
+
+def _공통필수(체크항목: dict[str, dict]) -> list[str]:
+    """모든 지출에 걸리는 항목의 code — `사업명`·`비목` 이 «둘 다 NULL» 인 것.
+
+    🔴 왜 서버가 붙이나 — 이건 LLM 이 «판단할» 대상이 아니다. 부가세를 빼는 것,
+       사업비 카드로 긁는 것, 협약기간 안에 집행하는 것은 지출 종류와 무관하게
+       «항상» 해당한다. B0 는 "해당하는 게 없으면 빈 배열" 이라 지시하는데, 모델이
+       이걸 곧이곧대로 적용해 빈손으로 끝내는 일이 실제로 났다 —
+       2026-09-07 데모 시드 실측: 4건 중 3건이 해야할일 0건(인건비·특허권 건).
+       화면의 「결제 전 확인」이 통째로 비었다.
+    ⇒ 「체크리스트는 DB 가 소유한다」(설계 결정 ⑥)를 끝까지 밀면, 필수 항목의
+       부착도 DB 사실로 결정해야 한다. 모델의 선택은 «여기에 더하는» 것이다.
+    """
+    return [c for c, v in 체크항목.items()
+            if v.get("사업명") is None and v.get("비목") is None]
 
 
 def s번호_메타(s맵: dict, dsn: str | None = None) -> dict[str, dict]:
@@ -582,6 +604,18 @@ def 검증(llm출력: dict, s맵: dict, *,
             깎(코드값, 문장)
             _설명제거(h, 대상)
         해야할일.append(h)
+
+    # ── 5-c. 공통 필수 바닥 — 모델이 안 골라도 «항상» 붙는다 ──────────────
+    # 🔴 폐쇄 목록 경로(체크코드를 준 실전 호출)에서만 돈다. 옛 계약(체크코드 미전달)은
+    #    LLM 이 항목·설명을 직접 쓰는 경로라 여기 끼면 계약이 달라진다 — 손대지 않는다.
+    if 허용코드 is not None:
+        _이미 = {h.get("code") for h in 해야할일}
+        for c in _공통필수(체크항목):
+            if c in _이미 or c not in 허용코드:
+                continue
+            본문 = 체크항목.get(c)
+            if 본문:
+                해야할일.append({"code": c, "항목": 본문["항목"], "설명": 본문["설명"]})
 
     # ── 6. 버전스탬프 — 인용 문서의 version. 코드가 채운다 ────────────────
     # 인용된 것만 모은다. s맵 전체를 쓰면 인용하지도 않은 문서의 판본이 화면에 붙는다.
