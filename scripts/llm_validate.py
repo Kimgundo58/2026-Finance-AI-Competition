@@ -168,6 +168,54 @@ def _l3표시명(원본파일명: str | None) -> str | None:
     return 이름.replace("_", " ").strip() or None
 
 
+_항호_깨끗 = re.compile(r"^[①-⑳\s,·~]+$")
+
+
+def _항호_표시(항호: str | None) -> str | None:
+    """화면에 낼 항호. «항 기호(①②③)만» 남기고 내부 표기는 버린다.
+
+    🔴 `corpus.chunks.항호` 는 값이 세 갈래다(운영 실측):
+         None                18,001건  — 대다수
+         "①", "③" 같은 항기호           — 사용자에게 유용하다
+         "항1~③", "-4#1", "-1#2~-3-4#1" — «청킹 내부 좌표» 다
+       세 번째가 그대로 화면에 나가 「붙임2 【붙임 2】… -1#2~-3-4#1」로 찍혔다
+       (2026-09-07 ai-4e 화면 실측). 사용자가 읽을 표기가 아니다.
+    🔴 «버리는 쪽»으로 판단한다 — 항 기호가 아니면 None. 내부 좌표를 사람 말로
+       바꿀 방법이 없고, 억지로 바꾸면 없는 정보를 지어내는 것이다.
+       원문은 `원문` 필드가 이미 나르므로 근거가 사라지지는 않는다.
+    """
+    if not 항호:
+        return None
+    t = 항호.strip()
+    if _항호_깨끗.match(t):
+        return t
+    # "항1~③" 처럼 앞에 내부 접두가 붙은 꼴 — 항 기호 부분만 건진다
+    기호 = "".join(ch for ch in t if "①" <= ch <= "⑳")
+    return 기호 or None
+
+
+def _조제목_표시(조번호: str | None, 조제목: str | None) -> str | None:
+    """조제목 앞에 붙은 «조번호 되풀이» 를 뗀다.
+
+    🔴 실측: 조번호="붙임2" · 조제목="【붙임 2】창업기업등 사업비 비목 해설표" 라
+       화면에 「붙임2 【붙임 2】창업기업등 사업비 비목 해설표」로 두 번 찍혔다
+       (2026-09-07 ai-4e). 프론트가 둘을 이어 붙이는데 원본이 이미 중복이다.
+       조번호는 «위치», 조제목은 «이름» 이라 둘 다 필요하다 — 그래서 조제목 쪽의
+       되풀이만 뗀다(조번호를 지우면 위치를 잃는다).
+    """
+    if not 조제목:
+        return 조제목
+    if not 조번호:
+        return 조제목
+    숫자만 = re.sub(r"\D", "", 조번호)
+    글자만 = re.sub(r"[\d\s]", "", 조번호)
+    if not (숫자만 and 글자만):
+        return 조제목
+    # 【붙임 2】 · [붙임2] · (붙임 2) 처럼 괄호로 감싼 되풀이를 맨 앞에서만 뗀다
+    앞 = re.match(r"^\s*[【\[(]\s*" + re.escape(글자만) + r"\s*" + 숫자만 + r"\s*[】\])]\s*", 조제목)
+    return 조제목[앞.end():].strip() if 앞 else 조제목
+
+
 def _조번호_표시(조번호: str | None) -> str | None:
     """`단락035` 처럼 «파서 산출물» 인 조번호를 사용자 표기로 바꾼다.
 
@@ -206,8 +254,9 @@ def s번호_메타(s맵: dict, dsn: str | None = None) -> dict[str, dict]:
             for sid, cid in 청크.items():
                 if cid in m:
                     _, doc, 조, 제목, h, ver, ex, txt, 기관, dom, lay = m[cid]
-                    out[sid] = dict(doc_id=doc, 조번호=조, 조제목=제목, 원문=txt or "",
-                                    원문범위="청크", version=ver, extraction=ex, 항호_DB=h,
+                    out[sid] = dict(doc_id=doc, 조번호=조, 조제목=_조제목_표시(조, 제목), 원문=txt or "",
+                                    원문범위="청크", version=ver, extraction=ex,
+                                    항호_DB=_항호_표시(h),
                                     기관id=기관, domain=dom, layer=lay)
         # article — 조 전체가 오므로 s맵의 항호로 잘라낸다
         if 조문:
@@ -220,7 +269,7 @@ def s번호_메타(s맵: dict, dsn: str | None = None) -> dict[str, dict]:
                 if aid in m:
                     _, doc, 조, 제목, 본문, ver, ex, 기관, dom, lay = m[aid]
                     원문, 범위 = _항_추출(본문, 항호.get(sid))
-                    out[sid] = dict(doc_id=doc, 조번호=조, 조제목=제목, 원문=원문,
+                    out[sid] = dict(doc_id=doc, 조번호=조, 조제목=_조제목_표시(조, 제목), 원문=원문,
                                     원문범위=범위, version=ver, extraction=ex, 항호_DB=None,
                                     기관id=기관, domain=dom, layer=lay)
         # l3 — tenant. extraction·version 축이 없다. 기관 업로드분이라 native 로 본다.
