@@ -97,9 +97,21 @@ def _항_추출(본문: str, 항호: str | None) -> tuple[str, str]:
         return "", "없음"
     if not 항호:
         return 본문, "조전체"
-    k = 본문.find(항호)
+    # 🔴 2026-09-07 — `①#2` 처럼 «몇 번째인지» 가 붙어 올 수 있다
+    #    (`assemble_context.원문블록` 주석 참조). 한 조 안에 같은 항 기호가 두 벌 있는
+    #    문서가 실재한다. 예전엔 `find()` 로 첫 번째만 잡아 두 번째 ①의 인용 «원문» 이
+    #    첫 번째 내용으로 표시됐다 — 프롬프트는 정확했고 표시만 틀렸다.
+    기호, _, 순 = 항호.partition("#")
+    차례 = int(순) if 순.isdigit() else 1
+    k, 남은 = -1, 차례
+    while 남은 > 0:
+        k = 본문.find(기호, k + 1)
+        if k < 0:
+            break
+        남은 -= 1
     if k < 0:
         return 본문, "조전체(항호 미발견)"
+    항호 = 기호
     뒤 = [본문.find(m, k + 1) for m in _항마커 if 본문.find(m, k + 1) > 0]
     end = min(뒤) if 뒤 else len(본문)
     잘린 = 본문[k:end].strip()
