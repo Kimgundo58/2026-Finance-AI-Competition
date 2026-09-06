@@ -94,9 +94,21 @@ Cloud Run 타임아웃에 먼저 끊긴다(`server/main.py:592·695` 가 그 자
 
 ✅ **팟 주소 DB 이전은 배선 완료(2026-09-05, `c0fb014`)** — `scripts/adapter.py::vllm_url()`·
 `server/gpu_watchdog.py::_팟id()` 가 `ops.gpu_pod`(id='default')를 우선 읽고 env 로 폴백한다
-(30초 캐시). 🔴 **남은 것: wake 가 새 팟을 "만드는" 경로는 아직 없다.** 지금도
-`POST /pods/{id}/start`(정지된 기존 팟 켜기)뿐이다 — 팟을 새로 만들면 여전히
-`ops.gpu_pod` 행을 사람이 갱신해야 한다.
+(30초 캐시).
+
+✅ **행 채우기는 API 로 옮겨졌다(2026-09-06, 레인 ι, `07ee8db`)** — `POST /admin/gpu/pod`
+가 `pod_id` 하나만 받아 `vllm_url`(`{pod_id}-8000.proxy.runpod.net` 규칙으로 유도)과
+함께 `ops.gpu_pod` 에 쓴다. 사람이 SQL `UPDATE` 를 손으로 치던 자리가 이걸로 줄었다.
+
+🔴 **다만 이걸로 "wake 가 새 팟을 만든다"로 읽으면 안 된다 — 그 경로는 여전히 없다.**
+`제어.시작()`(`RunPod팟.시작`)은 지금도 `POST /pods/{id}/start`(**정지된 기존 팟을
+켜는** 동작)뿐이다. 팟을 아예 새로 «만드는» 일(이미지·GPU·볼륨 선택, RunPod 팟 생성
+API 호출)은 여전히 사람이 RunPod 콘솔/CLI 로 한다 — `/admin/gpu/pod` 는 그렇게 만든
+(또는 재개한) 기존 팟의 **id 를 등록만** 한다. 남은 사람 개입은 「pod_id 하나를
+어딘가에 입력」으로 줄었을 뿐, 「판이 처음부터 끝까지 자동」은 아니다.
+
+🔴 이 엔드포인트는 배포 직후 500(`rowcount=-1`)이 확인돼 별도 수정이 진행 중이다
+(`scratchpad/ι_GPU시연_절차서.md` §② — 고쳐질 때까지의 임시 대체 수단도 그 문서에 있다).
 
 ## 5. `SUDDOE_GPU_IDLE_MIN` 재활성 값
 

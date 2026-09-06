@@ -947,13 +947,21 @@ def admin_gpu_pod(pod_id: str = Body(..., embed=True),
     if not pod_id:
         raise HTTPException(400, "pod_id 가 비어 있다")
     vllm_url = f"https://{pod_id}-8000.proxy.runpod.net"
-    n = _실행(
-        "UPDATE ops.gpu_pod SET pod_id=%s, vllm_url=%s, updated_at=now(), "
-        "updated_by='admin_gpu_pod' WHERE id='default'",
-        (pod_id, vllm_url))
+    # 🔴 2026-09-06(레인 D) — `예외전파=True`. 실측: Cloud Run 에서만 이 UPDATE 가
+    #    죽는데 `_실행()` 기본값(삼킴)이면 `rowcount=-1` 뿐이라 «무엇이 죽었는지»
+    #    영영 안 보인다. 여기서 켜서 진짜 예외를 응답에 싣는다 — 다른 호출부는
+    #    그대로다(`_실행()` 독스트링 참조).
+    try:
+        n = _실행(
+            "UPDATE ops.gpu_pod SET pod_id=%s, vllm_url=%s, updated_at=now(), "
+            "updated_by='admin_gpu_pod' WHERE id='default'",
+            (pod_id, vllm_url), 예외전파=True)
+    except Exception as e:                                    # noqa: BLE001
+        raise HTTPException(
+            500, f"ops.gpu_pod 갱신 실패 — {type(e).__name__}: {e}") from e
     if n <= 0:
-        raise HTTPException(500, "ops.gpu_pod 갱신 실패 — DB 연결·스키마를 확인해라"
-                                  f" (rowcount={n})")
+        raise HTTPException(500, "ops.gpu_pod 갱신 실패 — 대상 행이 없다"
+                                  f" (rowcount={n}, id='default' 행이 있는지 확인해라)")
     # 🔴 adapter.vllm_url() 은 30초 TTL 캐시다 — 강제갱신 안 하면 최대 30초간
     #    옛 주소(또는 env 폴백)를 계속 쓴다. 시연 중엔 그 30초도 아깝다
     try:
