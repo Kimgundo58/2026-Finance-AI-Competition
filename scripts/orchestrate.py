@@ -227,9 +227,15 @@ def _게이팅(l3룰) -> dict:
     return {"need_upper": True, "seed_refs": []}          # 허용='가능' → 🔴 강제
 
 
-def _l3로드(cur, org_id, 사업명) -> list[dict]:
+def _l3로드(cur, org_id, 사업명, 비목=None) -> list[dict]:
+    # 🔴 2026-09-07 — `비목` 은 «순서만» 바꾸는 힌트다(`l3_load.로드` docstring).
+    #    `SUDDOE_L3_비목순=on` 일 때만 발효하고, 어떤 경우에도 조를 «버리지 않는다».
+    #    옛 서명(3인자)으로 부르는 곳이 있어도 기본값 None 이라 안 깨진다.
     if _E_로드 and org_id:
-        return _E_로드(cur, org_id, 사업명) or []
+        try:
+            return _E_로드(cur, org_id, 사업명, 비목) or []
+        except TypeError:            # E 가 아직 3인자 판이면 그대로 부른다
+            return _E_로드(cur, org_id, 사업명) or []
     return []                                                    # STUB: E
 
 
@@ -827,7 +833,7 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool 
             l3본문 = []
         else:
             with ThreadPoolExecutor(max_workers=2) as ex:
-                fl3 = ex.submit(_병렬_l3, org_id, 사업명)
+                fl3 = ex.submit(_병렬_l3, org_id, 사업명, 비목)
                 fse = ex.submit(_병렬_검색, 질문, 사업명, top_k)
                 l3본문, l3err = fl3.result()
                 검색결과, se_err = fse.result()
@@ -1037,7 +1043,7 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool 
             지연ms=지연), 기록=False, 닫기=닫기)
 
 
-def _병렬_l3(org_id, 사업명):
+def _병렬_l3(org_id, 사업명, 비목=None):
     """스레드 안에서 자기 커넥션을 연다 — psycopg 커넥션은 공유하지 않는다."""
     if not org_id:
         return [], None
@@ -1045,7 +1051,7 @@ def _병렬_l3(org_id, 사업명):
         # 🔴 autocommit. 읽기 트랜잭션을 붙들면 다른 세션의 DDL 과 교착난다
         #    (2026-08-31 8세션 병렬 중 DeadlockDetected 실측 — C 세션 보고).
         with db.connect(connect_timeout=5, autocommit=True) as c:
-            return _l3로드(c.cursor(), org_id, 사업명), None
+            return _l3로드(c.cursor(), org_id, 사업명, 비목), None
     except Exception as e:
         return [], f"{type(e).__name__}: {e}"
 
