@@ -608,7 +608,15 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool 
        plan_id: int | None = None,
        격리근거: list[dict] | None = None, 주입: str | None = None,
        게이트임계: float | None = None, 온도: float = 0.0,
-       변형: str = "V0", _비목고정: str | None = None,
+       # 🔴 2026-09-07 — 기본값을 V0 → V7 로 «채택» 했다. A12 사전 선언 기준 3개를
+       #    전부 통과했다(run 205 기준선 vs run 206 V7, 운영 코퍼스 320문항):
+       #      ① 일치율 213 → 217 (+4문항, 기준 +3 이상)
+       #      ② 치명오답_넓음 26 → 26 (늘지 않음 — 정지 조건 통과)
+       #      ③ 판단불가율 1.2% (0% 아님)
+       #    겨냥한 자리가 움직였다: 정답=가능 4.8% → 14.3%(2건 → 6건),
+       #    예측 조건부 쏠림 124 → 120. 불가·조건부 정확도는 «한 건도 안 잃었다».
+       #    🔴 +4문항 = +1.2%p 로 기준을 «겨우» 넘겼다. 과장하지 않는다.
+       변형: str = "V7", _비목고정: str | None = None,
        정규화결과: dict | None = None,
        폐포사용: bool = True,
        사용자F값: dict | None = None) -> dict:
