@@ -75,8 +75,24 @@ def _실_저장(plan_id: int | None, body, out: dict,
          (plan_id, decision_id))
 
     # ③ 할일 동기화 — routes_tasks.py 를 편집하지 않고 함수만 부른다.
+    # 🔴 2026-09-07 — `증빙목록` 을 «같이» 넘긴다. 이 값은 `orchestrate.증빙_발급처()` 가
+    #    `corpus.rules.증빙`(79/82 룰에 채워져 있다 — 인건비만 10종) 을
+    #    `corpus.evidence_sources.발급처` 와 조인해 만든 것인데, 지금까지 판정 응답에
+    #    실려 SSE 로 «흘러가기만» 하고 저장이 안 됐다. 그래서 새로고침하면 사라지고,
+    #    화면의 「3. 결제 후 필요 증빙」(`plan.evidence`)이 늘 비어 있었다.
+    #    ⇒ 「서버가 만든다」 ≠ 「화면이 쓴다」. 할일과 같은 표에 `구분='결제후'` 로 심어
+    #      기존 체크·완료·일정 UI 를 그대로 쓴다(새 테이블·새 계약을 만들지 않는다).
+    #    code 가 없으므로 `구분` 힌트를 명시한다(`routes_tasks` 네 번째 자리).
+    _증빙 = [
+        {"항목": e["증빙명"], "구분": "결제후",
+         "설명": (f'{e["발급처"]}에서 발급받습니다.' if e.get("발급처")
+                else "지출 후 제출해야 하는 자료입니다.")}
+        for e in (out.get("증빙목록") or []) if e.get("증빙명")
+    ]
     동기화결과 = _할일동기화(
-        plan_id, 할일동기화(decision_id=decision_id, 해야할일=out.get("해야할일", [])),
+        plan_id,
+        할일동기화(decision_id=decision_id,
+                해야할일=list(out.get("해야할일", []) or []) + _증빙),
         org_id,
     )
 
