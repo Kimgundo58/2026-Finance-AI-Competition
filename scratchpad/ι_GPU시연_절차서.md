@@ -4,22 +4,24 @@
 🔴 이 세션은 GPU 를 켜지 않았다 — 아래는 코드 확인 + 새 엔드포인트 1개(로컬 DB 로만
 검증, RunPod API 호출 없음) + 절차 정리다. 실제 기동은 오너 신호 뒤 ai-8c 가 한다.
 
-🔴🔴 **지금(이 문서 작성 시각) 실서버 상태 — 절차서를 쓸 근거가 바로 이거다**
+🔴🔴 **실서버 상태 — 절차서를 쓸 근거가 바로 이거다 (계속 갱신 중)**
 ```
-ops.gpu_pod(운영)  상태='가동'  «인데»  vLLM_응답=false  (2026-09-06, 검토측 GCP 확인)
-검토측이 keepalive 로 종료만 막아둔 상태다. 즉 지금 이 순간 /api/gpu/status 를 치면
-"상태":"가동" 이 나와 «성공처럼 보이지만», 실제 vLLM 프로세스는 응답하지 않는다.
-=> ④(status 폴링) 단계에서 "상태" 필드 «하나만» 보고 넘어가면 이 상황을 그대로
-   지나친다. 아래 ④ 는 이미 "둘 다 보라"고 적었지만, 이게 «가정»이 아니라 «지금
-   실물에서 나고 있는 상태»라는 걸 여기 다시 못박는다. 시연 당일 아침 반드시
-   vLLM_응답 을 실제로 확인하고 시작할 것 — false 면 ①(pod_serve.sh 재기동)로 간다
+① (2026-09-06 오전) ops.gpu_pod 상태='가동' «인데» vLLM_응답=false — 검토측이
+   keepalive 로 종료만 막아둔 상태였다
+② 🔴 (2026-09-06, 더 나쁜 재확인) RunPod 계정에 팟이 «0개» 인데 우리 /api/gpu/status
+   는 «가동»을 줬다 — ①보다 근본적인 오류다(팟 자체가 없는데 "가동"). ai-53 이 지금
+   이 워치독 버그를 고치는 중이다. **고쳐지면 이 절차서(특히 ④)도 같이 다시 봐야
+   한다** — 지금 ④ 의 판정 기준("상태"+"vLLM_응답" 둘 다)이 이 새 버그 앞에서도
+   충분한지 ai-53 의 수정 내용을 보고 재확인할 것
+=> 결론은 그대로다: ④에서 "상태" 필드 «하나만» 보고 절대 넘어가지 마라. 오늘 두 번
+   다른 모양으로 같은 종류의 「표시는 초록·실제는 죽음」이 났다
 ```
 
-🔴 **코드 홀드 중(2026-09-06, ai-8c 지시)** — Cloud Run 재배포 빌드 중 워킹트리가
-그대로 이미지로 굽히기 때문에, `server/**`·`scripts/**`·`db/**` 는 홀드 해제 전까지
-한 글자도 안 건드린다. 이 문서(`scratchpad/`)만 계속 고친다. 코드 산출(§4 「산출」)은
-«이미 커밋됐다»(07ee8db·4887c5b, ai-8c 가 py_compile+pytest 306 passed 재검증) —
-이 세션이 추가로 손댈 코드는 없다.
+✅ **코드 홀드 해제(2026-09-06, ai-8c)** — 이 세션이 이전에 낸 산출(server/main.py
+`POST /admin/gpu/pod`·db/init/14_gpu_pod.sql 주석)은 07ee8db·4887c5b 로 이미 커밋·
+배포됐다. 🔴 **다만 이 엔드포인트는 지금(2026-09-06 낮) 500 이 난다**(`rowcount=-1`) —
+ai-53 이 고치는 중이고 **다음 재배포 전까지는 못 쓴다**. §②에 임시 대체 수단을
+적어 둔다.
 
 ## 0. 확인한 것 — 사람이 SQL 쳐야 했던 이유
 
@@ -65,13 +67,32 @@ ops.gpu_pod(운영)  상태='가동'  «인데»  vLLM_응답=false  (2026-09-06
 ## ① 팟 준비 (사람 — 오너/ai-8c, 이 세션은 안 함)
 
 ```
-할 일   RunPod 콘솔/CLI 로 팟을 새로 만들거나(볼륨 fv5cl1y1ww·US-KS-2, docs/8_운영/
-        8-3_GPU.md §3) 기존 팟을 재개, 그 위에서 scripts/pod_serve.sh 로 vLLM 기동
-        (--max-model-len 40960 은 스크립트 값이 기준 — 손으로 다른 값 치지 말 것)
+🔴 **확정판 조합**(2026-09-06 오늘 두 번 밟아 굳힌 값 — 그대로 써라. 다시 고르지 마라)
+  이미지   runpod/pytorch:2.8.0-py3.11-cuda12.8.1-cudnn-devel-ubuntu22.04
+  GPU     RTX A6000 48GB ($0.53/hr — L40 $0.82 보다 싸다) · US-KS-2 · 컨테이너 60GB
+  볼륨    fv5cl1y1ww -> /workspace  (모델 20GB 캐시 이미 있음. «다운로드 없다»)
+
+  🔴 볼륨의 기존 venv 를 «쓰지 마라» — py3.12 로 만들어져 있어 이미지의 py3.11 과
+     어긋난다(오늘 30분 날린 원인). 매번 새로 만든다:
+     uv venv --python 3.12 /opt/vv
+     uv pip install vllm==0.11.0 "transformers<5"     ← 🔴 제약을 «반드시 같이» 건다
+        (transformers<5 없이 깔면 5.16.1 이 들어가 "Qwen2Tokenizer has no attribute
+        all_special_tokens_extended" 로 죽는다 — pod_setup.sh 주석에 2026-09-02 부터
+        이미 적혀 있던 함정이 오늘 «또» 재발한 것이다)
+
+  HF_HOME=/workspace/hf · VLLM_CACHE_ROOT=/workspace/vllm_cache
+  vllm serve Qwen/Qwen3-32B-AWQ --quantization awq_marlin --max-model-len 40960 \
+       --gpu-memory-utilization 0.92 --enable-prefix-caching --reasoning-parser qwen3
+       (--max-model-len 40960 은 스크립트/이 값이 기준 — 손으로 다른 값 치지 말 것.
+       8-3_GPU.md §6: 이 값에서도 여유는 4%뿐이다)
+
+소요    팟 3~5분 + 모델 «로딩»(다운로드 아님, 볼륨에 이미 캐시됨) 10~12분 = 약 15분
 성공표시 SSH 로 `curl -H 'User-Agent: suddoe/1.0' https://<pod>-8000.proxy.runpod.net
         /v1/models` 가 200 과 함께 `max_model_len:40960` 을 보여준다
-실패시  어디를 보나 — pod_serve.sh 가 뱉는 로그(/workspace/vllm.log), 8-3_GPU.md §6
-        의 「40,960 을 내리면 조용히 잘린다」 경고, User-Agent 빠뜨리면 403(code 1010)
+실패시  어디를 보나 — vLLM 로그(/workspace/vllm.log)에서 위 transformers/Qwen2Tokenizer
+        에러가 있는지 먼저 본다("transformers<5" 를 빠뜨린 게 90% 확률로 원인이다).
+        그 다음 pod_serve.sh 자체 로그, 8-3_GPU.md §6 「40,960 을 내리면 조용히
+        잘린다」경고, User-Agent 빠뜨리면 403(code 1010)
 ```
 
 ## ② pod_id 등록 (신규 엔드포인트 — 사람이 입력하는 값은 pod_id 하나뿐)
@@ -89,6 +110,26 @@ curl -s -X POST https://<서비스도메인>/admin/gpu/pod \
         500 = "ops.gpu_pod 갱신 실패" → DB 연결 자체를 의심(Cloud SQL 프록시·방화벽)
 검증    (선택) DB 를 직접 볼 수 있으면
         `select pod_id, vllm_url, 상태 from ops.gpu_pod;` 로 방금 값이 들어갔는지 확인
+```
+
+🔴 **지금(2026-09-06 낮) 이 엔드포인트는 500 이 난다(`rowcount=-1`).** ai-53 이 고치는
+중이고 **다음 재배포 전까지는 못 쓴다** — 재배포됐는지는 `POST /admin/gpu/pod` 를 쳐서
+200 이 돌아오는지로 직접 확인해라(고쳐졌다는 «말»보다 그게 정본이다). 그때까지는
+아래 임시 수단(사람의 손 SQL — 이 절차서가 원래 없애려던 바로 그 자리다. 고쳐질 때까지의
+«임시»로만 쓴다)으로 대체한다:
+
+```sql
+UPDATE ops.gpu_pod
+   SET pod_id = '<①에서 받은 팟 id>',
+       vllm_url = 'https://<①에서 받은 팟 id>-8000.proxy.runpod.net',
+       updated_at = now(), updated_by = '<사람 이름> (임시수동, /admin/gpu/pod 500 회피)'
+ WHERE id = 'default';
+```
+```
+확인    select pod_id, vllm_url, 상태 from ops.gpu_pod;  로 값이 들어갔는지 확인
+🔴 vllm_url 을 손으로 옮겨 적을 때 pod_id 를 두 번 다 «똑같이» 넣어야 한다(오타가
+   나면 wake 가 엉뚱한 주소로 헬스체크를 친다 — 조용히 실패하지 않고 vLLM_응답:false
+   로 나타나므로 ④에서 걸린다는 게 그나마 다행이다)
 ```
 
 ## ③ wake
@@ -197,16 +238,13 @@ curl -s -N -X POST https://<서비스도메인>/api/judge \
 
 ## 산출
 ```
-scratchpad/ι_GPU시연_절차서.md   (이 문서)
-server/main.py                  POST /admin/gpu/pod 신설 — ✅ 커밋됨(07ee8db, ai-8c 가
-                                 py_compile+pytest 전체 306 passed 재검증 후 반영)
-db/init/14_gpu_pod.sql          위 신설 사실 주석에 기록(스키마 변경 없음, 주석만) —
-                                 ✅ 커밋됨(4887c5b)
-🔴 코드 홀드(2026-09-06) 중이라 이 세션은 더 이상 server/**·scripts/**·db/** 를
-   안 건드린다. 위 두 산출은 홀드 «전»에 이미 끝나 커밋된 것이고, 이 보고 시점 이후
-   변경은 없다
-🔴 docs/8_운영/8-7_GPU_무인운전.md §4 "wake 가 새 팟을 만드는 경로는 아직 없다" 문장이
-   이제 부분적으로 낡았다(pod_id 등록은 이제 엔드포인트로 된다 — «생성»은 여전히 안 됨).
-   CLAUDE.md 규칙대로 이 문서는 «작업 확실히 끝났을 때 오너에게 물어보고» 고친다 —
-   이번 보고에서 여쭤본다. (docs/** 는 코드 홀드 대상이 아니지만, 답 받기 전엔 안 고친다)
+scratchpad/ι_GPU시연_절차서.md   (이 문서, 확정판 조합·500 우회·watchdog 버그 반영해 갱신)
+server/main.py                  POST /admin/gpu/pod 신설 — ✅ 커밋·배포됨(07ee8db)
+                                 🔴 단, 지금 500(rowcount=-1) — ai-53 수정 중(§②)
+db/init/14_gpu_pod.sql          쓰기 경로 주석 반영 — ✅ 커밋됨(4887c5b)
+docs/8_운영/8-7_GPU_무인운전.md §4  ✅ 오너 승인 받아 이 세션이 직접 고쳤다(아래 참고)
+   — "wake 가 새 팟을 만든다"로 안 읽히게, "pod_id 등록은 엔드포인트로 됐고 «팟
+   생성» 은 여전히 없다"를 정확히 반영
+🔴 코드 홀드는 해제됐다(ai-8c). 다만 이번 배정은 절차서(scratchpad)+docs 반영까지라
+   server/**·scripts/**·db/** 는 이번에도 안 건드렸다 — 500 수정은 ai-53 담당이다
 ```

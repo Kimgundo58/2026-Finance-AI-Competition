@@ -66,8 +66,8 @@ from server._common import (DSN, MOCK, _sse, _sse응답, _실행, _질의,  # no
 from server.models import (F1, F3항, F4항, F5, 정규화요청,          # noqa: E402
                            판정요청, 프로필)
 from server import inquiry                                       # noqa: E402
-from server import (auth, gpu_watchdog, routes_l3, routes_orgs,     # noqa: E402
-                    routes_plans, routes_tasks)
+from server import (auth, gpu_watchdog, routes_admin_ingest,        # noqa: E402
+                    routes_l3, routes_orgs, routes_plans, routes_tasks)
 
 _워치독 = gpu_watchdog.워치독
 
@@ -215,6 +215,10 @@ _목_정규화 = {
     "용도": "디자이너 작업용",
     "비목후보": [{"비목": "기계장치", "신뢰도": 0.82}, {"비목": "재료비", "신뢰도": 0.31}],
     "결제수단": None, "구매명의": None, "신청일": None, "비교견적": None, "하위항목": None,
+    # A-3(2026-09-06) — 목 모드는 check_items 를 안 읽는다. 빈 리스트로 실 모드와 키를 맞춘다
+    # (`test_정규화_SSE_가_목과_실에서_같은_키를_준다`). ai-7d 산출이 들어와도 목은 그대로 둔다
+    # — 목은 «화면을 끝까지 그릴 최소 한 벌」이지 실 데이터 재현이 아니다.
+    "심층질문": [],
 }
 
 # 🔴 4-way 를 전부 그려봐야 한다. 판단불가는 에러 화면이 아니라 정상 경로다 (§3).
@@ -362,6 +366,7 @@ app.include_router(routes_tasks.router)
 app.include_router(routes_l3.router)
 app.include_router(routes_orgs.router)         # 기관 목록 — org_id 를 «안» 싣는다
 app.include_router(gpu_watchdog.router)        # /api/gpu/status · keepalive
+app.include_router(routes_admin_ingest.router)  # /admin/ingest·parse_report (레인 L3)
 
 # 🔴 IDLE_MIN=0 이면 스레드조차 만들지 않는다. 목 모드 가드는 gpu_watchdog 안에 있다
 #    — 목 서버는 GPU 를 안 부르니 «영원히 유휴» 라, 가드가 없으면 30분 뒤 목이
@@ -947,13 +952,21 @@ def admin_gpu_pod(pod_id: str = Body(..., embed=True),
     if not pod_id:
         raise HTTPException(400, "pod_id 가 비어 있다")
     vllm_url = f"https://{pod_id}-8000.proxy.runpod.net"
-    n = _실행(
-        "UPDATE ops.gpu_pod SET pod_id=%s, vllm_url=%s, updated_at=now(), "
-        "updated_by='admin_gpu_pod' WHERE id='default'",
-        (pod_id, vllm_url))
+    # 🔴 2026-09-06(레인 D) — `예외전파=True`. 실측: Cloud Run 에서만 이 UPDATE 가
+    #    죽는데 `_실행()` 기본값(삼킴)이면 `rowcount=-1` 뿐이라 «무엇이 죽었는지»
+    #    영영 안 보인다. 여기서 켜서 진짜 예외를 응답에 싣는다 — 다른 호출부는
+    #    그대로다(`_실행()` 독스트링 참조).
+    try:
+        n = _실행(
+            "UPDATE ops.gpu_pod SET pod_id=%s, vllm_url=%s, updated_at=now(), "
+            "updated_by='admin_gpu_pod' WHERE id='default'",
+            (pod_id, vllm_url), 예외전파=True)
+    except Exception as e:                                    # noqa: BLE001
+        raise HTTPException(
+            500, f"ops.gpu_pod 갱신 실패 — {type(e).__name__}: {e}") from e
     if n <= 0:
-        raise HTTPException(500, "ops.gpu_pod 갱신 실패 — DB 연결·스키마를 확인해라"
-                                  f" (rowcount={n})")
+        raise HTTPException(500, "ops.gpu_pod 갱신 실패 — 대상 행이 없다"
+                                  f" (rowcount={n}, id='default' 행이 있는지 확인해라)")
     # 🔴 adapter.vllm_url() 은 30초 TTL 캐시다 — 강제갱신 안 하면 최대 30초간
     #    옛 주소(또는 env 폴백)를 계속 쓴다. 시연 중엔 그 30초도 아깝다
     try:
@@ -1101,6 +1114,8 @@ def _실_정규화(body: 정규화요청) -> dict:
     #    (2026-09-03 S3). 필요해지면 계약에 먼저 올리고 세 경로에 같이 싣는다.
     out.pop("누락필드", None)
     out.pop("_출처", None)
+    # A-3(2026-09-06, 레인 Y) — check_items 기반 심층질문. LLM 호출 0 (배선일 뿐).
+    out["심층질문"] = _심층질문_선별(body.사업명, out.get("비목후보"))
     return out
 
 
@@ -1154,6 +1169,78 @@ def _체크마스터() -> dict[str, tuple[str, str]]:
     return 표
 
 
+_심층질문_캐시: tuple[float, list[dict]] | None = None
+_심층질문_캐시TTL = _int환경("SUDDOE_CHECKITEM_TTL", 300)
+
+# 🔴 A-3(2026-09-06, 레인 Y) — ai-7d 가 만드는 A-1(질문문)·A-2(유형·선택지·필요F필드)
+#    컬럼 이름의 예상값이다. `corpus.check_items` 에 이미 «유형」(기타/계약/비교견적,
+#    `할일.유형` 용) 이 있어 그것과 겹치지 않게 «질문유형」으로 잡았다 — ai-7d 산출이
+#    다른 이름으로 오면 여기만 고치면 된다(호출부는 아래 dict 모양만 본다).
+_심층질문_컬럼 = {"질문문": "질문문", "유형": "질문유형", "선택지": "선택지", "필요F필드": "필요F필드"}
+
+
+def _심층질문마스터() -> list[dict]:
+    """`corpus.check_items` 에서 심층질문 후보 전부를 읽는다 (52행 고정, `_체크마스터()`
+    와 같은 이유로 통째로 캐시한다).
+
+    🔴 A-1·A-2 컬럼이 «아직 없으면» `_질의()` 가 예외를 삼켜 빈 리스트를 준다 —
+       그게 정상이다(기능이 아직 안 켜진 것이지 고장이 아니다). 컬럼이 생기면 재배포
+       없이 다음 TTL 만료 때 자동으로 채워진다.
+    🔴 근거가 없는 행은 절대 안 낸다 — 「왜 묻는지」가 근거다(ai-8c 지시).
+    """
+    global _심층질문_캐시
+    if _심층질문_캐시 is not None:
+        받은시각, 표 = _심층질문_캐시
+        if time.time() - 받은시각 < _심층질문_캐시TTL:
+            return 표
+    c = _심층질문_컬럼
+    행 = _질의(f'''SELECT "code", "사업명", "비목", "{c["질문문"]}", "{c["유형"]}",
+                        "{c["선택지"]}", "근거", "{c["필요F필드"]}"
+                  FROM corpus.check_items''')
+    표 = []
+    for code, 사업명, 비목, 질문문, 유형, 선택지, 근거, 필요F필드 in 행:
+        if not 질문문 or not 근거:              # 질문문 없거나 근거 없으면 못 낸다
+            continue
+        근거들 = 근거 if isinstance(근거, list) else [근거]
+        if not 근거들 or not isinstance(근거들[0], dict):
+            continue
+        표.append({
+            "code": code, "사업명": 사업명, "비목": 비목,
+            "질문문": 질문문, "유형": 유형 or "예아니오",
+            "선택지": 선택지 or [],
+            "근거": {"doc_id": 근거들[0].get("doc_id"), "조번호": 근거들[0].get("조번호")},
+            "필요F필드": list(필요F필드 or []),
+        })
+    if 표:                                       # 🔴 빈 표는 캐시하지 않는다 (`_체크마스터()` 와 같은 이유)
+        _심층질문_캐시 = (time.time(), 표)
+    return 표
+
+
+def _심층질문_선별(사업명: str | None, 비목후보: list[dict] | None) -> list[dict]:
+    """정규화 시점엔 비목이 «후보» 뿐이다 — 사업명·최우선 비목후보로만 거칠게 거른다.
+
+    🔴 못 거르면(사업명 미확정) 전부 준다 — 화면이 접어 보여주면 되지, 서버가
+       추측으로 줄이면 「해당 없음」이 「아직 모름」을 삼킨다.
+    """
+    표 = _심층질문마스터()
+    if not 표:
+        return []
+    최우선비목 = None
+    if 비목후보:
+        try:
+            최우선비목 = max(비목후보, key=lambda c: c.get("신뢰도", 0)).get("비목")
+        except (TypeError, ValueError):
+            최우선비목 = None
+    out = []
+    for q in 표:
+        if q["사업명"] and 사업명 and q["사업명"] != 사업명:
+            continue
+        if q["비목"] and 최우선비목 and q["비목"] != 최우선비목:
+            continue
+        out.append({k: v for k, v in q.items() if k not in ("사업명", "비목")})
+    return out
+
+
 def _할일_보강(할일: list) -> list:
     """`code` 로 마스터를 봐서 `구분`·`유형` 을 얹는다 (§3-5 Q2). **LLM 호출 증가 0.**
 
@@ -1180,6 +1267,24 @@ def _할일_보강(할일: list) -> list:
         m = 표.get(h.get("code")) if isinstance(h, dict) else None
         본.append({**h, "구분": m[0], "유형": m[1]} if m else h)
     return 본
+
+
+def _사용자F값_조립(답변: list) -> dict | None:
+    """B(2026-09-06, 레인 Y) — 심층질문 답 → `orchestrate.판정(사용자F값=...)` 입력.
+
+    🔴 «컬럼명» 그대로 담는다(`_심층질문마스터()` 의 `필요F필드` 그대로 옮긴다) —
+       dotted-path(`F1.정부지원.현금`) 변환은 `f값_경로키()` 안에서 «한 번만» 일어난다
+       (orchestrate.py 주석 참조. 여기서 또 접두사를 매기면 두 곳이 어긋난다).
+    🔴 목록 밖(마스터에 없는) code 는 조용히 버린다 — 지어낸 F필드를 만들지 않는다.
+    """
+    if not 답변:
+        return None
+    표 = {q["code"]: q.get("필요F필드") or [] for q in _심층질문마스터()}
+    out: dict = {}
+    for a in 답변:
+        for 컬럼 in 표.get(a.code, []):
+            out[컬럼] = a.값
+    return out or None
 
 
 def _실_판정(body: 판정요청) -> dict:
@@ -1215,7 +1320,10 @@ def _실_판정(body: 판정요청) -> dict:
     #    `정규화` 로 두면 모듈 전역 함수를 파라미터가 가린다.
     r = orchestrate.판정(질문, 사업명=body.사업명, org_id=body.org_id, plan_id=body.plan_id,
                        _비목고정=body.확정비목 or None,
-                       정규화결과=body.정규화)
+                       정규화결과=body.정규화,
+                       # B(2026-09-06, 레인 Y) — 심층질문 답. 없으면(빈 리스트) None 이라
+                       # orchestrate 쪽에서 종전과 바이트 단위로 같은 경로를 탄다.
+                       사용자F값=_사용자F값_조립(body.답변))
     전제 = r.get("전제") or r.get("전제목록") or []
     # 🔴 후보에 없는 비목을 고정하면 «그 비목으로 본 판정» 이 나온다 — 조용히 내보내면
     #    사용자는 시스템이 동의한 걸로 읽는다 (2026-09-03 오너 결정 R7). 새 SSE 이벤트를
