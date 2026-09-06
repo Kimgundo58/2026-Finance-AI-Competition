@@ -275,18 +275,34 @@ def b4_문장(룰: dict | None) -> str | None:
 
 
 def b5_문장(cur, org_id) -> str | None:
-    """B5 F 요약. 🔴 현물은 없다 — 계상은 지출이 아니다 (오늘 DROP, 계약서 §2)."""
+    """B5 F 요약. 🔴 현물은 없다 — 계상은 지출이 아니다 (오늘 DROP, 계약서 §2).
+
+    🔴 2026-09-06 — 이 함수가 «없는 컬럼»(`협약총액`)을 물어서 «항상 None» 이었다.
+    B5 블록이 프롬프트에 «한 번도 안 실렸다». 그것만도 나쁜데 더 나쁜 게 있었다 —
+    **실패가 트랜잭션을 죽인다**. 이 함수는 판정 흐름의 «앞» 에서 불리므로(:765),
+    그 뒤 같은 트랜잭션의 모든 쿼리가 `InFailedSqlTransaction` 으로 죽고 각자의 except 에
+    삼켜져 «조용히 빈 값» 이 나갔다 — 검증(b5_값)·전제해소·증빙_발급처·decisions 기록까지.
+    실측으로 확인했다(같은 커서에서 이 함수 뒤 `select count(*) from corpus.rules` 가 죽는다).
+
+    그래서 두 가지를 한다: 컬럼을 바로잡고, 실패해도 «트랜잭션을 되살린다».
+    """
     if not org_id:
         return None
     try:
-        r = cur.execute("""SELECT 협약총액, 정부지원_현금, 자기부담_현금
+        r = cur.execute("""SELECT 협약시작일, 협약종료일, 정부지원_현금, 자기부담_현금
                              FROM tenant.f_profile WHERE org_id=%s LIMIT 1""",
                         (org_id,)).fetchone()
-    except Exception:
+    except Exception as e:
+        # 🔴 조용히 넘기지 않는다 + 뒤를 살린다. 이 함수의 실패가 «판정 전체» 를 죽이면 안 된다.
+        print(f"🔴 b5_문장 조회 실패 — {type(e).__name__}: {e}", file=sys.stderr)
+        try:
+            cur.connection.rollback()      # 죽은 트랜잭션을 여기서 끊는다
+        except Exception:
+            pass
         return None
     if not r:
         return None
-    이름 = ("협약총액", "정부지원(현금)", "자기부담(현금)")
+    이름 = ("협약시작일", "협약종료일", "정부지원(현금)", "자기부담(현금)")
     return "\n".join(f"{n}: {v if v is not None else '미입력'}" for n, v in zip(이름, r))
 
 def b5_값(cur, org_id) -> dict | None:
@@ -312,6 +328,10 @@ def b5_값(cur, org_id) -> dict | None:
         #    없는 컬럼(`협약총액`)을 물어서 «항상 None» 이었고, 그래서 층 B 상태 규칙이
         #    «영원히 무발효» 였는데 아무 데도 안 보였다. 계약(None=모른다)은 지키되 소리는 낸다.
         print(f"🔴 b5_값 조회 실패 — {type(e).__name__}: {e}", file=sys.stderr)
+        try:
+            cur.connection.rollback()   # 🔴 b5_문장 과 같은 이유 — 실패가 뒤를 죽이면 안 된다
+        except Exception:
+            pass
         return None                     # 모른다
     if not r:
         return {}
