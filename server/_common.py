@@ -160,8 +160,18 @@ def _질의(sql: str, 인자: tuple = (), *, 예외전파: bool = False) -> list
         return []
 
 
-def _실행(sql: str, 인자: tuple = ()) -> int:
-    """INSERT/UPDATE 용. 성공하면 rowcount, 실패하면 -1."""
+def _실행(sql: str, 인자: tuple = (), *, 예외전파: bool = False) -> int:
+    """INSERT/UPDATE 용. 성공하면 rowcount, 실패하면 -1.
+
+    🔴 `예외전파=True` 는 `_질의()` 와 «같은 계약·같은 이유» 다(2026-09-06, 레인 D).
+       실측 — `/admin/gpu/pod` 가 로컬에서는 되는 UPDATE 를 Cloud Run 에서 실패시켰는데,
+       `-1` 뿐이라 «무엇이 죽었는지» 를 영영 볼 수 없었다. `-1` 은 "0행"이 아니라
+       "예외가 났는데 삼켰다" 다 — 그 구분이 없으면 다음에도 못 본다.
+
+       기본값이 False 인 이유도 `_질의()` 와 같다: 호출부가 여러 곳(persist.py·
+       routes_l3.py·routes_orgs.py·routes_tasks.py·main.py:625 등)이다. 시그니처를
+       통째로 뒤집으면 거기 전부가 500 으로 바뀐다 — **필요한 자리만 켠다**.
+    """
     try:
         import psycopg
         with psycopg.connect(DSN, connect_timeout=3) as conn:
@@ -170,6 +180,8 @@ def _실행(sql: str, 인자: tuple = ()) -> int:
             conn.commit()
             return cur.rowcount
     except Exception:                                         # noqa: BLE001
+        if 예외전파:
+            raise
         return -1
 
 

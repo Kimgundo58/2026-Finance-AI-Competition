@@ -19,6 +19,41 @@
   ③ dangling 은 업로드 시점(=파싱 시점)에 `l3_documents.dangling수` 에 채운다
   ④ 조번호 구판 재매칭은 `l3_load._shifted_재매칭()`(오늘 추가) 이 이미 한다 — 여기선 그냥 부른다
 
+━━ 2026-09-06(레인 W2) — VLM 분기 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+스캔 PDF·이미지 한글처럼 «형식은 맞는데 글자가 거의 없는» 파일은 지금까지 조 0건으로
+바로 `fail` 이었다(다른 길이 없었다). ② 추출 단계(`extract()` 직후) 에 판독 시도를 끼운다.
+
+  🔴 **`extract()` 가 예외를 던지는 경우(파일이 깨졌다·형식 위장 등)는 이 분기를 안 탄다.**
+     "텍스트가 없다(스캔본)"과 "추출 자체가 죽었다"는 다른 사고다(요구사항 ④) — 후자는
+     기존 `except` 경로 그대로 둔다. 이 분기는 **추출이 성공했는데 결과가 사실상 빈** 경우만이다
+  🔴 임계값은 «새로 안 만든다» — `stage0_extract.빈_추출_글자수_임계치`(200자, 실측
+     근거는 그 파일 §빈 추출 게이트 주석)를 그대로 가져다 쓴다. ai-47 이 다른 값을 쓰면
+     **이 상수 하나로 맞춰야 한다** — 두 곳에 따로 적지 않는다
+  🔴 `scripts/vlm_extract.py` 가 아직 없으면 **import 실패를 조용히 삼키지 않는다** —
+     stderr 에 경고를 찍고 VLM 분기를 건너뛴다(기존 동작과 바이트 단위로 같다).
+     생기면 코드 수정 없이 붙는다(있으면 부르고 없으면 건너뛰는 조건 하나뿐)
+  🔴 판독에 성공해도 `파싱품질` 은 **'pass' 가 될 수 없다** — 항상 'warn'(판독은 틀릴
+     수 있다). `extraction='vlm'` 을 여기서 기록한다 — `tenant.l3_documents.extraction`
+     이 이 값을 가져야 (6-4_검증과_강등의) `VLM_DOWNGRADE` 강등이 걸린다. 안 적으면 강등이 안 돈다
+  🔴 비용 가드 — 파일 **내용** 의 sha256 을 캐시 키로 쓴다(`doc_id` 는 매 업로드마다 새로
+     발급돼 재업로드 탐지에 못 쓴다). `_vlm_캐시경로()` 아래 텍스트로 캐시하고, 있으면
+     VLM 을 다시 안 부른다. 🔴 이건 «DB 스키마를 안 건드린다» 는 이 파일의 원칙 때문에
+     고른 임시방편이다 — `tenant.l3_documents` 에 content_hash 컬럼이 생기면 그쪽으로
+     옮기는 게 정석이다(제안만, 여기서 만들지 않는다)
+  🔴 실제로 태워 본 결과(2026-09-06, DB 읽기전용) — «중앙이 말한 시험 재료가 실제로는
+     그 시나리오가 아니었다»:
+       경상국립대 안내문 2건(둘 다 파싱품질=warn) — 실측 글자수 27,123·549자, 둘 다
+       200자 임계치 «위**다**» — 이 분기가 다루는 "텍스트 거의 0" 사례가 «아니다».
+       그 문서들의 warn 원인은 Lane S 가 이미 짚은 것과 같다(조 구조가 없는 "단락"
+       문서라 validate() 의 다른 flag 가 걸린 것) — VLM 로 고칠 사안이 아니다
+       `_l3_업로드/` 에 있던 미등록 스캔 PDF 1건은 `extract()` 자체가
+       `PdfReadError: startxref not found` 로 죽는다 — 이것도 «이 분기 대상이 아니다»
+       (요구사항 ④의 "추출 자체가 죽었다" 쪽이다. 손상된 파일이지 스캔본 여부는 못 봤다)
+     => 이 분기를 실제 "성공했지만 텍스트 0" 파일로 못 태웠다(그런 파일이 이 DB·이
+        디렉터리에 없다). 아래 로직은 합성 입력(빈 문자열)으로 트리거 조건·임포트
+        가드·캐시만 검증했다 — 실제 VLM 응답 경로는 `vlm_extract.py` 가 생겨야 검증된다
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 실행:
     PYTHONIOENCODING=utf-8 python scripts/l3_parse.py --doc-id <uuid>
     PYTHONIOENCODING=utf-8 python scripts/l3_parse.py --all-pending
@@ -26,6 +61,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import sys
 import traceback
@@ -37,10 +73,24 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import psycopg  # noqa: E402
 
 import l3_load  # noqa: E402
-from stage0_extract import extract  # noqa: E402
+from stage0_extract import extract, 빈_추출_글자수_임계치  # noqa: E402
 from stage0_articles import split_articles, validate  # noqa: E402
 
 DSN = os.environ.get("SUDDOE_DSN", "postgresql://postgres:devpw@localhost:5432/suddoe")
+
+# ── VLM 판독 — ai-47 이 `vlm_extract.py` 를 아직 안 냈으면 «조용히 스킵» 이 아니라
+#    stderr 에 남기고 스킵한다. 생기면 import 가 저절로 성공해 이 분기가 켜진다.
+try:
+    from vlm_extract import extract as _vlm추출  # noqa: E402
+    #  제안 인터페이스(ai-47과 맞출 것): _vlm추출(path: Path) -> tuple[str, dict[int,int]]
+    #  — extract_pdf()·extract_hwp() 와 같은 모양(본문, 페이지오프셋)으로 맞췄다.
+except ImportError as _e:
+    _vlm추출 = None
+    print(f"⚠️ scripts/vlm_extract.py 를 못 찾았다({_e}) — VLM 분기는 항상 스킵된다. "
+          "생기면 코드 수정 없이 붙는다.", file=sys.stderr)
+
+_VLM_캐시_디렉터리 = Path(os.environ.get("SUDDOE_VLM_CACHE_DIR",
+                                     str(ROOT / "_l3_업로드" / "_vlm_캐시")))
 
 # 🔴 `server/routes_l3.py::원본경로()` 와 **반드시 같은 규칙**이어야 한다 — 저장한 쪽과
 #    읽는 쪽이 다른 파일을 보면 "파일이 없다" 실패가 매번 조용히 난다. 서버 코드를
@@ -58,6 +108,40 @@ def _확장자(원본파일명: str) -> str:
     return 원본파일명.rsplit(".", 1)[-1].lower() if "." in (원본파일명 or "") else ""
 
 
+def _파일해시(경로: Path) -> str:
+    """VLM 재호출 방지 키. `doc_id` 는 매 업로드마다 새로 발급돼 같은 파일의
+    재업로드를 못 알아본다 — «내용» 을 본다."""
+    return hashlib.sha256(경로.read_bytes()).hexdigest()
+
+
+def _vlm_캐시_경로(파일해시: str) -> Path:
+    return _VLM_캐시_디렉터리 / f"{파일해시}.txt"
+
+
+def _vlm_시도(경로: Path) -> tuple[str, dict[int, int], str] | None:
+    """VLM 판독. 성공하면 (본문, 페이지오프셋, 출처) — 출처는 'cache'|'live'.
+    실패(모듈 없음·판독 자체 실패)하면 None — 호출부가 기존 fail 경로로 닫는다.
+    """
+    if _vlm추출 is None:
+        return None
+    해시 = _파일해시(경로)
+    캐시경로 = _vlm_캐시_경로(해시)
+    if 캐시경로.exists():
+        return 캐시경로.read_text(encoding="utf-8"), {}, "cache"
+    try:
+        본문, 오프셋 = _vlm추출(경로)
+    except Exception as e:
+        print(f"⚠️ VLM 판독 실패 {type(e).__name__}: {e}", file=sys.stderr)
+        return None
+    if 본문:
+        try:
+            _VLM_캐시_디렉터리.mkdir(parents=True, exist_ok=True)
+            캐시경로.write_text(본문, encoding="utf-8")
+        except OSError as e:
+            print(f"⚠️ VLM 캐시 저장 실패(계속 진행) — {e}", file=sys.stderr)
+    return 본문, 오프셋, "live"
+
+
 def 파싱(cur, doc_id: str) -> dict:
     """실제 파싱 + DB 반영. 성공이든 실패든 `파싱품질` 이 '대기' 를 벗어난 채로 끝난다.
 
@@ -73,11 +157,20 @@ def 파싱(cur, doc_id: str) -> dict:
     확장 = _확장자(원본파일명)
     경로 = 원본경로(doc_id, 확장)
 
-    def _닫기(파싱품질: str, 조_건수: int = 0, dangling수: int = 0, **부가) -> dict:
-        cur.execute(
-            "UPDATE tenant.l3_documents SET \"파싱품질\"=%s, \"dangling수\"=%s "
-            " WHERE doc_id=%s",
-            (파싱품질, dangling수, doc_id))
+    def _닫기(파싱품질: str, 조_건수: int = 0, dangling수: int = 0,
+              extraction: str | None = None, **부가) -> dict:
+        # 🔴 extraction 은 None(=바꾸지 않음)이 기본이다. VLM 분기를 안 탄 기존 경로는
+        #    업로드 시점에 서버가 이미 적어 둔 값(파일 확장자 기준)을 그대로 둔다.
+        if extraction is not None:
+            cur.execute(
+                "UPDATE tenant.l3_documents SET \"파싱품질\"=%s, \"dangling수\"=%s, "
+                " extraction=%s WHERE doc_id=%s",
+                (파싱품질, dangling수, extraction, doc_id))
+        else:
+            cur.execute(
+                "UPDATE tenant.l3_documents SET \"파싱품질\"=%s, \"dangling수\"=%s "
+                " WHERE doc_id=%s",
+                (파싱품질, dangling수, doc_id))
         return {"ok": 파싱품질 in ("pass", "warn"), "파싱품질": 파싱품질,
                 "조_건수": 조_건수, "dangling수": dangling수, **부가}
 
@@ -89,14 +182,31 @@ def 파싱(cur, doc_id: str) -> dict:
     try:
         kind, payload = extract(경로)
     except Exception as e:
+        # 🔴 여기서 죽는 건 "추출 자체가 죽었다"(파일 손상·형식 위장 등)다 — VLM 분기
+        #    대상이 아니다(요구사항 ④). 스캔본이라 텍스트가 없는 것과는 다른 사고다.
         return _닫기("fail", 사유=f"추출 실패 {type(e).__name__}: {e}",
                     트레이스=traceback.format_exc()[-800:])
 
+    vlm사용 = False
     if kind == "articles":
         arts, strategy, raw_text = payload, "xml_native", "\n".join(
             a["본문"] for a in payload)
     else:
         raw_text, page_offsets = payload
+        # ── ②-1 🔴 VLM 분기 — 추출은 «성공했는데» 결과가 사실상 비었을 때만 ──────
+        #    (레인 W2, 2026-09-06). 임계값은 stage0_extract 의 기존 상수를 그대로 쓴다.
+        if len(raw_text) < 빈_추출_글자수_임계치:
+            vlm결과 = _vlm_시도(경로)
+            if vlm결과 is not None:
+                판독본문, 판독오프셋, 출처 = vlm결과
+                if len(판독본문) >= 빈_추출_글자수_임계치:
+                    raw_text, page_offsets = 판독본문, 판독오프셋
+                    vlm사용 = True
+                # 판독도 짧으면 vlm사용=False 로 두고 아래 split_articles 가 그대로
+                # 원래 raw_text(짧은 값)로 진행 -> 조 0건 -> ③에서 fail 로 닫힌다.
+                # 사유에 "판독도 실패"임을 남기려면 여기서 짧게 이유를 적어 둔다.
+            # vlm결과 가 None(모듈 없음·판독 자체 예외)이어도 여기서 죽지 않는다 —
+            # 아래로 흘러 기존 split_articles 경로가 그대로 조 0건 -> fail 로 닫는다.
         try:
             arts, strategy = split_articles(raw_text, page_offsets)
         except Exception as e:
@@ -107,7 +217,16 @@ def 파싱(cur, doc_id: str) -> dict:
 
     # ── ③ 🔴 조 0개는 성공이 아니다 — 게이트 두 겹 중 파싱 단 ───────────
     if not v["ok"]:
-        return _닫기("fail", 사유=f"조 0건 ({strategy})", strategy=strategy)
+        # 🔴 요구사항 ④ — "텍스트가 없다(스캔본) + 판독도 실패" 와 "추출 자체가
+        #    죽었다"(위 except 경로)는 다른 사고다. 여기 오는 건 전자 갈래이고,
+        #    그 안에서도 VLM 을 시도했는지 여부를 사유에 갈라 남긴다.
+        if kind != "articles" and len(raw_text) < 빈_추출_글자수_임계치:
+            사유 = ("텍스트가 없다(스캔본으로 보임) — VLM 판독도 실패"
+                   if _vlm추출 is not None else
+                   "텍스트가 없다(스캔본으로 보임) — VLM 모듈 없음(scripts/vlm_extract.py 미구현)")
+        else:
+            사유 = f"조 0건 ({strategy})"
+        return _닫기("fail", 사유=사유, strategy=strategy)
 
     # ── ④ tenant.l3_articles 에 넣는다 ──────────────────────────────────
     # 🔴 UNIQUE(doc_id, 조번호) 가 걸려 있다. `stage0_articles._build()` 는 titled/bare
@@ -137,6 +256,14 @@ def 파싱(cur, doc_id: str) -> dict:
         dang += sum(1 for r in l3_load.상위참조(cur, a["본문"]) if not r["해소"])
 
     파싱품질, flags = _품질판정(arts, v["flags"])
+    if vlm사용:
+        # 🔴 요구사항 ② — 판독은 틀릴 수 있다. 아무리 flags 가 깨끗해도 'pass' 로
+        #    올리지 않는다. extraction='vlm' 을 여기서 «처음» 기록한다 —
+        #    이게 없으면 VLM_DOWNGRADE 강등([[6_LLM/6-4_검증과_강등]])이 안 걸린다.
+        파싱품질 = "warn"
+        flags = list(flags) + ["VLM 판독분 — 사람 확인 권장"]
+        return _닫기(파싱품질, 조_건수=len(arts), dangling수=dang,
+                    strategy=strategy, flags=flags, extraction="vlm")
     return _닫기(파싱품질, 조_건수=len(arts), dangling수=dang,
                 strategy=strategy, flags=flags)
 

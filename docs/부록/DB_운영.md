@@ -107,7 +107,7 @@
 | `documents` | 원본 문서 목록 (어느 계층인지, 현행인지 구버전인지, **검색 진입점인지**) |
 | `doc_articles` | 문서를 **조(條) 단위**로 쪼갠 원문 |
 | `chunks` | 검색용으로 가공한 조각 + **1024개 숫자(임베딩)** ← 검색의 핵심 |
-| `case_chunks` | R&D 사례집 Q&A (참고용, 판정 근거로는 못 씀) |
+| `case_chunks` | R&D 사례집 Q&A (참고용, 판정 근거로는 못 씀) — 🔴 2026-09-06 **DROP 됨**(오너 결정, 커밋 `d26b96b`). 이 표는 더 이상 없다 |
 | `rules` | 비목별 허용/한도/사전승인/증빙 ← 빠른 판정의 핵심 |
 | `precedence_rules` | **어느 계층이 이기는가** (8개 사업 중 6개가 "관리기준이 기관규정을 이긴다") |
 | `refs` | 조문끼리의 **참조 그래프** ("제33조에 따른다" 를 따라가는 길) |
@@ -151,7 +151,7 @@
 corpus.documents        283      corpus.chunks        20,518
 corpus.doc_articles  26,301      corpus.chunk_terms  1,148,718
 corpus.refs          44,865      corpus.rules             72
-corpus.precedence_rules   8      corpus.case_chunks      193
+corpus.precedence_rules   8      corpus.case_chunks      193 (🔴 2026-09-06 DROP 됨)
 tenant.decisions         73      tenant.l3_articles       17
 eval.golden_set          77      eval.runs               188
 ```

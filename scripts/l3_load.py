@@ -444,6 +444,21 @@ def l3룰(cur, org_id: str, 비목: str) -> dict[str, Any] | None:
     🔴 조문은 있는데 분류가 안 되는 경우도 None 이다. '가능' 으로 추정하지 않는다 —
        분류 실패를 '가능' 으로 흘리면 근거 없는 "가능" 이 생긴다. 진단은
        `미분류(cur, org_id)` 로 따로 본다. 무음으로 버리지 않는다.
+
+    🔴 2026-09-06 — **여러 조가 같은 비목에 걸리면 전부 싣는다.** 예전엔 첫 매치에서
+       바로 `return` 해서 나머지가 조용히 사라졌다(실측: 한국창업대학교 기계장치가
+       제12조(제목 적중) 하나만 쓰고, 본문에만 있는 제21조(자산의 등록 및 관리 —
+       "취득가액 500만원 초과 기계장치는 …자산관리대장에 등록")를 아예 못 봤다 —
+       제목 패스가 매치를 «하나라도» 찾으면 본문 패스 자체를 안 돌렸기 때문이다).
+       대조해 보니 **진짜 충돌은 0건** — 제12조="구매 가능여부", 제21조="구매 후
+       등록의무" 처럼 서로 다른 사실을 말하고 있었다. 그래서 답은 "어느 게 우선이냐"가
+       아니라 "둘 다 싣는다"다.
+       🔴 **판정 우선순위는 그대로 둔다.** 제목 적중을 본문 적중보다 앞에 모아 그중
+       첫 번째를 기준선으로 쓴다(`_룰조립()` 그대로, 단일 조 경로와 완전히 같은
+       결과) — 이 부분이 안 바뀌어야 "제21조 같은 부수적 언급이 진짜 비목 조문을
+       가리는" 원래 걱정도 그대로 막힌다. 2개 이상이면 `_룰조립_다중()` 이 나머지의
+       근거·사전승인_조건·증빙만 위에 더한다(판정 자체는 안 바꾼다 — 그 함수 docstring
+       참조).
     """
     org_id = _org정규화(org_id)
     if org_id is None or not 비목:
@@ -451,18 +466,30 @@ def l3룰(cur, org_id: str, 비목: str) -> dict[str, Any] | None:
     _org_컨텍스트(cur, org_id)
     vocab = 비목어휘(cur)
     조문 = _조문들(cur, org_id)
-    # 🔴 제목 패스가 먼저다. 본문 적중은 "제21조(자산의 등록 및 관리) … 기계장치는"
-    #    같은 부수적 언급까지 잡아서, 조번호가 앞선 자산관리 조문이 진짜 비목 조문을
-    #    가려버린다. 제목에서 못 찾을 때만 본문으로 내려간다.
+    # 🔴 제목 패스 결과를 먼저 모으고, 본문 패스는 «제목 패스가 못 잡은 조문에 한해»
+    #    이어서 모은다 — 둘 다 항상 돈다(예전엔 제목 패스가 하나라도 잡으면 본문
+    #    패스 자체를 건너뛰어 제21조 같은 본문 전용 매치가 통째로 사라졌다).
+    #    순서는 "제목 적중 먼저"를 지킨다 — matches[0]이 여전히 제목 적중이라
+    #    판정 우선순위(아래 `_룰조립_다중` 참조)가 바뀌지 않는다.
+    matches: list[tuple[dict, dict]] = []
+    seen: set[int] = set()
     for 제목만 in (True, False):
         for a in 조문:
+            if a["article_id"] in seen:
+                continue
             if 비목추정(a["조제목"], a["본문"], vocab, 제목만=제목만) != 비목:
                 continue
             조각 = _추출(a["본문"])
             if 조각 is None:
                 continue
-            return _룰조립(cur, a, 비목, 조각)
-    return None
+            matches.append((a, 조각))
+            seen.add(a["article_id"])
+    if not matches:
+        return None
+    if len(matches) == 1:
+        a, 조각 = matches[0]
+        return _룰조립(cur, a, 비목, 조각)
+    return _룰조립_다중(cur, 비목, matches)
 
 
 def _조문들(cur, org_id: str) -> list[dict[str, Any]]:
@@ -500,6 +527,48 @@ def _룰조립(cur, a: dict, 비목: str, 조각: dict) -> dict[str, Any]:
         "extraction": a["extraction"],
         "원본파일명": a["원본파일명"],
     }
+
+
+def _룰조립_다중(cur, 비목: str, matches: list[tuple[dict, dict]]) -> dict[str, Any]:
+    """같은 비목에 조가 여럿 걸릴 때의 병합.
+
+    🔴 **판정(허용·참조만·사전승인·한도)은 바꾸지 않는다.** 이 조사는 "정보가 조용히
+    사라진다"는 결함이지 "판정이 틀리다"는 결함이 아니다 — 스칼라 값을 여러 조에서
+    골라 새로 계산하면 그 자체가 새 판정 로직이 되어 버린다(실측해 보니 실제로
+    기계장치·지급수수료 2곳에서 '조건부'가 '불가'로 바뀌었다 — 이건 고치는 게 아니라
+    다른 문제를 만드는 것이다). 그래서 **첫 매치(`_룰조립()`)를 그대로 기준선으로
+    쓰고**, 나머지 매치에서는 "조용히 사라지던" 목록형 부가정보(근거·사전승인_조건·
+    증빙·seed_refs·dangling)만 더한다. 실측(한국창업대학교 기계장치)에서 걸린 두
+    조는 "구매 가능여부"·"구매 후 등록의무"처럼 서로 다른 사실이었다 — 이런 부가
+    정보를 잃지 않는 게 이 함수의 목적이지, 새 판정을 만드는 게 아니다.
+
+    `_룰조립()` (단일 조)과 필드 모양이 같아야 `_l3정규화()`·호출부가 안 깨진다.
+    """
+    base = _룰조립(cur, matches[0][0], 비목, matches[0][1])
+    if len(matches) == 1:
+        return base
+
+    근거 = list(base["근거"])
+    seed_refs = list(base["seed_refs"])
+    dangling = list(base["dangling"])
+    사전승인_조건 = list(base["사전승인_조건"])
+    증빙 = list(base["증빙"])
+
+    for a, 조각 in matches[1:]:
+        refs = 상위참조(cur, a["본문"])
+        근거.append({"article_id": a["article_id"], "doc_id": str(a["doc_id"]),
+                     "조번호": a["조번호"], "조제목": a["조제목"], "layer": "L3"})
+        seed_refs.extend(r for r in refs if r["해소"])
+        dangling.extend(r["표기"] for r in refs if not r["해소"])
+        사전승인_조건.extend(조각.get("사전승인_조건") or [])
+        증빙.extend(조각.get("증빙") or [])
+
+    base["근거"] = 근거
+    base["seed_refs"] = list({(r.get("doc_id"), r.get("조번호")): r for r in seed_refs}.values())
+    base["dangling"] = sorted(set(dangling))
+    base["사전승인_조건"] = list(dict.fromkeys(사전승인_조건))   # 순서 보존 중복제거
+    base["증빙"] = sorted(set(증빙))
+    return base
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -612,7 +681,11 @@ def main() -> None:
             else:
                 한도 = (f" · 한도 {r['한도_값']}{r['한도_단위']}" if r["한도_값"] else "")
                 갈래 = "참조만" if r["참조만"] else r["허용"]
-                print(f"   {비목:<24} {갈래}{한도} · {r['근거'][0]['조번호']}"
+                # 🔴 2026-09-06 — 근거[0] 만 찍으면 다중매치 수정이 눈에 안 보인다.
+                #    전부 찍는다(콤마로 나열) — 조 개수만큼 값이 늘어난 걸 확인하려고
+                #    이 CLI 를 켰을 텐데 화면이 예전처럼 하나만 보이면 고친 게 안 보인다.
+                조번호들 = ",".join(g["조번호"] for g in r["근거"])
+                print(f"   {비목:<24} {갈래}{한도} · {조번호들}"
                       + (f" · seed_refs {len(r['seed_refs'])}" if r["seed_refs"] else "")
                       + (f" · 🔴dangling {r['dangling']}" if r["dangling"] else ""))
 
