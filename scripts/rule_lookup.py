@@ -1106,7 +1106,13 @@ def _오버레이(eff: dict, l3: dict) -> dict:
     합["근거"] = list(eff.get("근거") or []) + list(l3.get("근거") or [])
     합["verified"] = bool(eff.get("verified")) and bool(l3.get("verified"))
 
-    기여했나 = (L3더셈 or 주 is l3 or bool(l3.get("사전승인"))
+    # 🔴 2026-09-06 — `사전승인_조건` 기여를 뺐었다. `l3.get("사전승인")`(불리언)만 보면
+    #    L3 가 «사전승인_조건 문장만» 기여하고 불리언 자체는 base 와 같은(둘 다 True 거나,
+    #    l3_load 다중조 병합에서 base 조가 사전승인=False 인) 경우를 놓친다 — 근거는
+    #    합쳐지는데 화면 7 의 "이건 귀 기관 규정입니다" 출처 표시가 안 뜬다.
+    #    `_엄격병합` 이 `조건층` 을 기여 판정에 넣은 것과 같은 이유로, 여기서도
+    #    "L3 가 실제로 새 조건 문장을 보탰는가"(`_더`) 를 직접 본다.
+    기여했나 = (L3더셈 or 주 is l3 or bool(l3.get("사전승인")) or bool(_더)
                or bool(l3.get("증빙")) or bool(l3.get("금지예시"))
                or bool(l3.get("허용예시")))
     if 기여했나:
