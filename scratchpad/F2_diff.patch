@@ -1,0 +1,200 @@
+diff --git a/lib/adapt.ts b/lib/adapt.ts
+index 9049ce5..00b583d 100644
+--- a/lib/adapt.ts
++++ b/lib/adapt.ts
+@@ -119,28 +119,100 @@ export function 문서명보기(docId: string): string {
+   return s.replace(/\s+/g, " ").trim();
+ }
+ 
+-function 인용을규정으로(c: Record<string, unknown>): RuleItem {
+-  const 문자 = (k: string) => (typeof c[k] === "string" ? (c[k] as string) : "");
+-  return {
+-    // 🔴 2026-09-06 — 여기서 읽던 여섯 키(제목·조·문서·출처·본문·설명)가 **서버 스키마에
+-    //    하나도 없었습니다.** 정본은 `scripts/llm_schema.py:208 class 인용` 이고
+-    //    s번호 · doc_id · 조번호 · 조제목 · 항호 · 원문 · 원문범위 · version · extraction 입니다.
+-    //    그래서 실서버 판정에서 「적용 근거 2건」인데 각 줄이 «근거 조항»(폴백) + 빈칸으로
+-    //    나갔습니다 — 조문 내용이 통째로 안 보였습니다 (2026-09-06 production 실화면 확인).
+-    //    🔴 `lib/judge.ts:145` 는 «이미» 맞는 키를 쓰고 있었습니다. 같은 서버 응답을 두 파일이
+-    //       서로 다른 키로 읽고 있던 것이라, 이 파일을 그쪽에 맞춰 하나로 모읍니다.
+-    // 🔴 «항호» 를 제목에 붙입니다 — 서버는 「제39조 ②」처럼 «걸리는 항» 을 짚어 주는데
+-    //    프론트가 그걸 버리고 조문 전체만 보여주고 있었습니다. 제39조는 ①~⑧ 이 있고
+-    //    정작 걸리는 건 ② 하나인데, 법령을 모르는 사용자는 어디를 봐야 할지 알 수 없습니다.
+-    //    🔴 원문 자체는 «건드리지 않습니다» — 확정 원칙이 「인용은 생성이 아니라 추출」
+-    //       (`scripts/llm_validate.py:93`) 입니다. 쉽게 고쳐 쓰면 그건 인용이 아니라 창작입니다.
+-    //       그래서 «어디를 보라» 만 더합니다.
+-    title:
+-      [문자("조번호"), 문자("조제목")].filter(Boolean).join(" ") +
+-        (문자("항호") ? ` ${문자("항호")}` : "") || "근거 조항",
+-    source: [문서명보기(문자("doc_id")), 문자("version")].filter(Boolean).join(" · "),
+-    description: 문자("원문"),
+-  };
++// 조문 항 마커. `scripts/llm_validate.py:_항마커` 와 같은 목록 — 서버가 «조 전체» 를
++// 잘라주지 않은 경우(아래 항추출) 프론트가 같은 규칙으로 다시 잘라야 짝이 맞는다.
++const 항마커 = [
++  "①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩",
++  "⑪", "⑫", "⑬", "⑭", "⑮", "⑯", "⑰", "⑱", "⑲", "⑳",
++];
++
++/** 조 본문에서 `항호`(예: "③" · "③④")가 가리키는 항만 잘라낸다.
++ *
++ * 🔴 2026-09-07(레인 F2) — `scripts/llm_validate.py:_항_추출()` 과 같은 규칙을 프론트에
++ *    옮긴 것. 서버는 `종류="article"`(조문 전체 소스)일 때만 이 자르기를 하고,
++ *    `종류="chunk"`(청크가 이미 항 단위라고 가정)는 자르지 않는다(`llm_schema.py:144`
++ *    주석). 그런데 실화면(제38조 외주용역비)에서는 그 가정이 깨져 청크가 조 전체
++ *    (10개 항)를 통째로 담고 있었다 — `항호`(③④)는 맞게 왔는데 `원문`은 안 잘렸다.
++ *    백엔드를 고치는 대신(레인 밖) 프론트가 같은 규칙으로 한 번 더 잘라 방어한다.
++ * 🔴 **자르기지 요약이 아니다** — 마커를 못 찾으면 원문을 그대로 돌려준다(「인용은
++ *    생성이 아니라 추출」, `scripts/llm_validate.py:93`와 같은 원칙). 지어내지 않는다.
++ */
++export function 항추출(본문: string, 항호: string): string {
++  if (!본문) return "";
++  const 마커목록 = Array.from(항호 || "").filter((ch) => 항마커.includes(ch));
++  if (!마커목록.length) return 본문;
++  const k = 본문.indexOf(마커목록[0]);
++  if (k < 0) return 본문;
++  const 끝마커위치 = 본문.indexOf(마커목록[마커목록.length - 1], k);
++  let end = 본문.length;
++  if (끝마커위치 >= 0) {
++    for (const m of 항마커) {
++      const i = 본문.indexOf(m, 끝마커위치 + 1);
++      if (i > 0 && i < end) end = i;
++    }
++  }
++  const 잘린 = 본문.slice(k, end).trim();
++  return 잘린 || 본문;
++}
++
++/** 서버 `인용[]`(원시 딕셔너리 배열) → 화면에 낼 `RuleItem[]`.
++ *
++ * 🔴 2026-09-06 — 여기서 읽던 여섯 키(제목·조·문서·출처·본문·설명)가 **서버 스키마에
++ *    하나도 없었습니다.** 정본은 `scripts/llm_schema.py:208 class 인용` 이고
++ *    s번호 · doc_id · 조번호 · 조제목 · 항호 · 원문 · 원문범위 · version · extraction 입니다.
++ *    그래서 실서버 판정에서 「적용 근거 2건」인데 각 줄이 «근거 조항»(폴백) + 빈칸으로
++ *    나갔습니다 — 조문 내용이 통째로 안 보였습니다 (2026-09-06 production 실화면 확인).
++ *    🔴 `lib/judge.ts` 는 «이 함수를 안 쓰고» 같은 매핑을 자기 안에 따로 두고 있었습니다
++ *       — 같은 서버 응답을 두 파일이 서로 다른 키로 읽던 문제가 재발했습니다(2026-09-07
++ *       레인 F2, ai-33 실화면 확인). `judge.ts` 도 이 함수 하나로 모읍니다.
++ * 🔴 2026-09-07(레인 F2) — **같은 (doc_id, 조번호) 는 한 건으로 접습니다.** 실화면에서
++ *    「제38조 외주용역비」가 항호만 다른 두 건으로 와서, 조 전체(10개 항) 원문이 그대로
++ *    두 번 찍혔습니다 — 실제로 걸리는 건 ③·④항뿐이었습니다. 항호를 합쳐 제목에 붙이고,
++ *    본문은 `항추출()`로 해당 항만 남깁니다(원문에 없는 문장은 만들지 않습니다).
++ */
++export function 인용정리(인용들: Record<string, unknown>[]): RuleItem[] {
++  const 문자 = (c: Record<string, unknown>, k: string) =>
++    typeof c[k] === "string" ? (c[k] as string) : "";
++
++  const 그룹: Map<
++    string,
++    { 조번호: string; 조제목: string; doc_id: string; version: string; 항호들: string[]; 조각들: string[] }
++  > = new Map();
++  const 순서: string[] = [];
++
++  for (const c of 인용들) {
++    const doc_id = 문자(c, "doc_id");
++    const 조번호 = 문자(c, "조번호");
++    const 항호 = 문자(c, "항호");
++    const key = `${doc_id}::${조번호}`;
++    if (!그룹.has(key)) {
++      그룹.set(key, {
++        조번호,
++        조제목: 문자(c, "조제목"),
++        doc_id,
++        version: 문자(c, "version"),
++        항호들: [],
++        조각들: [],
++      });
++      순서.push(key);
++    }
++    const g = 그룹.get(key)!;
++    if (항호 && !g.항호들.includes(항호)) g.항호들.push(항호);
++    const 조각 = 항추출(문자(c, "원문"), 항호);
++    if (조각 && !g.조각들.includes(조각)) g.조각들.push(조각);
++  }
++
++  return 순서.map((key) => {
++    const g = 그룹.get(key)!;
++    const 항호결합 = g.항호들.join("");
++    return {
++      title:
++        [g.조번호, g.조제목].filter(Boolean).join(" ") +
++          (항호결합 ? ` ${항호결합}` : "") || "근거 조항",
++      source: [문서명보기(g.doc_id), g.version].filter(Boolean).join(" · "),
++      description: g.조각들.join("\n"),
++    };
++  });
+ }
+ 
+ /** 목록 한 줄 → ExpensePlan (상세 필드는 비어 있습니다) */
+@@ -184,7 +256,7 @@ export function 상세를계획으로(d: 계획상세): ExpensePlan {
+     // 🔴 결제전이 없으면 「집행」까지 포함해 보여줍니다 — 빈 화면보다 낫습니다
+     aiChecks: (결제전.length ? 결제전 : 할일들).map(할일을체크로),
+     evidence: 결제후.map(할일을체크로),
+-    rules: 인용들.map(인용을규정으로),
++    rules: 인용정리(인용들),
+     /**
+      * 🔴 서버는 «아직» 초안을 안 돌려줍니다 — `_실_상세` 가 읽는 decisions 컬럼에
+      *    문의초안이 없습니다(판정 직후 SSE 로만 흘러갑니다). 그래서 이 탭이 받아 둔
+diff --git a/lib/judge.ts b/lib/judge.ts
+index 445bdea..68272a6 100644
+--- a/lib/judge.ts
++++ b/lib/judge.ts
+@@ -10,11 +10,11 @@
+ 
+ import { 계획상세 } from "./api";
+ import { 판정SSE } from "./sse";
+-import { 상세를계획으로, 판정을상태로, 판정설명, 시각표기 } from "./adapt";
++import { 상세를계획으로, 판정을상태로, 판정설명, 시각표기, 인용정리 } from "./adapt";
+ import { 초안보관 } from "./inquiry-store";
+ import type { ChecklistItem, RuleItem } from "./types";
+ import type { ExpensePlan } from "./types";
+-import type { 판정값 } from "./server-types";
++import type { 판정값, 답변항목 } from "./server-types";
+ 
+ export type 목판정 = "가능" | "조건부" | "불가" | "판단불가";
+ 
+@@ -57,7 +57,13 @@ export type 대체입력 = {
+ export async function 판정실행(
+   planId: string | number,
+   중계: 판정중계,
+-  옵션?: { 목?: 목판정; signal?: AbortSignal; 대체입력?: 대체입력 },
++  옵션?: {
++    목?: 목판정;
++    signal?: AbortSignal;
++    대체입력?: 대체입력;
++    /** F1(2026-09-07) — 심층질문 답. 「확인 필요」는 호출부에서 값 "미상" 으로 채워 넣는다. */
++    답변?: 답변항목[];
++  },
+ ): Promise<판정결과> {
+   // 🔴 방금 만든 계획은 상세 조회가 «서버 버그로» 500 이 납니다
+   //    (routes_plans.py:139 — `계획상세() got multiple values for keyword argument '정규화'`).
+@@ -121,6 +127,9 @@ export async function 판정실행(
+     정규화: 정규화 as Record<string, unknown>,
+     확정비목: 이전.확정비목,
+     사업명: 이전.사업명,
++    // 🔴 비어 있어도 종전과 바이트 단위로 같은 경로다(`models.py::판정요청.답변` 기본값 []
++    //    → `_사용자F값_조립` 이 None 을 돌려준다) — 안 보내던 필드를 뒤늦게 실어도 안전하다.
++    답변: 옵션?.답변 ?? [],
+   };
+ 
+   const 흐름 = (이름: string, 값: unknown) => {
+@@ -149,14 +158,12 @@ export async function 판정실행(
+           });
+           break;
+         case "인용":
+-          인용 = (Array.isArray(값) ? 값 : []).map((c) => {
+-            const o = (c ?? {}) as Record<string, unknown>;
+-            return {
+-              title: [문자(o["조번호"]), 문자(o["조제목"])].filter(Boolean).join(" ") || "근거 조항",
+-              source: 문자(o["doc_id"]),
+-              description: 문자(o["원문"]),
+-            };
+-          });
++          // 🔴 2026-09-07(레인 F2) — 여기서 직접 매핑하던 걸 `adapt.ts` 의 `인용정리()`
++          //    로 모았다. doc_id 를 안 거치고 raw 로 찍던 것(문서명보기 누락)과, 같은
++          //    조가 항호만 다른 여러 건으로 와서 조 전체 원문이 중복 노출되던 것(항
++          //    단위로 안 자르던 것) 둘 다 이 파일만의 매핑이라 `adapt.ts` 쪽 수정이
++          //    안 먹었다 — 같은 서버 응답을 두 파일이 따로 읽던 문제가 재발한 것.
++          인용 = 인용정리(Array.isArray(값) ? (값 as Record<string, unknown>[]) : []);
+           break;
+         case "문의초안":
+           문의초안 = typeof 값 === "string" ? 값 : 문자(v["문의초안"]);

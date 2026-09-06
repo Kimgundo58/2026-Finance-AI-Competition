@@ -183,6 +183,16 @@ def 평가대상(cur, *, 세트: str | None = None, 범위밖포함: bool = Fals
        «검색 성능» 으로 보고된다.
        `범위밖포함=True` 는 센터 화면이 되살아날 때를 위한 문이다. 기본은 제외.
 
+    🔴 **`세트='L3'` 도 골든청크가 없어도 분모에 든다** (2026-09-07, ai-33 실측 정정).
+       처음엔 "L3 문서가 코퍼스에 결손"이라고 진단했는데 틀렸다 — L3 는 `tenant.
+       l3_articles` 에 정상 적재돼 있다(224조·파싱품질 warn·dangling 0). `eval.
+       golden_chunks`·`corpus.chunks` 를 보는 이 필터가 애초에 L3 가 사는 스키마를
+       안 본다 — 코퍼스 결손이 아니라 **이 하네스의 결손**이다. `pin_golden_chunks.py`
+       로 못 고친다(그 스크립트도 corpus.chunks 만 본다). 그래서 L3 는 golden_chunks
+       없이도 통과시키고, 인용정확도 채점은 `eval_e2e.py::지표()` 쪽에서 "정답청크가
+       실제로 있는가"로 따로 뺀다(판정일치율은 그대로 채점된다 — L3 인용까지 채점하려면
+       `tenant.l3_articles` 를 되짚는 채점기가 따로 필요한데, 그건 이번 범위 밖이다).
+
     🔴 **`정답판정='판단불가'` 는 골든청크가 없어도 분모에 든다** (2026-09-01).
        「골든청크가 고정된 것만 센다」는 조건이 **판단불가 문항을 구조적으로 배제**한다 —
        규범에 답이 없다는 것이 정답인 문항은 고정할 청크가 애초에 없기 때문이다.
@@ -196,6 +206,7 @@ def 평가대상(cur, *, 세트: str | None = None, 범위밖포함: bool = Fals
                   g.대상, g.평가범위, g.채점모드
              FROM eval.golden_set g
             WHERE (g.정답판정 = '판단불가'
+                   OR g.세트 = 'L3'
                    OR EXISTS (SELECT 1 FROM eval.golden_chunks gc
                                WHERE gc.gold_id = g.gold_id AND gc.chunk_id IS NOT NULL))
               AND (%s::text IS NULL OR g.세트 = %s::text)

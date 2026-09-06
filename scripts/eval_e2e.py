@@ -251,6 +251,12 @@ def 감싸기() -> None:
     import normalize_run
     import orchestrate as orch
 
+    # 🔴 2026-09-07 레인 Q(ai-33 확정) — SUDDOE_LLM=vllm|qwen 스위치를 감싸기 «전»에
+    #    적용한다. 아래 가드①이 「현재 값 == 정본」을 확인하므로, 스위치를 먼저 걸어야
+    #    무엇을 감쌌는지(vLLM 인지 Qwen 인지)가 `쌍`의 정본에 그대로 반영된다.
+    from llm_qwen import 스위치_적용
+    스위치_적용()
+
     # ── 가드 ① 감싸기 «전» 정체성. import 꼴이 바뀌면 여기서 깨진다 ────────
     쌍 = [(orch, "조립", assemble_context.조립),
           (orch, "정규화", normalize_run.정규화),
@@ -499,7 +505,36 @@ def 실행(*, dry: bool, limit: int | None, 세트: list[str] | None, 라벨: st
         if limit:
             문항 = 문항[:limit]
         if not 문항:
-            sys.exit("평가 대상이 0건이다. scripts/pin_golden_chunks.py 를 먼저 돌려라.")
+            sys.exit("평가 대상이 0건이다. scripts/archive/eval/pin_golden_chunks.py 를 먼저 돌려라"
+                      "(단, 세트=L3 는 이 스크립트로 못 고친다 — 위 평가대상() 주석 참고).")
+
+        # 🔴 L3(2026-09-07) — `tenant.l3_articles` 에 사는 문서라 org_id 를 몰라야 정상인
+        #    corpus.chunks 기반 판정은 L3 컨텍스트를 못 본다. `orchestrate.판정()` 은 org_id
+        #    를 이미 받는다(그동안 eval 이 안 넘겼을 뿐) — golden_set.정답근거[].article_id
+        #    로 그 문항이 가리키는 기관을 되짚어 넘긴다. 이게 없으면 "판정일치율만 채점"이
+        #    L3 문서를 «한 번도 안 보고» 낸 점수가 되어 측정 자체가 무의미해진다.
+        org_id맵: dict[int, str] = {}
+        l3_gid들 = [m["gold_id"] for m in 문항 if m["세트"] == "L3"]
+        if l3_gid들:
+            cur.execute("SELECT gold_id, 정답근거 FROM eval.golden_set WHERE gold_id = ANY(%s)",
+                        (l3_gid들,))
+            근거맵 = {gid: (근거 or []) for gid, 근거 in cur.fetchall()}
+            art_ids = {b["article_id"] for gid in l3_gid들 for b in 근거맵.get(gid, [])
+                       if b.get("article_id")}
+            art_org: dict[int, object] = {}
+            if art_ids:
+                cur.execute("SELECT article_id, org_id FROM tenant.l3_articles "
+                            "WHERE article_id = ANY(%s)", (list(art_ids),))
+                art_org = dict(cur.fetchall())
+            for gid in l3_gid들:
+                orgs = {art_org[b["article_id"]] for b in 근거맵.get(gid, [])
+                        if b.get("article_id") in art_org}
+                if len(orgs) == 1:
+                    org_id맵[gid] = str(orgs.pop())
+                else:
+                    # 조용히 넘어가지 않는다 — org_id 없이 돌면 L3 컨텍스트 없이 판정된다
+                    print(f"⚠️ gold={gid} L3 근거의 article_id 로 org_id 를 못 정했다"
+                          f"(매칭 {len(orgs)}곳) — org_id 없이 판정된다", file=sys.stderr)
 
         # 비교 앵커 재료. `with` 밖(집계 절)에서는 conn 이 닫혀 있어 여기서 미리 읽는다.
         코퍼스버전값 = eval_store.코퍼스버전(cur)
@@ -587,7 +622,8 @@ def 실행(*, dry: bool, limit: int | None, 세트: list[str] | None, 라벨: st
             try:
                 r = orchestrate.판정(m["질문"], 사업명=사업, dry=dry, top_k=top_k,
                                     conn=conn, 기록=False, 변형=변형,
-                                    폐포사용=폐포사용)
+                                    폐포사용=폐포사용,
+                                    org_id=org_id맵.get(gid))  # 🔴 L3(2026-09-07). 위 주석
                 return gid, r, None
             except Exception as e:
                 traceback.print_exc(limit=2)
@@ -763,7 +799,13 @@ def 실행(*, dry: bool, limit: int | None, 세트: list[str] | None, 라벨: st
         #    같은 분모로 찍어 두면, 지표가 기준선을 못 넘었을 때 그 사실이 표에서 바로 보인다.
         #    `초과`(일치율 - 기준선)가 이 평가의 진짜 신호다. 양수가 아니면 개선이 아니다.
         정답분포 = Counter(it["정답"] for it in 부분)
-        인용분 = [it for it in 부분 if it["정답"] != "판단불가"]
+        # 🔴 판단불가만 빼던 조건을 «정답청크가 실제로 있는가» 로 일반화했다(2026-09-07).
+        #    둘은 원래 같은 뜻이었다(판단불가는 고정할 청크가 없다) — 그런데 세트=L3 도
+        #    똑같이 "고정할 청크가 없다"(청크가 아니라 tenant.l3_articles 에 산다)이면서
+        #    정답판정은 판단불가가 아닌 경우가 있어, 그 경우만 걸러내던 옛 조건으로는 빠졌다.
+        #    `정답청크` 는 이 함수를 감싸는 `실행()` 의 클로저 변수다(위에서 채움).
+        인용분 = [it for it in 부분
+                if it["정답"] != "판단불가" and 정답청크.get(it["gold_id"])]
         기준선 = (정답분포.most_common(1)[0][1] / n * 100) if 부분 else 0.0
         일치 = sum(it["적중"] for it in 부분) / n * 100
         return {
@@ -1175,6 +1217,16 @@ def main() -> None:
                     help="eval 문항 동시 처리 수. 1=순차(기존). RAW·INJECT 캡처는 "
                          "전역 상태라 --동시>1 과 같이 못 쓴다")
     a = ap.parse_args()
+
+    # 🔴 2026-09-07(ai-33 실측 정정) — 스위치를 `감싸기()` 안에 두면 «안 걸린다».
+    #    `감싸기()` 는 SUDDOE_EVAL_RAW=1 일 때만 불리는데, 평소 평가는 그걸 안 켠다.
+    #    실측: SUDDOE_LLM=qwen 으로 20문항을 돌렸는데 `원출력.모델` 이 그대로
+    #    `Qwen/Qwen3-32B-AWQ`(=GPU) 였다 — 스위치가 한 번도 실행되지 않았다.
+    #    「환경변수를 줬다」 ≠ 「그 코드가 불린다」. 진입점 맨 앞으로 올린다.
+    if not a.dry:
+        from llm_qwen import 스위치_적용
+        print(f"LLM 경로: {스위치_적용()}", flush=True)
+
     실행(dry=a.dry, limit=a.limit, 세트=a.세트, 라벨=a.라벨,
        top_k=a.top_k, 기록=not a.no_log, 변형=a.변형, 부분집합=a.부분집합,
        gold_ids=a.gold_ids, max_model_len=a.max_model_len, 스냅샷=a.스냅샷,
