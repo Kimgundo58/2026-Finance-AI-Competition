@@ -66,8 +66,8 @@ from server._common import (DSN, MOCK, _sse, _sse응답, _실행, _질의,  # no
 from server.models import (F1, F3항, F4항, F5, 정규화요청,          # noqa: E402
                            판정요청, 프로필)
 from server import inquiry                                       # noqa: E402
-from server import (auth, gpu_watchdog, routes_l3, routes_orgs,     # noqa: E402
-                    routes_plans, routes_tasks)
+from server import (auth, gpu_watchdog, routes_admin_ingest,        # noqa: E402
+                    routes_l3, routes_orgs, routes_plans, routes_tasks)
 
 _워치독 = gpu_watchdog.워치독
 
@@ -366,6 +366,7 @@ app.include_router(routes_tasks.router)
 app.include_router(routes_l3.router)
 app.include_router(routes_orgs.router)         # 기관 목록 — org_id 를 «안» 싣는다
 app.include_router(gpu_watchdog.router)        # /api/gpu/status · keepalive
+app.include_router(routes_admin_ingest.router)  # /admin/ingest·parse_report (레인 L3)
 
 # 🔴 IDLE_MIN=0 이면 스레드조차 만들지 않는다. 목 모드 가드는 gpu_watchdog 안에 있다
 #    — 목 서버는 GPU 를 안 부르니 «영원히 유휴» 라, 가드가 없으면 30분 뒤 목이
