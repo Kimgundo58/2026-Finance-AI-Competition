@@ -198,6 +198,27 @@ CREATE TABLE corpus.rules (
     UNIQUE (layer, 기관ID, 사업명, 비목)
 );
 CREATE INDEX ix_rules_lookup ON corpus.rules (사업명, 비목);
+
+-- 🔴 2026-09-06 오너 결정 — corpus.rules 의 TRUNCATE 를 «막는다».
+--   `scripts/archive/seed/seed_rules.py` 가 TRUNCATE + 재삽입이고 스스로 "유일한 소유자" 라
+--   선언하는데, 그 파일의 rows() 는 «2026-09-02 스냅샷» 이다. 이후 DB 변경(배열 append 121건 ·
+--   L1 단서 7행 · 사전승인_조건 UNION · 골든셋 판정 5건)이 거기 «없다». 재적재하면 되돌릴 수
+--   없이 사라진다. 그 파일은 archive/ 라 읽기 전용이므로 «DB 쪽에» 관문을 둔다 —
+--   어느 경로로 들어오든(적재 스크립트 · 검수툴 · 수기 SQL) 똑같이 막힌다.
+--   🔴 정말 재적재해야 하면 사람이 이 트리거를 «의도적으로» 떨군다:
+--      DROP TRIGGER trg_rules_truncate_금지 ON corpus.rules;
+CREATE OR REPLACE FUNCTION corpus.f_rules_truncate_금지() RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION
+    '🔴 corpus.rules TRUNCATE 는 막혀 있다 (2026-09-06 오너 결정). '
+    'seed_rules.py 의 rows() 는 2026-09-02 스냅샷이고 이후 DB 변경이 거기 없다. '
+    '재적재하면 되돌릴 수 없이 사라진다. '
+    '정말 필요하면 사람이 DROP TRIGGER trg_rules_truncate_금지 ON corpus.rules; 를 «의도적으로» 친다.';
+END $$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_rules_truncate_금지
+  BEFORE TRUNCATE ON corpus.rules
+  FOR EACH STATEMENT EXECUTE FUNCTION corpus.f_rules_truncate_금지();
 COMMENT ON COLUMN corpus.rules.verified IS 'false 인 룰만으로 "가능" 판정 금지. 조문 인용 동반 필수.';
 -- ⚠️ 미결: layer='L3' 행은 기관 데이터다 (rule_base.md §3-1 overlay).
 --    corpus 는 "전 사용자 공통" 스키마인데 여기에 기관별 행이 섞인다.
