@@ -110,6 +110,24 @@ _항마커 = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳"
 _RE_조 = __import__("re").compile(r"제\d+조")
 
 
+def 체크항목_본문(codes: set[str] | None = None, dsn: str | None = None) -> dict[str, dict]:
+    """`corpus.check_items.code` → {항목, 설명}. §3-4 [2겹] — `인용`과 같은 원칙.
+
+    2026-09-06(레인 H, ai-8c 승인) — 해야할일은 LLM 이 code(안정 식별자)만 고르고
+    항목·설명은 여기서 DB 원문 그대로 채운다. `codes` 를 주면 그 안으로 좁힌다
+    (호출부가 이미 `체크코드_enum(사업명=...)` 로 사업 범위를 알기 때문).
+    """
+    with db.connect(dsn) as conn:
+        if codes:
+            rows = conn.execute(
+                'SELECT code, "항목", "설명" FROM corpus.check_items WHERE code = ANY(%s)',
+                (list(codes),)).fetchall()
+        else:
+            rows = conn.execute(
+                'SELECT code, "항목", "설명" FROM corpus.check_items').fetchall()
+    return {r[0]: {"항목": r[1], "설명": r[2]} for r in rows}
+
+
 def s번호_메타(s맵: dict, dsn: str | None = None) -> dict[str, dict]:
     """s맵의 각 S번호 → 치환·등급산정에 필요한 DB 사실.
 
@@ -312,6 +330,7 @@ def _설명제거(h: dict, 대상: str) -> None:
 def 검증(llm출력: dict, s맵: dict, *,
          메타: Optional[dict[str, dict]] = None,
          f경로: Optional[Iterable[str]] = None,
+         체크항목: Optional[dict[str, dict]] = None,
          룰들: Optional[list[dict]] = None,
          체크코드: Optional[Iterable[str]] = None,
          현재기관: Optional[str] = None,
@@ -326,7 +345,7 @@ def 검증(llm출력: dict, s맵: dict, *,
          dsn: Optional[str] = None) -> tuple[dict, list[str]]:
     """(검증·강등된 출력, 강등사유 목록). 반환 dict 에 `강등코드` 22종이 함께 실린다.
 
-    메타/f경로 를 주지 않으면 DB 에서 읽는다. 테스트는 스텁을 넣어 DB 없이 돈다.
+    메타/f경로/체크항목 를 주지 않으면 DB 에서 읽는다. 테스트는 스텁을 넣어 DB 없이 돈다.
     룰들 은 B4 에 들어간 `effective_rule` 결과다 — `[{"verified": bool, ...}]`.
 
     2026-08-31 추가 (`Agent.md` §5 미구현 6규칙):
@@ -351,6 +370,8 @@ def 검증(llm출력: dict, s맵: dict, *,
 
     메타 = 메타 if 메타 is not None else s번호_메타(s맵, dsn)
     허용경로 = set(f경로) if f경로 is not None else f_경로집합(dsn)
+    체크항목 = (체크항목 if 체크항목 is not None
+             else (체크항목_본문(set(체크코드), dsn) if 체크코드 else {}))
 
     # ── 1. 판정 enum ─────────────────────────────────────────────────────
     # 폐쇄 목록 밖이면 고쳐 맞추지 않는다. 모든 실패의 기본값은 판단불가다.
@@ -426,8 +447,19 @@ def 검증(llm출력: dict, s맵: dict, *,
             깎("PREMISE_UNMAPPED",
               f"전제 '{사실[:24]}' 매핑 {밖} 가 F 스키마 밖 → unmapped_premise 대상")
             미매핑.extend(밖)
-        전제목록.append(전제(사실=사실, 근거조항=근거, 매핑=경로,
-                          미충족시=미충족, 미매핑=bool(밖)))
+        # 🔴 2026-09-06(레인 H) — `인용`과 같은 s맵 체계이니 같은 방식으로 문서·원문을
+        # 채운다(§3-4 [2겹], `인용` 참조). DB 미스는 `인용`처럼 «폐기»하지 않는다 —
+        # `사실` 자체는 여전히 유효한 정보라서다(위 `전제` 데이터클래스 주석 참조).
+        m = 메타.get(근거)
+        if m is None:
+            깎("PREMISE_DB_MISSING",
+              f"전제 '{사실[:24]}' 근거조항 {근거} 의 원본을 DB 에서 못 찾음 → "
+              "문서/원문 없이 사실만 유지")
+        전제목록.append(전제(
+            사실=사실, 근거조항=근거, 매핑=경로, 미충족시=미충족, 미매핑=bool(밖),
+            doc_id=(m or {}).get("doc_id"), 조번호=(m or {}).get("조번호"),
+            조제목=(m or {}).get("조제목"), 원문=(m or {}).get("원문"),
+            원문범위=(m or {}).get("원문범위")))
 
     # ── 4. 신뢰등급 — 코드가 산정한다. LLM 자칭 금지 ──────────────────────
     # `documents.extraction='vlm'` = 스캔 판독본. CLAUDE.md "A등급 인용 금지"
@@ -503,7 +535,7 @@ def 검증(llm출력: dict, s맵: dict, *,
           f"L3 단독 '불가' 인데 우선 규범이 {'+'.join(기여)}({룰.get('허용')}) → 조건부로 전환")
         판정 = "조건부"
 
-    # ── 5-b. 해야할일 code — check_items 폐쇄 목록 밖이면 폐기 ─────────────
+    # ── 5-b. 해야할일 ────────────────────────────────────────────────────
     # code 는 재판정 간 진행상황을 잇는 키다. LLM 이 지어낸 code 를 그대로 두면
     # `tenant.plan_tasks.코드` FK 가 깨지고, 사용자 체크가 다음 판정에 안 붙는다.
     허용코드 = set(체크코드) if 체크코드 is not None else None
@@ -512,13 +544,39 @@ def 검증(llm출력: dict, s맵: dict, *,
     허용숫자 = _출처숫자(프롬프트) if 프롬프트 else None
     해야할일 = []
     for h in (llm출력.get("해야할일") or []):
-        if not isinstance(h, dict) or not h.get("항목"):
+        if not isinstance(h, dict):
             continue
         c = h.get("code")
-        if 허용코드 is not None and c is not None and c not in 허용코드:
-            깎("TASK_CODE_INVALID", f"해야할일 code '{c}' 가 check_items 밖 → 폐기")
+        if 허용코드 is not None:
+            # 🔴 2026-09-06(레인 H, ai-8c 승인) — `체크코드`(=`코드들`)가 있는 호출은
+            #    §3-4 [1겹] 스키마가 이제 "code" 하나만 요구한다(항목·설명은 LLM 이
+            #    낼 수조차 없다, additionalProperties=False). 항목·설명은 여기서
+            #    DB(check_items) 원문 그대로 채운다 — `인용`과 같은 원칙이라 층B
+            #    환각검사(_설명검사) 대상이 아니다. LLM 이 쓰지도 않은 텍스트를
+            #    "환각인가" 로 재판하는 건 범주 오류다.
+            #    🔴 `허용코드 is not None` 으로 가른다(`c is not None` 이 아니다) —
+            #    호출부가 체크코드 를 «준 실전 호출» 만 새 경로를 타야 한다.
+            #    옛 계약(§_self_test, 체크코드 미전달)은 code+항목+설명을 한
+            #    dict 에 같이 넣어 부르므로, `c is not None` 으로 가르면 옛 계약
+            #    호출까지 걸려 층B 회귀가 깨진다(실측 — 처음엔 이렇게 짜서 8건
+            #    실패했다).
+            if c is None or c not in 허용코드:
+                if c is not None:
+                    깎("TASK_CODE_INVALID", f"해야할일 code '{c}' 가 check_items 밖 → 폐기")
+                continue
+            본문 = 체크항목.get(c)
+            if 본문 is None:
+                # 폐쇄 목록 안인데 DB 에 없다 = 조회 사고(check_items 결손·동기화 지연).
+                # code 만이라도 남긴다 — 폐기하면 사용자 체크 진행상황이 또 끊긴다.
+                깎("TASK_DB_MISSING", f"해야할일 code '{c}' 의 항목·설명을 DB 에서 못 찾음")
+                해야할일.append({"code": c})
+                continue
+            해야할일.append({"code": c, "항목": 본문["항목"], "설명": 본문["설명"]})
             continue
-        # ── 층 B. 설명이 나쁜 것과 항목이 틀린 것은 다르다 — 항목·code 는 남긴다 ──
+        # ── 체크코드 미제공(옛 계약·§3-4 원형) — LLM 이 항목·설명을 직접 쓴다.
+        #    이 경로만 층B 환각검사를 받는다 — 기존 동작, 손대지 않는다.
+        if not h.get("항목"):
+            continue
         h = dict(h)                       # 입력 dict 를 제자리에서 고치지 않는다
         for 코드값, 문장, 대상 in _설명검사(h, f사실=f사실, 허용숫자=허용숫자, s맵=s맵):
             깎(코드값, 문장)

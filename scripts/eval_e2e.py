@@ -188,7 +188,16 @@ def _헤드() -> dict:
     import subprocess
     def _(*a):
         try:
+            # 🔴 `encoding="utf-8"` 을 «반드시» 준다 (2026-09-05 ai-04 실측).
+            #    `text=True` 만 주면 Windows 에서 locale(cp949)로 디코딩한다. 이 저장소는
+            #    파일명에 한글이 흔해서 `git status --porcelain` 이 UnicodeDecodeError 로
+            #    터졌고, 아래 `except Exception` 이 그걸 삼켜 **`dirty` 가 조용히 None 이
+            #    됐다.** None 은 "깨끗하다" 가 아니라 "못 쟀다" 인데 읽는 쪽은 구분이 안 된다
+            #    — 재현성 기록이 통째로 거짓말이 되는 자리다(CLAUDE.md 「잴 수 없는 것을
+            #    값이 0 으로 읽지 마라」). run 194 때는 미추적 파일이 ASCII 뿐이라 안 터졌다.
+            #    `errors="replace"` 는 그래도 못 읽는 바이트가 있을 때 예외 대신 문자를 남긴다.
             r = subprocess.run(a, capture_output=True, text=True,
+                               encoding="utf-8", errors="replace",
                                cwd=os.path.dirname(os.path.abspath(__file__)), timeout=10)
             return (r.stdout.strip() or None) if r.returncode == 0 else None
         except Exception:
@@ -479,6 +488,10 @@ def 실행(*, dry: bool, limit: int | None, 세트: list[str] | None, 라벨: st
 
         # 비교 앵커 재료. `with` 밖(집계 절)에서는 conn 이 닫혀 있어 여기서 미리 읽는다.
         코퍼스버전값 = eval_store.코퍼스버전(cur)
+        # 🔴 정답지 고정도 지문을 뜬다 (2026-09-06). 코퍼스는 지문이 있는데 정답지는
+        #    라벨뿐이라 비대칭이었다 — `eval_store.골든고정()` 주석 참조. conn 이 닫히기
+        #    전에 여기서 읽는다 (코퍼스버전값과 같은 이유).
+        골든고정값 = eval_store.골든고정(cur)
         cur.execute("SELECT count(*), count(*) FILTER (WHERE verified) FROM corpus.rules")
         rules수 = dict(zip(("총", "verified"), cur.fetchone()))
         cur.execute("SELECT 적용대상, count(*) FROM corpus.chunks GROUP BY 1 ORDER BY 2 DESC")
@@ -606,6 +619,20 @@ def 실행(*, dry: bool, limit: int | None, 세트: list[str] | None, 라벨: st
                                 or (_포획.get("조립") or {}).get("프롬프트길이")),
                     "지연ms": r.get("지연ms") or {},
                     "s맵": r.get("s맵") or {},
+                    # 🔴 2026-09-05 — 게이트 C 는 두 갈래를 «실제로 판정한다»
+                    #    (`orchestrate.py:611-620` 재귀 호출). 그런데 그 결과를 여기서
+                    #    안 베껴서 **문항당 LLM 4회(2갈래 x 2회)를 태우고 버리고 있었다.**
+                    #    run 195 에서 8문항 = 32회다. 그리고 채점은 부모의 "선택필요" 만
+                    #    보므로 게이트 C 는 «반드시 오답» 이 된다(골든에 선택필요 정답 0건).
+                    #    이걸 남겨야 「두 갈래가 합의하면 그 판정을 쓴다」로 바꿨을 때의
+                    #    이득을 **GPU 없이** 계산할 수 있다. 안 남기면 매번 다시 돌려야 한다.
+                    "갈래": [{"비목": g.get("비목"), "판정": g.get("판정"),
+                             "경로": g.get("경로"),
+                             # 근거적중은 eval 이 매기는 값이라 갈래엔 «없다». None 을
+                             # 남기면 「안 닿았다」로 읽힌다 — 인용목록만 남기고 뺐다.
+                             "인용목록": g.get("인용목록") or []}
+                            for g in (r.get("갈래") or [])],
+                    "비목후보": r.get("비목후보") or [],
                     # 🔴 아래 셋은 **플래그와 무관하게 항상** 남긴다 (원출력 키가 3개 는다).
                     #    `모델.종료이유`(finish_reason)는 «판단불가가 모델의 선택인가
                     #    잘림인가»를 가르는 값이라 플래그 뒤에 두면 안 된다 — 플래그를 안 켠
@@ -965,7 +992,7 @@ def 실행(*, dry: bool, limit: int | None, 세트: list[str] | None, 라벨: st
         return sorted(vals) or None
 
     설정 = {"dry": dry, "top_k": top_k, "세트": 세트, "limit": limit,
-          "정답고정": "eval.golden_chunks(D3)",
+          "정답고정": {"표": "eval.golden_chunks(D3)", "지문": 골든고정값},
           "채점": "결정론 4-way + 치명오답 + 근거/인용 적중",
           "변형": 변형,
           # 🔴 2026-09-05 — `변형` 이름만으로는 «그 변형의 문면이 그날 무엇이었는지» 를
