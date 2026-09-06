@@ -299,7 +299,41 @@ def 호출자리1_스키마(비목목록: list[str] | None = None) -> dict:
     }
 
 
-def _비목_블록(enum: list[str]) -> str:
+def _별칭_힌트(질문: str) -> str:
+    """질문에 «실제로 등장한» 상품명을 `corpus.item_alias` 에서 찾아 비목과 함께 보여준다.
+
+    🔴 2026-09-06 production 실측 — 「개발용 노트북 구매」를 정규화가 «외주용역비» 로
+       분류했다. 그런데 `item_alias` 에는 「노트북 → 기계장치」가 «이미 들어 있다»
+       (326행 · 맥북·PC·태블릿PC 도 있다). 읽는 코드가 전부 `scripts/archive/` 아래라
+       **판정 경로에서 한 번도 안 읽혔다.** DB 에 답이 있는데 프롬프트까지 못 간 자리다.
+
+    🔴 «질문에 나온 것만» 싣는다. 326행을 통째로 넣으면 프롬프트가 커지고, 관계없는
+       별칭이 오히려 다른 비목으로 유도한다.
+    🔴 «생성이 아니라 조회» 다. 못 찾으면 빈 문자열이라 종전 프롬프트와 같아진다.
+       DB 가 죽어도 정규화를 죽이지 않는다 — 힌트가 없을 뿐이다.
+    """
+    q = (질문 or "").replace(" ", "")
+    if not q:
+        return ""
+    try:
+        from _lib import db as _db                      # noqa: PLC0415 — 지연 import
+        with _db.connect(autocommit=True) as conn:
+            행 = conn.execute('SELECT "상품명", "비목" FROM corpus.item_alias').fetchall()
+    except Exception as e:                              # noqa: BLE001
+        print(f"item_alias 조회 실패({type(e).__name__}) — 별칭 힌트 없이 간다", file=sys.stderr)
+        return ""
+    맞음: dict[str, str] = {}
+    for 상품명, 비목 in 행:
+        이름 = (상품명 or "").strip()
+        if len(이름) >= 2 and 이름.replace(" ", "") in q:
+            맞음.setdefault(이름, 비목)
+    if not 맞음:
+        return ""
+    줄 = chr(10).join(f"- {k} -> {v}" for k, v in sorted(맞음.items()))
+    머리 = "질문에 나온 품목 중 이미 등록된 것 (참고, 이대로 강제하지는 않는다)"
+    return chr(10) * 2 + 머리 + chr(10) + 줄
+
+def _비목_블록(enum: list[str], 질문: str = "") -> str:
     """`비목 목록:` 자리에 들어갈 «이름 + 정의» 여러 줄.
 
     🔴 왜 정의를 넣나. 종전에는 이름 10개를 쉼표로 이어 붙인 한 줄이었다 — 모델은
@@ -312,11 +346,12 @@ def _비목_블록(enum: list[str]) -> str:
     """
     정의 = 비목_정의()
     if not 정의:
-        return ", ".join(enum)
+        return ", ".join(enum) + _별칭_힌트(질문)
     빠짐 = [b for b in enum if b not in 정의]
     if 빠짐:
         print(f"⚠️ 비목 정의 없음 {len(빠짐)}종 {빠짐} — 이름만 넣는다", file=sys.stderr)
-    return "\n".join(f"- {b} — {정의[b]}" if b in 정의 else f"- {b}" for b in enum)
+    본문 = "\n".join(f"- {b} — {정의[b]}" if b in 정의 else f"- {b}" for b in enum)
+    return 본문 + _별칭_힌트(질문)
 
 
 # ── 프롬프트. B0 과 달리 캐시 프리픽스가 아니므로 비목 목록을 안에 넣어도 된다 ──
@@ -510,7 +545,7 @@ def 정규화(질문: str, *, dry: bool = False, 비목목록: list[str] | None 
     스키마 = 호출자리1_스키마(비목목록)
     프롬프트 = _지시_조립(변형).format(
         비목=_비목_블록(스키마["properties"]["비목후보"]["items"]
-                     ["properties"]["비목"]["enum"]), 질문=질문)
+                     ["properties"]["비목"]["enum"], 질문), 질문=질문)
     # 🔴 400 이 아니라 2000 이다 (2026-09-03 실서버 실측).
     #    Qwen3 는 thinking 이 기본이라 `<think>...</think>` 가 «출력 토큰» 을 먹는다.
     #    서버에 `--reasoning-parser qwen3` 를 줘도 갈라지지 않는 응답이 있다 —
