@@ -203,7 +203,7 @@ def 평가대상(cur, *, 세트: str | None = None, 범위밖포함: bool = Fals
     """
     cur.execute(
         """SELECT g.gold_id, g.세트, g.사업명, g.적용범위, g.질문, g.정답판정, g.비목,
-                  g.대상, g.평가범위, g.채점모드
+                  g.대상, g.평가범위, g.채점모드, g.해야할일
              FROM eval.golden_set g
             WHERE (g.정답판정 = '판단불가'
                    OR g.세트 = 'L3'
@@ -212,8 +212,11 @@ def 평가대상(cur, *, 세트: str | None = None, 범위밖포함: bool = Fals
               AND (%s::text IS NULL OR g.세트 = %s::text)
               AND (%s OR g.평가범위 IS NULL OR g.평가범위 NOT LIKE '범위밖%%')
             ORDER BY g.gold_id""", (세트, 세트, 범위밖포함))
+    # 🔴 2026-09-07(ai-33 QA ③) — `해야할일` 추가. golden 쪽 기대값을 아예 안 갖고
+    #    있어서 «채택률» 을 잴 자리가 없었다(모델 쪽 출력도 eval_e2e.py 가 안 담았다 —
+    #    그건 그 파일에서 고쳤다).
     cols = ("gold_id", "세트", "사업명", "적용범위", "질문", "정답판정", "비목",
-            "대상", "평가범위", "채점모드")
+            "대상", "평가범위", "채점모드", "해야할일")
     return [dict(zip(cols, r)) for r in cur.fetchall()]
 
 
