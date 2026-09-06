@@ -455,7 +455,7 @@ def _비목순_재정렬(cur, 조문: list[dict[str, Any]],
     안정 정렬이라 그룹 «안의» 순서(조번호 순)는 그대로다. 스위치가 꺼져 있거나
     비목이 없으면 입력 리스트를 «그대로» 돌려준다 — 예전과 바이트 단위로 같다.
     """
-    if os.environ.get("SUDDOE_L3_비목순", "off") != "on" or not 비목 or not 조문:
+    if (os.environ.get("SUDDOE_L3_ITEM_ORDER") or os.environ.get("SUDDOE_L3_비목순", "off")) != "on" or not 비목 or not 조문:
         return 조문
     try:
         vocab = 비목어휘(cur)
