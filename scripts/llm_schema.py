@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -119,7 +120,7 @@ def 판정_스키마(s번호들: list[str] | None = None,
     """
     s번호 = ({"type": "string", "enum": list(s번호들)} if s번호들
              else {"type": "string", "pattern": S번호_PATTERN})
-    return {
+    스키마: dict[str, Any] = {
         "type": "object",
         "additionalProperties": False,
         "required": ["판정", "요약", "해야할일", "인용", "전제"],
@@ -179,6 +180,47 @@ def 판정_스키마(s번호들: list[str] | None = None,
             },
         },
     }
+    return _순서_적용(스키마)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# A13 스키마 «필드 순서» 변형 — 문구가 아니라 «디코딩 순서» 축
+# ════════════════════════════════════════════════════════════════════════════
+# 🔴 2026-09-07(ai-33) — strict json_schema / guided_json 은 **스키마에 적힌 순서대로**
+#    토큰을 뱉는다. 기본 순서는 `판정` 이 «맨 앞» 이라, 모델은 어떤 조항이 걸리는지
+#    (`인용`·`전제`) 쓰기 **전에** 판정을 확정한다.
+#      · GPU(vLLM, thinking ON) 에서는 문제가 덜하다 — 근거를 사고블록에서 이미 훑고 온다.
+#      · Qwen API(thinking 없음) 에서는 **근거를 한 글자도 안 쓴 상태의 첫 토큰이 판정**이다.
+#    Qwen 기준선 실측(320문항): 정답=가능 24%(4/17) · 정답=판단불가 0%(0/8) ·
+#    오답 20건 중 17건이 「조건부」 — 근거 없이 4지선다를 찍으면 가운데가 나온다.
+#
+#    ⚠️ 이건 **가설이다.** 채택 기준(assemble_context 의 A12 3개)을 그대로 적용한다.
+#    A12(문구) 와 «같이» 바꾸지 않는다 — 같이 바꾸면 무엇이 효과인지 못 가른다.
+_순서_변형들: dict[str, str] = {
+    "S0": "기준선 — 판정·요약·해야할일·인용·전제 (지금 운영 순서)",
+    "S1": "근거우선 — 인용·전제 를 판정 «앞» 으로. 근거를 먼저 쓰게 해 thinking 을 대신한다",
+}
+_S1_순서 = ["인용", "전제", "판정", "요약", "해야할일"]
+
+
+def _순서_적용(스키마: dict[str, Any]) -> dict[str, Any]:
+    """`SUDDOE_스키마순서`(S0|S1, 기본 S0)에 맞춰 필드 순서만 바꾼다.
+
+    🔴 **기본값은 바이트 단위로 예전과 같다** — 미설정이면 입력 객체를 그대로 돌려준다
+    (`is` 로 증명 가능). 값이 무엇이든 «키 집합·제약은 하나도 안 바뀐다» — 순서만이다.
+    """
+    순서 = os.environ.get("SUDDOE_스키마순서", "S0")
+    if 순서 == "S0":
+        return 스키마
+    if 순서 != "S1":
+        raise ValueError(f"SUDDOE_스키마순서={순서!r} — 'S0' 또는 'S1' 만 허용")
+    props = 스키마["properties"]
+    if set(_S1_순서) != set(props):
+        raise ValueError(f"S1 순서표가 스키마와 안 맞는다: {sorted(props)}")
+    새 = dict(스키마)
+    새["properties"] = {k: props[k] for k in _S1_순서}
+    새["required"] = list(_S1_순서)          # required 순서도 같이 맞춘다
+    return 새
 
 
 # ════════════════════════════════════════════════════════════════════════════

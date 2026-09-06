@@ -1086,9 +1086,13 @@ def _실_정규화(body: 정규화요청) -> dict:
     #    vLLM 원본을 탄다(직전 보고 §관찰2). 두 하위 경로(자연어/`_폼_비목후보`)가
     #    모두 이 함수를 거치므로 여기 한 번으로 둘 다 커버된다.
     from llm_qwen import 스위치_적용
-    스위치_적용()
+    백엔드 = 스위치_적용()
     if body.질문 and body.질문.strip():
-        _워치독.게이트()      # 못 깨우면 raise → 기존 except → 판단불가
+        # 🔴 2026-09-07 — GPU 게이트는 vLLM(자체 GPU) 경로에서만 의미가 있다. Qwen(외부
+        #    API) 경로는 팟 상태와 무관한데 게이트가 백엔드 구분 없이 걸려 있어, 팟을
+        #    끄고 SUDDOE_LLM=qwen 으로 돌려도 여기서 «판단불가»로 막히고 있었다.
+        if 백엔드 == "vllm":
+            _워치독.게이트()      # 못 깨우면 raise → 기존 except → 판단불가
         from normalize_run import 정규화
         out, _메타 = 정규화(body.질문, 비목목록=비목_ENUM)
     else:
@@ -1365,12 +1369,15 @@ def _사용자F값_조립(답변: list) -> dict | None:
 
 
 def _실_판정(body: 판정요청) -> dict:
-    _워치독.게이트()
     # 🔴 2026-09-07 레인 Q(ai-33 확정) — SUDDOE_LLM=vllm|qwen 스위치. orchestrate 를
     #    import 하기 «직전» 이 유일한 안전지점이다(llm_qwen.py 상단 docstring 참고).
     #    기본값(SUDDOE_LLM 미설정)은 패치 전 원본 그대로라 지금과 바이트 단위로 같다.
     from llm_qwen import 스위치_적용
-    스위치_적용()
+    백엔드 = 스위치_적용()
+    # 🔴 GPU 게이트는 vLLM(자체 GPU) 전용이다 — Qwen(외부 API) 경로에 걸면 팟을 꺼둔
+    #    채로 Qwen 을 써도 여기서 «판단불가»로 막힌다(정규화 쪽과 같은 결함, 같은 날 발견).
+    if 백엔드 == "vllm":
+        _워치독.게이트()
     import orchestrate
     # 🔴 `질문원문` 을 빼먹어 옳에 있는 원문을 두고 문장을 다시 만들고 있었다.
     #    `모델의 생성`이 아니라 계약 필드다 (`models.py:100·191·232`, `main.py:585` 가 싣는다).
