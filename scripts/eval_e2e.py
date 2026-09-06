@@ -419,6 +419,21 @@ def _인용좌표(응답: dict) -> set[tuple]:
     return out
 
 
+def _세트이름들() -> list[str]:
+    """🔴 `--세트` 의 choices 를 손으로 적지 않는다 — 이 파일이 이미 한 번 그 사고를 냈다
+    (주석 실측: '공식'·'보강' 이 golden_set 에 추가됐는데 목록은 2개로 굳어 있었다).
+    2026-09-07 재발 — 'L3'(27건) 이 추가됐는데 여전히 4개로 굳어 있었다. `_부분집합이름들()`
+    과 같은 관용구로 DB 에서 직접 읽는다. DB 를 못 열면(오프라인 개발 등) 마지막으로
+    알던 값으로 폴백한다 — 조용히 빈 리스트를 주면 argparse choices=[] 가 전부를 막는다.
+    """
+    try:
+        with psycopg.connect(DSN) as conn, conn.cursor() as cur:
+            cur.execute("SELECT DISTINCT 세트 FROM eval.golden_set ORDER BY 1")
+            return [r[0] for r in cur.fetchall()]
+    except Exception:
+        return ["본세트", "적대적", "공식", "보강", "L3"]
+
+
 def _부분집합표() -> tuple[str, dict]:
     경로 = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                       "scratchpad", "P4_부분집합_0903.json")
@@ -1128,7 +1143,7 @@ def main() -> None:
     #    (실측: '공식'·'보강' 이 추가됐는데 목록은 2개로 굳어 있었다).
     # 🔴 choices 를 손으로 적으면 세트가 늘 때마다 조용히 못 고르게 된다 (위 주석).
     #    nargs='+' 로 여러 세트를 한 run 에 담는다 — 1개만 주면 기존 SQL 경로 그대로다.
-    ap.add_argument("--세트", nargs="+", choices=["본세트", "적대적", "공식", "보강"])
+    ap.add_argument("--세트", nargs="+", choices=_세트이름들())
     ap.add_argument("--top-k", type=int, default=5, dest="top_k")
     ap.add_argument("--변형", default="V0",
                     help="A12 프롬프트 변형. V0=기준선 · V1~V6 (assemble_context.변형들)")
