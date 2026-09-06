@@ -204,16 +204,19 @@ _S1_순서 = ["인용", "전제", "판정", "요약", "해야할일"]
 
 
 def _순서_적용(스키마: dict[str, Any]) -> dict[str, Any]:
-    """`SUDDOE_스키마순서`(S0|S1, 기본 S0)에 맞춰 필드 순서만 바꾼다.
+    """`SUDDOE_SCHEMA_ORDER`(S0|S1, 기본 S0)에 맞춰 필드 순서만 바꾼다.
 
     🔴 **기본값은 바이트 단위로 예전과 같다** — 미설정이면 입력 객체를 그대로 돌려준다
     (`is` 로 증명 가능). 값이 무엇이든 «키 집합·제약은 하나도 안 바뀐다» — 순서만이다.
     """
-    순서 = os.environ.get("SUDDOE_스키마순서", "S0")
+    # 🔴 이름은 «ASCII 여야 한다». bash 는 비ASCII 환경변수 이름을 식별자로 못 읽어
+    #    `SUDDOE_스키마순서=S1 python ...` 이 `command not found` 로 죽는다(2026-09-07 실측).
+    #    `SUDDOE_L3_판독기` 가 같은 함정을 안고 있다 — gcloud 로만 줄 수 있고 셸에선 못 준다.
+    순서 = os.environ.get("SUDDOE_SCHEMA_ORDER", "S0")
     if 순서 == "S0":
         return 스키마
     if 순서 != "S1":
-        raise ValueError(f"SUDDOE_스키마순서={순서!r} — 'S0' 또는 'S1' 만 허용")
+        raise ValueError(f"SUDDOE_SCHEMA_ORDER={순서!r} — 'S0' 또는 'S1' 만 허용")
     props = 스키마["properties"]
     if set(_S1_순서) != set(props):
         raise ValueError(f"S1 순서표가 스키마와 안 맞는다: {sorted(props)}")
