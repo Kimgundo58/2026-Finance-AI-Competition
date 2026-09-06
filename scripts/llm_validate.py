@@ -255,7 +255,20 @@ def s번호_메타(s맵: dict, dsn: str | None = None) -> dict[str, dict]:
     out: dict[str, dict] = {}
 
     with db.connect(dsn) as conn:
-        # chunk — 청크 자체가 이미 항 단위(§3-7)라 text 를 그대로 쓴다. 자르지 않는다.
+        # chunk — 🔴 2026-09-07 정정. 원래 주석은 "청크 자체가 이미 항 단위(§3-7)라
+        #    text 를 그대로 쓴다" 였는데, **그 가정이 깨지는 청크가 있다.**
+        #    900토큰 미만이면 조 전체가 한 청크로 남는다(청킹 설계상 정상). 그런 조는
+        #    항호=NULL 인 청크 «한 행» 인데, 조립기(`assemble_context.분해`)는 그 본문을
+        #    ①②③… 으로 갈라 S번호를 «여러 개» 만든다. 그래서 여기서 항호를 안 보고
+        #    `c.text` 를 통째로 쓰면 «같은 조 전문이 항 개수만큼 복제» 된다.
+        #    실측(dec 4184): 인용 20건 중 제22조 1,095자×11회 · 제39조 863자×9회 —
+        #    원문 총 19,812자인데 고유는 1,958자. 잉여 17,854자.
+        #    🔴 프롬프트는 «멀쩡하다» — 조립기는 `분해()` 로 조각을 정확히 싣는다.
+        #      부풀어 있는 것은 «인용 표시·저장» 이다(화면 근거란, `decisions.인용`).
+        #      비용에 영향이 있다고 말하면 안 된다 — 프롬프트 토큰은 안 늘어난다.
+        #    고침: `article` 분기와 «같게» s맵의 항호로 잘라낸다. 청크가 이미 한 항이면
+        #    `_항_추출` 이 그 항을 그대로 돌려주므로 예전 동작과 같다(안전한 양방향).
+        #    (발견 ai-3f)
         if 청크:
             m = {r[0]: r for r in conn.execute("""
                 SELECT c.chunk_id, c.doc_id, c.조번호, c.조제목, c.항호,
@@ -266,8 +279,10 @@ def s번호_메타(s맵: dict, dsn: str | None = None) -> dict[str, dict]:
             for sid, cid in 청크.items():
                 if cid in m:
                     _, doc, 조, 제목, h, ver, ex, txt, 기관, dom, lay = m[cid]
-                    out[sid] = dict(doc_id=doc, 조번호=조, 조제목=_조제목_표시(조, 제목), 원문=txt or "",
-                                    원문범위="청크", version=ver, extraction=ex,
+                    원문, 범위 = _항_추출(txt or "", 항호.get(sid))
+                    out[sid] = dict(doc_id=doc, 조번호=조, 조제목=_조제목_표시(조, 제목), 원문=원문,
+                                    원문범위=("청크" if 범위 in ("조전체",) else 범위),
+                                    version=ver, extraction=ex,
                                     항호_DB=_항호_표시(h),
                                     기관id=기관, domain=dom, layer=lay)
         # article — 조 전체가 오므로 s맵의 항호로 잘라낸다
