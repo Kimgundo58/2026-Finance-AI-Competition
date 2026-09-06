@@ -162,6 +162,53 @@ def _recheck_큐_반영(conn, *, 신doc: str, 구doc: str | None, dry: bool) -> 
 
 
 # ════════════════════════════════════════════════════════════════════
+# ③′ W3(2026-09-06, 레인 W3, 오너 지시) — VLM 분기
+# ════════════════════════════════════════════════════════════════════
+# 🔴 구멍이 실측으로 드러났다 — 「2026년 재도전성공패키지 세부관리기준」이 fail(53자)
+#    난 이유는 «규정이 아니라서» 가 아니라 «스캔본» 이라서다. pdftext 는 페이지번호
+#    5자만 준다. DB 엔 이미 extraction='vlm' 으로 사람이 판독해 들어가 있다 —
+#    지금 구조로는 «스캔본 규정집이 자동화로는 영원히 fail» 이었다.
+
+# 🔴 «같은 값을 세 곳이 쓴다» — `stage0_extract.추출_품질_점검()` 의 판단불가
+#    임계치를 «재사용» 한다. 새 숫자를 만들면 L3(ai-7d)·검산(ai-47)과 다른 기준으로
+#    갈려 「셋이 다르면 못 읽는다」가 그대로 벌어진다.
+from stage0_extract import 빈_추출_글자수_임계치 as VLM_임계_글자수  # noqa: E402
+
+try:
+    import vlm_extract as _vlm          # ai-47 소유 모듈. 2026-09-06 현재 저장소에 없다
+except ImportError:
+    _vlm = None
+
+
+def _vlm_페이지수_추정(path: Path) -> int | None:
+    """⑤ 비용추정 전용 — VLM 을 «부르지 않고» 페이지 수만 본다(pypdf, 이미 의존성에 있다:
+    `stage0_extract._pdf_pypdf` 가 이미 pypdf 를 쓴다 — 새 의존성 아니다)."""
+    try:
+        import pypdf
+        return len(pypdf.PdfReader(str(path)).pages)
+    except Exception:                                          # noqa: BLE001
+        return None
+
+
+def _이미_판독됨(doc_id: str, version: str | None, 시행일) -> bool:
+    """④ 비용 가드 — 같은 판을 매주 다시 판독하지 않는다.
+
+    🔴 「수집기(ai-53) 앞단에서 걸러지는지 확인하라」는 지시를 받았는데 그 코드가
+    아직 이 저장소에 없다(G1 미착수) — 그래서 «여기서도» 막는다. 이중 방어가 맞다:
+    수집기가 나중에 걸러도, 스케줄러 밖에서 누가 `/admin/ingest` 를 직접 재호출하면
+    이 층이 없으면 여전히 매번 새로 판독한다.
+    """
+    행 = _질의("SELECT extraction, version, 시행일 FROM corpus.documents WHERE doc_id=%s",
+              (doc_id,))
+    if not 행:
+        return False
+    ext, v, d = 행[0]
+    if ext != "vlm":
+        return False
+    return (version is not None and v == version) or (시행일 is not None and d == 시행일)
+
+
+# ════════════════════════════════════════════════════════════════════
 # ③ 요청/응답 모양
 # ════════════════════════════════════════════════════════════════════
 
@@ -177,6 +224,9 @@ class 적재요청(BaseModel):
     version: str | None = None
     표_문서: bool = False                   # 별표·붙임·참고 위주 문서인지(호출부가 판단해 알려준다)
     dry: bool = False                       # True 면 판정만 하고 아무것도 안 쓴다
+    # W3(2026-09-06, 레인 W3) — ⑤ VLM 비용만 미리 보고 싶을 때. True 면 VLM 을
+    # «부르지 않고» 페이지 수·예상 호출 수만 준다(문서 자체는 안 들어간다).
+    vlm_비용추정만: bool = False
 
 
 class 적재응답(BaseModel):
@@ -187,6 +237,8 @@ class 적재응답(BaseModel):
     사유: list[str] = Field(default_factory=list)
     recheck_queue: dict[str, Any] | None = None
     dry: bool = False
+    vlm_사용: bool = False
+    vlm_비용추정: dict[str, Any] | None = None  # {"페이지수":.., "호출예상":..}
 
 
 @router.post("/ingest", response_model=적재응답)
@@ -213,28 +265,94 @@ def admin_ingest(body: 적재요청,
     extraction = {"hwp": "hancom" if 확장 == "hwp" else "native",
                   "hwpx": "native", "pdf": "native", "xml": "native"}.get(확장, "native")
 
+    vlm_사용 = False
+    vlm_비용추정: dict[str, Any] | None = None
+    vlm메타: dict[str, Any] | None = None
     if 종류 == "articles":
         조목록 = payload
     else:
         본문, 오프셋 = payload
         from stage0_extract import 추출_품질_점검
         점검 = 추출_품질_점검(본문)
-        if 점검["판단불가"]:
+
+        if 점검["글자수"] < VLM_임계_글자수:
+            # ── W3 VLM 분기 — 텍스트가 «거의 없다»(임계 미만). 스캔본 의심 ──
+            if body.vlm_비용추정만:
+                페이지수 = _vlm_페이지수_추정(Path(body.src_path))
+                return 적재응답(doc_id=body.doc_id, 라우팅="fail",
+                              사유=["비용추정 모드 — 아무것도 적재하지 않았다"],
+                              vlm_비용추정={"페이지수": 페이지수,
+                                        "호출예상": 페이지수 if 페이지수 else "페이지수 확인 불가"})
+            if _이미_판독됨(body.doc_id, body.version, body.시행일):
+                return 적재응답(doc_id=body.doc_id, 라우팅="fail",
+                              사유=["④ 이미 같은 판이 extraction='vlm' 으로 판독돼 있다 — "
+                                    "재판독 안 함(비용 가드). 원래 doc_id 를 그대로 쓴다"])
+            if _vlm is None:
+                return 적재응답(doc_id=body.doc_id, 라우팅="fail",
+                              사유=[f"텍스트 {점검['글자수']}자(임계 {VLM_임계_글자수}자 미만) — "
+                                    "스캔본으로 보여 VLM 판독이 필요하나 scripts/vlm_extract.py "
+                                    "를 못 찾았다(ai-47 모듈 미착수 또는 이 배포에 미포함) — 못 태웠다"])
+            try:
+                # 🔴 진단용(`extract_meta`)을 쓴다 — `판독불가_페이지` 가 ③(표 검산)의
+                #    재료다. 반환은 (본문, {페이지오프셋, vlm_페이지, 판독불가_페이지, ...})
+                #    — `extract()` 단순형이 아니라 «튜플» 이다(먼저 짰다가 확인 없이
+                #    문자열로 받는 실수를 했었다 — 실측으로 잡았다).
+                본문, vlm메타 = _vlm.extract_meta(Path(body.src_path))
+            except Exception as e:                               # noqa: BLE001
+                _log.exception("VLM 판독 실패 doc_id=%s", body.doc_id)
+                return 적재응답(doc_id=body.doc_id, 라우팅="fail",
+                              사유=[f"VLM 판독 실패 — {type(e).__name__}: {e} — 못 태웠다"])
+            extraction, vlm_사용 = "vlm", True
+            오프셋 = vlm메타["페이지오프셋"]
+            점검 = 추출_품질_점검(본문)
+            if 점검["판단불가"]:
+                return 적재응답(doc_id=body.doc_id, 라우팅="fail", vlm_사용=True,
+                              사유=[f"VLM 판독도 텍스트가 부족하다 — {점검['사유']}"])
+        elif 점검["판단불가"]:
             return 적재응답(doc_id=body.doc_id, 라우팅="fail", 사유=[점검["사유"]])
+
         from stage0_articles import split_articles
         조목록, _전략 = split_articles(본문, 오프셋, doc_id=body.doc_id)
         if not 조목록:
-            return 적재응답(doc_id=body.doc_id, 라우팅="fail",
+            return 적재응답(doc_id=body.doc_id, 라우팅="fail", vlm_사용=vlm_사용,
                           사유=["조 분해 실패 — split_articles 가 0건을 냈다"])
 
     # ── 2) parse_quality 자동판정 (TASK §7-G3 다섯 규칙) ────────────────
     quality, 품질사유 = parse_quality_판정(조목록, extraction=extraction,
                                         표_문서=body.표_문서, 목차_일치=None)
+
+    # ② W3 — VLM 판독분은 «pass 를 주지 않는다». 다섯 규칙을 전부 통과해도 사람
+    #    검수를 거치게 한 단 낮춘다 — 판독은 틀릴 수 있다(모델이 표를 잘못 읽고도
+    #    형식은 멀쩡할 수 있다).
+    if vlm_사용 and quality == "high":
+        quality = "low"
+        품질사유 = [*품질사유, "VLM 판독본은 다섯 규칙을 다 통과해도 최고등급을 안 준다(사람 검수 필수)"]
+
+    # ③ W3 — 표 문서인데 VLM 이 표를 못 살렸으면 warn 이 아니라 «fail». 별표·
+    #    한도표가 판정 재료라, 표가 깨진 채로 들어가면 «틀린 확신» 이 된다
+    #    (rule450 자작 예외와 같은 급의 사고 — 검수자가 «품질 낮음» 배지만 보고
+    #    안 열어볼 위험까지 감안해 아예 안 들어가게 한다).
+    #    🔴 «ai-47 표 검산과 같은 잣대» — `vlm_extract.extract_meta()` 가 이미
+    #    프롬프트에서 [판독불가] 마커로 표를 명시적으로 자백하게 시켜뒀다
+    #    (표 안 셀을 못 읽으면 지어내지 말고 마커를 남기라는 지시가 모듈 안에 있다).
+    #    그 신호(`판독불가_페이지`)를 «직접» 쓴다 — 표 행 카운트(파이프 개수)는
+    #    vlm메타 가 없을 때만 쓰는 보조 신호다.
+    if vlm_사용 and body.표_문서:
+        if vlm메타 and vlm메타.get("판독불가_페이지"):
+            return 적재응답(doc_id=body.doc_id, 라우팅="fail", vlm_사용=True,
+                          사유=[f"VLM 판독이 표를 못 살렸다 — 판독불가 페이지 {vlm메타['판독불가_페이지']}. "
+                                "warn 이 아니라 fail 이다"])
+        표행수 = sum(a.get("본문", "").count("|") for a in 조목록)
+        if 표행수 < 3:
+            return 적재응답(doc_id=body.doc_id, 라우팅="fail", vlm_사용=True,
+                          사유=["VLM 판독이 표를 못 살렸다(표 문서인데 표 행 3줄 미만) — "
+                                "warn 이 아니라 fail 이다. ai-47 표 검산과 같은 잣대"])
+
     라우팅: Literal["warn", "pass"] = "warn" if quality == "low" else "pass"
 
     if body.dry:
         return 적재응답(doc_id=body.doc_id, 라우팅=라우팅, parse_quality=quality,
-                      조_개수=len(조목록), 사유=품질사유, dry=True)
+                      조_개수=len(조목록), 사유=품질사유, dry=True, vlm_사용=vlm_사용)
 
     # ── 3) 적재 — status='staged' · index_target=False 로 «항상» 시작 ──
     #    (자동 승격 금지. 승인은 사람이 별도 절차로 한다. 'staged' 는 2026-09-06
@@ -304,7 +422,7 @@ def admin_ingest(body: 적재요청,
             raise HTTPException(500, f"적재 실패 — {type(e).__name__}: {e}") from e
 
     return 적재응답(doc_id=body.doc_id, 라우팅=라우팅, parse_quality=quality,
-                  조_개수=len(조목록), 사유=품질사유, recheck_queue=recheck)
+                  조_개수=len(조목록), 사유=품질사유, recheck_queue=recheck, vlm_사용=vlm_사용)
 
 
 @router.get("/parse_report")
