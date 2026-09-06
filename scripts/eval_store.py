@@ -84,9 +84,23 @@ def 골든고정(cur) -> str:
     n = cur.fetchone()
     cur.execute("SELECT 매칭방법, count(*) FROM eval.golden_chunks GROUP BY 1 ORDER BY 1")
     분포 = cur.fetchall()
-    씨앗 = "|".join(map(str, n)) + "|" + ",".join(f"{k}:{v}" for k, v in 분포)
+
+    # 🔴 2026-09-06 — 씨앗에 `golden_set` 을 «더한다». 그전엔 golden_chunks «뿐» 이라
+    #    «정답 라벨이 바뀌어도 지문이 안 움직였다». 실측으로 증명했다: 정답 3건을 실제로
+    #    바꿔도 지문이 g399-f6-q315-144be751 로 «불변». hit@k 는 안 움직여도 «일치율은
+    #    움직이는데», run 끼리 「같은 정답지였나」를 증명할 수단이 없었다.
+    #    같은 날 오너 승인으로 정답판정 «5건»(545·546·566·615 -> 불가, 552 -> 조건부)과
+    #    verified 190건 승격이 들어갔다 — 고치지 않았으면 그 run 이 «이전과 같은 정답지» 로
+    #    보였을 것이다. 이 배치가 바로 이 결함이 물릴 자리였다.
+    cur.execute("SELECT count(*), count(*) FILTER (WHERE verified) FROM eval.golden_set")
+    총, 검증됨 = cur.fetchone()
+    cur.execute("SELECT 정답판정, count(*) FROM eval.golden_set GROUP BY 1 ORDER BY 1")
+    판정분포 = cur.fetchall()
+
+    씨앗 = ("|".join(map(str, n)) + "|" + ",".join(f"{k}:{v}" for k, v in 분포)
+            + f"|s{총}v{검증됨}|" + ",".join(f"{k}:{v}" for k, v in 판정분포))
     h = hashlib.sha1(씨앗.encode()).hexdigest()[:8]
-    return f"g{n[0]}-f{n[1]}-q{n[2]}-{h}"
+    return f"g{n[0]}-f{n[1]}-q{n[2]}-s{총}v{검증됨}-{h}"
 
 
 def _git커밋() -> str | None:
