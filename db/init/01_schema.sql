@@ -183,7 +183,12 @@ CREATE TABLE corpus.rules (
     비목          TEXT NOT NULL,
     허용          TEXT NOT NULL CHECK (허용 IN ('가능','조건부','불가')),
     사전승인      BOOLEAN NOT NULL DEFAULT FALSE,
-    사전승인_조건 TEXT,
+    -- 🔴 2026-09-06 TEXT -> TEXT[]. 한 행이 조건을 «둘 이상» 담아야 한다 —
+    --   L1 과 L2 는 «충돌» 이 아니라 «다른 사실» 이라 병합에서 둘 다 살아야 하고(rule_lookup `_조건합`),
+    --   룰 제안도 append 로 들어와야 한다. 스칼라이던 동안은 «덮어쓰기» 밖에 없어서
+    --   제안 23건 중 22건이 기존 조건을 지웠을 상황이었다(2026-09-06 실측).
+    --   NULL 은 NULL 로 둔다 — 빈 배열로 바꾸면 「없다」와 「빈 값」이 섞인다.
+    사전승인_조건 TEXT[],
     한도_유형     TEXT CHECK (한도_유형 IN ('비율','금액','개수') OR 한도_유형 IS NULL),
     한도_값       NUMERIC,
     한도_단위     TEXT,
