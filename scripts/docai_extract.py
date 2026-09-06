@@ -55,6 +55,7 @@
 """
 from __future__ import annotations
 
+import logging
 import os
 import sys
 from pathlib import Path
@@ -96,6 +97,8 @@ class DocAICallFailed(RuntimeError):
 # ══════════════════════════════════════════════════════════════════════════
 # 1. 게이트 + 설정
 # ══════════════════════════════════════════════════════════════════════════
+
+_log = logging.getLogger(__name__)
 
 def _허용됐나() -> None:
     if os.environ.get("SUDDOE_ALLOW_DOCAI") != "1":
@@ -226,10 +229,35 @@ def _판독_한이미지(png_bytes: bytes) -> tuple[str, dict]:
 # 4. 메인 진입점 — `vlm_extract.extract_meta()` 와 같은 모양(페이지 선별 → 필요한 것만 호출)
 # ══════════════════════════════════════════════════════════════════════════
 
+class DocAI판독실패(RuntimeError):
+    """판독을 «한 장도» 못 했다. 「글자가 없는 문서」와 구별하기 위한 신호다."""
+
+
 def extract(path: str | Path, *, page_range: tuple[int, int] | None = None,
             임계: int = MIN_CHARS_PER_PAGE) -> tuple[str, dict[int, int]]:
-    """(본문, {문자오프셋: 페이지번호}) — `vlm_extract.extract()` 와 완전히 같은 모양."""
+    """(본문, {문자오프셋: 페이지번호}) — `vlm_extract.extract()` 와 완전히 같은 모양.
+
+    🔴 2026-09-07 — `extract_meta()` 가 이미 기록해 둔 `실패_페이지` 를 여기서
+       «버리고» 있었다. 그래서 인증 실패(ADC 없음)·권한 없음(서비스계정에
+       documentai 권한 미부여) 같은 «판독을 아예 못 한» 사고가 로그 어디에도 안 남고
+       화면에는 「판독은 했는데 짧다」로만 보였다. 실측: 0.5초·0자 — 네트워크 왕복도
+       없이 죽은 것이었는데 결과만 보면 구별이 안 된다(진단 ai-db).
+       ⇒ 새 유형이다: «방어적 예외 삼킴이 결함을 정상 동작으로 위장한다».
+         오늘 심층질문(`필요F필드` 오타)에서도 같은 모양이었다 — `_질의()` 가
+         예외를 삼키고 docstring 이 그걸 "정상" 이라 적어둬서 한 번도 안 실렸다.
+       2-tuple 계약(`vlm_extract` 와 같은 모양)은 «지킨다» — 대신 실패를 로그로 올린다.
+       판독을 한 장도 못 했는데 본문이 비면 그건 «성공이 아니다».
+    """
     본문, 메타 = extract_meta(path, page_range=page_range, 임계=임계)
+    실패 = 메타.get("실패_페이지") or []
+    if 실패:
+        _log.error("Document AI 판독 실패 %d장 — %s (본문 %d자)",
+                   len(실패), 실패[:3], len(본문))
+    if 실패 and not 본문.strip():
+        # 한 장도 못 읽었고 결과도 비었다 — 조용히 빈 문자열을 돌려주면 호출부가
+        # 「스캔본인데 글자가 없다」로 오해한다. 원인을 담아 올린다.
+        raise DocAI판독실패(
+            f"Document AI 가 {len(실패)}장 전부 판독 실패 — {실패[:3]}")
     return 본문, 메타["페이지오프셋"]
 
 
