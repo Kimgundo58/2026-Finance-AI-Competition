@@ -99,7 +99,8 @@ def _thinking_꺼야하나(모델: str) -> bool:
 
 
 def _호출_1회(client: OpenAI, 모델: str, 프롬프트: str, 스키마: dict | None,
-           온도: float, 최대토큰: int, 타임아웃: int) -> tuple[Any, dict]:
+           온도: float, 최대토큰: int, 타임아웃: int,
+           사고: bool | None = None) -> tuple[Any, dict]:
     kwargs: dict[str, Any] = {
         "model": 모델,
         "messages": [{"role": "user", "content": 프롬프트}],
@@ -112,7 +113,15 @@ def _호출_1회(client: OpenAI, 모델: str, 프롬프트: str, 스키마: dict
             "type": "json_schema",
             "json_schema": {"name": "판정", "schema": 스키마, "strict": True},
         }
-    if _thinking_꺼야하나(모델):
+    # 🔴 2026-09-07(ai-33 실측) — `사고=False` 를 «명시»하면 모델과 무관하게 끈다.
+    #    qwen3.7-plus 는 json_schema strict 와 thinking 을 «같이» 쓸 수 있는데(우리가
+    #    쓰는 조합이 그것이다), 정규화처럼 «문장에서 값을 뽑는» 작업에는 사고가
+    #    필요 없고 값만 비싸다. 같은 프롬프트 1콜 실측:
+    #        thinking ON  18.3초 · completion   976 토큰
+    #        thinking OFF  2.1초 · completion    54 토큰   ← 8.7배 빠르고 18배 싸다
+    #    판정(④)은 사고가 정확도에 기여할 수 있어 «건드리지 않는다» — 여기서 끄는 건
+    #    호출자가 명시적으로 요청한 자리뿐이다.
+    if 사고 is False or _thinking_꺼야하나(모델):
         kwargs["extra_body"] = {"enable_thinking": False}
 
     t = time.time()
@@ -140,7 +149,9 @@ def llm_호출(프롬프트: str, 스키마: dict | None, *,
             온도: float = 0.0,
             최대토큰: int = 1500,
             타임아웃: int = 240,
-            재시도: int = 1) -> tuple[Any, dict]:
+            재시도: int = 1,
+            사고: bool | None = None,
+            **_무시) -> tuple[Any, dict]:
     """`normalize_run.llm_호출` 과 같은 계약(입출력 모양)을 따르는 DashScope 판.
 
     `모델` 을 명시하지 않으면 `SUDDOE_QWEN_MODEL`(기본 qwen3.7-plus). 재시도를 다
@@ -158,7 +169,7 @@ def llm_호출(프롬프트: str, 스키마: dict | None, *,
     마지막 = None
     for 회차 in range(재시도 + 1):
         try:
-            return _호출_1회(client, 쓸_모델, 프롬프트, 스키마, 온도, 최대토큰, 타임아웃)
+            return _호출_1회(client, 쓸_모델, 프롬프트, 스키마, 온도, 최대토큰, 타임아웃, 사고)
         except json.JSONDecodeError as e:
             마지막 = f"JSON 파싱 실패: {e}"
         except Exception as e:  # noqa: BLE001 — SDK/HTTP/타임아웃 전부
@@ -166,7 +177,7 @@ def llm_호출(프롬프트: str, 스키마: dict | None, *,
 
     if 모델 is None and 폴백_모델 != 쓸_모델 and 폴백_모델 not in _금지_모델:
         try:
-            return _호출_1회(client, 폴백_모델, 프롬프트, 스키마, 온도, 최대토큰, 타임아웃)
+            return _호출_1회(client, 폴백_모델, 프롬프트, 스키마, 온도, 최대토큰, 타임아웃, 사고)
         except Exception as e:  # noqa: BLE001
             마지막 = f"{마지막} · 폴백({폴백_모델})도 실패: {type(e).__name__}: {str(e)[:200]}"
 

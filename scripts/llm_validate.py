@@ -117,15 +117,117 @@ def 체크항목_본문(codes: set[str] | None = None, dsn: str | None = None) -
     항목·설명은 여기서 DB 원문 그대로 채운다. `codes` 를 주면 그 안으로 좁힌다
     (호출부가 이미 `체크코드_enum(사업명=...)` 로 사업 범위를 알기 때문).
     """
+    # 🔴 2026-09-07 — `사업명`·`비목` 을 같이 싣는다. 둘 다 NULL 인 항목이
+    #    «모든 지출에 걸리는 공통 필수» 다(부가세제외·비교견적준비·사업비카드사용·
+    #    협약기간내집행·거래처증빙수취·세금계산서수취 6개). 아래 `_공통필수()` 가 쓴다.
+    #    기존 키(항목·설명)는 그대로라 호출부·테스트 스텁이 안 깨진다.
     with db.connect(dsn) as conn:
         if codes:
             rows = conn.execute(
-                'SELECT code, "항목", "설명" FROM corpus.check_items WHERE code = ANY(%s)',
+                'SELECT code, "항목", "설명", "사업명", "비목" '
+                'FROM corpus.check_items WHERE code = ANY(%s)',
                 (list(codes),)).fetchall()
         else:
             rows = conn.execute(
-                'SELECT code, "항목", "설명" FROM corpus.check_items').fetchall()
-    return {r[0]: {"항목": r[1], "설명": r[2]} for r in rows}
+                'SELECT code, "항목", "설명", "사업명", "비목" '
+                'FROM corpus.check_items').fetchall()
+    return {r[0]: {"항목": r[1], "설명": r[2], "사업명": r[3], "비목": r[4]} for r in rows}
+
+
+def _공통필수(체크항목: dict[str, dict]) -> list[str]:
+    """모든 지출에 걸리는 항목의 code — `사업명`·`비목` 이 «둘 다 NULL» 인 것.
+
+    🔴 왜 서버가 붙이나 — 이건 LLM 이 «판단할» 대상이 아니다. 부가세를 빼는 것,
+       사업비 카드로 긁는 것, 협약기간 안에 집행하는 것은 지출 종류와 무관하게
+       «항상» 해당한다. B0 는 "해당하는 게 없으면 빈 배열" 이라 지시하는데, 모델이
+       이걸 곧이곧대로 적용해 빈손으로 끝내는 일이 실제로 났다 —
+       2026-09-07 데모 시드 실측: 4건 중 3건이 해야할일 0건(인건비·특허권 건).
+       화면의 「결제 전 확인」이 통째로 비었다.
+    ⇒ 「체크리스트는 DB 가 소유한다」(설계 결정 ⑥)를 끝까지 밀면, 필수 항목의
+       부착도 DB 사실로 결정해야 한다. 모델의 선택은 «여기에 더하는» 것이다.
+    """
+    return [c for c, v in 체크항목.items()
+            if v.get("사업명") is None and v.get("비목") is None]
+
+
+_단락번호 = re.compile(r"^단락0*(\d+)$")
+
+
+def _l3표시명(원본파일명: str | None) -> str | None:
+    """L3 문서 UUID 대신 화면에 낼 이름. `L3_` 접두와 확장자를 떼고 밑줄을 띄운다.
+
+    "L3_2024창업중심대학_경상국립대_사업비사용안내문.hwp"
+      → "2024창업중심대학 경상국립대 사업비사용안내문"
+    파일명이 없으면 None — 호출부가 원래 값(UUID)으로 물러난다. 지어내지 않는다.
+    """
+    if not 원본파일명:
+        return None
+    이름 = 원본파일명.rsplit(".", 1)[0]
+    if 이름.startswith("L3_"):
+        이름 = 이름[3:]
+    return 이름.replace("_", " ").strip() or None
+
+
+_항호_깨끗 = re.compile(r"^[①-⑳\s,·~]+$")
+
+
+def _항호_표시(항호: str | None) -> str | None:
+    """화면에 낼 항호. «항 기호(①②③)만» 남기고 내부 표기는 버린다.
+
+    🔴 `corpus.chunks.항호` 는 값이 세 갈래다(운영 실측):
+         None                18,001건  — 대다수
+         "①", "③" 같은 항기호           — 사용자에게 유용하다
+         "항1~③", "-4#1", "-1#2~-3-4#1" — «청킹 내부 좌표» 다
+       세 번째가 그대로 화면에 나가 「붙임2 【붙임 2】… -1#2~-3-4#1」로 찍혔다
+       (2026-09-07 ai-4e 화면 실측). 사용자가 읽을 표기가 아니다.
+    🔴 «버리는 쪽»으로 판단한다 — 항 기호가 아니면 None. 내부 좌표를 사람 말로
+       바꿀 방법이 없고, 억지로 바꾸면 없는 정보를 지어내는 것이다.
+       원문은 `원문` 필드가 이미 나르므로 근거가 사라지지는 않는다.
+    """
+    if not 항호:
+        return None
+    t = 항호.strip()
+    if _항호_깨끗.match(t):
+        return t
+    # "항1~③" 처럼 앞에 내부 접두가 붙은 꼴 — 항 기호 부분만 건진다
+    기호 = "".join(ch for ch in t if "①" <= ch <= "⑳")
+    return 기호 or None
+
+
+def _조제목_표시(조번호: str | None, 조제목: str | None) -> str | None:
+    """조제목 앞에 붙은 «조번호 되풀이» 를 뗀다.
+
+    🔴 실측: 조번호="붙임2" · 조제목="【붙임 2】창업기업등 사업비 비목 해설표" 라
+       화면에 「붙임2 【붙임 2】창업기업등 사업비 비목 해설표」로 두 번 찍혔다
+       (2026-09-07 ai-4e). 프론트가 둘을 이어 붙이는데 원본이 이미 중복이다.
+       조번호는 «위치», 조제목은 «이름» 이라 둘 다 필요하다 — 그래서 조제목 쪽의
+       되풀이만 뗀다(조번호를 지우면 위치를 잃는다).
+    """
+    if not 조제목:
+        return 조제목
+    if not 조번호:
+        return 조제목
+    숫자만 = re.sub(r"\D", "", 조번호)
+    글자만 = re.sub(r"[\d\s]", "", 조번호)
+    if not (숫자만 and 글자만):
+        return 조제목
+    # 【붙임 2】 · [붙임2] · (붙임 2) 처럼 괄호로 감싼 되풀이를 맨 앞에서만 뗀다
+    앞 = re.match(r"^\s*[【\[(]\s*" + re.escape(글자만) + r"\s*" + 숫자만 + r"\s*[】\])]\s*", 조제목)
+    return 조제목[앞.end():].strip() if 앞 else 조제목
+
+
+def _조번호_표시(조번호: str | None) -> str | None:
+    """`단락035` 처럼 «파서 산출물» 인 조번호를 사용자 표기로 바꾼다.
+
+    🔴 원본에 제N조 구조가 없는 문서(안내문·양식)는 `split_articles()` 의 3순위
+       단락분할로 떨어지고, 그 결과가 `단락035` 다. 파싱은 «정상» 인데 그 내부
+       표기가 화면 「적용 근거」에 그대로 찍혔다(오너 지적: 「단락 08」).
+       숫자는 살린다 — 사용자가 원문에서 위치를 찾는 단서라 지우면 손실이다.
+    """
+    if not 조번호:
+        return 조번호
+    m = _단락번호.match(조번호.strip())
+    return f"{int(m.group(1))}번째 항목" if m else 조번호
 
 
 def s번호_메타(s맵: dict, dsn: str | None = None) -> dict[str, dict]:
@@ -152,8 +254,9 @@ def s번호_메타(s맵: dict, dsn: str | None = None) -> dict[str, dict]:
             for sid, cid in 청크.items():
                 if cid in m:
                     _, doc, 조, 제목, h, ver, ex, txt, 기관, dom, lay = m[cid]
-                    out[sid] = dict(doc_id=doc, 조번호=조, 조제목=제목, 원문=txt or "",
-                                    원문범위="청크", version=ver, extraction=ex, 항호_DB=h,
+                    out[sid] = dict(doc_id=doc, 조번호=조, 조제목=_조제목_표시(조, 제목), 원문=txt or "",
+                                    원문범위="청크", version=ver, extraction=ex,
+                                    항호_DB=_항호_표시(h),
                                     기관id=기관, domain=dom, layer=lay)
         # article — 조 전체가 오므로 s맵의 항호로 잘라낸다
         if 조문:
@@ -166,21 +269,31 @@ def s번호_메타(s맵: dict, dsn: str | None = None) -> dict[str, dict]:
                 if aid in m:
                     _, doc, 조, 제목, 본문, ver, ex, 기관, dom, lay = m[aid]
                     원문, 범위 = _항_추출(본문, 항호.get(sid))
-                    out[sid] = dict(doc_id=doc, 조번호=조, 조제목=제목, 원문=원문,
+                    out[sid] = dict(doc_id=doc, 조번호=조, 조제목=_조제목_표시(조, 제목), 원문=원문,
                                     원문범위=범위, version=ver, extraction=ex, 항호_DB=None,
                                     기관id=기관, domain=dom, layer=lay)
         # l3 — tenant. extraction·version 축이 없다. 기관 업로드분이라 native 로 본다.
         # 🔴 `기관id` 자리에는 `org_id` 를 넣는다 — 멀티테넌시 3차 방어의 대조 대상이다.
         if l3:
+            # 🔴 2026-09-07 — `l3_documents.원본파일명` 을 «같이» 읽는다. `l3_articles.doc_id`
+            #    는 UUID 라, 그대로 내보내면 화면 「적용 근거」에 «4add2b34-d038-…» 이
+            #    그대로 찍힌다(오너가 화면에서 직접 발견). L1·L2 는 doc_id 가 사람이
+            #    읽는 제목(「예비창업패키지 세부관리기준(2025년)」)이라 이 문제가 없고,
+            #    L3 만 어긋나 있었다. 읽을 이름은 «DB 에 이미 있다» — 안 쓰고 있었을 뿐이다.
+            #    ⇒ 「DB 에 있다」 ≠ 「화면이 쓴다」.
             m = {r[0]: r for r in conn.execute("""
-                SELECT article_id, doc_id::text, 조번호, 조제목, 본문, org_id::text
-                  FROM tenant.l3_articles WHERE article_id = ANY(%s)""",
+                SELECT a.article_id, a.doc_id::text, a.조번호, a.조제목, a.본문,
+                       a.org_id::text, d.원본파일명
+                  FROM tenant.l3_articles a
+                  LEFT JOIN tenant.l3_documents d ON d.doc_id = a.doc_id
+                 WHERE a.article_id = ANY(%s)""",
                 (list(l3.values()),)).fetchall()}
             for sid, aid in l3.items():
                 if aid in m:
-                    _, doc, 조, 제목, 본문, org = m[aid]
+                    _, doc, 조, 제목, 본문, org, 파일명 = m[aid]
                     원문, 범위 = _항_추출(본문, 항호.get(sid))
-                    out[sid] = dict(doc_id=doc, 조번호=조, 조제목=제목, 원문=원문,
+                    out[sid] = dict(doc_id=_l3표시명(파일명) or doc, 조번호=_조번호_표시(조),
+                                    조제목=제목, 원문=원문,
                                     원문범위=범위, version=None, extraction="native",
                                     항호_DB=None, 기관id=org, domain="창업지원사업",
                                     layer="L3")
@@ -582,6 +695,18 @@ def 검증(llm출력: dict, s맵: dict, *,
             깎(코드값, 문장)
             _설명제거(h, 대상)
         해야할일.append(h)
+
+    # ── 5-c. 공통 필수 바닥 — 모델이 안 골라도 «항상» 붙는다 ──────────────
+    # 🔴 폐쇄 목록 경로(체크코드를 준 실전 호출)에서만 돈다. 옛 계약(체크코드 미전달)은
+    #    LLM 이 항목·설명을 직접 쓰는 경로라 여기 끼면 계약이 달라진다 — 손대지 않는다.
+    if 허용코드 is not None:
+        _이미 = {h.get("code") for h in 해야할일}
+        for c in _공통필수(체크항목):
+            if c in _이미 or c not in 허용코드:
+                continue
+            본문 = 체크항목.get(c)
+            if 본문:
+                해야할일.append({"code": c, "항목": 본문["항목"], "설명": 본문["설명"]})
 
     # ── 6. 버전스탬프 — 인용 문서의 version. 코드가 채운다 ────────────────
     # 인용된 것만 모은다. s맵 전체를 쓰면 인용하지도 않은 문서의 판본이 화면에 붙는다.
