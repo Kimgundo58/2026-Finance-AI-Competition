@@ -72,7 +72,7 @@ def 실제형식(본문: bytes) -> str:
     return "알수없음"
 
 
-def _업로드_주인(요청: Request, 자기신고: str) -> str:
+def _업로드_주인(요청: Request, 자기신고: str | None) -> str:
     """이 업로드가 «어느 기관» 것인지 서버가 정한다.
 
     🔴 **업로드의 org_id 는 `auth.OrgId주입` 이 못 막는다** (2026-09-03 재현).
@@ -105,7 +105,11 @@ def _업로드_주인(요청: Request, 자기신고: str) -> str:
             _log.warning("L3 업로드 org_id 불일치 — 토큰=%s Form=%s · 토큰을 쓴다",
                          주.org_id, 자기신고)
         return str(주.org_id)                      # 🔴 토큰이 이긴다
-    if not auth.ORG_PARAM_허용:
+    # 🔴 2026-09-06 — 자기신고가 «없어도» 여기로 온다. 프론트는 org_id 를 «알 수 없다»
+    #    (`lib/orgs.ts:10` — 밖으로 나오는 손잡이는 slug 뿐이고 slug→org_id 는 서버 안에서만
+    #    푼다). 그래서 `Form(...)` 필수 제약이 프론트의 업로드 호출 자체를 «구조적으로»
+    #    막고 있었다 — 화면의 「파일 교체」가 서버를 안 부르고 이름만 바꾸던 진짜 이유다.
+    if not auth.ORG_PARAM_허용 or not 자기신고:
         raise HTTPException(401, "기관을 확인할 수 없습니다 — 로그인이 필요합니다.")
     return 자기신고
 
@@ -115,7 +119,9 @@ async def 업로드(
     요청: Request,
     배경: BackgroundTasks,
     파일: UploadFile = File(...),
-    org_id: str = Form(...),
+    # 🔴 «선택» 이다. 로그인했으면 `_업로드_주인` 이 토큰 주체로 정한다(토큰이 이긴다).
+    #    프론트는 org_id 를 알 수 없으므로 필수로 두면 업로드를 아예 못 부른다.
+    org_id: str | None = Form(None),
     기관명: str | None = Form(None),
 ) -> L3업로드응답:
     # 🔴 «맨 앞» 이다. 아래 검사들이 org_id 를 안 쓰긴 하지만, 나중에 누가
