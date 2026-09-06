@@ -82,6 +82,40 @@ class 비목후보(BaseModel):
 _비목후보 = 비목후보
 
 
+class 심층질문선택지(BaseModel):
+    값: str
+    라벨: str
+
+
+class 심층질문근거(BaseModel):
+    doc_id: str
+    조번호: str
+
+
+class 심층질문항목(BaseModel):
+    """A-3(2026-09-06, 레인 Y) — ai-8c·ai-7d 와 계약 확정.
+
+    ai-7d 가 A-1(질문문 52건)·A-2(유형·선별)를 만든다. 이 모양은 그걸 실어 나르는 그릇이다.
+    """
+    code: str                              # corpus.check_items(code) 그대로
+    질문문: str                             # A-1 산출
+    # 🔴 4종은 A-2 확정 전 임시값이다 — ai-7d 산출이 나오면 이 enum 을 맞춰 조정한다.
+    유형: Literal["예아니오", "선택", "숫자", "텍스트"]
+    선택지: list[심층질문선택지] = Field(default_factory=list)   # 유형="선택" 일 때만 채운다
+    근거: 심층질문근거                       # 🔴 필수 — 절대 비우지 않는다. 「왜 묻는지」가 이것이다
+    # 🔴 «컬럼명 그대로» 넣는다(예: "정부지원_현금") — dotted-path(`F1.정부지원.현금`)로
+    #    미리 만들지 않는다. `orchestrate.f값_경로키()` 가 축(F1~F4) 접두사를 매기는
+    #    «유일한» 자리다 — 여기서 또 매기면 두 곳이 어긋날 때 다음에 또 「붙였는데 안
+    #    붙은」실패가 난다. 목록 밖 컬럼을 쓰게 되면 `f값_경로키()` 의 특례표를 같이 늘려라.
+    필요F필드: list[str] = Field(default_factory=list)
+
+
+class 답변항목(BaseModel):
+    """B(2026-09-06, 레인 Y) — `/api/judge` 가 심층질문 답을 받는 그릇."""
+    code: str
+    값: Any
+
+
 class 정규화응답(BaseModel):
     품목: str | None = None
     금액: float | None = None
@@ -98,6 +132,8 @@ class 정규화응답(BaseModel):
     # 폼 값을 문장으로 합성한 것. 저장·검색·표시 전용.
     # ⚠️ 이 문장을 다시 LLM 입력으로 쓰지 않는다 — 필드→문장→필드 왕복은 정보를 잃는다.
     질문원문: str | None = None
+    # A-3(2026-09-06) — check_items 기반 심층질문. LLM 이 만들지 않는다(호출수 불변).
+    심층질문: list[심층질문항목] = Field(default_factory=list)
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -111,6 +147,10 @@ class 판정요청(BaseModel):
     org_id: str | None = None
     plan_id: int | None = None         # 있으면 판정 후 expense_plans 에 연결한다
     f5: F5 = Field(default_factory=F5)
+    # B(2026-09-06, 레인 Y) — 심층질문 답. 비어 있어도 종전과 바이트 단위로 같다
+    # (`_실_판정` 이 빈 리스트면 `사용자F값=None` 을 넘기고, `orchestrate.판정()` 은
+    #  그 인자가 None 이면 기존 f값 계산과 완전히 같은 경로를 탄다).
+    답변: list[답변항목] = Field(default_factory=list)
 
 
 # ════════════════════════════════════════════════════════════════════
