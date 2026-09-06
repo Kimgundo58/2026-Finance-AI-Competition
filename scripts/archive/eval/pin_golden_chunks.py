@@ -98,6 +98,17 @@ def 매칭(cur, doc: str | None, 조번호: str | None, 원문: str | None):
     if not doc:
         return "실패", [], "정답근거에 doc 이 없다 (골든셋 결손)"
 
+    # 🔴 2026-09-07(ai-33 실측 정정) — L3 는 «코퍼스 결손이 아니다».
+    #    아래 분기가 "documents 에도 없다 — 코퍼스 결손" 이라고 단언하는 바람에
+    #    L3 27건이 «규정이 없다» 로 오진됐다. 실제로는 tenant.l3_articles 에
+    #    224조가 정상 적재돼 있고(파싱품질 warn·dangling 0), corpus.* 만 보는
+    #    이 스크립트가 그 스키마를 안 볼 뿐이다. 하네스 결손이지 코퍼스 결손이 아니다.
+    if (doc or "").startswith("L3_"):
+        return "실패", [], (
+            f"doc_id='{doc}' 는 L3 문서다 — tenant.l3_articles 에 있고 이 스크립트"
+            "(corpus.* 전용)로는 못 잡는다. «코퍼스 결손이 아니다» — L3 는 pin 대상이"
+            " 아니라 eval_store.평가대상() 이 별도 경로로 통과시킨다.")
+
     cur.execute("SELECT count(*) FROM corpus.chunks WHERE doc_id = %s", (doc,))
     if cur.fetchone()[0] == 0:
         cur.execute("SELECT count(*) FROM corpus.documents WHERE doc_id = %s", (doc,))
