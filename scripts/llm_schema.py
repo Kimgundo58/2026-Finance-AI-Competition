@@ -125,7 +125,11 @@ def 판정_스키마(s번호들: list[str] | None = None,
         "required": ["판정", "요약", "해야할일", "인용", "전제"],
         "properties": {
             "판정": {"type": "string", "enum": list(판정_ENUM)},
-            "요약": {"type": "string", "minLength": 1, "maxLength": 300},
+            # 🔴 2026-09-07(중앙 ai-33, 오너 지시) — minLength 1 이 «구멍» 이었다.
+            #    run 197 실측: 12건 중 5건이 요약을 `"S02, S03"` 처럼 인용
+            #    앵커만으로 채웠고, 오답 3건이 «전부» 그 5건 안에 있었다.
+            #    요약을 안 쓰면 판정도 찍는다 — 문장을 강제한다(B0 에 문안 규칙).
+            "요약": {"type": "string", "minLength": 20, "maxLength": 300},
             # 🔴 2026-09-06(레인 H, ai-8c 승인) — `코드들` 이 있으면 LLM 은 **code 하나만**
             #    고른다. `인용`(S번호만 LLM, 나머지는 코드)과 같은 원칙 — code 는 안정
             #    식별자이고(`체크코드_enum` 독스트링), 항목·설명은 `corpus.check_items`
