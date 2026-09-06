@@ -180,7 +180,7 @@ def 현재문서(org_id: str | None = None) -> L3현재문서목록응답:
         return L3현재문서목록응답(문서=[])
     조건, org인자 = _org조건(org_id, "d")
     행 = _질의(
-        f'SELECT d.doc_id, d."원본파일명", d.version, d."시행일", d."파싱품질", '
+        f'SELECT d.doc_id, d."원본파일명", d.version, d."시행일", d.created_at, d."파싱품질", '
         f'       (SELECT count(*) FROM tenant.l3_articles a WHERE a.doc_id = d.doc_id) '
         f'  FROM tenant.l3_documents d '
         f' WHERE {조건} AND d.status = \'active\' '
@@ -190,8 +190,9 @@ def 현재문서(org_id: str | None = None) -> L3현재문서목록응답:
     return L3현재문서목록응답(문서=[
         L3현재문서(doc_id=str(doc_id), 원본파일명=이름, version=버전,
                 시행일=시행일.isoformat() if 시행일 else None,
+                등록일=등록.date().isoformat() if 등록 else None,
                 파싱품질=파싱품질, 조_건수=건수)
-        for doc_id, 이름, 버전, 시행일, 파싱품질, 건수 in 행])
+        for doc_id, 이름, 버전, 시행일, 등록, 파싱품질, 건수 in 행])
 
 
 @router.get("/{doc_id}", response_model=L3업로드응답)

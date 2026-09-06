@@ -310,6 +310,11 @@ class L3현재문서(BaseModel):
     원본파일명: str
     version: str | None = None
     시행일: str | None = None
+    # 🔴 2026-09-07 — `등록일`(=`created_at`)을 «같이» 준다. 실제 업로드 문서는
+    #    `시행일` 이 전부 NULL 이다(문서에 시행일이 안 적혀 있어 파서가 못 뽑는다 —
+    #    테스트 픽스처만 값이 있다). 화면 마이페이지가 「2026.03.02 등록」을
+    #    하드코딩하고 있는데, 그 자리에 넣을 «실제 값» 은 시행일이 아니라 등록일이다.
+    등록일: str | None = None
     파싱품질: Literal["대기", "pass", "warn", "fail"] | None = None
     조_건수: int = 0
 

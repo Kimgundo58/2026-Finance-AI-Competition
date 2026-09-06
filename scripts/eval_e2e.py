@@ -517,9 +517,15 @@ def 실행(*, dry: bool, limit: int | None, 세트: list[str] | None, 라벨: st
     #    단가를 모른다(추정치를 확정값처럼 적으면 나중에 소급으로 틀려진다). 둘 다
     #    안 설정돼 있으면 _단가={} 이고 추정비용USD 는 None 으로 그 사실을 남긴다.
     _단가: dict[str, float] = {}
-    if os.environ.get("SUDDOE_QWEN_단가_IN") and os.environ.get("SUDDOE_QWEN_단가_OUT"):
-        _단가 = {"in": float(os.environ["SUDDOE_QWEN_단가_IN"]),
-                "out": float(os.environ["SUDDOE_QWEN_단가_OUT"])}
+    # 🔴 2026-09-07 — 이름이 «ASCII 여야 한다». bash 는 비ASCII 환경변수 이름을 식별자로
+    #    못 읽어 `export SUDDOE_QWEN_단가_IN=0.4` 가 "not a valid identifier" 로 죽는다.
+    #    같은 함정을 오늘 `SUDDOE_스키마순서` → `SUDDOE_SCHEMA_ORDER` 로 한 번 고쳤는데,
+    #    지시를 내릴 때 한글 이름을 그대로 줘서 되풀이했다(중앙 잘못).
+    #    옛 한글 이름도 «받는다» — 이미 그 이름으로 문서·메모가 나가 있다.
+    _IN = os.environ.get("SUDDOE_QWEN_PRICE_IN") or os.environ.get("SUDDOE_QWEN_단가_IN")
+    _OUT = os.environ.get("SUDDOE_QWEN_PRICE_OUT") or os.environ.get("SUDDOE_QWEN_단가_OUT")
+    if _IN and _OUT:
+        _단가 = {"in": float(_IN), "out": float(_OUT)}
     with psycopg.connect(DSN) as conn:
         cur = conn.cursor()
 
@@ -879,7 +885,7 @@ def 실행(*, dry: bool, limit: int | None, 세트: list[str] | None, 라벨: st
             # 🔴 2026-09-08(ai-33 QA — 토큰·비용) — 데이터는 이미 있었다(`orchestrate.
             #    판정()` 이 실어 옴, `_토큰합()` 참고). 여기서 하는 일은 «합산» 뿐이다.
             #    단가는 코드에 안 박는다 — 확정된 계약단가를 이 세션이 모른다(추정치를
-            #    확정값처럼 적지 않는다는 원칙). `SUDDOE_QWEN_단가_IN`·`_OUT`(USD/1M토큰)
+            #    확정값처럼 적지 않는다는 원칙). `SUDDOE_QWEN_PRICE_IN`·`_OUT`(USD/1M토큰)
             #    이 설정돼 있을 때만 계산하고, 그 값을 `설정.단가`(위 실행() 참고)에
             #    같이 남긴다 — 나중에 단가가 바뀌어도 «그 run 이 쓴 단가» 가 소급으로
             #    안 바뀌게.
