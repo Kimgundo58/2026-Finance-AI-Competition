@@ -150,6 +150,38 @@ def _공통필수(체크항목: dict[str, dict]) -> list[str]:
             if v.get("사업명") is None and v.get("비목") is None]
 
 
+_단락번호 = re.compile(r"^단락0*(\d+)$")
+
+
+def _l3표시명(원본파일명: str | None) -> str | None:
+    """L3 문서 UUID 대신 화면에 낼 이름. `L3_` 접두와 확장자를 떼고 밑줄을 띄운다.
+
+    "L3_2024창업중심대학_경상국립대_사업비사용안내문.hwp"
+      → "2024창업중심대학 경상국립대 사업비사용안내문"
+    파일명이 없으면 None — 호출부가 원래 값(UUID)으로 물러난다. 지어내지 않는다.
+    """
+    if not 원본파일명:
+        return None
+    이름 = 원본파일명.rsplit(".", 1)[0]
+    if 이름.startswith("L3_"):
+        이름 = 이름[3:]
+    return 이름.replace("_", " ").strip() or None
+
+
+def _조번호_표시(조번호: str | None) -> str | None:
+    """`단락035` 처럼 «파서 산출물» 인 조번호를 사용자 표기로 바꾼다.
+
+    🔴 원본에 제N조 구조가 없는 문서(안내문·양식)는 `split_articles()` 의 3순위
+       단락분할로 떨어지고, 그 결과가 `단락035` 다. 파싱은 «정상» 인데 그 내부
+       표기가 화면 「적용 근거」에 그대로 찍혔다(오너 지적: 「단락 08」).
+       숫자는 살린다 — 사용자가 원문에서 위치를 찾는 단서라 지우면 손실이다.
+    """
+    if not 조번호:
+        return 조번호
+    m = _단락번호.match(조번호.strip())
+    return f"{int(m.group(1))}번째 항목" if m else 조번호
+
+
 def s번호_메타(s맵: dict, dsn: str | None = None) -> dict[str, dict]:
     """s맵의 각 S번호 → 치환·등급산정에 필요한 DB 사실.
 
@@ -194,15 +226,25 @@ def s번호_메타(s맵: dict, dsn: str | None = None) -> dict[str, dict]:
         # l3 — tenant. extraction·version 축이 없다. 기관 업로드분이라 native 로 본다.
         # 🔴 `기관id` 자리에는 `org_id` 를 넣는다 — 멀티테넌시 3차 방어의 대조 대상이다.
         if l3:
+            # 🔴 2026-09-07 — `l3_documents.원본파일명` 을 «같이» 읽는다. `l3_articles.doc_id`
+            #    는 UUID 라, 그대로 내보내면 화면 「적용 근거」에 «4add2b34-d038-…» 이
+            #    그대로 찍힌다(오너가 화면에서 직접 발견). L1·L2 는 doc_id 가 사람이
+            #    읽는 제목(「예비창업패키지 세부관리기준(2025년)」)이라 이 문제가 없고,
+            #    L3 만 어긋나 있었다. 읽을 이름은 «DB 에 이미 있다» — 안 쓰고 있었을 뿐이다.
+            #    ⇒ 「DB 에 있다」 ≠ 「화면이 쓴다」.
             m = {r[0]: r for r in conn.execute("""
-                SELECT article_id, doc_id::text, 조번호, 조제목, 본문, org_id::text
-                  FROM tenant.l3_articles WHERE article_id = ANY(%s)""",
+                SELECT a.article_id, a.doc_id::text, a.조번호, a.조제목, a.본문,
+                       a.org_id::text, d.원본파일명
+                  FROM tenant.l3_articles a
+                  LEFT JOIN tenant.l3_documents d ON d.doc_id = a.doc_id
+                 WHERE a.article_id = ANY(%s)""",
                 (list(l3.values()),)).fetchall()}
             for sid, aid in l3.items():
                 if aid in m:
-                    _, doc, 조, 제목, 본문, org = m[aid]
+                    _, doc, 조, 제목, 본문, org, 파일명 = m[aid]
                     원문, 범위 = _항_추출(본문, 항호.get(sid))
-                    out[sid] = dict(doc_id=doc, 조번호=조, 조제목=제목, 원문=원문,
+                    out[sid] = dict(doc_id=_l3표시명(파일명) or doc, 조번호=_조번호_표시(조),
+                                    조제목=제목, 원문=원문,
                                     원문범위=범위, version=None, extraction="native",
                                     항호_DB=None, 기관id=org, domain="창업지원사업",
                                     layer="L3")
