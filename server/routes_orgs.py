@@ -29,14 +29,14 @@ _log = logging.getLogger(__name__)
 # 🔴 데모 org 표식. 스키마를 못 늘리므로(이 세션 허용 변경은 pw_hash 하나) 기관명 접두어로
 #    구분한다. 접두어가 «검색 대상 밖» 이어야 심사위원 org 가 목록에 안 뜬다.
 데모접두 = "[데모] "
-데모_사업명 = os.environ.get("SUDDOE_DEMO_사업명", "예비창업패키지")
+데모_사업명 = (os.environ.get("SUDDOE_DEMO_PROGRAM") or os.environ.get("SUDDOE_DEMO_사업명", "예비창업패키지"))
 # 보존 24h > 토큰 수명 2h — 정리가 «살아 있는 토큰» 을 앞질러 지우지 못하게 한 것이다
-데모_보존초 = int(os.environ.get("SUDDOE_DEMO_보존초", "86400"))
+데모_보존초 = int((os.environ.get("SUDDOE_DEMO_KEEP_SEC") or os.environ.get("SUDDOE_DEMO_보존초", "86400")))
 # 🔴 인증 없는 «쓰기» 엔드포인트다. 상한이 없으면 tenant.orgs 를 무한히 부풀리는
 #    자원고갈 통로가 된다. 넘치면 «거부» — 심사 동시 인원 상한이라 넉넉하다.
-데모_상한 = int(os.environ.get("SUDDOE_DEMO_상한", "200"))
+데모_상한 = int((os.environ.get("SUDDOE_DEMO_LIMIT") or os.environ.get("SUDDOE_DEMO_상한", "200")))
 # 한 요청에서 지우는 최대 건수. 요청 경로에서 도는 청소라 상한이 필요하다
-_정리_한도 = int(os.environ.get("SUDDOE_DEMO_정리한도", "50"))
+_정리_한도 = int((os.environ.get("SUDDOE_DEMO_PURGE_LIMIT") or os.environ.get("SUDDOE_DEMO_정리한도", "50")))
 
 
 # ── 응답 모델 ───────────────────────────────────────────────────────

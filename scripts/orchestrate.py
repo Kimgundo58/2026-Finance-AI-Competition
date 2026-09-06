@@ -82,7 +82,7 @@ DSN = db.DSN
 # 🔴 판정 호출(④)의 max_tokens. **리터럴로 두지 않는다** — run 191 은 라벨이 3000 인데
 #    코드는 1500 이었고, finish_reason 도 안 남겨 사후 확인이 불가능했다(P1 실측 0903).
 #    기록되는 값과 실제 쓰이는 값이 같은 이름을 보게 묶는다.
-판정_최대토큰 = int(os.environ.get("SUDDOE_판정_최대토큰", "1500"))
+판정_최대토큰 = int((os.environ.get("SUDDOE_JUDGE_MAX_TOKENS") or os.environ.get("SUDDOE_판정_최대토큰", "1500")))
 
 # ════════════════════════════════════════════════════════════════════════════
 # 강등코드 18종 — A 가 발행한다 (동결 인터페이스)
@@ -179,7 +179,7 @@ def _스텁_검색(cur, 질문: str, 사업명: str | None, *, top_k: int = 5,
 #
 # `retrieve.사업필터_기본` 은 **False 로 둔 채**로 호출부에서만 켠다. 그래야
 # `eval_retrieval.py` 회귀 기준선 52.9% 가 손대지 않은 채 남는다 (§7 동일 조건 비교).
-사업필터 = os.environ.get("SUDDOE_사업필터", "1") != "0"
+사업필터 = (os.environ.get("SUDDOE_PROGRAM_FILTER") or os.environ.get("SUDDOE_사업필터", "1")) != "0"
 
 
 def _검색(cur, 질문, 사업명, *, top_k=5) -> dict:
