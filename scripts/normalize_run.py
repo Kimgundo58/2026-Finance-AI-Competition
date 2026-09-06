@@ -158,7 +158,13 @@ def llm_호출(프롬프트: str, 스키마: dict | None, *,
             최대토큰: int = 1500,
             타임아웃: int = 240,          # 🔴 180→240, adapter.LLMAdapter.호출 과 통일
             재시도: int = 1,
-            스트리밍: bool | None = None) -> tuple[Any, dict]:
+            스트리밍: bool | None = None,
+            # 🔴 2026-09-07 — Qwen 판(`llm_qwen.llm_호출`)과 «같은 계약» 을 갖기 위한
+            #    자리다. vLLM 은 서버 기동 옵션(`--reasoning-parser qwen3`)이 사고를
+            #    정하므로 요청 단위로 못 끈다 — 받아서 «무시» 한다. 두 경로가 같은
+            #    인자를 받아야 `스위치_적용()` 이 몽키패치해도 호출부가 안 깨진다.
+            사고: bool | None = None,
+            **_무시) -> tuple[Any, dict]:
     """vLLM OpenAI 호환 엔드포인트. (파싱된 출력, 메타).
 
     온도 0 고정이 기본이다 — 재현성이 이 도메인의 **요건**이지 편의가 아니다
@@ -554,7 +560,9 @@ def 정규화(질문: str, *, dry: bool = False, 비목목록: list[str] | None 
     #    (`finish_reason='length'`). 정규화 3회 연속 동일 실패 — 「팔레트」가 그 사례다.
     #    ⚠️ 잘려도 예외는 안 난다. `LLM실패` 로 올라가 판단불가가 되는데, 그건
     #       「모델이 모른다」가 아니라 「우리가 자리를 안 줬다」다. 두 개를 갈라야 한다.
-    출력, 메타 = llm_호출(프롬프트, 스키마, 모델=MODEL_1 or None,
+    # 🔴 사고=False — 정규화는 «문장에서 값을 뽑는» 추출이라 사고가 필요 없다
+    #    (실측 18.3초/976토큰 → 2.1초/54토큰). vLLM 경로는 이 인자를 무시한다.
+    출력, 메타 = llm_호출(프롬프트, 스키마, 사고=False, 모델=MODEL_1 or None,
                        최대토큰=2000, 타임아웃=타임아웃)
     # guided_json 이 걸려 있어도 서버가 무시했을 때를 대비해 최소 형태만 확인한다
     if not isinstance(출력, dict) or "품목" not in 출력:
