@@ -1,1 +1,9 @@
-[]
+[
+  {
+    "id": "nxbbd4jped1mmf",
+    "opened_at": "2026-09-06T12:37:00.719319+00:00",
+    "gpu": "NVIDIA A100-SXM4-80GB",
+    "hours": 1.0,
+    "rate": 1.59
+  }
+]

@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import difflib
+import logging
 import math
 import re
 from datetime import timedelta
@@ -24,6 +25,7 @@ from . import mock_data
 from .routes_plans import _org조건
 
 router = APIRouter(tags=["할일"])
+_log = logging.getLogger(__name__)
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -265,9 +267,26 @@ def _체크항목_조회(코드: str) -> tuple[str | None, int | None, str | Non
        `기본_오프셋일` 은 52행 중 **45행이 규정 근거가 없다**(`기한근거='운영기본값'`).
        근거를 안 보고 쓰면 우리가 정한 관행이 화면에서 «규정상 기한» 으로 읽힌다.
        판단은 `_due계산()` 이 한다 — 여기서는 재료를 빠짐없이 넘기기만 한다.
+
+    🔴 2026-09-07(F3, ai-5c 실측) — `_질의()` 는 실패하면 **조용히 `[]`** 을 준다
+       (`_common.py::_질의` 기본값). 그러면 이 함수는 `(None, None, None)` 을 돌려주고,
+       호출부 `_실_동기화()` 는 `구분 = 구분 or "결제전"` 으로 덮는다 — **쿼리가 죽어도
+       화면은 에러 없이 뜨고, 결제후 코드까지 전부 결제전으로 찍힌다.**
+       실측: 프로덕션 `tenant.plan_tasks` 전 행(외주검수조서·거래처증빙수취 등 결제후
+       코드 포함)이 구분='결제전' 이었다 — 로컬 DB 로는 같은 쿼리가 정상 작동해
+       코드 자체는 무죄, 프로덕션 쪽 실패(스키마 드리프트 또는 배포 지연 추정)로 보인다.
+       실패를 다시 삼키면 다음 사람도 똑같이 못 찾는다 — 여기서 로그로 남긴다.
+       (전파는 안 한다 — `_질의` 독스트링 그대로: "DB 가 없어도 서버는 떠야 한다")
     """
-    행 = _질의('SELECT 구분, 기본_오프셋일, "기한근거" FROM corpus.check_items WHERE code = %s',
-              (코드,))
+    try:
+        행 = _질의('SELECT 구분, 기본_오프셋일, "기한근거" FROM corpus.check_items WHERE code = %s',
+                  (코드,), 예외전파=True)
+    except Exception:                                         # noqa: BLE001
+        _log.exception("체크항목_조회 실패 — code=%r (구분 기본값 '결제전' 으로 대체됨)", 코드)
+        return (None, None, None)
+    if not 행:
+        _log.warning("체크항목_조회 — code=%r 가 corpus.check_items 에 없다 "
+                     "(구분 기본값 '결제전' 으로 대체됨)", 코드)
     return (행[0][0], 행[0][1], 행[0][2]) if 행 else (None, None, None)
 
 

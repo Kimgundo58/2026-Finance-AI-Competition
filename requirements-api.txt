@@ -57,3 +57,4 @@ google-cloud-documentai==3.15.0   # pip index versions 로 확인한 최신판(2
 
 # 이 파일을 한 줄만 고쳐도 빌더의 pip 레이어가 통째로 다시 돈다(실측 재빌드 340초).
 # 모델 2.2GB 재다운로드는 Dockerfile 의 캐시 마운트가 막는다 — bake 105초 → 20초 (실측).
+openai==1.109.1
