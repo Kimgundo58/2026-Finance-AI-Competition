@@ -915,6 +915,48 @@ def admin_queue(x_admin_token: str | None = Header(default=None),
     }
 
 
+@app.post("/admin/gpu/pod")
+def admin_gpu_pod(pod_id: str = Body(..., embed=True),
+                   x_admin_token: str | None = Header(default=None)) -> dict:
+    """`ops.gpu_pod` 의 pod_id·vllm_url 을 채운다 — 사람이 SQL UPDATE 를 손으로
+    치는 자리를 없앤다(레인 ι, 2026-09-06).
+
+    🔴 **적재 경로만이다.** 판정 로직(`gpu_watchdog.py`·`adapter.py`)은 한 글자도
+    안 고쳤다 — 그쪽은 이미 `ops.gpu_pod` 를 «읽기만» 정확히 하고 있었다. 비어 있던
+    건 «누가 채우는가» 였고, 그게 지금까지 사람의 SQL 이었다. 이 엔드포인트가
+    그 자리를 대신한다.
+
+    vllm_url 은 손으로 안 받는다 — RunPod 프록시 규칙(`scratchpad/W-GPU_기동절차.md`
+    에서도 쓰던 `{pod_id}-8000.proxy.runpod.net`, `scripts/pod_serve.sh` 의
+    고정 포트 8000)으로 pod_id 하나에서 유도한다. 사람이 입력할 값을 하나로 줄이는
+    것이 목적이다 — URL을 손으로 옮겨 적다 오타 나는 자리를 없앤다.
+
+    🔴 `상태` 컬럼은 여기서 안 건드린다. 가동 여부 판정은 여전히 `/api/gpu/wake`
+    →`GPU워치독.기동_진행()`(vLLM 헬스체크로 확인) 몫이다 — 이 엔드포인트는
+    "어느 팟을 볼지" 만 알려준다.
+    """
+    _관리자(x_admin_token)
+    pod_id = (pod_id or "").strip()
+    if not pod_id:
+        raise HTTPException(400, "pod_id 가 비어 있다")
+    vllm_url = f"https://{pod_id}-8000.proxy.runpod.net"
+    n = _실행(
+        "UPDATE ops.gpu_pod SET pod_id=%s, vllm_url=%s, updated_at=now(), "
+        "updated_by='admin_gpu_pod' WHERE id='default'",
+        (pod_id, vllm_url))
+    if n <= 0:
+        raise HTTPException(500, "ops.gpu_pod 갱신 실패 — DB 연결·스키마를 확인해라"
+                                  f" (rowcount={n})")
+    # 🔴 adapter.vllm_url() 은 30초 TTL 캐시다 — 강제갱신 안 하면 최대 30초간
+    #    옛 주소(또는 env 폴백)를 계속 쓴다. 시연 중엔 그 30초도 아깝다
+    try:
+        from adapter import vllm_url as _vllm_url_읽기
+        갱신값 = _vllm_url_읽기(강제갱신=True)
+    except Exception as e:                                    # noqa: BLE001
+        갱신값 = f"갱신 실패 {type(e).__name__} — 다음 호출 시 자연 갱신됨(TTL 30초)"
+    return {"pod_id": pod_id, "vllm_url": vllm_url, "캐시_갱신확인": 갱신값}
+
+
 @app.post("/admin/warmup")
 def admin_warmup(x_admin_token: str | None = Header(default=None)) -> dict:
     """발표 30분 전 워밍업 (`Agent.md` §9).

@@ -309,35 +309,104 @@ def b5_값(cur, org_id) -> dict | None:
     """B5 의 **값**. `b5_문장` 의 문자열판이 아니라 층 B 대조용 원본이다 (ai-ba 패치).
 
     🔴 반환값 셋을 갈라야 한다 — 뭉치면 게스트 가드가 조용히 꺼진다.
-        None   조회 자체를 못 했다(예외) = 모른다  -> 층 B 상태 규칙 무발효
-        {}     F축이 없다(게스트·미등록·전 NULL)   -> 최대 강도
+        None   조회를 «전부» 못 했다(양쪽 다 예외) = 모른다  -> 층 B 상태 규칙 무발효
+        {}     F축이 없다(게스트·미등록·전 NULL)             -> 최대 강도
         {...}  실제 값
 
     `b5_문장` 은 셋을 전부 None 으로 뭉갠다 — 프롬프트에 넣을 문자열이라 그래도 됐지만,
     검증기는 «모른다» 와 «없다» 를 갈라야 하므로 함수를 합치지 않는다.
+
+    2026-09-06(레인 η) — F4(`tenant.f_personnel`) 를 더한다. F1(f_profile)·F4(f_personnel)
+    를 **각각 독립 시도**한다 — 하나가 죽어도(스키마 오류 등) 다른 하나는 살아야 한다
+    (그래서 트랜잭션을 되살리는 rollback 도 각자 갖는다. b5_문장 이 이미 그렇게 한다).
+    둘 다 죽었을 때만 None(모른다) 이다.
     """
     if not org_id:
         return {}                       # 게스트. '모른다' 가 아니라 '없다' 다
+
+    값: dict = {}
+    성공 = False
+
+    # ── F1 (f_profile) ──────────────────────────────────────────────
     try:
         r = cur.execute("""SELECT 협약시작일, 협약종료일, 정부지원_현금, 자기부담_현금,
                                   과업범위요약
                              FROM tenant.f_profile WHERE org_id=%s LIMIT 1""",
                         (org_id,)).fetchone()
+        성공 = True
+        if r:
+            값.update({k: v for k, v in zip(("협약시작일", "협약종료일", "정부지원_현금",
+                                            "자기부담_현금", "과업범위요약"), r)
+                       if v is not None})
     except Exception as e:
         # 🔴 조용히 삼키지 않는다. 2026-09-06 에 이 except 가 «스키마 오류» 를 삼키고 있었다 —
         #    없는 컬럼(`협약총액`)을 물어서 «항상 None» 이었고, 그래서 층 B 상태 규칙이
         #    «영원히 무발효» 였는데 아무 데도 안 보였다. 계약(None=모른다)은 지키되 소리는 낸다.
-        print(f"🔴 b5_값 조회 실패 — {type(e).__name__}: {e}", file=sys.stderr)
+        print(f"🔴 b5_값 F1(f_profile) 조회 실패 — {type(e).__name__}: {e}", file=sys.stderr)
         try:
-            cur.connection.rollback()   # 🔴 b5_문장 과 같은 이유 — 실패가 뒤를 죽이면 안 된다
+            cur.connection.rollback()   # 이 실패가 뒤(F4 조회·판정 저장)를 죽이면 안 된다
         except Exception:
             pass
-        return None                     # 모른다
-    if not r:
-        return {}
-    return {k: v for k, v in zip(("협약시작일", "협약종료일", "정부지원_현금",
-                                  "자기부담_현금", "과업범위요약"), r)
-            if v is not None}
+
+    # ── F4 (f_personnel) ────────────────────────────────────────────
+    # 🔴 f_personnel 에는 org_id 가 없다 — f_profile.profile_id 로 조인해야 한다.
+    # 🔴 org 당 «여러 행» 일 수 있다(직원별 레코드). 값 하나로 접을 근거가 없다 —
+    #    2행 이상이면 «어느 직원» 의 고용형태·타사업참여율인지 이 자리에서 모른다.
+    #    아무 행이나(예: 첫 행) 대표로 쓰면 «엉뚱한 사람 값으로 조건을 검증한 뒤
+    #    조용히 통과시키는» 틀린 즉시검증이 나온다 — 원칙 7(모르면 보류)에 따라
+    #    0행·2행 이상은 F4 를 «비운다»(즉시검증 대상에서 빠지고 인라인요청으로 간다).
+    #    1행일 때만 스칼라로 접는다 — 그때는 「그 org 의 유일한 인원」이라 안전하다.
+    try:
+        cur.execute("""SELECT p.역할, p.고용형태, p.타사업참여율, p.소속기관유형, p.겸직
+                         FROM tenant.f_personnel p
+                         JOIN tenant.f_profile pr USING (profile_id)
+                        WHERE pr.org_id=%s""", (org_id,))
+        인원행 = cur.fetchall()
+        성공 = True
+        if len(인원행) == 1:
+            값.update({k: v for k, v in zip(
+                ("역할", "고용형태", "타사업참여율", "소속기관유형", "겸직"), 인원행[0])
+                if v is not None})
+        elif len(인원행) > 1:
+            print(f"⚠️ b5_값: org={org_id} f_personnel {len(인원행)}행 — "
+                  "한 값으로 못 접어 F4 를 비운다(모르면 보류)", file=sys.stderr)
+    except Exception as e:
+        print(f"🔴 b5_값 F4(f_personnel) 조회 실패 — {type(e).__name__}: {e}", file=sys.stderr)
+        try:
+            cur.connection.rollback()
+        except Exception:
+            pass
+
+    # ── F3 (f_exec) — 🔴 배선만. 지금 0행이라 값은 기대하지 않는다 ───────────
+    # f_exec 는 «집행 건별 로그» 라 f_personnel 과 성격이 다르다 — 나중에 데이터가
+    # 쌓이면 "org 하나에 여러 집행" 이 «정상 상태» 가 된다(0/2행 이상=보류 규칙이
+    # f_personnel 만큼 맞는지 그때 다시 봐야 한다). 지금은 0행만 실측했으므로 이
+    # 자리에서는 같은 규칙(1행만 접는다)을 그대로 두되, 데이터가 쌓이는 순간 이
+    # 가정이 거의 항상 «접지 않는» 쪽으로 기운다는 걸 다음 세션에 남긴다.
+    try:
+        cur.execute("""SELECT e.비목, e.재원, e.거래처, e.인력역할, e.귀속월, e.금액
+                         FROM tenant.f_exec e
+                         JOIN tenant.f_profile pr USING (profile_id)
+                        WHERE pr.org_id=%s""", (org_id,))
+        집행행 = cur.fetchall()
+        성공 = True
+        if len(집행행) == 1:
+            값.update({k: v for k, v in zip(
+                ("비목", "재원", "거래처", "인력역할", "귀속월", "금액"), 집행행[0])
+                if v is not None})
+        elif len(집행행) > 1:
+            print(f"⚠️ b5_값: org={org_id} f_exec {len(집행행)}행 — "
+                  "한 값으로 못 접어 F3 를 비운다(모르면 보류)", file=sys.stderr)
+    except Exception as e:
+        print(f"🔴 b5_값 F3(f_exec) 조회 실패 — {type(e).__name__}: {e}", file=sys.stderr)
+        try:
+            cur.connection.rollback()
+        except Exception:
+            pass
+
+    if not 성공:
+        return None                     # 셋 다 실패 — 모른다
+    return 값
 
 
 def 증빙_발급처(cur, 룰: dict | None) -> list[dict]:
@@ -378,7 +447,18 @@ def f값_경로키(값: dict | None) -> dict:
         return {}
     # 🔴 축 번호는 컬럼이 사는 «테이블» 이 아니라 `llm_validate.py` 의 축 정의를 따른다 —
     #    `과업범위요약` 은 f_profile 에 살지만 «F2» 다(F축_특례). F1 로 붙이면 항상 미스다.
-    특례 = {"과업범위요약": "F2"}
+    #    2026-09-06(레인 η) — F4(f_personnel)·F3(f_exec) 컬럼도 같은 이유로 여기 추가한다.
+    #    `llm_validate.py::F축_테이블` = {"F1":"f_profile","F3":"f_exec","F4":"f_personnel"}
+    #    을 그대로 따른다 — 두 상수가 따로 놀면 다음에 또 "붙였는데 안 붙는" 실패가 난다.
+    특례 = {
+        "과업범위요약": "F2",
+        # F4 — tenant.f_personnel
+        "역할": "F4", "고용형태": "F4", "타사업참여율": "F4",
+        "소속기관유형": "F4", "겸직": "F4",
+        # F3 — tenant.f_exec (지금 0행. 배선만 — 값 기대는 안 한다)
+        "비목": "F3", "재원": "F3", "거래처": "F3",
+        "인력역할": "F3", "귀속월": "F3", "금액": "F3",
+    }
     return {f'{특례.get(k, "F1")}.{k.replace("_", ".")}': v for k, v in 값.items()}
 
 
