@@ -64,7 +64,7 @@ sys.path.insert(0, str(ROOT))          # `python server/main.py` 로도 server �
 from server._common import (DSN, MOCK, _sse, _sse응답, _실행, _질의,  # noqa: E402
                             비목_ENUM, 판정_ENUM, 창업활동비_사업 as _창업활동비_사업)
 from server.models import (F1, F3항, F4항, F5, 정규화요청,          # noqa: E402
-                           판정요청, 프로필)
+                           판정요청, 프로필, 사업목록응답, 사업정보, 우선순위규칙)
 from server import inquiry                                       # noqa: E402
 from server import (auth, gpu_watchdog, routes_admin_ingest,        # noqa: E402
                     routes_l3, routes_orgs, routes_plans, routes_tasks)
@@ -664,22 +664,50 @@ def vocab(사업명: str | None = None) -> dict:
             "비고": "프론트 라벨을 이 문자열 그대로 맞춘다. 별칭 매핑은 서버가 한다"}
 
 
-@app.get("/api/programs")
-def programs() -> dict:
+def _우선순위규칙맵() -> dict[str, list[우선순위규칙]]:
+    """`corpus.precedence_rules` -> {사업명: [우선순위규칙...]}.
+
+    🔴 org 경계가 «없는» 표다(사업명으로만 갈린다 — 열 자체에 org_id 가 없다).
+       그래서 `_org조건()` 이 필요 없다 — 남의 기관에 새는 게 아니라 모두가 보는
+       공통 참조 데이터다. `verified` 만 거른다 — 검수 안 된 행을 사실처럼 보여주지 않는다.
+    """
+    행 = _질의('SELECT "사업명", "우선계층", "열위계층", "범위", "우선규범", "해석" '
+              'FROM corpus.precedence_rules WHERE "verified" ORDER BY prec_id')
+    맵: dict[str, list[우선순위규칙]] = {}
+    for 사업명, 우선, 열위, 범위, 규범, 해석 in 행:
+        맵.setdefault(사업명, []).append(
+            우선순위규칙(우선계층=우선, 열위계층=열위, 범위=범위, 우선규범=규범, 해석=해석))
+    return 맵
+
+
+@app.get("/api/programs", response_model=사업목록응답)
+def programs() -> 사업목록응답:
     """사업 목록. 게스트에게 화면 3 에서 사업을 묻기 위한 재료 (§10 확인필요 #1).
 
     룰 조회 키가 `사업 × 비목` 이라 사업을 모르면 한도를 못 고른다 — 그래서
     게스트에게도 물어야 한다. 그 UI 결정의 데이터는 여기가 준다.
+
+    🔴 2026-09-07 레인 Q — `우선순위규칙` 필드 추가. `lib/norms.ts:74-91` 이 8사업
+       공통 관리기준(L1/L2/L3 중 뭐가 이기는지) 표를 프론트에 하드코딩하고 있었다
+       (ai-9d 조사) — 서버가 안 주던 정보였다. 기존 필드(사업명·별칭·비목계통·
+       트랙범위)는 이름·모양 그대로다. 새 라우트로 안 뺀 이유: `/api/programs` 는
+       게스트가 화면 3 진입 시 **이미 한 번** 부르는, 사실상 정적인 참조 데이터라 —
+       같은 생명주기·같은 캐시 특성인데 새 엔드포인트로 가르면 왕복이 하나 늘 뿐이다.
     """
     행 = _질의('SELECT "사업명", "별칭", "비목계통", "트랙범위" FROM corpus.programs '
               'WHERE "활성" ORDER BY "사업명"')
+    우선순위맵 = _우선순위규칙맵()
     if 행:
-        return {"사업": [{"사업명": a, "별칭": list(b or []), "비목계통": c, "트랙범위": d}
-                        for a, b, c, d in 행]}
-    return {"사업": [{"사업명": n, "별칭": [], "비목계통": "창업", "트랙범위": None} for n in (
-        "예비창업패키지", "초기창업패키지", "재도전성공패키지", "창업도약패키지",
-        "창업중심대학", "초격차 스타트업 프로젝트", "모두의 창업 프로젝트", "TIPS")],
-        "비고": "corpus.programs 를 못 읽어 코드 상수로 답했다"}
+        return 사업목록응답(사업=[
+            사업정보(사업명=a, 별칭=list(b or []), 비목계통=c, 트랙범위=d,
+                    우선순위규칙목록=우선순위맵.get(a, []))
+            for a, b, c, d in 행])
+    return 사업목록응답(
+        사업=[사업정보(사업명=n, 별칭=[], 비목계통="창업", 트랙범위=None,
+                    우선순위규칙목록=우선순위맵.get(n, [])) for n in (
+            "예비창업패키지", "초기창업패키지", "재도전성공패키지", "창업도약패키지",
+            "창업중심대학", "초격차 스타트업 프로젝트", "모두의 창업 프로젝트", "TIPS")],
+        비고="corpus.programs 를 못 읽어 코드 상수로 답했다")
 
 
 @app.post("/api/normalize")

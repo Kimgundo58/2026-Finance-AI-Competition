@@ -302,6 +302,51 @@ class L3업로드응답(BaseModel):
     파싱품질: Literal["대기", "pass", "warn", "fail"] | None = None
 
 
+class L3현재문서(BaseModel):
+    """org 에 지금 「적용 중」인 L3 문서 한 건. `status='active'` 인 것만 이 모양으로 나간다
+    — `superseded`(구판)는 이 응답에 절대 안 실린다(레인 Q, 2026-09-07 지시).
+    """
+    doc_id: str
+    원본파일명: str
+    version: str | None = None
+    시행일: str | None = None
+    파싱품질: Literal["대기", "pass", "warn", "fail"] | None = None
+    조_건수: int = 0
+
+
+class L3현재문서목록응답(BaseModel):
+    """`GET /api/l3/current` — org_id 없으면(게스트) 빈 목록. 남의 org 문서는 절대 안 섞인다."""
+    문서: list[L3현재문서] = Field(default_factory=list)
+
+
+# ════════════════════════════════════════════════════════════════════
+# ⑥ 사업 목록 — 화면 3 게스트 사업 선택 (`/api/programs`)
+# ════════════════════════════════════════════════════════════════════
+
+class 우선순위규칙(BaseModel):
+    """`corpus.precedence_rules` 한 행. L1/L2/L3 중 어느 층이 이기는지."""
+    우선계층: str
+    열위계층: str
+    범위: str | None = None
+    우선규범: str | None = None
+    해석: str | None = None
+
+
+class 사업정보(BaseModel):
+    사업명: str
+    별칭: list[str] = Field(default_factory=list)
+    비목계통: str | None = None
+    트랙범위: str | None = None
+    # 🔴 2026-09-07 레인 Q 추가 — 기존 필드(사업명·별칭·비목계통·트랙범위)는 그대로,
+    #    이 필드만 더한다(계약 안 깨짐). `lib/norms.ts:74-91` 프론트 하드코딩 대체용.
+    우선순위규칙목록: list[우선순위규칙] = Field(default_factory=list)
+
+
+class 사업목록응답(BaseModel):
+    사업: list[사업정보] = Field(default_factory=list)
+    비고: str | None = None
+
+
 # ════════════════════════════════════════════════════════════════════
 # ⑥ F 프로필 — 화면 12 내 정보 (기존 계약. 동결)
 #    ⚠️ 현물 없음 (2026-08-31). f1 은 2칸, f3 에 「형태」 없음, f4 에 이름칸 없음.
