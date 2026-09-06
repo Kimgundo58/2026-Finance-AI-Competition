@@ -328,7 +328,14 @@ CREATE TABLE corpus.item_alias (
     사업명      TEXT,
     출처        TEXT,            -- seed | 사용자질문 | 센터답변
     embedding   extensions.vector(1024),
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- 🔴 2026-09-06 — 별칭의 «근거». 전부 NULL 허용이다.
+    --   레인 M 이 216건을 원문과 문자대조한 결과이고, 근거를 «못 찾은» 행은 비워 둔다.
+    --   「상품명이 발췌에 보이는가」는 «만들 때» 의 잣대이지 «있던 것을 재는» 잣대가 아니다 —
+    --   그래서 대조성공 172 / 보류 42 / 미확정 2 가 갈렸고, 보류·미확정은 채우지 않았다.
+    원문발췌  TEXT,
+    doc_id    TEXT,
+    조번호    TEXT
 );
 CREATE INDEX ix_alias_name ON corpus.item_alias (상품명);
 
