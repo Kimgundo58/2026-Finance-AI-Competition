@@ -1,1 +1,0 @@
-{"model": "Qwen/Qwen3-8B", "messages": [{"role": "user", "content": "워밍업"}], "temperature": 0, "max_tokens": 8}
