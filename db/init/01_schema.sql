@@ -165,17 +165,12 @@ COMMENT ON COLUMN corpus.chunks.text IS '원문 문자열 그대로. 인용 검�
 --    (retrieval_scope 로 진입점을 좁히면 1만 미만으로 떨어질 수 있다 — 그래서 먼저 잰다)
 
 -- ════════════════════════════════════════════════════════════════
--- corpus 4. case_chunks : 사례 인덱스 (B등급). 물리적으로 분리한다.
+-- corpus 4. (비어 있음) — case_chunks 는 2026-09-06 오너 결정으로 «드랍했다»
+--   판단불가 경로에 사례를 붙이지 않는다. 193행은
+--   scratchpad/_백업_case_chunks_0906.json 에 백업돼 있다.
+--   🔴 «물리 분리 원칙 자체는 남는다» — 판정 인덱스는 여전히 L1·L2 + 현재 기관 L3 뿐이고,
+--      타 기관 규정(L4)·정답셋은 절대 넣지 않는다. 사라진 것은 «사례 테이블» 이지 «경계» 가 아니다.
 -- ════════════════════════════════════════════════════════════════
-CREATE TABLE corpus.case_chunks (
-    case_id     BIGSERIAL PRIMARY KEY,
-    doc_id      TEXT NOT NULL REFERENCES corpus.documents(doc_id) ON DELETE CASCADE,
-    출처도메인  TEXT NOT NULL,   -- R&D | 보조금 | 창업
-    question    TEXT NOT NULL,
-    answer      TEXT NOT NULL,
-    embedding   extensions.vector(1024)     -- question 을 임베딩한다 (answer 아님)
-);
-COMMENT ON TABLE corpus.case_chunks IS '판단불가 경로에서만 조회. 판정 근거로 인용 금지.';
 
 -- ════════════════════════════════════════════════════════════════
 -- corpus 5. rules : 룰 테이블 (fast path). 벡터 없음.
@@ -540,7 +535,7 @@ CREATE TABLE eval.golden_set (
     검수메모    TEXT
 );
 COMMENT ON TABLE eval.golden_set IS
-  '절대 corpus.chunks / corpus.case_chunks 에 넣지 말 것 (정답 유출). Supabase 덤프 대상도 아니다.';
+  '절대 corpus.chunks 에 넣지 말 것 (정답 유출). Supabase 덤프 대상도 아니다.';
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -558,7 +553,6 @@ CREATE VIEW corpus.v_적재현황 AS
 SELECT '01. corpus.documents'      AS 테이블, count(*) AS 건수 FROM corpus.documents
 UNION ALL SELECT '02. corpus.doc_articles',     count(*) FROM corpus.doc_articles
 UNION ALL SELECT '03. corpus.chunks',           count(*) FROM corpus.chunks
-UNION ALL SELECT '04. corpus.case_chunks',      count(*) FROM corpus.case_chunks
 UNION ALL SELECT '05. corpus.rules',            count(*) FROM corpus.rules
 UNION ALL SELECT '06. corpus.precedence_rules', count(*) FROM corpus.precedence_rules
 UNION ALL SELECT '07. corpus.refs',             count(*) FROM corpus.refs
