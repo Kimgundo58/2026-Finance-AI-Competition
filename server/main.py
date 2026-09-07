@@ -413,7 +413,11 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[o for o in os.environ.get(
         "SUDDOE_CORS", "http://localhost:3000,http://localhost:5173").split(",") if o],
-    allow_methods=["GET", "POST", "PUT", "PATCH", "OPTIONS"],
+    # 🔴 2026-09-07(ai-fe) — DELETE 가 빠져 있었다. `DELETE /api/plans/{id}` 라우트(v26)는
+    #    있는데 브라우저 사전 확인(OPTIONS)이 여기서 400 으로 막혀 **실제 DELETE 가 서버에
+    #    닿지 못했다** — 실화면 「삭제하지 못했습니다」, 로그엔 OPTIONS 400 두 건뿐(00:55).
+    #    curl 로는 되고 브라우저에서만 안 되는 유형이다.
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
