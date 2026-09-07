@@ -82,7 +82,7 @@ DSN = db.DSN
 # 🔴 판정 호출(④)의 max_tokens. **리터럴로 두지 않는다** — run 191 은 라벨이 3000 인데
 #    코드는 1500 이었고, finish_reason 도 안 남겨 사후 확인이 불가능했다(P1 실측 0903).
 #    기록되는 값과 실제 쓰이는 값이 같은 이름을 보게 묶는다.
-판정_최대토큰 = int(os.environ.get("SUDDOE_판정_최대토큰", "1500"))
+판정_최대토큰 = int((os.environ.get("SUDDOE_JUDGE_MAX_TOKENS") or os.environ.get("SUDDOE_판정_최대토큰", "1500")))
 
 # ════════════════════════════════════════════════════════════════════════════
 # 강등코드 18종 — A 가 발행한다 (동결 인터페이스)
@@ -179,7 +179,7 @@ def _스텁_검색(cur, 질문: str, 사업명: str | None, *, top_k: int = 5,
 #
 # `retrieve.사업필터_기본` 은 **False 로 둔 채**로 호출부에서만 켠다. 그래야
 # `eval_retrieval.py` 회귀 기준선 52.9% 가 손대지 않은 채 남는다 (§7 동일 조건 비교).
-사업필터 = os.environ.get("SUDDOE_사업필터", "1") != "0"
+사업필터 = (os.environ.get("SUDDOE_PROGRAM_FILTER") or os.environ.get("SUDDOE_사업필터", "1")) != "0"
 
 
 def _검색(cur, 질문, 사업명, *, top_k=5) -> dict:
@@ -227,9 +227,15 @@ def _게이팅(l3룰) -> dict:
     return {"need_upper": True, "seed_refs": []}          # 허용='가능' → 🔴 강제
 
 
-def _l3로드(cur, org_id, 사업명) -> list[dict]:
+def _l3로드(cur, org_id, 사업명, 비목=None) -> list[dict]:
+    # 🔴 2026-09-07 — `비목` 은 «순서만» 바꾸는 힌트다(`l3_load.로드` docstring).
+    #    `SUDDOE_L3_비목순=on` 일 때만 발효하고, 어떤 경우에도 조를 «버리지 않는다».
+    #    옛 서명(3인자)으로 부르는 곳이 있어도 기본값 None 이라 안 깨진다.
     if _E_로드 and org_id:
-        return _E_로드(cur, org_id, 사업명) or []
+        try:
+            return _E_로드(cur, org_id, 사업명, 비목) or []
+        except TypeError:            # E 가 아직 3인자 판이면 그대로 부른다
+            return _E_로드(cur, org_id, 사업명) or []
     return []                                                    # STUB: E
 
 
@@ -602,7 +608,15 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool 
        plan_id: int | None = None,
        격리근거: list[dict] | None = None, 주입: str | None = None,
        게이트임계: float | None = None, 온도: float = 0.0,
-       변형: str = "V0", _비목고정: str | None = None,
+       # 🔴 2026-09-07 — 기본값을 V0 → V7 로 «채택» 했다. A12 사전 선언 기준 3개를
+       #    전부 통과했다(run 205 기준선 vs run 206 V7, 운영 코퍼스 320문항):
+       #      ① 일치율 213 → 217 (+4문항, 기준 +3 이상)
+       #      ② 치명오답_넓음 26 → 26 (늘지 않음 — 정지 조건 통과)
+       #      ③ 판단불가율 1.2% (0% 아님)
+       #    겨냥한 자리가 움직였다: 정답=가능 4.8% → 14.3%(2건 → 6건),
+       #    예측 조건부 쏠림 124 → 120. 불가·조건부 정확도는 «한 건도 안 잃었다».
+       #    🔴 +4문항 = +1.2%p 로 기준을 «겨우» 넘겼다. 과장하지 않는다.
+       변형: str = "V7", _비목고정: str | None = None,
        정규화결과: dict | None = None,
        폐포사용: bool = True,
        사용자F값: dict | None = None) -> dict:
@@ -827,7 +841,7 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool 
             l3본문 = []
         else:
             with ThreadPoolExecutor(max_workers=2) as ex:
-                fl3 = ex.submit(_병렬_l3, org_id, 사업명)
+                fl3 = ex.submit(_병렬_l3, org_id, 사업명, 비목)
                 fse = ex.submit(_병렬_검색, 질문, 사업명, top_k)
                 l3본문, l3err = fl3.result()
                 검색결과, se_err = fse.result()
@@ -1037,7 +1051,7 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool 
             지연ms=지연), 기록=False, 닫기=닫기)
 
 
-def _병렬_l3(org_id, 사업명):
+def _병렬_l3(org_id, 사업명, 비목=None):
     """스레드 안에서 자기 커넥션을 연다 — psycopg 커넥션은 공유하지 않는다."""
     if not org_id:
         return [], None
@@ -1045,7 +1059,7 @@ def _병렬_l3(org_id, 사업명):
         # 🔴 autocommit. 읽기 트랜잭션을 붙들면 다른 세션의 DDL 과 교착난다
         #    (2026-08-31 8세션 병렬 중 DeadlockDetected 실측 — C 세션 보고).
         with db.connect(connect_timeout=5, autocommit=True) as c:
-            return _l3로드(c.cursor(), org_id, 사업명), None
+            return _l3로드(c.cursor(), org_id, 사업명, 비목), None
     except Exception as e:
         return [], f"{type(e).__name__}: {e}"
 

@@ -82,7 +82,7 @@ DSN = os.environ.get("SUDDOE_DSN", "postgresql://postgres:devpw@localhost:5432/s
 #    `SUDDOE_L3_판독기 = vlm | docai` (기본 vlm). 계약이 같아(`extract(path) ->
 #    (본문, 페이지오프셋)`) import 만 바꿔 끼운다 — 아래 호출 코드는 한 글자도 안 고친다.
 #    둘 다 없거나 고른 쪽이 없으면 «조용히 스킵» 이 아니라 stderr 에 남기고 스킵한다.
-_L3_판독기 = os.environ.get("SUDDOE_L3_판독기", "vlm")
+_L3_판독기 = (os.environ.get("SUDDOE_L3_READER") or os.environ.get("SUDDOE_L3_판독기", "vlm"))
 try:
     if _L3_판독기 == "docai":
         from docai_extract import extract as _vlm추출  # noqa: E402
