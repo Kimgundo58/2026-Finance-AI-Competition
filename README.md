@@ -10,7 +10,7 @@
 [![Cloud Run](https://img.shields.io/badge/Cloud%20Run-GCP-4285F4?style=flat-square&logo=googlecloud&logoColor=white)](https://cloud.google.com/run)
 [![Qwen](https://img.shields.io/badge/LLM-Qwen3.7--plus-FF6A00?style=flat-square)](https://www.alibabacloud.com/en/product/modelstudio)
 
-[🩺 실서버 헬스체크](https://suddoe-api-1081277785480.asia-northeast3.run.app/api/health) · [📘 문서 지도](docs/README.md)
+[🚀 데모 실행하기](https://2026-finance-ai-competition-fronten.vercel.app/) · [🩺 실서버 헬스체크](https://suddoe-api-1081277785480.asia-northeast3.run.app/api/health) · [📘 문서 지도](docs/README.md)
 
 </div>
 
@@ -46,8 +46,19 @@
 | 프로젝트명 | 써도돼요 |
 | 대상 사업 | 창업진흥원 8종(예비창업패키지·초기창업패키지·창업도약패키지·창업중심대학·재도전성공패키지·초격차 스타트업 프로젝트·TIPS·모두의창업) |
 | 판정 결과 | 가능 · 조건부 · 불가 · 판단불가 |
-| 배포 | 백엔드 FastAPI on Cloud Run(asia-northeast3) + Cloud SQL(PostgreSQL 17 + pgvector), 프론트 Vercel(별도 레포) |
+| 배포 주소 | [Vercel 데모](https://2026-finance-ai-competition-fronten.vercel.app/) |
+| 구성 | 백엔드 FastAPI on Cloud Run(asia-northeast3) + Cloud SQL(PostgreSQL 17 + pgvector), 프론트 Vercel(별도 레포) |
 | 저장소 | 이 레포(백엔드·수집·평가) |
+
+### 🖥️ 시연 홈화면
+
+<p align="center">
+  <a href="https://2026-finance-ai-competition-fronten.vercel.app/">
+    <img src="docs/screenshots/홈화면.png" alt="써도돼요 시연 홈화면" width="860">
+  </a>
+</p>
+
+<p align="center"><a href="https://2026-finance-ai-competition-fronten.vercel.app/"><b>브라우저에서 데모 열기</b></a></p>
 
 ---
 
@@ -100,9 +111,6 @@ DASHSCOPE_API_KEY=your_dashscope_api_key_here
 SUDDOE_QWEN_MODEL=qwen3.7-plus
 ```
 
-RunPod에서 vLLM(Qwen3-32B-AWQ)로 돌리는 경로도 코드에 남아 있다(`SUDDOE_LLM=vllm` +
-`VLLM_URL`) — 지금은 GPU 팟이 정지된 상태다.
-
 ---
 
 <a id="3-기술-스택"></a>
@@ -130,7 +138,6 @@ RunPod에서 vLLM(Qwen3-32B-AWQ)로 돌리는 경로도 코드에 남아 있다(
 
 <p>
   <img src="https://img.shields.io/badge/DashScope-Qwen3.7--plus-FF6A00?style=for-the-badge" alt="DashScope Qwen">
-  <img src="https://img.shields.io/badge/vLLM-예비경로(정지)-6B7280?style=for-the-badge" alt="vLLM">
 </p>
 
 ### Infra
@@ -240,7 +247,6 @@ requirements-api.txt             API 컨테이너 의존성 (torch CPU 휠 고�
 - L3(기관 규정) 세트는 다른 세트보다 일치율이 낮다(55.6%) — 조건단위로 보면 9개뿐인
   경상국립대 사례로 검증했고, 그중 L1/L2와 실제로 갈리는 조건은 9개뿐이라 판정력을
   넓게 일반화하기는 이르다.
-- GPU(vLLM) 경로는 코드에 남아 있지만 팟은 정지 상태다. 운영은 DashScope API로 돈다.
 - 게스트 사용자는 F축(기관 프로필) 없이 판정하므로 전제가 다수 남는다 — 로그인은
   정확도를 높이는 다이얼이지 관문이 아니다.
 
