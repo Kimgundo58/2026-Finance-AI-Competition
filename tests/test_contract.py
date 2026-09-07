@@ -91,7 +91,10 @@ def _가드_초기화():
     "vocab":       ({"비목", "별칭", "사업명", "비고"}, set()),
     # 🔴 `비고` 는 corpus.programs 를 못 읽었을 때만 붙는다 (코드 상수 폴백)
     "programs":    ({"사업"}, {"비고"}),
-    "programs_항": ({"사업명", "별칭", "비목계통", "트랙범위"}, set()),
+    # 🔴 2026-09-07 — `우선순위규칙목록` 추가. `corpus.precedence_rules` 를 읽는
+    #    라우트가 서버에 «0개» 라 프론트(`lib/norms.ts`)가 8사업 표를 하드코딩하고
+    #    있었다. 정적 참조데이터(사업 8종·규칙 9행)라 별도 라우트 대신 이 응답에 얹었다.
+    "programs_항": ({"사업명", "별칭", "비목계통", "트랙범위", "우선순위규칙목록"}, set()),
     "계획목록":     ({"통계", "건수", "페이지", "크기", "항목"}, set()),
     "계획통계":     ({"전체", "확인필요", "위험", "특이사항없음", "점검전", "금액합계"}, set()),
     "계획요약":     ({"plan_id", "제목", "확정비목", "금액", "판정",
@@ -634,11 +637,19 @@ def test_실판정이_터져도_4way_밖으로_안_나간다(monkeypatch):
     ("GET", "/api/health"), ("GET", "/api/vocab"), ("GET", "/api/programs"),
     ("POST", "/api/normalize"), ("POST", "/api/judge"),
     ("GET", "/api/plans"), ("POST", "/api/plans"), ("GET", "/api/plans/{plan_id}"),
+    # 🔴 2026-09-07 신설 — 화면에 삭제 버튼이 «이미 있었는데» 서버 라우트가 없어
+    #    localStorage 만 지우고 "삭제했습니다" 라고 알리고 있었다(새로고침하면 되살아남).
+    ("DELETE", "/api/plans/{plan_id}"),
     ("POST", "/api/plans/{plan_id}/tasks:sync"),
     ("POST", "/api/plans/{plan_id}/tasks"),
     ("PATCH", "/api/plans/{plan_id}/tasks/{task_id}"),
     ("GET", "/api/tasks"),
     ("POST", "/api/l3/upload"), ("GET", "/api/l3/{doc_id}"),
+    # 🔴 2026-09-07 신설 — 「이 기관에 지금 적용 중인 L3 문서」를 doc_id 없이 물을 방법이
+    #    없어서 프론트(`lib/orgs.ts:107`)가 파일명을 하드코딩하고 있었다.
+    #    🔴 `/{doc_id}` «보다 먼저» 등록해야 한다 — 아니면 FastAPI 가 "current" 를
+    #      doc_id 로 먹어 404 가 난다(`routes_l3.py` 165행 vs 197행).
+    ("GET", "/api/l3/current"),
     ("GET", "/api/profile"), ("PUT", "/api/profile"),
     # 🔴 2026-09-04 (Q2/Q5, 중앙 판단) — 프론트가 「로그인 직후 GPU 깨우기」에서
     #    실제로 부르는 프론트 계약 경로다. `reap` 은 안 그렇다 — 아래 `계약_보류` 참조.
