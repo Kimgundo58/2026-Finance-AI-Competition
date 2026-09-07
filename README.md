@@ -81,7 +81,7 @@ FILTER = "embedding IS NOT NULL AND status='active' AND parse_quality='high'
 - **검수 전 문서는 안 보인다.** 자동 수집분은 `status='staged'` 로 들어오고, 사람이
   검수해 `'active'` 로 올린다. 필터를 깜빡할 자리가 없다.
 
-새 인덱싱 경로는 `scripts/archive/eval/index_guard.py` 를 반드시 통과한다.
+새 인덱싱 경로는 `scripts/retrieve.py` 의 FILTER 를 반드시 통과한다.
 
 ---
 
@@ -142,7 +142,6 @@ POST /ingest/weekly  (수집기 배선 완료 · 스케줄러 연결은 미결)
 
 ## 읽는 순서
 
-`docs/README.md` → 지금 상태 `docs/0_현황.md` → 결정 대기 `docs/9_미결.md`
+`docs/README.md` → 지금 상태 `docs/0_현황.md`
 
-판단이 필요한 원칙은 `CLAUDE.md` 에 있다. 기계가 검사할 규칙은
-`scripts/archive/eval/index_guard.py` 에 있다. 서빙 밖 운영·검산 도구는 `scripts/tools/` 에 있다.
+기계가 검사할 규칙은 인덱싱 경로 필터인 `scripts/retrieve.py` 에 있다.

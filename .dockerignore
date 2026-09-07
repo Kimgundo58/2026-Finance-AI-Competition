@@ -6,17 +6,9 @@
 
 # 원본 문서·참고자료
 법령 PDF/
-법령 연계 모음/
 _hwp변환/
-archive/
-참고논문/
-공유받은 파일/
-프론트측에서 준 파일/
 
 # 정답셋·평가·개발 도구 (서빙 경로 아님)
-scripts/tools/
-scripts/archive/
-tests/
 db/
 
 # 문서·개발 부산물

@@ -79,3 +79,5 @@ scratchpad/*.프롬프트.jsonl
 scratchpad/
 *.mp4
 2026_Finance_DATA_FOR_RAG/_골든셋_스테이징/
+CLAUDE.md
+MEMORY.md
