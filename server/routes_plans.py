@@ -219,6 +219,48 @@ def 상세(plan_id: int, org_id: str | None = None) -> 계획상세:
     return _실_상세(plan_id, org_id)
 
 
+@router.delete("/{plan_id}", status_code=200)
+def 삭제(plan_id: int, org_id: str | None = None) -> dict:
+    """지출계획 하나를 지운다. 🔴 «자기 org 것만» 지워진다.
+
+    ━━ 무엇이 같이 지워지고 무엇이 남는가 (FK 가 이미 정하고 있다) ━━━━━━━━━
+      `plan_tasks`  ON DELETE CASCADE   → 할일·일정은 «같이 지워진다»
+      `decisions`   ON DELETE SET NULL  → 판정 기록은 «남고» 연결만 끊긴다
+
+    🔴 판정을 같이 지우지 «않는» 것은 의도다. 판정은 「그때 우리가 이렇게 답했다」는
+       기록이고, 사용자가 계획을 지웠다고 그 사실이 없어지면 안 된다(감사 흔적).
+       `decisions.plan_id` 가 NULL 이 되어 어느 계획 것이었는지만 흐려진다.
+
+    🔴 되돌릴 수 없다. 그래서 «몇 건이 같이 지워졌는지» 를 돌려준다 — 화면이
+       "할일 6건도 같이 삭제됐습니다" 로 사용자에게 알릴 수 있어야 한다.
+    """
+    if MOCK:
+        전 = len(mock_data.목_계획)
+        mock_data.목_계획[:] = [p for p in mock_data.목_계획 if p["plan_id"] != plan_id]
+        if len(mock_data.목_계획) == 전:
+            raise HTTPException(404, f"지출계획 {plan_id} 을(를) 찾을 수 없습니다")
+        할일 = [t for t in mock_data.목_할일 if t["plan_id"] == plan_id]
+        mock_data.목_할일[:] = [t for t in mock_data.목_할일 if t["plan_id"] != plan_id]
+        return {"삭제": True, "plan_id": plan_id, "할일삭제": len(할일)}
+
+    조건, org인자 = _org조건(org_id, "p")
+    # 지우기 «전» 에 센다 — CASCADE 뒤에는 못 센다.
+    행 = _질의(
+        f"SELECT p.제목, (SELECT count(*) FROM tenant.plan_tasks t WHERE t.plan_id = p.plan_id) "
+        f"  FROM tenant.expense_plans p WHERE p.plan_id = %s AND {조건}",
+        (plan_id, *org인자))
+    if not 행:
+        # 🔴 남의 org 것이어도 404 다 — 403 을 주면 «그 id 가 존재한다» 는 정보가 샌다.
+        raise HTTPException(404, f"지출계획 {plan_id} 을(를) 찾을 수 없습니다")
+    제목, 할일수 = 행[0]
+    n = _실행(f"DELETE FROM tenant.expense_plans p WHERE p.plan_id = %s AND {조건}",
+             (plan_id, *org인자))
+    if n != 1:
+        raise HTTPException(404, f"지출계획 {plan_id} 을(를) 찾을 수 없습니다")
+    _log.info("지출계획 삭제 plan_id=%s 제목=%r 할일 %d건 동반삭제", plan_id, 제목, 할일수)
+    return {"삭제": True, "plan_id": plan_id, "제목": 제목, "할일삭제": 할일수}
+
+
 # ════════════════════════════════════════════════════════════════════
 # 🔴 실 경로 구역 — 아래 넷이 전부다
 # ════════════════════════════════════════════════════════════════════
