@@ -460,6 +460,18 @@ def warmup() -> None:
     """
     global _모델
     if _모델 is None:
+        # 🔴 2026-09-07(ai-fe, 판정 시간 최소화) — 검색(`retrieve.모델()`)이 «같은»
+        #    KURE-v1 을 이미 프로세스에 올린다. 여기서 한 벌 더 올리면 콜드 로드가
+        #    두 번(실측 Q5: 비목확정 31.8초 + 검색 12.0초)이고 RSS 도 2.4GB 가 두 벌이다.
+        #    같은 가중치라 벡터는 동일하다 — max_seq_length 는 «자르는 상한» 이지 패딩이
+        #    아니라 짧은 상품명 인코딩 비용은 그대로다. retrieve 를 못 가져오면(단독
+        #    실행·시드 스크립트) 종전대로 제 것을 올린다.
+        try:
+            import retrieve                                     # noqa: PLC0415
+            _모델 = retrieve.모델()
+            return
+        except Exception:                                       # noqa: BLE001
+            pass
         from sentence_transformers import SentenceTransformer
         m = SentenceTransformer(_MODEL_NAME, device="cpu")
         m.max_seq_length = 128            # 상품명은 짧다. 1024 로 두면 헛돈다
