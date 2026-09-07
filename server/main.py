@@ -382,18 +382,20 @@ def _워밍업_전부() -> dict:
 
 @app.on_event("startup")
 def _기동시_워밍업() -> None:
-    """기동 직후 «백그라운드 스레드» 로 모델을 데운다 — 첫 사용자가 콜드 로드를 안 문다.
+    """기동 단계에서 «동기» 로 모델을 데운다 — 첫 사용자가 콜드 로드를 안 문다.
 
-    🔴 헬스체크를 막지 않으려고 스레드다(Cloud Run 기동 프로브가 `/api/health` 를 친다).
+    🔴 처음엔 데몬 스레드로 돌렸다(v27). 실측: 배포 3분 뒤 `/admin/warmup` 이 임베딩 43.5초
+       — 스레드가 모델을 못 올려놓고 있었다. Cloud Run 은 «요청을 처리하는 동안만» CPU 를
+       주는 게 기본(cpu-throttling)이라, 요청 없는 min-instance 의 백그라운드 스레드는
+       사실상 멈춰 있다. 기동 훅 안에서 동기로 돌리면 startup-cpu-boost 를 받으며 끝난 뒤에
+       포트가 열리고, 기동 프로브(TCP, 기본 240초 한도)는 그만큼 기다린다(로컬 28초 실측).
     🔴 목 모드(`SUDDOE_MOCK=1`, 테스트 기본)에서는 안 돈다 — 모델이 필요 없다.
        `SUDDOE_WARMUP_ON_START=0` 으로 끌 수 있다.
     """
     if MOCK or os.environ.get("SUDDOE_WARMUP_ON_START", "1") == "0":
         return
-    def _run() -> None:
-        r = _워밍업_전부()
-        _log.info("기동 워밍업 %s", r)
-    threading.Thread(target=_run, name="suddoe-warmup", daemon=True).start()
+    r = _워밍업_전부()
+    print(f"[suddoe] 기동 워밍업 {r}", flush=True)     # uvicorn 기본 로깅은 app 로거 INFO 를 안 찍는다
 
 # ── 인증·테넌트 귀속 (2026-09-03 배선) ──────────────────────────────────
 # 🔴 CORS 보다 «먼저» add 한다. add_middleware 는 마지막에 넣은 것이 «바깥» 이라,

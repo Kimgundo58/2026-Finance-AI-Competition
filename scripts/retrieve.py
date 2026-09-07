@@ -29,6 +29,7 @@ import json
 import os
 import statistics
 import sys
+import threading
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -137,14 +138,23 @@ _토큰화 = None
 _stdout보관 = None
 
 
+_모델_잠금 = threading.Lock()
+
+
 def 모델():
-    """KURE-v1 을 프로세스에 한 번만 올린다. CPU. 첫 호출에 ~15초, 이후 0."""
+    """KURE-v1 을 프로세스에 한 번만 올린다. CPU. 첫 호출에 ~15초, 이후 0.
+
+    🔴 잠금 — 서버는 판정 스레드·워밍업·`rule_lookup.warmup()` 이 같은 함수를 동시에 부를 수
+       있다. 잠금 없이는 둘 다 `None` 을 보고 각자 1.1GB 를 올린다(v27 실측 의심 자리).
+    """
     global _모델
     if _모델 is None:
-        from sentence_transformers import SentenceTransformer
-        m = SentenceTransformer("nlpai-lab/KURE-v1", device="cpu")
-        m.max_seq_length = 1024
-        _모델 = m
+        with _모델_잠금:
+            if _모델 is None:
+                from sentence_transformers import SentenceTransformer
+                m = SentenceTransformer("nlpai-lab/KURE-v1", device="cpu")
+                m.max_seq_length = 1024
+                _모델 = m
     return _모델
 
 
