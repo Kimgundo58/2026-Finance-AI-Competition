@@ -1,29 +1,18 @@
 # -*- coding: utf-8 -*-
-"""L3 골든셋 검산 — L2 산출(`scratchpad/L3골든셋_L2.json`, 30~40건)이 뜨는 «동안» 같이 돈다.
+"""L3 골든셋 검산 — 정답근거의 article_id·원문·org_id 와 정답판정 enum 을 DB 와 대조한다 (읽기전용).
 
-검사 4가지 (전부 DB 읽기전용):
-  ① article_id 실재 — `tenant.l3_articles` 에 그 id 가 있는가
-  ② 근거원문 포함 — `정답근거[].원문` 이 «그 article 의 본문 안에» 있는가
-     (긴 인용문이라 `tips_rule_check._norm_발췌`(조사떼기 없는 정규형)를 재사용한다 —
-     짧은 품목명용 `rule_lookup._norm()` 을 그대로 쓰면 PDF/HWP 줄바꿈이 단어를 끊는
-     자리에서 조사떼기가 오히려 정규형을 갈라놓는다는 게 T4 실측으로 확인됐다)
-  ③ 🔴 org_id 격리 — article 의 org_id 가 파일이 선언한 기관(경상국립대 창업중심대학사업단)
-     것인가. **타 기관 혼입은 여기서 하드 실패** — 남의 기관 규정이 이 골든셋을 통해
-     판정에 섞이면 그 자체가 TENANT_LEAK 이다
-  ④ 판정 4종 enum — `정답판정` ∈ {가능,조건부,불가,판단불가} (`eval.golden_set` 실측 확인)
+검사 4가지:
+  1. article_id 가 `tenant.l3_articles` 에 있는가
+  2. `정답근거[].원문` 이 그 article 본문 안에 있는가 (`tips_rule_check._norm_발췌` 정규형으로 비교)
+  3. article 의 org_id 가 파일이 선언한 기관 것인가 — 타 기관 혼입은 하드 실패
+  4. `정답판정` ∈ {가능,조건부,불가,판단불가}
 
-🔴 먼저 «일부러 틀린 항목» 을 넣어(존재 안 하는 article_id·타 기관 article_id·
-   원문에 없는 근거·잘못된 enum) 이 검사기가 잡는지 자체증명한다(`--self-test`).
-   자체증명 재료는 **실제 DB 값**(대상 기관 article 1건 + 실재하는 타 기관 article 1건)을
-   쓴다 — 지어낸 값이 아니라 진짜 대조군으로 검출력을 증명한다.
+`--self-test` 는 실제 DB 값으로 만든 불량 항목을 넣어 검사기가 잡는지 확인한다.
 
-실행:
-    PYTHONIOENCODING=utf-8 python scripts/l3_golden_check.py --self-test
-    PYTHONIOENCODING=utf-8 python scripts/l3_golden_check.py "scratchpad/L3골든셋_L2.json"
+    PYTHONIOENCODING=utf-8 python scripts/tools/l3_golden_check.py --self-test
+    PYTHONIOENCODING=utf-8 python scripts/tools/l3_golden_check.py <골든셋.json>
 
-## 입력 스키마 (실 파일 확인, 2026-09-06)
-
-파일 최상단에 `org_id`(문항 전체가 같은 기관) · `문항`(리스트). 문항 하나:
+입력: 최상단에 `org_id`(문항 전체가 같은 기관) 와 `문항` 리스트. 문항 하나:
     {"no": "L3-01", "정답판정": "조건부",
      "정답근거": [{"article_id": 369, "doc": "...", "원문": "본문에서 그대로 뗀 인용문"}], ...}
 """
@@ -43,15 +32,12 @@ from _lib import db                                                   # noqa: E4
 
 _norm_발췌 = _t._norm_발췌
 
-# 데모 기관 확정 — docs/9_미결 #1·HANDOFF. DB 실측(2026-09-06): 207개 article 보유.
 대상_ORG_ID = "cfeba091-251a-5ae4-8cc9-88c6e6679440"          # 경상국립대학교 창업중심대학사업단
 
-정답판정_ENUM = {"가능", "조건부", "불가", "판단불가"}         # eval.golden_set 실측(2026-09-06)
+정답판정_ENUM = {"가능", "조건부", "불가", "판단불가"}         # eval.golden_set 의 판정 값
 
 
-# ══════════════════════════════════════════════════════════════════════════════
 # article 조회 (캐시)
-# ══════════════════════════════════════════════════════════════════════════════
 
 def _article(cur, article_id, _캐시: dict = {}) -> dict | None:
     if article_id in _캐시:
@@ -64,9 +50,7 @@ def _article(cur, article_id, _캐시: dict = {}) -> dict | None:
     return out
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# 근거 한 건 검산 — ①②③
-# ══════════════════════════════════════════════════════════════════════════════
+# 근거 한 건 검산
 
 def 근거검산(cur, g: dict, *, 대상_org: str = 대상_ORG_ID) -> dict:
     art = _article(cur, g.get("article_id"))
@@ -127,9 +111,7 @@ def 검산(cur, 파일들: list[dict]) -> dict:
             "문항별": 문항별}
 
 
-# ══════════════════════════════════════════════════════════════════════════════
 # 자체증명 — 실제 DB 값으로 만든 대조군
-# ══════════════════════════════════════════════════════════════════════════════
 
 def _self_test(cur) -> bool:
     기준 = _article(cur, 309)
@@ -172,9 +154,7 @@ def _self_test(cur) -> bool:
     return not 실패
 
 
-# ══════════════════════════════════════════════════════════════════════════════
 # CLI
-# ══════════════════════════════════════════════════════════════════════════════
 
 def main() -> None:
     ap = argparse.ArgumentParser()

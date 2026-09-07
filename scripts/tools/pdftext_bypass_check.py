@@ -1,26 +1,12 @@
 # -*- coding: utf-8 -*-
 """`pdftext.py::extract()` 를 우회하는 `.extract_text(` 직접호출을 저장소 전체에서 찾는다.
 
-**왜.** `.claude/hooks/check_pdf_extract.py` 는 PostToolUse(Write|Edit) 라 **신규 저장 때만**
-걸린다 — 이미 존재하는 파일(예: `scripts/stage0_extract.py`)은 훅을 안 태우고 지나갔다.
-게다가 그 훅의 판정식(`"pdftext" 문자열이 없고 ".extract_text(" 가 있으면 경고`)은
-**`pdftext.py` 자기 자신도 걸린다** — 전수 검사에는 그대로 못 쓴다. 2026-09-05 ai-35·ai-66
-교차확인에서 나온 결함(stage0_extract.py 가 L3 파싱 경로에서 이 훅을 우회)의 재발 방지용.
+판정식은 `.claude/hooks/check_pdf_extract.py` 와 같다 — `pdftext` 언급이 없고 `.extract_text(` 가
+있으면 위반. `scripts/pdftext.py` 자신은 제외하고, `archive/` 아래는 낮은 우선순위로 따로 표시한다.
+한계: `pdftext` 문자열이 주석에라도 있으면 통과로 본다. 결과는 사람이 확인하는 출발점이다.
 
-이 스크립트는 훅과 같은 판정식을 쓰되:
-  - `scripts/pdftext.py` 자기 자신은 제외한다 (훅은 못 하는 것)
-  - 경로에 `archive/` 가 들어간 파일은 **낮은 우선순위**로 따로 표시한다 (조사용 진단
-    스크립트가 많아 오탐이 잦다 — `scripts/archive/eval/scan_tables.py` 등)
-  - `.venv`·`node_modules`·`.git` 은 애초에 안 본다
-
-🔴 **이게 못 잡는 것.** `pdftext` 문자열이 파일 어디에든(주석·docstring 포함) 있으면 통과로
-본다 — 훅과 동일한 약점이다. 즉 "pdftext 얘기는 하지만 실제로는 안 부르는" 파일은
-오탐(PASS인데 사실 위반)일 수 있다. 여기서 나온 목록은 **사람이 각 파일을 열어 확인**하는
-출발점이지, 그 자체로 "이 파일들이 전부 결함"이라는 뜻은 아니다.
-
-사용법:
-    python scripts/pdftext_bypass_check.py            # 저장소 전체
-    python scripts/pdftext_bypass_check.py --root scripts
+    python scripts/tools/pdftext_bypass_check.py            # 저장소 전체
+    python scripts/tools/pdftext_bypass_check.py --root scripts
 """
 from __future__ import annotations
 

@@ -1,25 +1,11 @@
 # -*- coding: utf-8 -*-
-"""스캔 전용 PDF 전수 조사 → `_scan_inventory.json`.
+"""텍스트 레이어가 없는 스캔 전용 PDF 를 전수 조사해 `_scan_inventory.json` 으로 남긴다.
 
-텍스트 레이어가 없는 PDF 는 파서가 조용히 0자를 뱉는다. **어느 문서가 그런지 먼저 알아야**
-판독 우선순위를 정할 수 있다.
-
-판정 등급별로 처리 방침이 다르다:
-    A등급 근거(지침·세부관리기준) → 판독본을 그대로 인용하면 안 된다.
-        원칙 4(인용은 생성이 아니라 추출)상 손으로 옮긴 텍스트는 원문 일치 검증이 무의미하다.
-        판독하더라도 `parse_quality='low'` + `extraction='vlm'` 로 태깅하고,
-        판정 시 "이 근거는 판독본입니다" 경고를 강제한다.
-    B등급 사례(사례집) → 판독본 사용 가능. 애초에 참고용이라 인용 정확성 요구가 낮다.
-
-실행:
-    python scripts/archive/eval/scan_inventory.py
+실행:  python scripts/archive/eval/scan_inventory.py
 """
 from __future__ import annotations
 
-# 🔴 2026-09-05 scripts/archive/ 이관 — 원래 scripts/ 바로 밑에 있던 파일이라
-#    아래(또는 이 파일의 기존 sys.path 계산)는 scripts/ 바로 밑 기준으로 짜여 있다.
-#    이관으로 깊이가 늘어나 깨지므로, `scripts/_lib` 을 찾을 때까지 위로 걸어 올라가
-#    scripts/ 와 프로젝트 루트를 sys.path 맨 앞에 다시 건다.
+# `scripts/_lib` 이 보일 때까지 위로 올라가 scripts/ 와 프로젝트 루트를 sys.path 맨 앞에 건다.
 import os as _os_이관, sys as _sys_이관
 _p_이관 = _os_이관.path.dirname(_os_이관.path.abspath(__file__))
 while not _os_이관.path.isdir(_os_이관.path.join(_p_이관, "_lib")):
@@ -31,8 +17,7 @@ if _p_이관 not in _sys_이관.path:
     _sys_이관.path.insert(0, _p_이관)
 if _os_이관.path.dirname(_p_이관) not in _sys_이관.path:
     _sys_이관.path.insert(0, _os_이관.path.dirname(_p_이관))
-# 🔴 archive 내부에서 카테고리를 넘나드는 import(예: index_guard, stage0_run)가
-#    있어 scripts/archive/ 의 모든 하위 폴더도 같이 건다.
+# archive 하위 폴더끼리 import 하므로 scripts/archive/ 의 모든 하위 폴더도 건다.
 _archive_이관 = _os_이관.path.join(_p_이관, "archive")
 if _os_이관.path.isdir(_archive_이관):
     for _d_이관 in _os_이관.listdir(_archive_이관):
@@ -50,10 +35,10 @@ import pdfplumber
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8",
                               errors="replace", line_buffering=True)
-ROOT = next(p for p in Path(__file__).resolve().parents if (p / "scripts" / "_lib").is_dir())  # 🔴 2026-09-05 archive 이관 — 깊이 무관 계산으로 교체
+ROOT = next(p for p in Path(__file__).resolve().parents if (p / "scripts" / "_lib").is_dir())
 OUT = ROOT / "2026_Finance_DATA_FOR_RAG" / "_scan_inventory.json"
 
-# 판정 근거로 쓰이는가 = 판독본 사용 시 경고가 필요한가
+# 파일명에 이 단어가 있으면 판정 근거 문서(A등급)로 본다
 A등급_힌트 = ("지침", "세부관리기준", "운영요령", "관리규정", "법률", "고시", "훈령")
 
 

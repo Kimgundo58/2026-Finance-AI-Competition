@@ -1,14 +1,6 @@
 # -*- coding: utf-8 -*-
-"""행정규칙 별표 수집 — `target=admbyl`.
-
-법령은 별표 본문이 XML `별표단위/별표내용` 에 박스표로 들어오지만 **행정규칙은
-본문에도 첨부에도 별표가 없는 경우가 많다.** 예: 「중소벤처기업부 보조사업 관리규정」은
-본문이 "별표 1의 업종에는 보조사업비를 사용할 수 없다"고만 하고, 정작 그 업종 목록인
-**「보조사업비 카드 사용제한 업종」**은 어디에도 없었다. 비목 적격성 판정에 직결되는 표다.
-
-`lawSearch.do?target=admbyl` 이 별표를 독립 레코드로 준다(`별표서식파일링크` 포함).
-다만 `query` 는 **별표명**만 매칭하므로 행정규칙명으로는 못 찾는다. 그래서 목록을
-페이지네이션으로 훑어 인덱스를 만든 뒤 `관련행정규칙명` 으로 거른다.
+"""행정규칙 별표 수집 — `lawSearch.do?target=admbyl` 목록을 전부 훑어 캐시한 뒤
+`관련행정규칙명` 으로 대상 행정규칙의 별표 파일을 내려받는다 (query 는 별표명만 매칭한다).
 
 실행:
     python scripts/archive/crawling/fetch_admrul_appendix.py --index-only     목록만 수집(캐시)
@@ -16,10 +8,7 @@
 """
 from __future__ import annotations
 
-# 🔴 2026-09-05 scripts/archive/ 이관 — 원래 scripts/ 바로 밑에 있던 파일이라
-#    아래(또는 이 파일의 기존 sys.path 계산)는 scripts/ 바로 밑 기준으로 짜여 있다.
-#    이관으로 깊이가 늘어나 깨지므로, `scripts/_lib` 을 찾을 때까지 위로 걸어 올라가
-#    scripts/ 와 프로젝트 루트를 sys.path 맨 앞에 다시 건다.
+# scripts/_lib 을 찾을 때까지 위로 올라가 scripts/ 와 프로젝트 루트를 sys.path 맨 앞에 건다.
 import os as _os_이관, sys as _sys_이관
 _p_이관 = _os_이관.path.dirname(_os_이관.path.abspath(__file__))
 while not _os_이관.path.isdir(_os_이관.path.join(_p_이관, "_lib")):
@@ -31,8 +20,7 @@ if _p_이관 not in _sys_이관.path:
     _sys_이관.path.insert(0, _p_이관)
 if _os_이관.path.dirname(_p_이관) not in _sys_이관.path:
     _sys_이관.path.insert(0, _os_이관.path.dirname(_p_이관))
-# 🔴 archive 내부에서 카테고리를 넘나드는 import(예: index_guard, stage0_run)가
-#    있어 scripts/archive/ 의 모든 하위 폴더도 같이 건다.
+# archive 하위 폴더끼리 서로 import 하므로 scripts/archive/* 도 건다.
 _archive_이관 = _os_이관.path.join(_p_이관, "archive")
 if _os_이관.path.isdir(_archive_이관):
     for _d_이관 in _os_이관.listdir(_archive_이관):
@@ -54,7 +42,7 @@ import requests
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import Law_Crawling as L  # noqa: E402
 
-ROOT = next(p for p in Path(__file__).resolve().parents if (p / "scripts" / "_lib").is_dir())  # 🔴 2026-09-05 archive 이관 — 깊이 무관 계산으로 교체
+ROOT = next(p for p in Path(__file__).resolve().parents if (p / "scripts" / "_lib").is_dir())
 SRC = ROOT / "법령 PDF" / "L1_법령"
 OUT = SRC / "별표"
 CACHE = ROOT / "법령 PDF" / "_admbyl_index.json"
@@ -157,10 +145,7 @@ def main() -> None:
         try:
             resp = requests.get(link, headers=UA, timeout=60, allow_redirects=True)
             resp.raise_for_status()
-            # ⚠️ 크기만 검사하면 안 된다 (2026-08-27 실측).
-            #    다운로드가 간헐 실패하면 수 KB 짜리 **HTML 오류페이지**가 오는데
-            #    512바이트를 넘어서 통과해 버린다. 5건이 그렇게 섞여 들어왔다.
-            #    매직바이트로 실제 포맷을 확인한다. 재시도하면 대부분 정상적으로 온다.
+            # 크기 검사만으론 HTML 오류페이지가 통과한다 — 매직바이트로 포맷을 확인한다.
             head = resp.content[:8]
             if head[:8] == bytes.fromhex("d0cf11e0a1b11ae1"):
                 fmt = "HWP"

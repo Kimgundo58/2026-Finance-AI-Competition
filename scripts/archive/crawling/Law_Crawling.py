@@ -1,13 +1,7 @@
 # -*- coding: utf-8 -*-
-"""국가법령정보 OPEN API 수집기 — 「써도돼요」 L1 법령·행정규칙.
-
-입력은 `법령 연계 모음/문서_법령_링크모음.md` §1 마스터 목록이다.
-그 표를 직접 읽어 대상(L01~L39, R01~R12)과 참조 조항을 뽑고,
-각 규범의 현행본 + 문서 연도별 시점본을 DRF XML로 내려받는다.
-
-XML로 받는 이유: scripts/stage0_extract.py::extract_xml() 이 이미 이 포맷을
-조 단위로 파싱한다. JSON을 쓰면 동등한 파서를 새로 짜야 하고, 단일 원소가
-배열이 아닌 객체로 오는 함정까지 따로 처리해야 한다.
+"""국가법령정보 OPEN API 수집기 — L1 법령·행정규칙.
+`법령 연계 모음/문서_법령_링크모음.md` §1 마스터 표를 읽어 각 규범의 현행본과 연도별 시점본을
+DRF XML 로 내려받고, 위임 계통(법률 → 시행령·시행규칙 → 위임 행정규칙)을 따라간다.
 
 실행 (환경변수 LAW_GO_KR_OC 에 law.go.kr 신청 ID 필요):
     python Law_Crawling.py --healthcheck     OC 키 동작 확인만
@@ -19,10 +13,7 @@ XML로 받는 이유: scripts/stage0_extract.py::extract_xml() 이 이미 이 �
 """
 from __future__ import annotations
 
-# 🔴 2026-09-05 scripts/archive/ 이관 — 원래 scripts/ 바로 밑에 있던 파일이라
-#    아래(또는 이 파일의 기존 sys.path 계산)는 scripts/ 바로 밑 기준으로 짜여 있다.
-#    이관으로 깊이가 늘어나 깨지므로, `scripts/_lib` 을 찾을 때까지 위로 걸어 올라가
-#    scripts/ 와 프로젝트 루트를 sys.path 맨 앞에 다시 건다.
+# scripts/_lib 을 찾을 때까지 위로 올라가 scripts/ 와 프로젝트 루트를 sys.path 맨 앞에 건다.
 import os as _os_이관, sys as _sys_이관
 _p_이관 = _os_이관.path.dirname(_os_이관.path.abspath(__file__))
 while not _os_이관.path.isdir(_os_이관.path.join(_p_이관, "_lib")):
@@ -34,8 +25,7 @@ if _p_이관 not in _sys_이관.path:
     _sys_이관.path.insert(0, _p_이관)
 if _os_이관.path.dirname(_p_이관) not in _sys_이관.path:
     _sys_이관.path.insert(0, _os_이관.path.dirname(_p_이관))
-# 🔴 archive 내부에서 카테고리를 넘나드는 import(예: index_guard, stage0_run)가
-#    있어 scripts/archive/ 의 모든 하위 폴더도 같이 건다.
+# archive 하위 폴더끼리 서로 import 하므로 scripts/archive/* 도 건다.
 _archive_이관 = _os_이관.path.join(_p_이관, "archive")
 if _os_이관.path.isdir(_archive_이관):
     for _d_이관 in _os_이관.listdir(_archive_이관):
@@ -56,11 +46,9 @@ from xml.etree import ElementTree as ET
 
 import requests
 
-# stdout 래핑은 main() 에서만 한다.
-# 모듈 로드 시점에 갈아끼우면 이 모듈을 import 하는 쪽의 stdout 이 닫힌다
-# (scripts/build_citations.py 가 parse_articles 를 재사용한다).
+# stdout 래핑은 main() 에서만 한다 — 모듈 로드 시점에 갈아끼우면 import 하는 쪽의 stdout 이 닫힌다.
 
-ROOT = next(p for p in Path(__file__).resolve().parents if (p / "scripts" / "_lib").is_dir())  # 🔴 2026-09-05 archive 이관 — 깊이 무관 계산으로 교체
+ROOT = next(p for p in Path(__file__).resolve().parents if (p / "scripts" / "_lib").is_dir())
 MD_PATH = ROOT / "법령 연계 모음" / "문서_법령_링크모음.md"
 OUT_DIR = ROOT / "법령 PDF" / "L1_법령"
 HIST_DIR = OUT_DIR / "연혁"
@@ -68,19 +56,14 @@ CACHE_PATH = ROOT / "법령 PDF" / "_law_cache.json"
 REPORT_PATH = ROOT / "법령 PDF" / "_law_report.json"
 DROP_PATH = ROOT / "법령 PDF" / "_law_delegated_dropped.json"
 
-# law.go.kr OPEN API 신청 ID. 공개 저장소에 개인 ID를 남기지 않으려고 환경변수로 뺐다.
-#   PowerShell:  $env:LAW_GO_KR_OC = "<신청ID>"
-#   bash:        export LAW_GO_KR_OC='<신청ID>'
-# 비어 있으면 Api() 생성 시점에 죽는다 — OC 가 틀리면 API 가 HTTP 200 에
-# 빈 결과를 돌려주기 때문에(§12 함정) 조용한 0건으로 새는 걸 막아야 한다.
+# law.go.kr OPEN API 신청 ID (환경변수). 비어 있으면 Api() 생성 시점에 죽는다 —
+# OC 가 틀리면 API 가 HTTP 200 에 빈 결과를 돌려주므로 조용한 0건을 막는다.
 OC = os.environ.get("LAW_GO_KR_OC", "")
 BASE = "https://www.law.go.kr/DRF"
 TIMEOUT = 30
 SLEEP_SEC = 0.7
 MAX_RETRY = 3
 DOC_YEARS = (2022, 2023, 2024, 2025, 2026)   # 세부관리기준 연도판
-# 2026-08-24: 신규 데이터셋(2026_finance_data_for_RAG/창진원)에 2022년판
-# 「창업도약패키지 세부관리기준(2022년)」이 있어 2022 를 추가했다.
 
 HEADERS = {
     "User-Agent": (
@@ -95,8 +78,7 @@ ALIAS = {
     "L19": "공무원교육훈련법",   # 2016.1.1 「공무원 인재개발법」으로 전부개정
 }
 
-# md 는 '△ 2009년도판만 등재'라 적었으나 실제 검색은 0건이다(2026-08 확인).
-# 0건 항목으로 두면 '별칭 매핑 누락'으로 오독되므로 수동수집으로 분류한다.
+# law.go.kr 검색 0건이 확인된 항목 — 수동수집으로 분류한다.
 KNOWN_ZERO = {"R08"}
 
 # md 가 '×' 로 표시한 항목의 확보 경로 (재시도 루프 금지)
@@ -133,13 +115,9 @@ def safe_name(s: str) -> str:
 
 # ── 참조 조항 파싱 ────────────────────────────────────────────────
 def parse_articles(s: str) -> tuple[list[str], list[str]]:
-    """md 의 참조 조항 문자열 → 조 식별자 리스트.
+    """md 의 참조 조항 문자열 → 조 식별자 리스트 ('35' = 제35조, '31-2' = 제31조의2, '별표1').
 
-    '35' = 제35조 / '31-2' = 제31조의2 / '별표1' = 별표 1
-    md §2-5 가 열거한 표기가 전부 등장한다:
-        제35조 / 제31조의2 / 제2조제6호 / 제21조제1항제1호나목
-        제13조③ / 제33조~제42조 / 제24조 내지 제42조 / 제51조·제52조
-        제8·9·17~19조 (조가 맨 뒤에만 붙는 축약 열거) / 별표 1 제2호
+    범위(제33조~제42조, 내지)와 축약 열거(제8·9·17~19조)도 전개한다.
     """
     if not s:
         return [], []
@@ -241,11 +219,7 @@ def load_master(md_path: Path = MD_PATH) -> list[dict]:
 
 # ── HTTP ─────────────────────────────────────────────────────────
 def require_oc() -> str:
-    """OC 없이 부르면 여기서 죽인다.
-
-    law.go.kr 은 OC 가 비었거나 틀려도 HTTP 200 에 빈 결과를 준다(§12 함정).
-    그대로 두면 파싱이 조용히 0건으로 끝나 수집 실패를 못 알아챈다.
-    """
+    """OC 없이 부르면 여기서 죽인다 — law.go.kr 은 OC 가 틀려도 HTTP 200 에 빈 결과를 준다."""
     if not OC:
         raise SystemExit(
             "환경변수 LAW_GO_KR_OC 가 비어 있다. law.go.kr OPEN API 신청 ID를 넣어라." \
@@ -302,11 +276,7 @@ class Api:
 
 # ── 해결(resolve) ────────────────────────────────────────────────
 def resolve_law(api: Api, keyword: str, alias: str | None = None) -> dict | None:
-    """검색 → 공백제거 완전일치 + 현행 필터.
-
-    검색이 매우 느슨하다 (query=상법 → 56건, 무관한 법령 다수).
-    완전일치 필터가 없으면 엉뚱한 법을 집는다.
-    """
+    """검색 → 공백제거 완전일치 + 현행 필터. 검색이 느슨해 완전일치 없이는 엉뚱한 법을 집는다."""
     want = norm(keyword)
     for q in filter(None, [keyword, alias]):
         items = api.search("law", q)
@@ -326,15 +296,7 @@ def _sim(a: str, b: str) -> float:
 
 
 def resolve_admrul(api: Api, keyword: str) -> dict | None:
-    """행정규칙 현행본 해결.
-
-    제명이 개정으로 바뀌는 일이 잦다. 실측: 위임 정보가 가리킨
-    「창업 및 창업기업 범위에 관한 규정」(2022-46) 은 폐지되고 현행은
-    「창업기업 및 국외 창업기업 범위에 관한 규정」(2025-138) 이다.
-    두 판의 행정규칙ID 는 82325 로 같다 — ID 가 개정을 관통하는 안정 키다.
-    law.go.kr 검색이 구 제명으로도 현행을 찾아주므로, 완전일치가 실패하면
-    유사도로 고른다.
-    """
+    """행정규칙 현행본 해결 — 완전일치가 없으면 현행 후보 중 제명 유사도로 고른다 (개정으로 제명이 바뀐다)."""
     want = norm(keyword)
     items = api.search("admrul", keyword)
     if not items:
@@ -356,10 +318,7 @@ def resolve_admrul(api: Api, keyword: str) -> dict | None:
 
 
 def historical_msts(api: Api, keyword: str, years=DOC_YEARS) -> list[dict]:
-    """target=eflaw + efYd 로 연도별 시행 버전을 잡는다.
-
-    target=law + efYd 는 0건이 나온다. eflaw 를 써야 한다.
-    """
+    """target=eflaw + efYd 로 연도별 시행 버전을 잡는다 (target=law + efYd 는 0건이 나온다)."""
     want = norm(keyword)
     seen, out = set(), []
     for y in years:
@@ -536,10 +495,8 @@ def collect(api: Api, master: list[dict], only: set[str] | None, with_history: b
     return results
 
 
-# ── 위임 추적 (하이퍼링크 따라가기) ────────────────────────────────
-# 법률 → 시행령·시행규칙 → 위임 행정규칙 의 3단계.
-# '인용법령'은 위임이 아니라 단순 참조다. 따라가면 「중소기업기본법」→「상법」→…
-# 로 전체 법령까지 번지므로 반드시 제외한다.
+# ── 위임 추적 ────────────────────────────────────────────────────
+# 따라갈 위임구분. '인용법령' 은 단순 참조라 제외한다 (따라가면 전체 법령으로 번진다).
 DELEGATE_KINDS = {"시행령", "시행규칙", "위임행정규칙", "위임규정"}
 
 
@@ -566,21 +523,9 @@ def delegated_targets(api: Api, mst: str, cited: set[str],
                       parent: str = "") -> tuple[list, list]:
     """lsDelegated → (따라갈 대상, 범위 밖으로 제외한 대상).
 
-    응답의 위임 일련번호는 구판을 가리킨다 (실측: 「중소기업창업 지원사업
-    운영요령」이 2100000222594 = 구판, 현행은 2100000250454). 일련번호를
-    그대로 쓰면 폐지된 규범을 인덱싱하므로 제목 → 현행 재조회로 간다.
-
-    필터 정책
-      제명이 부모 법령으로 시작하는 시행령·시행규칙
-          → 항상 따라간다 (고등교육법 → 고등교육법 시행령. 진짜 직접 하위)
-      그 밖의 모든 위임 (다른 법령·행정규칙)
-          → 문서가 인용한 조가 위임한 것만 따라간다
-      인용법령  → 위임이 아니라 단순 참조 → 항상 제외
-
-    law.go.kr 은 **다른 법으로 넘어가는 위임도 위임구분=시행령/시행규칙 으로
-    표시한다** (실측: 국민연금법 시행규칙 → 고용보험법 시행규칙,
-    고등교육법 → 한국교원대학교 설치령). 위임구분만 믿고 따라가면 창업지원금과
-    무관한 법령이 수백 건 딸려온다. 제명 접두 일치로 걸러야 한다.
+    응답의 위임 일련번호는 구판을 가리키므로 제목으로 현행을 재조회한다.
+    제명이 부모 법령으로 시작하는 시행령·시행규칙은 항상 따라가고,
+    그 밖의 위임은 문서가 인용한 조가 위임한 것만 따라간다.
     """
     try:
         root = ET.fromstring(api.body_xml("lsDelegated", MST=mst))

@@ -1,11 +1,8 @@
 # -*- coding: utf-8 -*-
-"""정본 = DB. 파일을 DB 로 맞춘다 (2026-09-06 오너 확정).
+"""정본은 DB 다. 골든셋·어휘집 파일을 DB 에 맞춘다.
 
-🔴 왜 DB 가 정본인가 — 판정이 «DB 를 읽어서» 난다. 파일은 아무도 안 읽는다.
-   파일이 최신이 아니면 사람만 헷갈리고, 파일이 DB 를 덮으면 «판정이 바뀐다».
-
-    python scripts/정본_동기화.py            대조만 (아무것도 안 쓴다)
-    python scripts/정본_동기화.py --apply    파일을 DB 로 맞춘다
+    python scripts/tools/정본_동기화.py            대조만 (아무것도 안 쓴다)
+    python scripts/tools/정본_동기화.py --apply    파일을 DB 로 맞춘다
 """
 import argparse, glob, json, sys
 sys.path.insert(0, 'scripts/_lib'); import db
@@ -41,9 +38,9 @@ def 골든셋(apply: bool) -> None:
     print(f"골든셋 — 파일에서 고칠 칸 «{바뀜}개»")
 
 def 어휘(apply: bool) -> None:
-    """🔴 파일은 «판정 enum»(창업 10종)이다. DB 의 RND 계통은 여기 «안 들어간다»."""
+    """어휘집 파일의 판정 enum 과 DB 의 창업 계통 비목을 대조한다. RND 계통은 대상이 아니다."""
     d = json.load(open(어휘집, encoding="utf-8"))
-    파일enum = set(d.get("guided_json_enum") or [])   # 🔴 실제 키. 짐작하지 말고 파일을 봤다
+    파일enum = set(d.get("guided_json_enum") or [])
     with db.connect() as c, c.cursor() as cur:
         cur.execute("select 비목 from corpus.item_vocab where 계통='창업'")
         db창업 = {r[0] for r in cur.fetchall()}

@@ -1,17 +1,6 @@
 # -*- coding: utf-8 -*-
-"""중기부(L1) 참조 법령 수집기.
-
-입력은 `법령 PDF/_mss_master.json` (중기부 문서 84건 마스터).
-창진원 배치와 **같은 폴더에 저장**하되, 출처는 `_law_sources.json` 으로 구분한다.
-같은 규범을 두 배치가 함께 참조하는 경우가 27건 있어 파일을 두 벌 두면 안 된다.
-
-단계:
-  1. 현행본 수집 (법령=target law / 행정규칙=target admrul)
-  2. 법령 시점본 (DOC_YEARS)
-  3. 위임 추적 3단계 (Law_Crawling.crawl_delegated 재사용)
-
-행정규칙 구판과 별표 첨부는 별도 스크립트가 디스크 전체를 훑으므로 이후 실행한다:
-  scripts/archive/crawling/fetch_admrul_history.py · scripts/archive/crawling/fetch_admrul_attachments.py
+"""중기부(L1) 참조 법령 수집기 — `법령 PDF/_mss_master.json` 의 규범을 현행본·시점본·위임 3단계로
+받아 창진원 배치와 같은 폴더에 저장한다 (출처 구분은 `_law_sources.json`).
 
 실행:
     python scripts/archive/crawling/mss_crawl.py --dry-run
@@ -19,10 +8,7 @@
 """
 from __future__ import annotations
 
-# 🔴 2026-09-05 scripts/archive/ 이관 — 원래 scripts/ 바로 밑에 있던 파일이라
-#    아래(또는 이 파일의 기존 sys.path 계산)는 scripts/ 바로 밑 기준으로 짜여 있다.
-#    이관으로 깊이가 늘어나 깨지므로, `scripts/_lib` 을 찾을 때까지 위로 걸어 올라가
-#    scripts/ 와 프로젝트 루트를 sys.path 맨 앞에 다시 건다.
+# scripts/_lib 을 찾을 때까지 위로 올라가 scripts/ 와 프로젝트 루트를 sys.path 맨 앞에 건다.
 import os as _os_이관, sys as _sys_이관
 _p_이관 = _os_이관.path.dirname(_os_이관.path.abspath(__file__))
 while not _os_이관.path.isdir(_os_이관.path.join(_p_이관, "_lib")):
@@ -34,8 +20,7 @@ if _p_이관 not in _sys_이관.path:
     _sys_이관.path.insert(0, _p_이관)
 if _os_이관.path.dirname(_p_이관) not in _sys_이관.path:
     _sys_이관.path.insert(0, _os_이관.path.dirname(_p_이관))
-# 🔴 archive 내부에서 카테고리를 넘나드는 import(예: index_guard, stage0_run)가
-#    있어 scripts/archive/ 의 모든 하위 폴더도 같이 건다.
+# archive 하위 폴더끼리 서로 import 하므로 scripts/archive/* 도 건다.
 _archive_이관 = _os_이관.path.join(_p_이관, "archive")
 if _os_이관.path.isdir(_archive_이관):
     for _d_이관 in _os_이관.listdir(_archive_이관):
@@ -54,7 +39,7 @@ from xml.etree import ElementTree as ET
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import Law_Crawling as L  # noqa: E402
 
-ROOT = next(p for p in Path(__file__).resolve().parents if (p / "scripts" / "_lib").is_dir())  # 🔴 2026-09-05 archive 이관 — 깊이 무관 계산으로 교체
+ROOT = next(p for p in Path(__file__).resolve().parents if (p / "scripts" / "_lib").is_dir())
 MASTER = ROOT / "법령 PDF" / "_mss_master.json"
 REPORT = ROOT / "법령 PDF" / "_mss_report.json"
 DROPPED = ROOT / "법령 PDF" / "_mss_delegated_dropped.json"

@@ -1,16 +1,6 @@
 # -*- coding: utf-8 -*-
-"""누락 규범 지정 수집 — `_missing_norms.json` -> `법령 PDF/L1_법령/`.
-
-`Law_Crawling.py` 는 마스터 md(`중기부_법령_링크모음.md`)에 적힌 목록만 훑는다.
-이 스크립트는 **참조 그래프에서 도출된 누락분**을 이름으로 지정해 받는다.
-
-배경 (`법령_크롤링_현황.md` §9 #1)
-    L1 수집 범위가 폐기된 구 PDF 기준이라, 현행 세부관리기준이 인용하는 규범 중
-    규정 모음에 없는 것이 있었다. `_refs.json` 을 전 규정 모음으로 확장한 뒤 전수 추출해
-    13종을 확정했다 — 고용보험법(인건비 4대보험 예외) 등 판정 직결분 7종 포함.
-
-해소기(`Law_Crawling.resolve_law` / `resolve_admrul`)를 그대로 쓴다.
-검색이 매우 느슨해서(query=상법 -> 56건) 완전일치 필터 없이는 엉뚱한 법을 집는다.
+"""누락 규범 지정 수집 — `_missing_norms.json` 에 적힌 규범을 이름으로 찾아 `법령 PDF/L1_법령/` 에 받는다.
+해소기는 `Law_Crawling.resolve_law` / `resolve_admrul` 을 그대로 쓴다.
 
 실행:
     $env:LAW_GO_KR_OC = "<신청ID>"
@@ -19,10 +9,7 @@
 """
 from __future__ import annotations
 
-# 🔴 2026-09-05 scripts/archive/ 이관 — 원래 scripts/ 바로 밑에 있던 파일이라
-#    아래(또는 이 파일의 기존 sys.path 계산)는 scripts/ 바로 밑 기준으로 짜여 있다.
-#    이관으로 깊이가 늘어나 깨지므로, `scripts/_lib` 을 찾을 때까지 위로 걸어 올라가
-#    scripts/ 와 프로젝트 루트를 sys.path 맨 앞에 다시 건다.
+# scripts/_lib 을 찾을 때까지 위로 올라가 scripts/ 와 프로젝트 루트를 sys.path 맨 앞에 건다.
 import os as _os_이관, sys as _sys_이관
 _p_이관 = _os_이관.path.dirname(_os_이관.path.abspath(__file__))
 while not _os_이관.path.isdir(_os_이관.path.join(_p_이관, "_lib")):
@@ -34,8 +21,7 @@ if _p_이관 not in _sys_이관.path:
     _sys_이관.path.insert(0, _p_이관)
 if _os_이관.path.dirname(_p_이관) not in _sys_이관.path:
     _sys_이관.path.insert(0, _os_이관.path.dirname(_p_이관))
-# 🔴 archive 내부에서 카테고리를 넘나드는 import(예: index_guard, stage0_run)가
-#    있어 scripts/archive/ 의 모든 하위 폴더도 같이 건다.
+# archive 하위 폴더끼리 서로 import 하므로 scripts/archive/* 도 건다.
 _archive_이관 = _os_이관.path.join(_p_이관, "archive")
 if _os_이관.path.isdir(_archive_이관):
     for _d_이관 in _os_이관.listdir(_archive_이관):
@@ -53,7 +39,7 @@ from pathlib import Path
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace",
                               line_buffering=True)
 
-ROOT = next(p for p in Path(__file__).resolve().parents if (p / "scripts" / "_lib").is_dir())  # 🔴 2026-09-05 archive 이관 — 깊이 무관 계산으로 교체
+ROOT = next(p for p in Path(__file__).resolve().parents if (p / "scripts" / "_lib").is_dir())
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import Law_Crawling as LC  # noqa: E402
@@ -61,19 +47,15 @@ import Law_Crawling as LC  # noqa: E402
 SRC = ROOT / "법령 PDF" / "_missing_norms.json"
 OUT = ROOT / "법령 PDF" / "_missing_norms_report.json"
 
-# 정식 제명. 세부관리기준의 인용 표기가 법령의 현행 제명과 다른 경우가 있다.
-# 2026-08-30 검색으로 확인한 실제 제명이다 — 추정이 아니라 실측이다.
+# 인용 표기 -> law.go.kr 현행 제명 (세부관리기준의 인용 표기가 현행 제명과 다른 경우)
 정식제명 = {
-    # 인용 표기                              -> law.go.kr 현행 제명
     "근로자직업능력개발법": "국민 평생 직업능력 개발법",
-    #   ^ 2022 전부개정으로 제명이 바뀌었다. 세부관리기준이 구 제명으로 인용한다
     "대·중소기업 상생협력 촉진에 관한 법률": "대ㆍ중소기업 상생협력 촉진에 관한 법률",
-    #   ^ 가운뎃점이 U+00B7(·) 이 아니라 U+318D(ㆍ) 다. 눈으로는 같아 보인다
+    # 가운뎃점이 U+00B7(·) 이 아니라 U+318D(ㆍ) 다
     "중소기업기술개발 지원사업 관리지침": "중소기업기술개발 지원사업 운영요령",
-    #   ^ '관리지침' 이라는 규범은 없다. TIPS 총괄 운영지침이 위임받는 상위는 운영요령이다
 }
 
-# law.go.kr 에 없는 것 — 수집 불가. 사유를 남긴다.
+# law.go.kr 미등재 — 수집 불가 사유
 미등재 = {
     "신사업창업사관학교 운영지침":
         "검색 0건. 중기부 내부 지침으로 국가법령정보센터 미등재. "
@@ -144,7 +126,7 @@ def main() -> None:
 
         if not args.dry_run:
             body = api.body_xml(target, **key)
-            # 0건 != 없음. OC 오타·미승인이면 HTTP 200 에 빈 결과가 온다 (§12 함정)
+            # OC 오타·미승인이면 HTTP 200 에 빈 결과가 온다
             if not body.lstrip().startswith("<") or len(body) < 500:
                 rec.update(상태="본문없음", flags=rec["flags"] + [f"len={len(body)}"])
                 results.append(rec)

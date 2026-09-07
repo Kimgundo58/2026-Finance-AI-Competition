@@ -1,23 +1,12 @@
 # -*- coding: utf-8 -*-
-"""개정 diff : 통합관리지침 구판 → 신판 조문 매칭.
+"""개정 diff — 통합관리지침 구판(제12차)과 신판(제14차) 조문을 벡터 유사도로 매칭한다.
 
-왜 벡터가 필요한가
-  제12차 제33~42조 = 제14차 제36~45조. 조 번호가 밀려서 번호로는 못 잇는다.
-  83 x 83 = 6,889 쌍을 LLM 에 물어볼 수는 없다. 내용 매칭만이 유일한 방법이다.
-
-하는 일
-  1) 구판(제12차)이 색인 안 돼 있으면 증분 색인한다 (기존 chunks 는 건드리지 않는다)
-  2) 신판 각 조 → 구판에서 가장 가까운 조를 찾는다
-  3) 번호 이동 / 신설 / 내용 변경을 분류해 출력한다
-
+구판이 색인 안 돼 있으면 증분 색인한 뒤, 신판 각 조의 번호 이동·개정·신설을 분류해 출력한다.
 실행:  python scripts/archive/eval/version_diff.py
 """
 from __future__ import annotations
 
-# 🔴 2026-09-05 scripts/archive/ 이관 — 원래 scripts/ 바로 밑에 있던 파일이라
-#    아래(또는 이 파일의 기존 sys.path 계산)는 scripts/ 바로 밑 기준으로 짜여 있다.
-#    이관으로 깊이가 늘어나 깨지므로, `scripts/_lib` 을 찾을 때까지 위로 걸어 올라가
-#    scripts/ 와 프로젝트 루트를 sys.path 맨 앞에 다시 건다.
+# `scripts/_lib` 이 보일 때까지 위로 올라가 scripts/ 와 프로젝트 루트를 sys.path 맨 앞에 건다.
 import os as _os_이관, sys as _sys_이관
 _p_이관 = _os_이관.path.dirname(_os_이관.path.abspath(__file__))
 while not _os_이관.path.isdir(_os_이관.path.join(_p_이관, "_lib")):
@@ -29,8 +18,7 @@ if _p_이관 not in _sys_이관.path:
     _sys_이관.path.insert(0, _p_이관)
 if _os_이관.path.dirname(_p_이관) not in _sys_이관.path:
     _sys_이관.path.insert(0, _os_이관.path.dirname(_p_이관))
-# 🔴 archive 내부에서 카테고리를 넘나드는 import(예: index_guard, stage0_run)가
-#    있어 scripts/archive/ 의 모든 하위 폴더도 같이 건다.
+# archive 하위 폴더끼리 import 하므로 scripts/archive/ 의 모든 하위 폴더도 건다.
 _archive_이관 = _os_이관.path.join(_p_이관, "archive")
 if _os_이관.path.isdir(_archive_이관):
     for _d_이관 in _os_이관.listdir(_archive_이관):
@@ -42,7 +30,7 @@ import io, os, sys, time
 from pathlib import Path
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-ROOT = next(p for p in Path(__file__).resolve().parents if (p / "scripts" / "_lib").is_dir())  # 🔴 2026-09-05 archive 이관 — 깊이 무관 계산으로 교체
+ROOT = next(p for p in Path(__file__).resolve().parents if (p / "scripts" / "_lib").is_dir())
 sys.path.insert(0, str(ROOT / "scripts"))
 
 _C = Path.home() / ".cache/huggingface/hub/models--nlpai-lab--KURE-v1"

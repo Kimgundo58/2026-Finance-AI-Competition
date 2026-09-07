@@ -20,12 +20,21 @@ def _strip_docstrings(tree):
 def _dump(src):
     return ast.dump(_strip_docstrings(ast.parse(src)), include_attributes=False)
 
+def _sql_body(src):
+    """`--` 줄주석과 `/* */` 블록주석을 걷고 공백을 정규화한다 (문자열 안의 -- 는 구분 못 한다)."""
+    import re
+    s = re.sub(r"/\*.*?\*/", " ", src, flags=re.S)
+    s = re.sub(r"--[^\n]*", " ", s)
+    return " ".join(s.split())
+
 def check(path):
     new = pathlib.Path(path).read_text(encoding="utf-8")
     r = subprocess.run(["git", "show", f"HEAD:{path}"], capture_output=True)
     if r.returncode != 0:
         return "NEW(HEAD 에 없음)"
     old = r.stdout.decode("utf-8")
+    if path.endswith(".sql"):
+        return "OK" if _sql_body(old) == _sql_body(new) else "CHANGED — SQL 본문이 바뀌었다"
     try:
         return "OK" if _dump(old) == _dump(new) else "CHANGED — 코드가 바뀌었다"
     except SyntaxError as e:
@@ -34,7 +43,7 @@ def check(path):
 if __name__ == "__main__":
     args = sys.argv[1:]
     if args == ["--changed"]:
-        out = subprocess.run(["git", "-c", "core.quotepath=off", "diff", "--name-only", "HEAD", "--", "*.py"],
+        out = subprocess.run(["git", "-c", "core.quotepath=off", "diff", "--name-only", "HEAD", "--", "*.py", "*.sql"],
                              capture_output=True, text=True, encoding="utf-8").stdout
         args = [l for l in out.splitlines() if l.strip()]
     bad = 0

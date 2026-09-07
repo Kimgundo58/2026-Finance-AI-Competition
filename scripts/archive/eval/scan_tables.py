@@ -1,22 +1,11 @@
 # -*- coding: utf-8 -*-
-"""원본 파일에 표가 몇 개 있는지 전수 스캔한다.
-
-목적: "표가 있는데 파싱에서 씹힌 파일"을 사람이 수작업으로 찾지 않게 한다.
-  PDF  → pdfplumber find_tables() 로 페이지별 표 개수
-  HWP  → HWPTAG_TABLE(76) 레코드 개수
-  HWPML→ <TABLE 태그 개수
-
-판정:
-  표가 있는데 현재 추출 텍스트에 셀 경계 흔적이 없으면 '깨짐 의심'.
+"""원본 PDF·HWP·HWPML 에 표가 몇 개 있는지 전수 스캔해 `scripts/_table_scan.json` 으로 남긴다.
 
 실행:  python scripts/archive/eval/scan_tables.py
 """
 from __future__ import annotations
 
-# 🔴 2026-09-05 scripts/archive/ 이관 — 원래 scripts/ 바로 밑에 있던 파일이라
-#    아래(또는 이 파일의 기존 sys.path 계산)는 scripts/ 바로 밑 기준으로 짜여 있다.
-#    이관으로 깊이가 늘어나 깨지므로, `scripts/_lib` 을 찾을 때까지 위로 걸어 올라가
-#    scripts/ 와 프로젝트 루트를 sys.path 맨 앞에 다시 건다.
+# `scripts/_lib` 이 보일 때까지 위로 올라가 scripts/ 와 프로젝트 루트를 sys.path 맨 앞에 건다.
 import os as _os_이관, sys as _sys_이관
 _p_이관 = _os_이관.path.dirname(_os_이관.path.abspath(__file__))
 while not _os_이관.path.isdir(_os_이관.path.join(_p_이관, "_lib")):
@@ -28,8 +17,7 @@ if _p_이관 not in _sys_이관.path:
     _sys_이관.path.insert(0, _p_이관)
 if _os_이관.path.dirname(_p_이관) not in _sys_이관.path:
     _sys_이관.path.insert(0, _os_이관.path.dirname(_p_이관))
-# 🔴 archive 내부에서 카테고리를 넘나드는 import(예: index_guard, stage0_run)가
-#    있어 scripts/archive/ 의 모든 하위 폴더도 같이 건다.
+# archive 하위 폴더끼리 import 하므로 scripts/archive/ 의 모든 하위 폴더도 건다.
 _archive_이관 = _os_이관.path.join(_p_이관, "archive")
 if _os_이관.path.isdir(_archive_이관):
     for _d_이관 in _os_이관.listdir(_archive_이관):
@@ -41,7 +29,7 @@ import io, json, sys, zlib
 from pathlib import Path
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-ROOT = next(p for p in Path(__file__).resolve().parents if (p / "scripts" / "_lib").is_dir())  # 🔴 2026-09-05 archive 이관 — 깊이 무관 계산으로 교체
+ROOT = next(p for p in Path(__file__).resolve().parents if (p / "scripts" / "_lib").is_dir())
 sys.path.insert(0, str(ROOT))
 
 HWPTAG_TABLE = 16 + 60  # 76

@@ -1,19 +1,12 @@
 # -*- coding: utf-8 -*-
-"""마스터 문서 ↔ 디스크 전수 대조.
+"""법령 마스터 목록(창진원·중기부 리포트 JSON)과 디스크 XML 을 전수 대조한다.
 
-창진원(`_law_report.json`)·중기부(`_mss_master.json` + `_mss_report.json`) 두 배치의
-마스터 목록을 기준으로, 각 항목이 실제로 디스크에 있는지 확인한다. 파일 존재만
-보지 않고 **인용된 조가 그 법에 실재하는지**(`article_titles`)까지 본다 — 창진원
-배치에서 이 검증이 「산업교육진흥법 시행규칙」 누락을 잡아냈다.
-
-실행: python scripts/archive/eval/verify_corpus.py
+파일 실재, 규범명 인덱스, 인용 조 존재, XML 무결성을 보고 `_verify_report.json` 으로 남긴다.
+실행:  python scripts/archive/eval/verify_corpus.py
 """
 from __future__ import annotations
 
-# 🔴 2026-09-05 scripts/archive/ 이관 — 원래 scripts/ 바로 밑에 있던 파일이라
-#    아래(또는 이 파일의 기존 sys.path 계산)는 scripts/ 바로 밑 기준으로 짜여 있다.
-#    이관으로 깊이가 늘어나 깨지므로, `scripts/_lib` 을 찾을 때까지 위로 걸어 올라가
-#    scripts/ 와 프로젝트 루트를 sys.path 맨 앞에 다시 건다.
+# `scripts/_lib` 이 보일 때까지 위로 올라가 scripts/ 와 프로젝트 루트를 sys.path 맨 앞에 건다.
 import os as _os_이관, sys as _sys_이관
 _p_이관 = _os_이관.path.dirname(_os_이관.path.abspath(__file__))
 while not _os_이관.path.isdir(_os_이관.path.join(_p_이관, "_lib")):
@@ -25,8 +18,7 @@ if _p_이관 not in _sys_이관.path:
     _sys_이관.path.insert(0, _p_이관)
 if _os_이관.path.dirname(_p_이관) not in _sys_이관.path:
     _sys_이관.path.insert(0, _os_이관.path.dirname(_p_이관))
-# 🔴 archive 내부에서 카테고리를 넘나드는 import(예: index_guard, stage0_run)가
-#    있어 scripts/archive/ 의 모든 하위 폴더도 같이 건다.
+# archive 하위 폴더끼리 import 하므로 scripts/archive/ 의 모든 하위 폴더도 건다.
 _archive_이관 = _os_이관.path.join(_p_이관, "archive")
 if _os_이관.path.isdir(_archive_이관):
     for _d_이관 in _os_이관.listdir(_archive_이관):
@@ -46,7 +38,7 @@ from xml.etree import ElementTree as ET
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import Law_Crawling as L  # noqa: E402
 
-ROOT = next(p for p in Path(__file__).resolve().parents if (p / "scripts" / "_lib").is_dir())  # 🔴 2026-09-05 archive 이관 — 깊이 무관 계산으로 교체
+ROOT = next(p for p in Path(__file__).resolve().parents if (p / "scripts" / "_lib").is_dir())
 D = ROOT / "법령 PDF"
 
 
@@ -141,10 +133,7 @@ def main() -> None:
         except Exception:                                        # noqa: BLE001
             bad.append(f.name)
             continue
-        # 행정규칙 XML 은 본문 모양이 셋이다:
-        #   (a) 법령        → .//조문단위
-        #   (b) 행정규칙     → 최상위 조문내용 반복
-        #   (c) 행정규칙 변종 → <조문> 래퍼 안에 조문번호/제목/내용 삼중주
+        # XML 본문 모양이 셋이다: 법령 .//조문단위 · 행정규칙 최상위 조문내용 · <조문> 래퍼 변종
         n = (len(r.findall(".//조문단위"))
              + len([c for c in r if c.tag == "조문내용"])
              + len(r.findall(".//조문/조문내용")))

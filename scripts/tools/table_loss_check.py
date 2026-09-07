@@ -1,20 +1,13 @@
 # -*- coding: utf-8 -*-
-"""전수 소실 검사기 — `_stage0_articles.json`(원문) ↔ `corpus.doc_articles`(현재 DB)
-어절 다중집합 대조. 2026-09-05 사고(레인 C, ai-35 배정) C2 산출물.
+"""조 단위 소실 검사기 — `_stage0_articles.json`(원문) 과 `corpus.doc_articles`(DB) 의 어절 다중집합을
+대조한다.
 
-**표 기호를 정규화하고 비교한다** — `text_coverage.부족_어절()` 이 `|` 를 걷고
-순서를 안 본다(표는 프로즈를 컬럼으로 재배치하므로 순서 대조는 항상 오탐).
-그래도 남는 두 가지 조판 잔재(쪽번호 순수 숫자, `[라벨]` 헤딩 반복)는 여기서
-따로 걷는다 — `table_splice.py` 의 복구 필터(`RE_복구_노이즈`)와 같은 규칙.
+`text_coverage.부족_어절()` 로 비교하고, 남는 조판 잔재(쪽번호 순수 숫자, `[라벨]` 헤딩)는 여기서
+걷는다. `--calibrate` 는 재적재 안 된 조만 돌려 0건이 나오는지로 검사기 눈금을 확인한다.
 
-계량 축(중앙 지시): 창업중심대학 참고1·2·4 는 09-05 재파싱 대상이 아니라
-원문과 글자수까지 일치해야 한다 — 이 셋에 0건이 안 나오면 검사기 자체가
-잘못 눈금 잡힌 것이다. `--calibrate` 로 이 셋만 돌려 확인한다.
-
-실행:
-    python scripts/_work/table_loss_check.py --calibrate     # 눈금 확인(0건 기대)
-    python scripts/_work/table_loss_check.py --target        # 09-05 재적재 대상 8개 조
-    python scripts/_work/table_loss_check.py --doc "창업중심대학 세부관리기준2025년 개정"
+    python scripts/tools/table_loss_check.py --calibrate     # 눈금 확인(0건 기대)
+    python scripts/tools/table_loss_check.py --target        # 재적재 대상 8개 조
+    python scripts/tools/table_loss_check.py --doc "창업중심대학 세부관리기준2025년 개정"
 """
 from __future__ import annotations
 
@@ -33,7 +26,7 @@ STAGE0_PATH = ROOT / "2026_Finance_DATA_FOR_RAG" / "_stage0_articles.json"
 
 RE_노이즈 = re.compile(r"^(\d+|\[.*\])$")
 
-# 09-05 재적재 대상 8개 조 (레인 C 배정 메시지 원문 그대로).
+# 재적재 대상 8개 조.
 재적재_대상 = [
     ("창업중심대학 세부관리기준2025년 개정", "참고3"),
     ("창업중심대학 세부관리기준2025년 개정", "참고5"),
@@ -45,7 +38,7 @@ RE_노이즈 = re.compile(r"^(\d+|\[.*\])$")
     ("창업도약패키지 세부관리기준(2025년)", "별지서식"),
 ]
 
-# 계량 축 — 재적재 안 된 조. 이 셋은 0건이 나와야 검사기가 맞게 눈금 잡힌 것.
+# 계량 축 — 재적재 안 된 조. 0건이 나와야 검사기 눈금이 맞다.
 계량_대상 = [
     ("창업중심대학 세부관리기준2025년 개정", "참고1"),
     ("창업중심대학 세부관리기준2025년 개정", "참고2"),

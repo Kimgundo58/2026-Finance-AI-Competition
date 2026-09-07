@@ -1,23 +1,11 @@
 # -*- coding: utf-8 -*-
-"""`db/init/*.sql` 이 살아있는 DB 를 재현하는지 검증한다.
-
-## 왜 필요한가
-
-`db/init/` 은 **컨테이너를 처음 만들 때만** 실행된다. 살아있는 DB 에는 `psql` 로 직접
-적용하므로, **파일과 실물이 갈라져도 아무 에러가 안 난다.** 갈라진 채로 두면
-`docker compose down -v && up -d` 한 순간 스키마가 조용히 되돌아간다.
-
-문자열 대조로는 부족하다 — 컬럼 이름이 SQL 어딘가에 있기만 하면 통과한다.
-**빈 DB 에 실제로 돌려서 운영 DB 와 대조**한다.
+"""`db/init/*.sql` 을 빈 DB 에 돌려 운영 DB 스키마(컬럼·제약·인덱스·정책·트리거·뷰)와 대조한다.
 
 실행:  PYTHONIOENCODING=utf-8 python scripts/archive/eval/verify_schema_repro.py
 """
 from __future__ import annotations
 
-# 🔴 2026-09-05 scripts/archive/ 이관 — 원래 scripts/ 바로 밑에 있던 파일이라
-#    아래(또는 이 파일의 기존 sys.path 계산)는 scripts/ 바로 밑 기준으로 짜여 있다.
-#    이관으로 깊이가 늘어나 깨지므로, `scripts/_lib` 을 찾을 때까지 위로 걸어 올라가
-#    scripts/ 와 프로젝트 루트를 sys.path 맨 앞에 다시 건다.
+# `scripts/_lib` 이 보일 때까지 위로 올라가 scripts/ 와 프로젝트 루트를 sys.path 맨 앞에 건다.
 import os as _os_이관, sys as _sys_이관
 _p_이관 = _os_이관.path.dirname(_os_이관.path.abspath(__file__))
 while not _os_이관.path.isdir(_os_이관.path.join(_p_이관, "_lib")):
@@ -29,8 +17,7 @@ if _p_이관 not in _sys_이관.path:
     _sys_이관.path.insert(0, _p_이관)
 if _os_이관.path.dirname(_p_이관) not in _sys_이관.path:
     _sys_이관.path.insert(0, _os_이관.path.dirname(_p_이관))
-# 🔴 archive 내부에서 카테고리를 넘나드는 import(예: index_guard, stage0_run)가
-#    있어 scripts/archive/ 의 모든 하위 폴더도 같이 건다.
+# archive 하위 폴더끼리 import 하므로 scripts/archive/ 의 모든 하위 폴더도 건다.
 _archive_이관 = _os_이관.path.join(_p_이관, "archive")
 if _os_이관.path.isdir(_archive_이관):
     for _d_이관 in _os_이관.listdir(_archive_이관):
@@ -41,7 +28,7 @@ if _os_이관.path.isdir(_archive_이관):
 import os, subprocess, sys
 from pathlib import Path
 
-ROOT = next(p for p in Path(__file__).resolve().parents if (p / "scripts" / "_lib").is_dir())  # 🔴 2026-09-05 archive 이관 — 깊이 무관 계산으로 교체
+ROOT = next(p for p in Path(__file__).resolve().parents if (p / "scripts" / "_lib").is_dir())
 컨테이너 = os.environ.get("SUDDOE_CONTAINER", "suddoe-db")
 운영DB = os.environ.get("SUDDOE_DB", "suddoe")
 검증DB = "suddoe_verify"

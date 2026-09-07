@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
-"""SUDDOE_LLM 스위치가 기본값(미설정=vllm)에서 «지금과 바이트 단위로 같은» 경로인지
-identity 로 증명한다. LLM 호출 없음(비용 0) — `llm_qwen.스위치_적용()` 이 세팅하는
-객체가 패치 전 원본 그 자체(`is`)인지만 본다. 2026-09-07 ai-33 지시.
+"""SUDDOE_LLM 스위치 테스트 — 미설정이면 vllm 원본 llm_호출 그대로, qwen 이면 llm_qwen 으로
+갈리는지 identity(`is`) 로 확인한다. LLM 호출 없음.
 """
 import os
 import sys
@@ -41,7 +40,7 @@ def test_qwen_전환():
 
 
 def test_왕복_기본값으로_복귀():
-    """qwen 으로 갔다가 다시 vllm(미설정)으로 — idempotent 확인."""
+    """qwen 으로 갔다가 다시 vllm(미설정)으로 돌아오는지 확인한다."""
     os.environ["SUDDOE_LLM"] = "qwen"
     import llm_qwen
     llm_qwen.스위치_적용()
