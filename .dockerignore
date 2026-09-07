@@ -49,3 +49,7 @@ _orgs_추가_창업중심대학.json
 !.env.example
 *.key
 *.pem
+
+# ── 운영·검산 도구 (서빙 경로 아님, 2026-09-07) ──
+scripts/tools/
+scripts/archive/

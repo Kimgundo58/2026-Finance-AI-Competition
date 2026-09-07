@@ -1,9 +1,9 @@
 # CLAUDE.md
-
+**절대로 GCP와 VERCEL은 수정하지 않는다.** - 0907 오후 12시기준 **
 「써도돼요」 — 창업지원금 지출비 사전승인 판정 서비스.
 
-> **판단이 필요한 원칙만 둔다.** 기계가 검사할 규칙은 `.claude/hooks/` 와
-> `scripts/archive/eval/index_guard.py`, 실측은 SessionStart 훅에 있다.
+> **판단이 필요한 원칙만 둔다.** 기계가 검사할 규칙은 `scripts/archive/eval/index_guard.py` 에 있다.
+> 개발 세션용 훅·스크래치(`.claude/`, `scratchpad/`)는 2026-09-07 트리 정리로 저장소 밖이다(로컬 전용).
 > 읽기 순서 **`docs/README.md`** · 지금 상태 `docs/0_현황.md` · 결정 대기 `docs/9_미결.md`.
 
 ## 작업 방식
@@ -67,4 +67,5 @@
 
       ## 주의점
       실패했던 접근, 위험한 파일, 남은 질문(: 최대 3줄)
+
 

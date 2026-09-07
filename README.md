@@ -144,5 +144,5 @@ FILTER = "embedding IS NOT NULL AND status='active' AND parse_quality='high'
 
 `docs/README.md` → 지금 상태 `docs/0_현황.md` → 결정 대기 `docs/9_미결.md`
 
-판단이 필요한 원칙은 `CLAUDE.md` 에 있다. 기계가 검사할 규칙은 `.claude/hooks/` 와
-`scripts/archive/eval/index_guard.py` 에 있다.
+판단이 필요한 원칙은 `CLAUDE.md` 에 있다. 기계가 검사할 규칙은
+`scripts/archive/eval/index_guard.py` 에 있다. 서빙 밖 운영·검산 도구는 `scripts/tools/` 에 있다.

@@ -11,7 +11,7 @@
 > 생성기를 다시 돌려라.
 >
 > ```bash
-> PYTHONIOENCODING=utf-8 python db/tools/gen_api_db_spec.py     # 저장소 루트에서
+> PYTHONIOENCODING=utf-8 python db/tools/gen_api_db_spec.py     # 저장소 루트에서 (생성기는 2026-09-07 트리 정리로 제거 — 히스토리 f780dc6 이전에 있다)
 > ```
 >
 > 생성 시각 `2026-09-02T01:17:58+09:00` · 소스 `server.main:app` · `localhost:5432/suddoe` · 생성기 `db/tools/gen_api_db_spec.py`
