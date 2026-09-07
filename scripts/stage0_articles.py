@@ -1,12 +1,7 @@
 # -*- coding: utf-8 -*-
 """Stage 0-d : 평문을 조(條) 단위로 재조립하고 검증 통과 조건 V1~V6 을 적용한다.
 
-전략 (앞에서부터 시도)
-    jo_titled         제N조(제목)          법령·지침·규정·규칙 (대부분)
-    outline_numbered  제N장 > N. > 가.     TIPS 총괄 운영지침 계열 (조 체계 아님)
-    jo_bare / jang    제N조 / 제N장        구조 약함
-    roman_chapter     Ⅰ Ⅱ Ⅲ 단독줄        "제N장" 이 없는 개요형
-    paragraph         빈 줄 2개            구조 없음, 판정 인덱스 제외
+전략은 jo_titled → outline_numbered → jo_bare/jang → roman_chapter → paragraph 순으로 시도한다.
 """
 from __future__ import annotations
 import re
@@ -208,8 +203,7 @@ def _roman_chapters(text: str, page_offsets: dict[int, int]) -> list[dict]:
     return arts
 
 
-# 단락 폴백에서 한 조각의 최소 길이. 이 값 미만을 버리는 게 아니라 채울 때까지 이어 붙인다 —
-# 버리면 셀마다 한 줄인 HWP 표가 통째로 사라진다.
+# 단락 폴백 조각의 최소 길이 — 미만이면 버리지 않고 채울 때까지 이어 붙인다(버리면 HWP 표가 사라진다).
 _단락_최소 = 100
 
 

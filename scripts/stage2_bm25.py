@@ -1,28 +1,13 @@
 # -*- coding: utf-8 -*-
 """Stage 2-e : BM25 역색인 -> `corpus.chunk_terms` / `chunk_len` / `term_df`.
 
-형태소 분석은 앱이 색인 시점에 하고 **결과 토큰만 적재**한다 (`RAG.md` §2-4).
-재인덱싱이 트랜잭션 하나가 되고 워커가 상태를 안 가진다.
-
-🔴 **색인 입력은 `chunks.text` 가 아니라 `[컨텍스트 헤더] + text` 다** (§3-5).
-   임베딩과 같은 입력을 써야 두 검색기가 같은 것을 본다. 입력은 stage2_chunk.py 가
-   내보낸 `_stage2_chunks.jsonl` 이고 chunk_id 로 정렬돼 있다.
-
-🔴 **토큰화 정책은 색인과 쿼리에 똑같이 적용한다.** 이게 동등성 검증의 재현 조건이라
-   `토큰화()` 를 앱도 그대로 import 해서 쓴다. 여기서만 고치면 조용히 어긋난다.
-
-🔴 **`--보충` 은 `stage2_chunk` 를 import 하지 않는다.** `장맵()`/`헤더()` 를 그대로
-   가져다 쓰고 싶지만, `stage2_chunk` 는 `tag_apply_target` 을 물고 오고 그건
-   module-level 에서 `sys.stdout` 을 다시 감싼다 — 이 파일이 이미 위에서 한 번
-   감싸 놓은 뒤라 두 번째 감싸기가 첫 래퍼의 버퍼를 닫아 `ValueError: I/O
-   operation on closed file` 로 죽는다(실측, `stage2_chunk.py` 상단 주석과 같은
-   원인). 그래서 `장맵()`/`헤더()` 는 아래에 그대로 복제해 뒀다 — 원본을 고치면
-   여기도 같이 고친다.
+형태소 분석은 색인 시점에 하고 결과 토큰만 적재한다. 색인 입력은 `chunks.text` 가 아니라
+`[컨텍스트 헤더] + text` 다 — 임베딩과 같은 입력이어야 두 검색기가 같은 것을 본다.
+토큰화 정책은 색인과 쿼리에 동일하게 적용해야 하므로 `토큰화()` 를 앱도 그대로 import 해 쓴다.
 
 실행:
     PYTHONIOENCODING=utf-8 python scripts/stage2_bm25.py
     PYTHONIOENCODING=utf-8 python scripts/stage2_bm25.py --verify   # bm25s 겹침률
-    PYTHONIOENCODING=utf-8 python scripts/stage2_bm25.py --보충 --dry-run  # 누락분 개수만
     PYTHONIOENCODING=utf-8 python scripts/stage2_bm25.py --보충            # 누락분만 채운다
 """
 from __future__ import annotations
@@ -69,7 +54,7 @@ def 토큰화(texts: list[str]) -> list[list[str]]:
     return out
 
 
-# ── `stage2_chunk.py` 복제분 (import 하면 죽는다 — 위 docstring 참조) ──────────
+# stage2_chunk.py 복제분 — import 하면 module-level stdout 재래핑이 충돌해 죽는다
 import re as _re
 
 _RE_장 = _re.compile(r"제\s*(\d+)\s*장\s*([^\n<>]{0,20})")
@@ -97,13 +82,12 @@ def _헤더(layer, 사업, doc_id, 장, 조번호, 조제목) -> str:
 def 보충(dry_run: bool = False) -> None:
     """전체 재구축(TRUNCATE) 대신 `corpus.chunk_len` 에 없는 chunk_id 만 채운다.
 
-    스코프 재적재(`_참고3_scoped_reload.py` 류)가 `corpus.chunks` 만 만지고
-    BM25 세 테이블을 안 건드려 생기는 구멍을 메우는 경로다. `토큰화()` 는 색인
-    본체와 같은 함수를 그대로 쓴다 — 여기서 새로 정의하면 색인/질의 규칙이 갈린다.
+    스코프 재적재가 `corpus.chunks` 만 만지고 BM25 세 테이블을 안 건드려 생기는
+    구멍을 메우는 경로다. `토큰화()` 는 색인 본체와 같은 함수를 그대로 쓴다.
     """
     from _lib import db
 
-    # audit_db.py 의 "BM25 색인 누락" 정의와 같은 anti-join (chunk_len 을 닻으로 쓴다)
+    # chunk_len 에 없는 chunk_id 를 찾는 anti-join
     SQL_누락 = """
         SELECT c.chunk_id, c.doc_id, c.layer, c.사업명, c.조번호, c.조제목, c.text
           FROM corpus.chunks c
@@ -201,7 +185,7 @@ def 적재(rows: list[dict]) -> None:
     assert posting == n_t, f"포스팅 불일치 {posting} vs {n_t}"
 
 
-# ── 동등성 검증 ──────────────────────────────────────────────────────────────
+# 동등성 검증
 질의들 = [
     "노트북 구입 가능한가요",
     "창업기업 인건비 대표자 급여",
@@ -217,7 +201,7 @@ def 적재(rows: list[dict]) -> None:
 
 
 def verify() -> None:
-    """SQL BM25 와 `bm25s` 의 top-20 겹침률. 정답셋 평가보다 **먼저** 한다."""
+    """SQL BM25 와 `bm25s` 의 top-20 겹침률. 정답셋 평가보다 먼저 한다."""
     try:
         import bm25s
     except ImportError:
@@ -229,7 +213,7 @@ def verify() -> None:
     ids = np.array([r["chunk_id"] for r in rows])
     print(f"bm25s 색인 {len(rows):,}건 (같은 토큰화)...", flush=True)
     corpus = 토큰화([r["text"] for r in rows])
-    # k1·b 를 SQL 쪽과 맞춘다. method='lucene' 이 §2-4 의 식과 같은 계열이다.
+    # k1·b 를 SQL 쪽과 맞춘다. method='lucene' 이 같은 식 계열이다.
     idx = bm25s.BM25(k1=1.2, b=0.75, method="lucene")
     idx.index(corpus, show_progress=False)
 

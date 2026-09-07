@@ -1,21 +1,13 @@
 # -*- coding: utf-8 -*-
 """검색 품질 평가 — dense / BM25 / RRF 가 정답 조문을 실제로 찾아오는가.
 
-🔴 **A·B 가 잰 것과 다르다.**
-   A = 전량 스캔 대비 재현율   -> "임베딩 모델이 가깝다고 본 것"을 얼마나 재현하나
-   B = 우리 SQL == bm25s       -> 구현 동등성
-   둘 다 기계가 제대로 도는지를 봤을 뿐, **맞는 조문을 찾는지는 안 봤다.**
-   여기가 그걸 잰다.
-
 정답은 `eval.golden_set.정답근거` (jsonb: doc / 조번호 / 원문).
 `doc` 이 `corpus.chunks.doc_id` 와 그대로 일치하고, `원문` 은 조문에서 그대로 따온
-문장이라 **원문 부분일치로 정답 청크를 역추적**한다. 조번호는 항호까지 붙어 있어
+문장이라 원문 부분일치로 정답 청크를 역추적한다. 조번호는 항호까지 붙어 있어
 ("제20조(1)") 청크 단위와 어긋날 수 있으므로 보조 수단으로만 쓴다.
 
-🔴 **검색 구현은 여기에 없다 — `scripts/retrieve.py` 를 부른다** (2026-08-31 분리).
-   평가와 실전이 다른 코드를 쓰면 여기서 잰 숫자가 실전을 설명하지 못한다.
-   분리 시점의 기준값(정답셋 70문항): **RRF hit@5 = 52.9%** · dense 47.1% · BM25 40.0%.
-   이 값이 한 자리라도 바뀌면 검색 동작이 바뀐 것이다.
+검색 구현은 여기에 없다 — `scripts/retrieve.py` 를 부른다. 평가와 실전이 다른
+코드를 쓰면 여기서 잰 숫자가 실전을 설명하지 못한다.
 
 지표
     hit@k   정답 청크가 상위 k 안에 하나라도 있는가 (판정에는 이게 1순위 —
@@ -42,9 +34,9 @@ import time
 
 import psycopg
 
-# 🔴 sys.stdout 을 여기서 감싸지 않는다. stage2_bm25 를 import 하면 그쪽이 다시 감싸고,
-#    이쪽 래퍼가 GC 되면서 밑의 버퍼를 닫아버린다 ("I/O operation on closed file").
-#    출력 인코딩은 PYTHONIOENCODING=utf-8 로 준다 (훅이 강제한다).
+# sys.stdout 을 여기서 감싸지 않는다 — stage2_bm25 를 import 하면 그쪽이 다시 감싸고,
+# 이쪽 래퍼가 GC 되면서 밑의 버퍼를 닫아버린다 ("I/O operation on closed file").
+# 출력 인코딩은 PYTHONIOENCODING=utf-8 로 준다.
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _lib import db  # noqa: E402
@@ -80,13 +72,12 @@ def 정답청크(cur, 근거: list[dict]) -> set[int]:
 
 
 def 정답청크_고정(cur, gold_id: int) -> set[int]:
-    """D3 `eval.golden_chunks` 고정 매핑. 매 실행 원문 부분일치로 되짚지 않는다.
+    """`eval.golden_chunks` 고정 매핑. 매 실행 원문 부분일치로 되짚지 않는다.
 
-    🔴 위의 `정답청크()` 는 **부속물 좌표를 통째로 놓치고 있었다** — `[붙임2]`·`참고2`·
-       `별표1`·`별지4` 를 `제N조` 정규식이 못 잡는다. 그래서 평가 가능 문항이 70 이었고
-       고정 매핑으로는 **74** 다. 늘어난 4문항은 난이도가 다르므로
-       🔴 **70문항 시절의 hit율과 직접 비교하면 안 된다** (계약 §7).
-       `--gold-chunks` 는 그래서 74문항 지표와 **70문항 부분집합 지표를 같이** 찍는다.
+    `정답청크()` 는 `[붙임2]`·`참고2`·`별표1`·`별지4` 같은 부속물 좌표를 `제N조`
+    정규식으로 못 잡아 평가 가능 문항이 70건이었다. 고정 매핑으로는 74건이다 —
+    늘어난 4문항은 난이도가 달라 70문항 시절 hit율과 직접 비교할 수 없다.
+    `--gold-chunks` 는 74문항 지표와 70문항 부분집합 지표를 같이 찍는다.
     """
     cur.execute("""SELECT chunk_id FROM eval.golden_chunks
                     WHERE gold_id = %s AND chunk_id IS NOT NULL""", (gold_id,))
@@ -106,10 +97,7 @@ def 정답조(cur, 근거: list[dict]) -> set[int]:
     return out
 
 
-# ── 미스 원인 분해 ──────────────────────────────────────────────────────────
-# hit@5 를 놓친 문항을 **네 갈래**로 가른다. 이게 갈리지 않으면 내일 무엇을 고칠지
-# 또 추측하게 된다 (계약 §1). "검색이 나쁘다" 는 진단이 아니다.
-#
+# 미스 원인 분해 — hit@5 를 놓친 문항을 네 갈래로 가른다. "검색이 나쁘다" 는 진단이 아니다.
 #   필터밖    정답 청크가 pre-filter 를 통과하지 못한다 (status·scope·적용대상·사업명)
 #             -> 검색기를 아무리 고쳐도 안 잡힌다. 태깅·적재 쪽 문제다
 #   결손      정답 근거에 해당하는 청크 자체가 없다 (부속물 미청킹 등)
@@ -169,7 +157,7 @@ def 진단하기(cur, 데이터, r_res, 벡터들, a, 미해결) -> None:
 
 
 def 필터진단(cur, chunk_ids: list[int]) -> None:
-    """`필터밖` 으로 떨어진 청크가 **어느 조건**에서 막혔는지 하나씩 본다."""
+    """`필터밖` 으로 떨어진 청크가 어느 조건에서 막혔는지 하나씩 본다."""
     조건 = [("status", "status='active'"), ("parse_quality", "parse_quality='high'"),
             ("retrieval_scope", "retrieval_scope='진입점'"), ("layer", "layer IN ('L1','L2')"),
             ("적용대상", "적용대상 IN ('창업기업','공통')"), ("embedding", "embedding IS NOT NULL")]
@@ -217,8 +205,7 @@ def main() -> None:
     a = ap.parse_args()
     KS = [1, 5, 10, 20, a.k]
 
-    # 🔴 읽기 전용인데도 트랜잭션을 붙들면 다른 세션의 DDL 과 교착이 난다
-    #    (2026-08-31 8세션 병렬 중 DeadlockDetected 실측). autocommit 으로 푼다.
+    # 읽기 전용인데도 트랜잭션을 붙들면 다른 세션의 DDL 과 교착이 날 수 있다. autocommit 으로 푼다.
     with psycopg.connect(DSN, autocommit=True) as conn:
         cur = conn.cursor()
         cur.execute("""SELECT gold_id, 세트, 질문, 정답근거, 사업명 FROM eval.golden_set
@@ -287,8 +274,8 @@ def main() -> None:
                   + f" {g['MRR']:7.3f}")
 
         if a.gold_chunks:
-            # 🔴 §7 — 문항 수가 바뀌면 hit율을 직접 비교하면 안 된다. 늘어난 4문항은
-            #    전부 부속물(별표·별지) 근거라 난이도가 다르다. 같은 70문항으로 맞춰 찍는다.
+            # 문항 수가 바뀌면 hit율을 직접 비교할 수 없다 — 늘어난 4문항은 부속물
+            # (별표·별지) 근거라 난이도가 다르다. 같은 70문항으로 맞춰 찍는다.
             부분 = [r for r, d in zip(r_res, 데이터) if d[0] in 레거시70]
             새것 = [(d[0], d[1]) for d in 데이터 if d[0] not in 레거시70]
             print(f"\n[§7 비교 보정] 위는 {len(데이터)}문항 기준이다. "
@@ -304,7 +291,7 @@ def main() -> None:
             print(f"  {세트:8} {len(부분):3}건  {지표(부분, [a.k])['hit@'+str(a.k)]:5.1f}%")
 
         if a.dangling:
-            # A3 DANGLING_WARN 이 L1·L2 경로에서 실제로 발화하는지. 판정 인덱스 **안의**
+            # A3 DANGLING_WARN 이 L1·L2 경로에서 실제로 발화하는지. 판정 인덱스 안의
             # 끊긴 참조만 신호다 — top-5 진입점에서 출발한 것만 센다 (RAG.md §4-3).
             빈, 있음 = 0, []
             for (gid, _세트, _q, _정답, _사업, _근거), row in zip(데이터, r_res):
@@ -322,9 +309,9 @@ def main() -> None:
                 print(f"    ... 외 {len(있음)-10}문항")
 
         if a.c7:
-            # 🔴 필터 on/off 를 **같은 임베딩으로 짝지어** 잰다. 따로 두 번 돌리면
-            #    CPU 부하 차이가 섞여 어느 쪽이 원인인지 못 가린다.
-            #    공통 문항은 사업명이 NULL 이라 필터가 no-op — 분모에서 뺀다.
+            # 필터 on/off 를 같은 임베딩으로 짝지어 잰다 — 따로 두 번 돌리면 CPU 부하
+            # 차이가 섞여 어느 쪽이 원인인지 못 가린다. 공통 문항은 사업명이 NULL 이라
+            # 필터가 no-op — 분모에서 뺀다.
             지정idx = [i for i, d in enumerate(데이터) if 사업키(d[4])]
             켬 = []
             for i in 지정idx:
@@ -369,8 +356,8 @@ def main() -> None:
             진단하기(cur, 데이터, r_res, 벡터들, a, 미해결)
 
         if a.기록:
-            # D4 `eval_store.기록()`. 🔴 `설정` 을 반드시 채운다 — 내일 아침 "이 숫자가
-            # 무엇 때문에 나왔나" 를 답할 수 있는 건 이 필드뿐이다 (eval_store 독스트링).
+            # `eval_store.기록()`. `설정` 을 반드시 채운다 — 이 숫자가 무엇 때문에
+            # 나왔는지 답할 수 있는 건 이 필드뿐이다.
             import eval_store
             지표들 = {f"{이름}.{k}": v
                       for 이름, res in (("dense", d_res), ("BM25", b_res), ("RRF", r_res))
@@ -389,8 +376,8 @@ def main() -> None:
                  "문항수": len(데이터), "지표": 지표들,
                  "라벨": f"C/eval_retrieval 사업필터={'on' if a.사업필터 else 'off'}"
                          f" 정답={'고정' if a.gold_chunks else '역추적'}",
-                 # 🔴 비고는 표를 훑는 사람이 읽는 유일한 자유 텍스트다. 조건이 다른 행끼리
-                 #    hit@5 를 빼는 오독이 가장 위험하므로 그 경고를 여기 박는다.
+                 # 비고는 표를 훑는 사람이 읽는 유일한 자유 텍스트다 — 조건이 다른 행끼리
+                 # hit@5 를 빼는 오독을 막는 경고를 여기 남긴다.
                  "비고": ("조건: 사업필터="
                           + ("on" if a.사업필터 else "off")
                           + " · 정답출처="

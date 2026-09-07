@@ -1,12 +1,9 @@
 # -*- coding: utf-8 -*-
-"""지출계획 — 화면 6 홈 · 화면 7 목록 · 화면 11 상세.   **[지출계획 계통]**
+"""지출계획 — 화면 6 홈 · 화면 7 목록 · 화면 11 상세.
 
-목(mock) 경로는 끝까지 구현돼 있다. 프론트는 이 파일 그대로 붙을 수 있다.
-🔴 **실 경로는 `_실_*` 세 함수에만 있다.** 목 경로와 응답 모델은 건드리지 않는다.
-   응답 필드가 달라지면 프론트가 깨진다 — 필드를 바꾸려면 먼저 합의할 것.
-
-CSV 는 만들지 않는다 — 프론트 요구서 §화면7-③ 이 «브라우저 생성» 으로 확정했다.
-통계는 별도 API 가 아니라 목록 응답에 얹는다 (§화면6-④ «통계 전용 API 불필요»).
+목(mock) 경로가 기본 구현이고 실 경로는 `_실_*` 함수에만 있다. 응답 모델을
+바꾸면 프론트가 깨지므로 필드를 바꾸려면 먼저 합의한다. CSV 는 만들지 않는다
+(브라우저 생성으로 확정). 통계는 별도 API 없이 목록 응답에 얹는다.
 """
 from __future__ import annotations
 
@@ -23,9 +20,7 @@ router = APIRouter(prefix="/api/plans", tags=["지출계획"])
 
 _log = logging.getLogger(__name__)
 
-# 🔴 «본문 값을 쓴다» 와 «주인이 없다(게스트)» 를 갈라야 해서 센티넬을 둔다.
-#    None 을 기본값으로 두면 게스트를 뜻하는 None 과 구별이 안 되고, 그러면
-#    라우터가 org 를 안 넘긴 실수가 «게스트» 가 아니라 «본문 신뢰» 로 조용히 떨어진다.
+# 게스트(org_id=None)와 «값을 안 넘김» 을 구별하려는 센티넬
 _주어지지않음 = object()
 
 
@@ -49,7 +44,7 @@ def 목록(
     행 = mock_data.목_계획요약() if MOCK else _실_목록(org_id)
     통계 = 계획통계(**(mock_data.목_통계() if MOCK else _실_통계(org_id)))
 
-    # 🔴 통계는 «필터 적용 전» 전체 기준이다. 탭 배지가 필터에 따라 흔들리면 안 된다.
+    # 통계는 필터 적용 전 전체 기준이다 — 탭 배지가 필터에 따라 흔들리면 안 된다
     걸린 = _거르기(행, 탭, 사업명, 확정비목, q, 금액_최소, 금액_최대)
     걸린 = _정렬(걸린, 정렬)
     시작 = (페이지 - 1) * 크기
@@ -103,24 +98,11 @@ def _정렬(행: list[dict], 정렬: str) -> list[dict]:
 # ════════════════════════════════════════════════════════════════════
 
 def _질의_저장(sql: str, 인자: tuple, 주인: str | None) -> list[tuple]:
-    """저장용 `_질의`. 🔴 **실패 사유를 갈라서 내보낸다.**
+    """저장용 `_질의` — 실패 사유(DB 다운/권한·RLS 차단/제약 위반)를 갈라서 반환한다.
 
-    ■ 왜 갈라야 하나 (2026-09-03 · 실서버에서 실제로 헛짚었다)
-      무인증으로 `POST /api/plans` 를 치면 「DB 연결 실패」가 떴는데 **DB 는 멀쩡했다.**
-      같은 서버의 읽기가 413건을 돌려주고 있었다. 실제 기전은 이렇다:
-
-          주체 없음 → GUC 안 세움 → current_org() NULL → RLS 가 INSERT 차단(42501)
-                   → `_질의` 가 예외를 삼켜 [] → `if not 행:` → 503 「DB 연결 실패」
-
-      즉 ⓐ DB 다운 ⓑ 권한/RLS 차단 ⓒ 제약 위반이 **한 문구로 뭉개진다.**
-      `auth._계정조회()` 가 「죽은 DB」와 「없는 계정」을 가른 것과 «완전히 같은» 축이고,
-      처방도 같다 — `예외전파=True`.
-
-    ■ 🔴 `예외전파` 는 **여기 한 자리만** 켠다. `_질의` 호출부가 37곳이라 기본값을
-      바꾸면 조용하던 실패가 전부 500 으로 튄다.
-
-    ■ 🔴 사용자에게는 SQLSTATE·DB 메시지를 안 준다. psycopg 의 오류 본문에는 호스트·
-      포트·사용자명·컬럼명이 그대로 실린다. 사유는 로그에만 남기고 화면 문구는 셋으로 닫는다.
+    `예외전파=True` 는 여기서만 켠다 — 호출부가 많아 기본값을 바꾸면 조용하던
+    실패가 전부 500 으로 튄다. 사용자에게는 SQLSTATE·DB 메시지를 주지 않는다
+    (호스트·포트 등이 그대로 실릴 수 있다) — 사유는 로그에만 남긴다.
     """
     try:
         return _질의(sql, 인자, 예외전파=True)
@@ -129,8 +111,7 @@ def _질의_저장(sql: str, 인자: tuple, 주인: str | None) -> list[tuple]:
         _log.exception("지출계획 저장 실패 — sqlstate=%s 주인=%s", 상태, 주인)
         if 상태 == "42501":              # insufficient_privilege = RLS 가 물었다
             if 주인 is None:
-                # 🔴 게스트다. 「권한이 없다」가 아니라 「누군지 모른다」가 맞다 —
-                #    403 으로 주면 로그인해도 안 될 것처럼 읽힌다.
+                # 게스트다 — 「권한 없음」이 아니라 「누군지 모름」이므로 401 로 답한다
                 raise HTTPException(401, "저장하려면 로그인이 필요합니다") from e
             raise HTTPException(403, "이 기관으로 저장할 권한이 없습니다") from e
         if 상태 is None:                 # 접속 자체가 안 됐다 (OperationalError)
@@ -139,21 +120,12 @@ def _질의_저장(sql: str, 인자: tuple, 주인: str | None) -> list[tuple]:
 
 
 def _계획_주인(요청: Request, 자기신고: str | None) -> str | None:
-    """계획의 «주인» 을 정한다. 🔴 **본문의 `org_id` 는 절대 쓰지 않는다.**
+    """계획의 주인(org_id)을 정한다. 본문의 org_id 는 절대 쓰지 않는다 — 클라이언트
+    값을 그대로 INSERT 하면 남의 기관 이름으로 행을 심을 수 있다.
 
-    ■ 왜 본문을 버리나
-      본문은 클라이언트가 쓴 값이다. 그걸 그대로 INSERT 하면 남의 기관 이름으로
-      행을 심을 수 있다. 지금은 RLS 가 DB 층에서 한 번 더 막지만, 그건 «두 번째»
-      방어선이지 근거가 아니다 — `routes_l3._업로드_주인` 과 같은 처방을 같은 축에
-      적용한다 (`/api/judge` 는 이미 닫혔고 여기만 남아 있었다).
-
-    ■ 🔴 돌려주는 값은 `auth.OrgId주입` 이 GUC(`app.org_id`)에 세운 값과 «같아야»
-      한다. RLS 정책이 `org_id = current_org()` 라서, 둘이 어긋나면 토큰이 멀쩡해도
-      INSERT 가 거부된다(503). 그래서 판정식을 미들웨어와 «같은 문장» 으로 둔다:
-      `주.검증됨 and 주.org_id`. 여기를 손대려면 `auth.py` 의 그 줄도 같이 봐야 한다.
-
-    ■ 본문에 org_id 가 실려 와도 **400 으로 죽이지 않는다.** 프론트가 아직 보내고
-      있을 수 있고, 시연 중에 그걸로 멈추면 손해가 더 크다. 무시하고 로그만 남긴다.
+    반환값은 `auth.OrgId주입` 이 GUC(app.org_id)에 세운 값과 같아야 한다 — RLS 정책이
+    org_id = current_org() 라서 어긋나면 INSERT 가 거부된다. 본문에 org_id 가 와도
+    400 으로 막지 않고 무시한 채 로그만 남긴다.
     """
     주 = 요청.scope.get("suddoe_주체")
     주인 = str(주.org_id) if (주 is not None and 주.검증됨 and 주.org_id) else None
@@ -190,8 +162,7 @@ def 생성(요청: Request, body: 계획생성) -> 계획상세:
 def _합성(body: 계획생성) -> str:
     """폼 값을 문장으로 합성한다 — `expense_plans.질문원문` 이 NOT NULL 이라서다.
 
-    🔴 스키마를 바꾸지 않으려고 택한 방법이다 (`프로토타입_해부_구현명세.md` §6-1 (b)안).
-    ⚠️ 이 문장을 다시 LLM 입력으로 쓰지 않는다. 저장·검색·표시 전용이다.
+    스키마를 바꾸지 않으려는 방법이다. 이 문장은 저장·검색·표시 전용이고 LLM 입력으로 다시 쓰지 않는다.
     """
     만원 = f"{int(body.금액):,}원"
     return f"{body.사업명}에서 {body.용도} {body.품목} {만원}을 사도 되나요?"
@@ -212,8 +183,7 @@ def 상세(plan_id: int, org_id: str | None = None) -> 계획상세:
         if not 행:
             raise HTTPException(404, f"지출계획 {plan_id} 을(를) 찾을 수 없습니다")
         할일 = [t for t in mock_data.목_할일 if t["plan_id"] == plan_id]
-        # 🔴 `생성()` 이 만든 행에는 "정규화" 키가 이미 있고 시드 5건에는 없다.
-        #    `**행` 과 `정규화=` 를 같이 쓰면 새 계획 조회가 TypeError → 500 이었다.
+        # 생성() 이 만든 행에는 「정규화」 키가 있고 시드 데이터엔 없다 — 병합 시 중복 키 주의
         return 계획상세(**{**행, "정규화": 행.get("정규화") or {}},
                        할일=할일, 판정상세=None)
     return _실_상세(plan_id, org_id)
@@ -221,18 +191,10 @@ def 상세(plan_id: int, org_id: str | None = None) -> 계획상세:
 
 @router.delete("/{plan_id}", status_code=200)
 def 삭제(plan_id: int, org_id: str | None = None) -> dict:
-    """지출계획 하나를 지운다. 🔴 «자기 org 것만» 지워진다.
+    """지출계획 하나를 지운다 — 자기 org 것만 지워진다.
 
-    ━━ 무엇이 같이 지워지고 무엇이 남는가 (FK 가 이미 정하고 있다) ━━━━━━━━━
-      `plan_tasks`  ON DELETE CASCADE   → 할일·일정은 «같이 지워진다»
-      `decisions`   ON DELETE SET NULL  → 판정 기록은 «남고» 연결만 끊긴다
-
-    🔴 판정을 같이 지우지 «않는» 것은 의도다. 판정은 「그때 우리가 이렇게 답했다」는
-       기록이고, 사용자가 계획을 지웠다고 그 사실이 없어지면 안 된다(감사 흔적).
-       `decisions.plan_id` 가 NULL 이 되어 어느 계획 것이었는지만 흐려진다.
-
-    🔴 되돌릴 수 없다. 그래서 «몇 건이 같이 지워졌는지» 를 돌려준다 — 화면이
-       "할일 6건도 같이 삭제됐습니다" 로 사용자에게 알릴 수 있어야 한다.
+    FK 로 plan_tasks 는 CASCADE(같이 삭제), decisions 는 SET NULL(판정 기록은
+    감사 흔적으로 남기고 연결만 끊는다). 되돌릴 수 없어 같이 지워진 건수를 반환한다.
     """
     if MOCK:
         전 = len(mock_data.목_계획)
@@ -244,13 +206,13 @@ def 삭제(plan_id: int, org_id: str | None = None) -> dict:
         return {"삭제": True, "plan_id": plan_id, "할일삭제": len(할일)}
 
     조건, org인자 = _org조건(org_id, "p")
-    # 지우기 «전» 에 센다 — CASCADE 뒤에는 못 센다.
+    # 지우기 전에 센다 — CASCADE 뒤에는 못 센다
     행 = _질의(
         f"SELECT p.제목, (SELECT count(*) FROM tenant.plan_tasks t WHERE t.plan_id = p.plan_id) "
         f"  FROM tenant.expense_plans p WHERE p.plan_id = %s AND {조건}",
         (plan_id, *org인자))
     if not 행:
-        # 🔴 남의 org 것이어도 404 다 — 403 을 주면 «그 id 가 존재한다» 는 정보가 샌다.
+        # 남의 org 것이어도 404 다 — 403 을 주면 id 존재 여부가 샌다
         raise HTTPException(404, f"지출계획 {plan_id} 을(를) 찾을 수 없습니다")
     제목, 할일수 = 행[0]
     n = _실행(f"DELETE FROM tenant.expense_plans p WHERE p.plan_id = %s AND {조건}",
@@ -262,7 +224,7 @@ def 삭제(plan_id: int, org_id: str | None = None) -> dict:
 
 
 # ════════════════════════════════════════════════════════════════════
-# 🔴 실 경로 구역 — 아래 넷이 전부다
+# 실 경로 구역 — 아래 넷이 전부다
 # ════════════════════════════════════════════════════════════════════
 
 def _문자열(v) -> str | None:
@@ -278,7 +240,7 @@ def _jsonb(v):
 
 
 def _org조건(org_id: str | None, 별칭: str = "p") -> tuple[str, tuple]:
-    """org_id 가 None 이면 게스트(org_id IS NULL) 행만 — 🔴 남의 기관 행이 새면 TENANT_LEAK."""
+    """org_id 가 None 이면 게스트(org_id IS NULL) 행만 반환한다 — 남의 기관 행이 새면 TENANT_LEAK."""
     if org_id is None:
         return f"{별칭}.org_id IS NULL", ()
     return f"{별칭}.org_id = %s", (org_id,)
@@ -287,8 +249,8 @@ def _org조건(org_id: str | None, 별칭: str = "p") -> tuple[str, tuple]:
 def _실_목록(org_id: str | None) -> list[dict]:
     """tenant.expense_plans LEFT JOIN tenant.decisions ON latest_decision_id.
 
-    반환 dict 의 키는 `models.계획요약` 필드와 정확히 같아야 한다.
-    org_id 가 None 이면 게스트(org_id IS NULL) 행만 본다 — 🔴 남의 기관 행이 새면 TENANT_LEAK.
+    반환 dict 의 키는 `models.계획요약` 필드와 정확히 같아야 한다. org_id 가 None 이면
+    게스트(org_id IS NULL) 행만 본다 — 남의 기관 행이 새면 TENANT_LEAK.
     """
     조건, 인자 = _org조건(org_id)
     행 = _질의(f"""
@@ -325,7 +287,7 @@ def _실_통계(org_id: str | None) -> dict:
         LEFT JOIN tenant.decisions d ON d.decision_id = p.latest_decision_id
         WHERE {조건}
     """, 인자)
-    # 🔴 _질의 는 DB 접속 실패 시 빈 리스트를 준다 — «0건» 과 구분해 0으로 채운다.
+    # _질의 는 DB 접속 실패 시도 빈 리스트를 준다 — 0건과 구분해 0으로 채운다
     if not 행:
         return {"전체": 0, "확인필요": 0, "위험": 0, "특이사항없음": 0, "점검전": 0, "금액합계": 0.0}
     r = 행[0]
@@ -338,13 +300,9 @@ def _실_통계(org_id: str | None) -> dict:
 def _실_생성(body: 계획생성, *, org_id=_주어지지않음) -> 계획상세:
     """INSERT INTO tenant.expense_plans. 질문원문이 없으면 `_합성(body)` 을 쓴다.
 
-    🔴 `org_id` 는 **HTTP 경로에서 반드시 넘겨라** — `_계획_주인()` 이 검증된 주체에서
-       뽑은 값이다. 안 넘기면 `body.org_id`(자기신고)로 떨어지는데, 그건 테스트가
-       본문으로 org 를 지정하는 관례(`test_plans.py`)를 살려 두기 위한 «직접 호출»
-       전용 통로다. 라우터에서 그 통로를 타면 기관 사칭이 열린다.
+    org_id 는 HTTP 경로에서 반드시 넘겨야 한다 — 안 넘기면 body.org_id(자기신고)로
+    떨어지는데, 이 통로는 테스트의 직접 호출 전용이다. 라우터에서 타면 기관 사칭이 된다.
     """
-    # 🔴 **라우터는 반드시 `org_id=` 를 넘긴다.** 안 넘기면 자기신고(본문)로 떨어지고
-    #    그게 곧 기관 사칭이다. 이 통로는 테스트의 «직접 호출» 전용이다.
     주인 = body.org_id if org_id is _주어지지않음 else org_id
     제목 = body.제목 or body.품목
     질문원문 = body.질문원문 or _합성(body)
@@ -361,9 +319,7 @@ def _실_생성(body: 계획생성, *, org_id=_주어지지않음) -> 계획상�
         주인,
     )
     if not 행:
-        # 🔴 `_질의_저장` 이 예외를 다 세워 내보내므로 여기까지 «빈 리스트» 로 오는 길은
-        #    없다 (INSERT ... RETURNING 은 성공하면 반드시 1행). 남겨 두되 503 이 아니라
-        #    500 이다 — 여기 걸리면 DB 문제가 아니라 우리가 모르는 상태다.
+        # _질의_저장 이 실패를 예외로 던지므로 정상 경로에선 여기 안 온다 — 방어적 처리
         raise HTTPException(500, "지출계획을 저장하지 못했습니다")
     r = 행[0]
     return 계획상세(
@@ -401,14 +357,9 @@ def _실_상세(plan_id: int, org_id: str | None) -> 계획상세:
             "전제": r[18] or [], "신뢰등급": r[19], "버전스탬프": r[20],
             "참조사슬": r[21] or [], "강등사유": r[22] or [],
         }
-        # 🔴 2026-09-07 — 문의초안을 «여기서 다시 만든다». 판정 때 만들어 SSE 로 한 번
-        #    흘리기만 하고 «저장은 안 했다» — `tenant.decisions` 에 칼럼이 없다. 그래서
-        #    새로고침하면 사라져 화면 「문의초안 카드」가 영영 안 떴다.
-        #    오늘 「결제 후 증빙」·「심층질문」과 같은 계열의 세 번째 사례다.
-        #    🔴 칼럼을 늘리지 «않는» 쪽을 골랐다(오너 결정) — 문의초안은 판정에서
-        #      «파생되는 글» 이라 원본(인용·전제·정규화)이 저장돼 있으면 언제든 다시
-        #      만들 수 있다. 스키마를 안 늘려도 되고, 문구를 고치면 옛 판정에도 새
-        #      문구가 적용된다. 판단불가가 아니면 `문의초안()` 이 None 을 준다.
+        # 문의초안은 저장하지 않고 여기서 매번 다시 만든다 — 인용·전제·정규화(저장됨)에서
+        # 파생되는 글이라 스키마를 안 늘려도 되고, 문구를 고치면 옛 판정에도 적용된다.
+        # 판단불가가 아니면 문의초안() 이 None 을 준다
         try:
             from .inquiry import 문의초안 as _초안
             판정상세["문의초안"] = _초안(

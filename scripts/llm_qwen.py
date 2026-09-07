@@ -1,12 +1,9 @@
 # -*- coding: utf-8 -*-
 """Qwen(DashScope 국제판) LLM 어댑터.
 
-`llm_호출` 은 `normalize_run.llm_호출` 과 같은 계약(파싱된 출력 또는 raw 문자열, 메타)을 따른다.
-`스위치_적용()` 이 환경변수 `SUDDOE_LLM`(vllm|qwen) 에 따라 `normalize_run`·`orchestrate` 의
-`llm_호출` 을 한 번에 바꿔 끼운다. 서버 기동 시 한 번은 반드시 불려야 한다.
-
-JSON 강제는 `response_format`(json_schema, strict) 을 쓴다 — vLLM 의 `guided_json` 은 이 엔드포인트에서
-조용히 무시된다.
+`llm_호출` 은 `normalize_run.llm_호출` 과 같은 계약을 따른다. `스위치_적용()` 이 환경변수
+`SUDDOE_LLM`(vllm|qwen) 에 따라 `normalize_run`·`orchestrate` 의 `llm_호출` 을 바꿔 끼운다.
+JSON 강제는 `response_format` 을 쓴다 — vLLM 의 `guided_json` 은 이 엔드포인트에서 무시된다.
 """
 from __future__ import annotations
 

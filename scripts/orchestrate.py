@@ -884,8 +884,8 @@ def main() -> None:
         종류 = list(_주입종류) if a.fault == "all" else [a.fault]
         나쁨 = 0
         for f in 종류:
-            # 🔴 dry 로 돈다. vLLM 없이도 5경로가 **각자 제 단계에서** 걸려야 한다 —
-        #    서버가 없어서 (1) 에서 다 죽으면 아무것도 검증한 게 아니다.
+            # dry 로 돈다. vLLM 없이도 각 경로가 각자 제 단계에서 걸려야 한다 —
+            # 서버가 없어서 (1) 에서 다 죽으면 아무것도 검증한 게 아니다.
             r = 판정(a.q or "노트북 200만원 구매해도 되나요", 사업명=a.사업명,
                     dry=True, 기록=False, 주입=f, 폐포사용=폐포사용)
             ok = r["판정"] == "판단불가"
@@ -900,8 +900,8 @@ def main() -> None:
     if a.golden:
         워밍업()
         with db.connect(autocommit=True) as conn:
-            # 🔴 D2 이후: 공통 27문항은 `사업명 IS NULL` + `적용범위` 에 원표기가 있다.
-        #    사업명='공통...' 을 기대하는 코드는 그 자리에서 0건이 된다.
+            # 공통 문항은 `사업명 IS NULL` + `적용범위` 에 원표기가 있다.
+            # 사업명='공통...' 을 기대하는 코드는 그 자리에서 0건이 된다.
             컬럼 = {r[0] for r in conn.execute(
                 "SELECT column_name FROM information_schema.columns WHERE "
                 "table_schema='eval' AND table_name='golden_set'").fetchall()}
@@ -924,8 +924,8 @@ def main() -> None:
                   + (f"🔴{r.get('실패단계')}" if r.get("실패단계") else ""))
         print(f"\n{len(out)}건 · {time.time()-t0:.0f}초 · 변형={a.변형}")
         if a.eval_log:
-            # 🔴 `설정` 에 **사업필터와 변형을 반드시 박는다.** 이게 없으면 내일 이 숫자가
-        #    어느 조건에서 나온 건지 못 가린다 — 그게 오늘 밤의 유일한 산출물인데.
+            # `설정` 에 사업필터와 변형을 반드시 박는다 — 없으면 이 숫자가 어느 조건에서
+            # 나온 건지 못 가린다.
             try:
                 from eval_store import 기록 as _기록
                 n = len(out) or 1

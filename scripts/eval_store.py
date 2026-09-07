@@ -1,11 +1,6 @@
 # -*- coding: utf-8 -*-
 """평가 결과 적재 (`eval.runs` · `eval.run_items`).
 
-    eval_store.기록(run: dict, items: list[dict]) -> run_id
-      run   {"종류":"e2e|retrieval|judge", "코퍼스버전":str, "설정":{...},
-             "문항수":int, "지표":{...}}
-      items [{"gold_id":int, "예측":str, "정답":str, "적중":bool, "원출력":{...}}]
-
 `지표`·`원출력` 은 jsonb 로 통째로 받는다. `코퍼스버전`·`git커밋` 은 안 주면 여기서 실측해 채운다.
 채점은 전부 결정론적이며 LLM-as-judge 는 붙이지 않는다.
 """

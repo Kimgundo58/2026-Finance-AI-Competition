@@ -1,26 +1,10 @@
 # -*- coding: utf-8 -*-
-"""검색 축 — Agent.md (3)-b~e 를 한 모듈로. `RAG.md` §4 가 기준 문서이다.
-
-`eval_retrieval.py` 안에 흩어져 있던 SQL·RRF·임베딩을 여기로 뽑았다. 평가와 실전이
-**같은 코드를 부르게** 하는 것이 목적이다 — 둘이 갈라지면 잰 숫자가 실전을 설명하지 못한다.
-
-## 이 모듈이 지키는 것
-
-  · pre-filter 가 검색보다 먼저다 (`FILTER`). `적용대상 IN (...)` 은 NULL 을 통과시키지
-    않으므로 태깅이 비면 조용히 사라진다 — 회귀 방어로 남겨 둔 조건이다 (§4-2)
-  · RRF 가중 0.9/0.1 · K=60. 🔴 초판 0.6/0.4 는 hit@5 가 7.2%p 낮았다 (§4-4)
-  · 참조 확장은 **깊이 1 · `dst_조번호 IS NOT NULL`** 만. 조 없는 인용을 펴면 근로기준법
-    하나가 6,026청크를 끌고 온다 (2026-08-31 실측 · §4-3)
-  · 게이트값은 **dense 코사인 최고값**. RRF 점수는 스케일이 없어 임계치로 못 쓴다
-
-## 🔴 판정 인덱스 경계
-
-`FILTER` 는 `layer IN ('L1','L2')` 다. L3 는 `tenant.l3_articles` 에서 검색 없이 통째
-로드하며(E의 `l3_load`), 여기서 절대 섞지 않는다 — 테이블이 달라 누수가 구조적으로 불가능하다.
+"""검색 축 — dense·BM25 를 RRF 로 합치고 참조 조항을 확장해 판정용 후보를 만든다.
+pre-filter 는 `layer IN ('L1','L2')` 만 본다. L3 는 `tenant.l3_articles` 에서 별도로 로드한다.
 
 실행:
     PYTHONIOENCODING=utf-8 python scripts/retrieve.py --q "맥북 250만원 사도 되나요"
-    PYTHONIOENCODING=utf-8 python scripts/retrieve.py --bench      # 쿼리 임베딩 p50 실측
+    PYTHONIOENCODING=utf-8 python scripts/retrieve.py --bench      # 쿼리 임베딩 p50 측정
 """
 from __future__ import annotations
 
@@ -38,35 +22,16 @@ paths.ensure_on_path()
 
 DSN = db.DSN
 
-# ── (3)-b pre-filter — 평가와 실전이 같은 집합을 봐야 한다 ────────────────────
+# ── pre-filter — 검색 대상 청크의 조건 ────────────────────────────────────────
 FILTER = """embedding IS NOT NULL AND status='active' AND parse_quality='high'
         AND retrieval_scope='진입점' AND layer IN ('L1','L2')
         AND 적용대상 IN ('창업기업','공통')"""
 
-# 사업 필터는 별도 절로 뗐다 — C7 실측 전까지 기본은 끔. 아래 `사업필터_기본` 주석 참조.
+# 사업명이 지정된 검색에서만 그 사업의 세부관리기준으로 후보를 좁히는 절.
 사업절 = " AND (사업명 IS NULL OR %(사업)s = ANY(사업명))"
 
-# 🔴 C7 실측 결론 (2026-08-31 · `eval_retrieval.py --c7`) — **필터는 무력하지 않다.**
-#
-#    "사업명 97% NULL 이라 필터가 안 걸린다" 는 전제가 틀렸다. 전체 20,525청크 기준으로는
-#    97.6% 가 NULL 이 맞지만, 검색 후보(진입점 1,252)로 좁히면 **204개(16.3%)에 사업명이
-#    있고 그게 전부 8개 사업의 세부관리기준**이다. 그 204개가 서로의 top-5 를 잡아먹는다.
-#
-#    사업 지정 44문항 짝지어 비교 (같은 임베딩 · 필터만 다름):
-#        hit@1  9.1 -> 15.9   hit@5  27.3 -> 36.4   hit@10 34.1 -> 40.9
-#        hit@20 43.2 -> 52.3  hit@50 50.0 -> 56.8   MRR 0.158 -> 0.251
-#        15개 지표 전부 상승 · 하락 0 · hit@5 뒤집힘 4건 전부 False->True
-#    전체 70문항 RRF hit@5 로는 52.9% -> 58.6%.
-#
-#    🔴 이건 튜닝이 아니라 **인덱스 경계 위반**이다. gold_id=10(예비창업 외주용역)의
-#       필터 끈 top-5 는 2~5위가 재도전·창업도약·모두의창업 **세부관리기준**이었다.
-#       CLAUDE.md 절대규칙 — "남의 규정이 인용되는 순간 그 자체가 오답".
-#       필터를 켜면 그 자리에 예비창업 제22조와 L1 계약 조항이 들어온다.
-#
-#    그런데도 기본을 False 로 둔다 — 오늘 밤 8세션이 52.9% 를 공통 기준선으로 쓰고
-#    (D7 하이퍼파라미터 스윕 포함) 있어서, 여기서 조용히 바꾸면 오늘 잰 E2E 낙폭이
-#    무엇 때문인지 못 가린다. **A 에게 넘긴 판단이다** — 켜는 건 이 값 한 줄이다.
-#    C8(사업명 백필)은 조건("필터 무력")이 성립하지 않아 실행하지 않았다.
+# 사업 필터를 켜면 다른 사업의 세부관리기준이 섞여 들어오는 걸 막아 검색 정확도가 오르지만,
+# 판정 인덱스 경계에 영향을 주는 값이라 기본은 꺼둔다. 켜는 건 이 값 한 줄이다.
 사업필터_기본 = False
 
 DENSE = f"""SELECT chunk_id, 1 - (embedding <=> %(v)s::extensions.vector(1024)) AS sim
@@ -87,10 +52,9 @@ WHERE ct.chunk_id IN (SELECT chunk_id FROM corpus.chunks WHERE """ + FILTER + ""
 GROUP BY ct.chunk_id ORDER BY score DESC LIMIT %(k)s
 """
 
-# ── 참조 확장 (§4-3) ──────────────────────────────────────────────────────────────
-# 깊이 1 이면 재귀가 필요 없지만 CTE 형태를 유지한다 — 규정 모음이 바뀌어 깊이를 다시 재야
-# 할 때 `깊이` 하나만 올리면 되고, RAG.md §4-3 의 SQL 과 눈으로 대조된다.
-#   🔴 `dst_조번호 IS NOT NULL` 은 시작 간선에도, 재귀 간선에도 둘 다 건다.
+# ── 참조 확장 ──────────────────────────────────────────────────────────────────
+# 깊이 1 이면 재귀가 필요 없지만, 깊이를 늘려야 할 때 대비해 CTE 형태를 유지한다.
+# `dst_조번호 IS NOT NULL` 은 시작 간선과 재귀 간선 둘 다에 건다.
 참조확장SQL = """
 WITH RECURSIVE 시작(doc_id, 조번호) AS (
     SELECT DISTINCT doc_id, 조번호 FROM corpus.chunks WHERE chunk_id = ANY(%(cids)s)
@@ -118,7 +82,7 @@ SELECT DISTINCT ON (p.ref_id)
  ORDER BY p.ref_id
 """
 
-# 판정 인덱스 **안의** 끊긴 참조만 신호다 (§4-3). 밖의 끊긴 참조는 정상이라 세지 않는다.
+# 판정 인덱스 안의 끊긴 참조만 신호다. 밖의 끊긴 참조는 정상이라 세지 않는다.
 DANGLING_SQL = """
 SELECT DISTINCT r.참조문자열
   FROM corpus.refs r
@@ -129,10 +93,10 @@ SELECT DISTINCT r.참조문자열
 """
 
 W_DENSE, W_SPARSE, RRF_K = 0.9, 0.1, 60
-후보K = 50          # dense·BM25 각각의 깊이. §4-2 "top-50 + top-50 -> RRF -> top-5"
-깊이 = 1            # §4-3 실측: 1·2·3 의 hit@5+참조 확장이 전부 같다
+후보K = 50          # dense·BM25 각각에서 가져오는 후보 수
+깊이 = 1            # 참조 확장 재귀 깊이
 
-# ── 임베딩 상주 (C5) ─────────────────────────────────────────────────────────
+# ── 임베딩 모델 상주 ─────────────────────────────────────────────────────────
 _모델 = None
 _토큰화 = None
 _stdout보관 = None
@@ -144,8 +108,8 @@ _모델_잠금 = threading.Lock()
 def 모델():
     """KURE-v1 을 프로세스에 한 번만 올린다. CPU. 첫 호출에 ~15초, 이후 0.
 
-    🔴 잠금 — 서버는 판정 스레드·워밍업·`rule_lookup.warmup()` 이 같은 함수를 동시에 부를 수
-       있다. 잠금 없이는 둘 다 `None` 을 보고 각자 1.1GB 를 올린다(v27 실측 의심 자리).
+    판정 스레드·워밍업·`rule_lookup.warmup()` 이 동시에 부를 수 있어 잠금을 건다 —
+    잠금이 없으면 둘 다 `None` 을 보고 각자 모델을 올린다.
     """
     global _모델
     if _모델 is None:
@@ -159,13 +123,11 @@ def 모델():
 
 
 def 토큰화(texts: list[str]) -> list[list[str]]:
-    """BM25 토큰화는 `stage2_bm25.토큰화` 를 그대로 쓴다 — 색인과 쿼리가 갈라지면
-    동등성 검증이 재현되지 않는다 (`RAG.md` §2-4).
+    """BM25 토큰화는 `stage2_bm25.토큰화` 를 그대로 쓴다 — 색인과 쿼리가 같은 토큰화를 써야 한다.
 
-    🔴 `stage2_bm25` 는 import 시점에 `sys.stdout` 을 무조건 다시 감싼다. 이 모듈을
-       import 하는 쪽(A 의 orchestrate)이 그 부작용을 맞으면 안 되므로 되돌린다.
-       다만 새 래퍼를 그냥 버리면 GC 가 __del__ 에서 밑의 버퍼를 닫아버린다
-       ("I/O operation on closed file") — 그래서 참조를 붙잡아 둔다.
+    `stage2_bm25` 는 import 시점에 `sys.stdout` 을 다시 감싸므로, 이 모듈을 import 하는
+    쪽이 그 부작용을 맞지 않도록 되돌린다. 새 래퍼는 참조를 붙잡아 둔다 — 버리면 GC 가
+    `__del__` 에서 원래 버퍼를 닫아버린다.
     """
     global _토큰화, _stdout보관
     if _토큰화 is None:
@@ -218,7 +180,7 @@ def sparse(cur, 질문: str, *, k: int = 후보K, 사업명: str | None = None,
 
 def rrf(순위목록: list[list[int]], k: int = RRF_K,
         가중: tuple[float, ...] = (W_DENSE, W_SPARSE)) -> list[int]:
-    """순위의 역수를 가중해 더한다 — 점수 스케일이 달라도 섞인다 (Agent.md (3)-e).
+    """순위의 역수를 가중해 더한다 — 점수 스케일이 달라도 섞인다.
     한쪽에만 나온 청크는 그 항이 0 이다."""
     점수: dict[int, float] = {}
     for 순위, w in zip(순위목록, 가중):
@@ -231,8 +193,7 @@ def rrf(순위목록: list[list[int]], k: int = RRF_K,
 def 폐포수집(cur, 진입점: list[int], *, 깊이값: int = 깊이) -> tuple[list[int], list[dict], list[str]]:
     """진입점 청크가 가리키는 조항을 끌어온다. (참조 확장 article_id, 참조사슬, 끊긴 참조)
 
-    `shifted` 는 보정된 dst 를 쓰되 **원래 표기도 함께** 넘긴다 — 화면 7 이
-    "귀 기관 규정은 제33조라 하지만 현행 기준 제39조입니다" 를 그리는 재료다.
+    `shifted` 는 보정된 dst 를 쓰되 원래 표기도 함께 넘긴다 — 보정 사실을 화면에 보여주는 재료다.
     """
     if not 진입점:
         return [], [], []
@@ -249,21 +210,21 @@ def 폐포수집(cur, 진입점: list[int], *, 깊이값: int = 깊이) -> tuple
             "표기": 표기,
             "관계": 관계,
             "to": {"doc_id": ddoc, "조번호": d조, "조제목": d제목, "article_id": aid},
-            # 보정이 있을 때만 채운다. shifted 가 아니면 None (동결 인터페이스 §4)
+            # 보정이 있을 때만 채운다. shifted 가 아니면 None
             "보정": 보정근거 if 상태 == "shifted" else None,
         })
     cur.execute(DANGLING_SQL, {"cids": 진입점})
     return 폐포, 사슬, [r[0] for r in cur.fetchall()]
 
 
-# ── 동결 인터페이스 (`0831_최종구현.md` §4) ──────────────────────────────────
+# ── 검색 인터페이스 ────────────────────────────────────────────────────────────
 def 검색(cur, 질문: str, 사업명: str | None, *, top_k: int = 5,
          후보k: int = 후보K, 사업필터: bool = 사업필터_기본) -> dict:
     """질문 하나 -> 판정에 넘길 검색 결과 한 벌.
 
-    🔴 0건이어도 `None` 을 돌려주지 않는다. 빈 리스트다 — A 가 `for` 로 받는다.
-    🔴 `게이트값` 은 dense 코사인 최고값이다. RRF 점수는 스케일이 없어 임계치로 못 쓴다.
-       후보가 0건이면 0.0 (판단불가 쪽으로 기운다 — 기본값은 언제나 판단불가다).
+    0건이어도 `None` 이 아니라 빈 리스트를 돌려준다.
+    `게이트값` 은 dense 코사인 최고값이다 — RRF 점수는 스케일이 없어 임계치로 못 쓴다.
+    후보가 0건이면 0.0 (판단불가 쪽으로 기운다).
     """
     벡터 = 임베딩(질문)
     d = dense(cur, 벡터, k=후보k, 사업명=사업명, 사업필터=사업필터)
@@ -283,7 +244,7 @@ def 검색(cur, 질문: str, 사업명: str | None, *, top_k: int = 5,
 
 # ── CLI ──────────────────────────────────────────────────────────────────────
 def _p50(cur, 기록: bool = False) -> None:
-    """C5 — 쿼리 임베딩 CPU 지연 실측. 예산 200ms."""
+    """쿼리 임베딩 CPU 지연 측정. 예산 200ms."""
     질문들 = [
         "디자이너 쓸 맥북 250만원 사도 되나요?",
         "창업활동비 이번 달 60만원 써도 되나요?",
@@ -316,8 +277,8 @@ def _p50(cur, 기록: bool = False) -> None:
               f"max {지연[-1]:6.1f}ms")
 
     if 기록:
-        # C5 를 `eval.runs` 에 남긴다 — 내일 "이 지연이 어느 조건이었나" 를 되짚을 수 있게.
-        # 🔴 8세션 병렬 중이면 CPU 경합으로 값이 부풀려진다. 그 사실을 `설정` 에 적는다.
+        # 측정 결과를 `eval.runs` 에 남긴다. 병렬 실행 중이면 CPU 경합으로 값이 부풀려질 수
+        # 있다는 사실을 `설정` 에 적는다.
         import eval_store
         run_id = eval_store.기록({
             "종류": "retrieval",
@@ -344,8 +305,7 @@ def main() -> None:
                     help="--bench 결과를 eval.runs 에 남긴다 (D4 eval_store)")
     a = ap.parse_args()
 
-    # 🔴 읽기 전용인데도 트랜잭션을 붙들면 다른 세션의 DDL 과 교착이 난다
-    #    (2026-08-31 8세션 병렬 중 DeadlockDetected 실측). autocommit 으로 푼다.
+    # 읽기 전용인데도 트랜잭션을 붙들면 다른 세션의 DDL 과 교착이 날 수 있다. autocommit 으로 푼다.
     with db.connect(autocommit=True) as conn:
         cur = conn.cursor()
         if a.bench:

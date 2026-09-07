@@ -1,53 +1,22 @@
 # -*- coding: utf-8 -*-
-"""스캔 PDF 판독 — GCP Document AI 버전. `vlm_extract.py` 와 **같은 계약**을 지킨다.
+"""스캔 PDF 판독 — GCP Document AI 버전. `vlm_extract.py` 와 같은 계약을 지킨다.
 
-🔴 왜 필요한가 (2026-09-06 오너 지시로 착수, 레인 D):
-    `vlm_extract.py`(Anthropic 비전 API)는 이미 있고 게이트도 있지만, 기관 문서를
-    «외부»(Anthropic)로 내보낸다. Document AI 는 같은 GCP 프로젝트(project-35d896d7-
-    67d7-4b2a-a8f) 안에서 돈다 — 이미 결제·Cloud Run·Cloud SQL 이 거기 있다. 판독기를
-    이걸로 바꿔 끼울 수 있게, «같은 계약» 으로 새 모듈을 만든다.
+`extract(path)` -> (본문: str, 페이지오프셋: dict[int,int]). 호출부(`l3_parse.py`)는
+이 계약만 보고 vlm_extract 와 docai_extract 중 하나를 고른다. 페이지 판정·PNG 렌더링·
+판독불가 마커는 `vlm_extract` 것을 그대로 재사용한다. 표 직렬화는
+`table_splice._마크다운_표()` 를 그대로 써서 Document AI 의 `Table` 을 파이프
+마크다운으로 만든다.
 
-━━ 계약 — `vlm_extract.extract()` 와 글자 하나까지 같다 ━━━━━━━━━━━━━━━━━━━━━
-    `extract(path)` -> (본문: str, 페이지오프셋: dict[int,int])
-    호출부(`l3_parse.py`)는 이 계약만 보고 두 모듈 중 하나를 고른다 — 코드 두 벌을
-    만들지 않는다. 페이지 판정(어느 페이지가 "글자가 없다"인지)·PNG 렌더링은
-    `vlm_extract` 것을 그대로 재사용한다(새로 안 만든다 — 임계값이 둘로 갈리면
-    다음 사람이 "50 이 맞나 60 이 맞나" 를 또 실측해야 한다).
+문단 신뢰도가 `PARAGRAPH_CONFIDENCE_MIN` 미만이면 원문 대신 `ILLEGIBLE_MARKER` 로
+바꾼다 — 지어내지 않는다.
 
-━━ 표를 살리는 방법 — `table_splice.py` 와 «같은 직렬화 함수» 를 쓴다 ━━━━━━━━━
-    `table_splice._마크다운_표()` 를 그대로 import 해서 쓴다. 파이프 마크다운
-    형식이 한 글자라도 갈리면 `stage2_chunk.py::RE_박스표` 감지망이나 하류
-    소비자가 깨진다 — 형식의 원본(source of truth)은 하나여야 한다.
-    Document AI 응답의 `Table`(header_rows/body_rows, 셀마다 text_anchor) 을
-    `list[list[str]]` 로 풀어서 그 함수에 그대로 넘긴다.
+게이트: `SUDDOE_ALLOW_DOCAI=1` 이 없으면 호출을 막는다(`SUDDOE_ALLOW_EXTERNAL` 과는
+별개 스위치). `SUDDOE_DOCAI_PROJECT`·`SUDDOE_DOCAI_LOCATION`·`SUDDOE_DOCAI_PROCESSOR_ID`
+중 하나라도 없으면 `DocAIConfigMissing` 을 던진다.
 
-━━ 판독 불가 — 지어내지 않는다 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    Document AI 는 토큰·문단마다 `layout.confidence`(0~1)를 준다. `vlm_extract`
-    의 "[판독불가]" 프롬프트 지시와 같은 효과를 내려고, 문단 신뢰도가
-    `PARAGRAPH_CONFIDENCE_MIN` 미만이면 그 문단 구간을 `ILLEGIBLE_MARKER` 로
-    바꿔 넣는다(원문을 지어내지 않는다). `vlm_extract.ILLEGIBLE_MARKER` 를 그대로
-    가져와 쓴다 — 마커 문자열이 두 판독기에서 다르면 하류(경고 카운트 등)가
-    판독기별로 분기해야 한다.
+self-test 는 API 호출 없이 게이트·계약·마크다운 직렬화·저신뢰 마커 치환만 검사한다.
 
-━━ 게이트 둘 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    1) `SUDDOE_ALLOW_DOCAI=1` — `SUDDOE_ALLOW_EXTERNAL` 과 «같은 모양» 의 명시적
-       스위치다. Document AI 는 같은 GCP 프로젝트 안에서 돌아 엄밀히는 "외부"가
-       아니지만(기관 문서가 제3자 API로 안 나간다), 그래도 실비용이 드는 API 호출을
-       사람이 켜고 끌 수 있어야 한다 — 조용히 나가면 안 된다는 원칙은 "외부냐 아니냐"
-       와 별개다. 그래서 이름을 `SUDDOE_ALLOW_EXTERNAL` 과 다르게 뗐다(의미가 다르므로
-       한 스위치로 묶으면 "외부로 나가는 것"과 "GCP 안에서 도는 것"을 못 구분한다).
-    2) 설정 누락 — `SUDDOE_DOCAI_PROJECT`·`SUDDOE_DOCAI_LOCATION`·
-       `SUDDOE_DOCAI_PROCESSOR_ID` 중 하나라도 없으면 `DocAIConfigMissing` 을
-       명시적으로 던진다(조용히 빈 값으로 넘어가지 않는다 — 오늘 이 프로젝트가
-       네 번 밟은 사고).
-
-━━ 🔴 정확도 — 샘플이 없어 «못 잰다» ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    scratchpad/D_DocumentAI_설계.md 에 그대로 적었다. 이 파일의 self-test 는
-    "API 를 안 불러도 되는 부분"(게이트·계약·마크다운 직렬화·저신뢰 마커 치환
-    로직)만 검사한다. `documentai.googleapis.com` 이 꺼져 있고 프로세서도 없어서
-    **실제 판독 정확도는 이 세션에서 측정할 방법이 없다** — 추정치를 적지 않는다.
-
-실행 (자가검사는 API·SDK 설치 없이 돈다):
+실행:
     PYTHONIOENCODING=utf-8 python scripts/docai_extract.py --selftest
     SUDDOE_ALLOW_DOCAI=1 SUDDOE_DOCAI_PROJECT=... SUDDOE_DOCAI_LOCATION=us \
         SUDDOE_DOCAI_PROCESSOR_ID=... \
@@ -63,22 +32,20 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
-# 🔴 페이지 판정·렌더링·판독불가 마커는 vlm_extract 것을 그대로 쓴다 — 새로 안 만든다.
-#    (임계값 50자·DPI 200 이 vlm_extract 실측으로 정해진 값이라 여기서 다시 정하면 갈린다)
+# 페이지 판정·렌더링·판독불가 마커는 vlm_extract 것을 그대로 쓴다.
 from vlm_extract import (  # noqa: E402
     MIN_CHARS_PER_PAGE,
     ILLEGIBLE_MARKER,
     페이지별_글자수,
     _렌더,
 )
-# 🔴 표 직렬화는 table_splice 것을 그대로 쓴다 — 파이프 마크다운 형식의 source of truth
+# 표 직렬화는 table_splice 것을 그대로 쓴다 — 파이프 마크다운 형식의 source of truth
 from table_splice import _마크다운_표  # noqa: E402
 
 NL = "\n"
 
 # ── 상수 ─────────────────────────────────────────────────────────────────
-PARAGRAPH_CONFIDENCE_MIN = 0.5   # 이 미만이면 원문 대신 ILLEGIBLE_MARKER — 🔴 실측 아님, 초안값
-                                  # (오너/central 조정 가능. self-test 는 이 값이 쓰이는지만 검사)
+PARAGRAPH_CONFIDENCE_MIN = 0.5   # 이 미만이면 원문 대신 ILLEGIBLE_MARKER (초안값, 조정 가능)
 
 
 class DocAINotAllowed(RuntimeError):
@@ -152,8 +119,8 @@ def _테이블_행렬(전체텍스트: str, table) -> list[list[str]]:
 def document_to_text(document, *, 신뢰도임계: float = PARAGRAPH_CONFIDENCE_MIN) -> str:
     """Document AI `Document` 객체 -> 표는 파이프 마크다운, 저신뢰 문단은 마커로 바꾼 최종 본문.
 
-    🔴 순서: 표 구간과 저신뢰 문단 구간을 모두 모아 **역순(뒤에서부터)** 치환한다 —
-    앞에서부터 치환하면 뒤쪽 구간의 char offset 이 밀려 어긋난다.
+    표 구간과 저신뢰 문단 구간을 모두 모아 역순(뒤에서부터)으로 치환한다 —
+    앞에서부터 치환하면 뒤쪽 구간의 char offset 이 밀린다.
     표 구간과 겹치는 저신뢰 문단은 건너뛴다(표 쪽 치환이 이미 그 구간을 덮는다).
     """
     전체 = document.text or ""
@@ -237,16 +204,9 @@ def extract(path: str | Path, *, page_range: tuple[int, int] | None = None,
             임계: int = MIN_CHARS_PER_PAGE) -> tuple[str, dict[int, int]]:
     """(본문, {문자오프셋: 페이지번호}) — `vlm_extract.extract()` 와 완전히 같은 모양.
 
-    🔴 2026-09-07 — `extract_meta()` 가 이미 기록해 둔 `실패_페이지` 를 여기서
-       «버리고» 있었다. 그래서 인증 실패(ADC 없음)·권한 없음(서비스계정에
-       documentai 권한 미부여) 같은 «판독을 아예 못 한» 사고가 로그 어디에도 안 남고
-       화면에는 「판독은 했는데 짧다」로만 보였다. 실측: 0.5초·0자 — 네트워크 왕복도
-       없이 죽은 것이었는데 결과만 보면 구별이 안 된다(진단 ai-db).
-       ⇒ 새 유형이다: «방어적 예외 삼킴이 결함을 정상 동작으로 위장한다».
-         오늘 심층질문(`필요F필드` 오타)에서도 같은 모양이었다 — `_질의()` 가
-         예외를 삼키고 docstring 이 그걸 "정상" 이라 적어둬서 한 번도 안 실렸다.
-       2-tuple 계약(`vlm_extract` 와 같은 모양)은 «지킨다» — 대신 실패를 로그로 올린다.
-       판독을 한 장도 못 했는데 본문이 비면 그건 «성공이 아니다».
+    판독 실패 페이지는 로그로 남긴다. 2-tuple 계약(`vlm_extract` 와 같은 모양)은
+    지키되, 한 장도 못 읽었는데 본문도 비어 있으면 `DocAI판독실패` 를 던진다 —
+    조용히 빈 문자열을 돌려주면 「글자 없는 문서」로 오인한다.
     """
     본문, 메타 = extract_meta(path, page_range=page_range, 임계=임계)
     실패 = 메타.get("실패_페이지") or []
@@ -254,8 +214,7 @@ def extract(path: str | Path, *, page_range: tuple[int, int] | None = None,
         _log.error("Document AI 판독 실패 %d장 — %s (본문 %d자)",
                    len(실패), 실패[:3], len(본문))
     if 실패 and not 본문.strip():
-        # 한 장도 못 읽었고 결과도 비었다 — 조용히 빈 문자열을 돌려주면 호출부가
-        # 「스캔본인데 글자가 없다」로 오해한다. 원인을 담아 올린다.
+        # 조용히 빈 문자열을 돌려주지 않는다 — 원인을 담아 올린다.
         raise DocAI판독실패(
             f"Document AI 가 {len(실패)}장 전부 판독 실패 — {실패[:3]}")
     return 본문, 메타["페이지오프셋"]

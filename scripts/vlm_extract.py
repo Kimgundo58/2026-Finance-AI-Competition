@@ -1,45 +1,22 @@
 # -*- coding: utf-8 -*-
 """스캔 PDF 판독 — 페이지를 이미지로 렌더링해 비전 API 로 텍스트를 뽑는다.
 
-🔴 왜 필요한가 (2026-09-06 오너 지시로 착수):
-    `corpus.documents.extraction='vlm'` 은 "사람이 판독해 넣었다"는 «표시» 일 뿐이고,
-    `llm_validate.py` 의 VLM_DOWNGRADE 는 이미 vlm 인 문서를 «인용할 때» 신뢰등급을
-    내리는 규칙이다. **판독을 실제로 부르는 코드는 이 파일이 생기기 전까지 0곳이었다.**
-    실측: "2026년 재도전성공패키지 세부관리기준(11차 개정)" 은 9페이지 «전부» 가
-    스캔이고, `pdfplumber.extract_text()` 는 페이지마다 "- N -"(하단 쪽번호) 5자만
-    돌려준다 — 본문이 통째로 없다. 이 사업은 지금 룰·판정 재료가 «전무»하다.
+`scripts/pdftext.py::extract()` 는 텍스트 레이어가 있는데 깨진 경우를 고친다.
+이 파일은 그 전 단계 — 텍스트 레이어 자체가 없는 페이지를 다룬다. 먼저
+`pdftext` 로 시도한 뒤, 페이지별 글자 수가 임계(50자) 미만인 페이지만 비전
+API 로 보낸다.
 
-    기존 `scripts/pdftext.py::extract()` 는 **텍스트 레이어가 있는데 깨진** 경우
-    (문자중복·다단·4분면)를 고친다. 이 파일은 그 전 단계 — **텍스트 레이어 자체가
-    없는** 페이지를 다룬다. 겹치지 않는다: 이 모듈은 먼저 `pdftext` 로 시도한 뒤,
-    페이지별 글자 수가 임계 미만인 페이지만 비전 API 로 보낸다.
+`SUDDOE_ALLOW_EXTERNAL=1` 이 없으면 호출 자체를 하지 않는다(`adapter.py` 와
+같은 관문 신호).
 
-━━ 언제 부르나 — 페이지당 50자 미만 (숫자 근거, 전부 실측) ━━━━━━━━━━━━━━━━━━
-    재도전(스캔, 9p)      전 페이지 5자                      → 9/9 (100%) 이 임계 아래
-    창업도약(텍스트, 34p)  최소 23자(표지 추정) · 나머지 110자+  → 1/34 (2.9%) 만 아래
-    모두의창업(텍스트, 48p) 최소 51자                          → 0/48 (0%) 아래
-    50 은 스캔 문서를 전량 잡으면서(위양성 0), 텍스트 문서의 오탐을 페이지 하나
-    이하로 묶는다(표지·구분지처럼 원래 짧은 페이지가 어쩌다 걸리는 비용은
-    "그 한 페이지만" 비전 API 를 한 번 더 태우는 것뿐이라 감내 가능하다).
+프롬프트가 표를 파이프 마크다운으로 내라고 명시한다(`table_splice.py` 와
+같은 형식). 판독 불가 구간은 `[판독불가]` 로 표시하게 하고, 반환된 텍스트에
+그 마커가 있으면 `표_판독_불확실=True` 로 알린다.
 
-━━ 관문 (오너가 이미 만들어 둔 것 그대로 탄다) ━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    `SUDDOE_ALLOW_EXTERNAL=1` 이 없으면 호출 자체를 하지 않는다(`adapter.py:330`
-    과 같은 신호). CLAUDE.md 2026-09-05 오너 해제로 "외부 API 금지" 원칙 자체는
-    풀렸지만, 그 원칙이 풀렸다고 관문 없이 나가도 된다는 뜻은 아니다 — 관문은
-    "언제 쓸지"를 사람이 여전히 켜고 끌 수 있게 하는 스위치이지 원칙과 다른 것이다.
-
-━━ 표를 살리는 방법 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    프롬프트가 표를 파이프 마크다운으로 내라고 명시한다(`table_splice.py` 와
-    같은 형식 — 뒤 배관이 그 형식을 이미 기대한다). **판독 불가 구간은 지어내지
-    말고 `[판독불가]` 로 표시하라**고 지시하고, 반환된 텍스트에 그 마커가 있으면
-    `표_판독_불확실=True` 로 명시적으로 알린다(뭉갠 채 성공이라 하지 않는다).
-
-━━ 반환 모양 — 기존 파이프라인과 맞춘다 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    `extract(path)` -> (본문: str, 페이지오프셋: dict[int,int])
-    `stage0_extract.extract_pdf()` 와 «같은 모양» 이다 — 뒤의 `split_articles(본문,
-    페이지오프셋)` 이 그대로 이어붙는다. 새 형식을 만들면 배관을 두 벌 만들게 된다
-    (오너 지시 원문). 진단이 더 필요하면 `extract_meta()` 를 쓴다(pdftext.py 의
-    extract/extract_meta 짝과 같은 관용구).
+`extract(path)` -> (본문: str, 페이지오프셋: dict[int,int]) 는
+`stage0_extract.extract_pdf()` 와 같은 모양이다 — 뒤의
+`split_articles(본문, 페이지오프셋)` 이 그대로 이어붙는다. 진단이 더 필요하면
+`extract_meta()` 를 쓴다.
 
 실행 (자가검사는 API 호출 없이 돈다):
     PYTHONIOENCODING=utf-8 python scripts/vlm_extract.py --selftest
@@ -62,22 +39,21 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
-import pdftext  # noqa: E402 — 🔴 반드시 이걸 먼저 거친다. pdfplumber.extract_text() 직접 호출 금지
+import pdftext  # noqa: E402 — 반드시 이걸 먼저 거친다. pdfplumber.extract_text() 직접 호출 금지
 
 NL = "\n"
 
 # ── 상수 (전부 위 docstring 의 실측으로 정함) ─────────────────────────────
 MIN_CHARS_PER_PAGE = 50          # 이보다 적으면 그 페이지는 "텍스트가 없다"로 본다
 VLM_MODEL = os.environ.get("SUDDOE_VLM_MODEL", "claude-sonnet-5")
-RENDER_DPI = 200                 # 표 안 작은 글자까지 읽을 해상도. 150 이하는 실측(초안)에서 흐릿했다
+RENDER_DPI = 200                 # 표 안 작은 글자까지 읽을 해상도. 150 이하는 흐릿하다
 API_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
 ILLEGIBLE_MARKER = "[판독불가]"
 
 
 class VLMKeyMissing(RuntimeError):
-    """ANTHROPIC_API_KEY 가 없다. 🔴 조용히 빈 값으로 넘어가지 않는다 — 오늘 이 프로젝트가
-    네 번 밟은 "except 가 삼켜서 빈 값" 사고를 되풀이하지 않는다. 호출부가 반드시 본다."""
+    """ANTHROPIC_API_KEY 가 없다. 조용히 빈 값으로 넘어가지 않는다 — 호출부가 반드시 본다."""
 
 
 class ExternalNotAllowed(RuntimeError):
@@ -96,11 +72,8 @@ class VLMCallFailed(RuntimeError):
 def 페이지별_글자수(path: Path) -> list[int]:
     """`pdftext` 가 이미 여는 `pdfplumber` 문서를 그대로 써서 페이지별 길이를 잰다.
 
-    🔴 문자중복 레이어가 있으면 정상 문서도 실측 글자 수가 반토막 난다(같은
-    글자가 겹쳐도 `extract_text()` 문자열 «길이» 자체는 안 준다 — "제제5조조"는
-    원문의 2배 길이다. 오히려 부풀지 줄지는 않는다). 그래도 안전하게, `pdftext`
-    가 이미 문서 단위로 중복 판정을 끝낸 `dedupe_chars()` 소스를 재사용한다 —
-    새로 열지 않는다(문서를 두 번 여는 비용을 줄인다).
+    문자중복 레이어가 있으면 글자 수가 실제보다 부풀 수 있어(예: "제제5조조"),
+    `pdftext` 가 이미 문서 단위로 중복 판정을 끝낸 `dedupe_chars()` 소스를 재사용한다.
     """
     import pdfplumber
 
@@ -276,8 +249,7 @@ def extract_meta(path: str | Path, *, page_range: tuple[int, int] | None = None,
                 if 호출메타.get("판독불가마커수"):
                     판독불가_페이지.append(i)
             except (VLMKeyMissing, ExternalNotAllowed) as e:
-                # 🔴 관문이 막았다 — 조용히 pdftext 텍스트(사실상 빈 값)로 대체하지 않는다.
-                #    호출부가 이 사실을 알아야 하므로 그대로 올린다.
+                # 관문이 막았다 — 조용히 pdftext 텍스트로 대체하지 않고 그대로 올린다.
                 raise
             except VLMCallFailed as e:
                 실패_페이지.append((i, str(e)))
@@ -351,9 +323,7 @@ def _self_test() -> int:
     대상 = [i for i, n in enumerate(글자수, 1) if n < MIN_CHARS_PER_PAGE]
     eq("임계_페이지선정", 대상, [1, 2, 4])
 
-    # 5. 실측 상수가 문서 그대로 박혀있는지(회귀 방지) — docstring 수치와 코드 상수가 갈리면
-    #    다음 사람이 "50" 을 아무 근거 없이 바꿔도 여기서 안 걸린다. 그래서 실제 판정 대상
-    #    문서(재도전 9p, 전부 5자)에 대해 "전량 VLM 대상"이 되는지를 산술로 재확인한다.
+    # 5. 임계값 회귀 방지 — 전 페이지가 임계 미만인 문서는 전량 VLM 대상이 되는지 확인한다.
     재도전_글자수 = [5] * 9
     대상2 = [i for i, n in enumerate(재도전_글자수, 1) if n < MIN_CHARS_PER_PAGE]
     eq("재도전_전량대상", len(대상2), 9)
@@ -395,7 +365,7 @@ def main() -> int:
     try:
         본문, 메타 = extract_meta(a.file, page_range=page_range)
     except (VLMKeyMissing, ExternalNotAllowed) as e:
-        # 🔴 트레이스백 대신 명확한 한 줄 — 「못 태웠다」를 숨기지 않고 그대로 보여준다.
+        # 트레이스백 대신 명확한 한 줄로 보여준다.
         print(f"🔴 판독 못 함 — {type(e).__name__}: {e}")
         return 1
     print(f"총페이지={메타['총페이지']} · pdftext_dedupe={메타['pdftext_dedupe']}")
