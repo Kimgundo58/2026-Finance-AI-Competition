@@ -41,6 +41,7 @@ import logging
 import os
 import re
 import sys
+import threading
 import time
 from collections import deque
 from datetime import datetime, timezone
@@ -352,6 +353,47 @@ _목_프로필 = {"f1": F1().model_dump(), "f3": [], "f4": []}
 
 app = FastAPI(title="써도돼요 API", version="0.1.0",
               description="창업지원금 지출비 사전승인 판정. `프론트 연동 사양.md` §8 계약.")
+
+
+def _워밍업_전부() -> dict:
+    """임베딩(검색)·비목확정(룰) 모델을 한 번에 데운다. `/admin/warmup` 과 기동 훅이 같이 쓴다.
+
+    🔴 2026-09-07(ai-fe) — 종전 `/admin/warmup` 은 `retrieve` 만 데웠다. `rule_lookup` 이
+       같은 KURE-v1 을 따로 올려서(지금은 retrieve 것을 재사용하지만 그래도 첫 호출은
+       있다) 첫 판정이 «비목확정 31.8초» 를 물었다(Q5 실측). 둘 다 여기서 태운다.
+    """
+    결과 = {}
+    t = time.time()
+    try:
+        from retrieve import 워밍업  # type: ignore
+        워밍업()
+        결과["임베딩"] = f"{time.time() - t:.1f}초"
+    except Exception as e:                                    # noqa: BLE001
+        결과["임베딩"] = f"실패 {type(e).__name__}"
+    t = time.time()
+    try:
+        from rule_lookup import warmup as _룰워밍업  # type: ignore
+        _룰워밍업()
+        결과["비목확정"] = f"{time.time() - t:.1f}초"
+    except Exception as e:                                    # noqa: BLE001
+        결과["비목확정"] = f"실패 {type(e).__name__}"
+    return 결과
+
+
+@app.on_event("startup")
+def _기동시_워밍업() -> None:
+    """기동 직후 «백그라운드 스레드» 로 모델을 데운다 — 첫 사용자가 콜드 로드를 안 문다.
+
+    🔴 헬스체크를 막지 않으려고 스레드다(Cloud Run 기동 프로브가 `/api/health` 를 친다).
+    🔴 목 모드(`SUDDOE_MOCK=1`, 테스트 기본)에서는 안 돈다 — 모델이 필요 없다.
+       `SUDDOE_WARMUP_ON_START=0` 으로 끌 수 있다.
+    """
+    if MOCK or os.environ.get("SUDDOE_WARMUP_ON_START", "1") == "0":
+        return
+    def _run() -> None:
+        r = _워밍업_전부()
+        _log.info("기동 워밍업 %s", r)
+    threading.Thread(target=_run, name="suddoe-warmup", daemon=True).start()
 
 # ── 인증·테넌트 귀속 (2026-09-03 배선) ──────────────────────────────────
 # 🔴 CORS 보다 «먼저» add 한다. add_middleware 는 마지막에 넣은 것이 «바깥» 이라,
@@ -1030,23 +1072,11 @@ def admin_warmup(x_admin_token: str | None = Header(default=None)) -> dict:
        첫 호출 스키마 컴파일(`LLM.md` §1 vLLM 운영 규칙). 둘 다 미리 태운다.
     """
     _관리자(x_admin_token)
-    결과 = {}
-    t = time.time()
-    try:
-        # 🔴 `retrieve.질문벡터` 는 **실재하지 않는다.** 실제 공개 표면은
-        #    `워밍업()`·`임베딩()` 이다. 그래서 이 갈래는 항상 ImportError 로
-        #    떨어졌고, `/admin/warmup` 은 **아무것도 데우지 못했다**
-        #    (2026-09-03 ai-98 실측: `{"임베딩": "실패 ImportError"}`).
-        #    8-5 §7 은 워밍업 응답을 배포 go/no-go 로 쓰는데 그게 항상 실패를
-        #    가리키고 있었다. 이름을 고치지 말고 **실재하는 이름을 부른다.**
-        from retrieve import 워밍업  # type: ignore
-        워밍업()
-        결과["임베딩"] = f"{time.time() - t:.1f}초"
-    except Exception as e:                                    # noqa: BLE001
-        # 🔴 예전에는 `orchestrate._임베딩` 으로 되짚었다. 밑줄 심볼이라 Agent 쪽이
-        #    이름만 바꿔도 서버가 **기동 시점에** 죽는다 (2026-09-01 ai-25 경고).
-        #    파이프라인의 공개 표면(`retrieve.질문벡터` · `orchestrate.판정`)만 쓴다.
-        결과["임베딩"] = f"실패 {type(e).__name__}"
+    # 🔴 `retrieve.질문벡터` 는 **실재하지 않는다.** 실제 공개 표면은 `워밍업()`·`임베딩()`
+    #    이다(2026-09-03 ai-98 실측: `{"임베딩": "실패 ImportError"}`). 파이프라인의
+    #    공개 표면만 부른다 — 밑줄 심볼(`orchestrate._임베딩`)로 되짚지 않는다(ai-25).
+    #    2026-09-07(ai-fe) — 검색+비목확정 둘 다 `_워밍업_전부()` 한 곳에서 데운다.
+    결과 = _워밍업_전부()
     t = time.time()
     try:
         from adapter import 호출
