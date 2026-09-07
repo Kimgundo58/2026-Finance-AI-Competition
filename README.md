@@ -54,7 +54,7 @@
 
 <p align="center">
   <a href="https://2026-finance-ai-competition-fronten.vercel.app/">
-    <img src="docs/screenshots/홈화면.png" alt="써도돼요 시연 홈화면" width="860">
+    <img src="docs/screenshots/home.png" alt="써도돼요 시연 홈화면" width="860">
   </a>
 </p>
 
