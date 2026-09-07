@@ -801,13 +801,7 @@ def normalize(req: Request, body: 정규화요청):
         for 필드 in ("품목", "금액", "금액_추정여부", "용도", "비목후보"):
             if 필드 in out:
                 yield _sse("필드", {필드: out[필드]})
-        # 🔴 2026-09-07 — `증빙목록` 은 «저장용 내부 키» 다. `persist.판정_저장()` 이
-        #    이걸 읽어 `plan_tasks` 에 구분='결제후' 로 심고, 화면은 그 할일을 본다.
-        #    프론트 계약(`결과` 이벤트)에는 안 실린다 — 실으면 목과 실경로의 키집합이
-        #    갈리고(`tests/test_계약_키집합.py`), 프론트가 안 쓰는 키가 계약에 늘어난다.
-        #    `decision_id` 와 «같은 취급» 이다. 다만 그건 pop 으로 빼지만 이건 아래
-        #    `저장` 이벤트가 `out` 을 그대로 써야 해서 «복사본에서만» 뺀다.
-        yield _sse("결과", {k: v for k, v in out.items() if k != "증빙목록"})
+        yield _sse("결과", out)
         yield _sse("완료", {"캐시": False})
 
     return _sse응답(gen())
@@ -934,7 +928,15 @@ def judge(req: Request, body: 판정요청, 목: str | None = None):
         yield _sse("참조사슬", out.get("참조사슬", []))
         if out.get("판정") == "판단불가" and out.get("문의초안"):
             yield _sse("문의초안", out["문의초안"])          # 화면 9
-        yield _sse("결과", out)
+        # 🔴 2026-09-07 — `증빙목록` 은 «저장용 내부 키» 다. `persist.판정_저장()` 이
+        #    이걸 읽어 `plan_tasks` 에 구분='결제후' 로 심고, 화면은 그 할일을 본다.
+        #    프론트 계약(`결과` 이벤트)에는 안 실린다 — 실으면 목과 실경로의 키집합이
+        #    갈리고(`tests/test_계약_키집합.py`), 프론트가 안 쓰는 키가 계약에 늘어난다.
+        #    `decision_id` 와 «같은 취급» 이다. 다만 그건 pop 으로 빼지만 이건 아래
+        #    `저장` 이벤트가 `out` 을 그대로 써야 해서 «복사본에서만» 뺀다.
+        #    🔴 cfc144a 는 이 줄을 `/api/normalize` 의 `결과` 에 넣었다(정규화 결과엔 이
+        #       키가 없어 no-op) — 판정 쪽으로 옮긴다 (ai-fe 검토, 2026-09-07).
+        yield _sse("결과", {k: v for k, v in out.items() if k != "증빙목록"})
         yield _sse("저장", _판정_저장_시도(body, out, 캐시 is not None, _decision_id))
         yield _sse("완료", {"캐시": 캐시 is not None})
 
