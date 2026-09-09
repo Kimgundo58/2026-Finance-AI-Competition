@@ -99,7 +99,7 @@ gcloud run deploy suddoe-api --image=$IMG --region=asia-northeast3 \
   --set-env-vars=SUDDOE_MOCK=0,SUDDOE_LLM=qwen,SUDDOE_QWEN_MODEL=qwen3.7-plus
 ```
 
-배포는 수동이다(GitHub push로 자동 반영되지 않는다). `DOCKER_BUILDKIT=1`이 필수이고
+ `DOCKER_BUILDKIT=1` 설정 필요
 (Dockerfile의 HF 캐시 마운트 때문), arm 머신에서는 `--platform linux/amd64`를 붙인다.
 전체 절차는 [`docs/8_운영/8-5_배포_레시피.md`](docs/8_운영/8-5_배포_레시피.md).
 
