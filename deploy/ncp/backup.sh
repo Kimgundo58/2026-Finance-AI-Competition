@@ -7,6 +7,8 @@
 # - 덤프에는 사용자 계정·기관 데이터가 포함된다. GitHub 이나 공유 드라이브에 올리지 않는다.
 set -euo pipefail
 cd "$(dirname "$0")"
+# 덤프 파일을 소유자만 읽을 수 있게 만든다 (기본 umask 022 이면 644 로 생성된다)
+umask 077
 
 KEEP=${KEEP:-14}
 mkdir -p backups
