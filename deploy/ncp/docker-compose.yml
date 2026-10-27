@@ -1,0 +1,105 @@
+# 운영 배포 구성 (네이버클라우드 VM 1대): API + PostgreSQL(pgvector) + Caddy(HTTPS)
+#
+# 실행: deploy/ncp 디렉터리에서 `docker compose up -d --build`
+# 전체 절차: docs/8_운영/8-6_NCP_배포.md
+#
+# 주의
+# - db/docker-compose.yml 은 로컬 개발용이다. 5432 포트와 인증 없는 pgweb(8081)을 외부에 노출하므로
+#   서버에서 쓰면 안 된다. 이 파일은 DB 포트를 노출하지 않는다.
+# - 프로젝트 이름을 suddoe-prod 로 둔다. 개발용 compose(name: suddoe)와 같으면 볼륨 이름
+#   (suddoe_pgdata)이 겹쳐 개발 DB 볼륨을 그대로 사용하게 된다.
+# - 설정값은 같은 디렉터리의 .env 에서 읽는다(git 제외). 템플릿은 .env.example.
+
+name: suddoe-prod
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+services:
+  # PostgreSQL 17 + pgvector. 백업 복원 테스트를 이 이미지로 했다.
+  db:
+    image: pgvector/pgvector:pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is not set in .env}
+      POSTGRES_DB: suddoe
+      POSTGRES_INITDB_ARGS: "--locale=C.UTF-8"
+      TZ: Asia/Seoul
+    # db/init/*.sql 은 마운트하지 않는다. 스키마와 데이터는 restore.sh 가 덤프에서 복원한다.
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    mem_limit: 1536m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d suddoe"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    logging: *logging
+
+  # API 서버. 레포 루트 Dockerfile 을 그대로 빌드한다 (FastAPI + KURE-v1 CPU 임베딩).
+  api:
+    build:
+      context: ../..
+    image: suddoe-api:prod
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    # 앱은 권한이 제한된 롤 suddoe_app 으로만 접속한다.
+    # postgres 롤은 이 구성에서 superuser 라 RLS 가 적용되지 않는다.
+    # 비밀번호는 접속 URL 에 그대로 들어가므로 hex 문자열로 만든다(URL 인코딩 불필요).
+    environment:
+      SUDDOE_DSN: postgresql://suddoe_app:${SUDDOE_APP_DB_PASSWORD:?SUDDOE_APP_DB_PASSWORD is not set in .env}@db:5432/suddoe
+      SUDDOE_MOCK: "0"
+      SUDDOE_ADMIN_TOKEN: ${SUDDOE_ADMIN_TOKEN:?SUDDOE_ADMIN_TOKEN is not set in .env}
+      SUDDOE_CORS: ${SUDDOE_CORS:?SUDDOE_CORS is not set in .env}
+      SUDDOE_JWKS_URL: ${SUDDOE_JWKS_URL:?SUDDOE_JWKS_URL is not set in .env}
+      SUDDOE_DEMO_SECRET: ${SUDDOE_DEMO_SECRET:?SUDDOE_DEMO_SECRET is not set in .env}
+      SUDDOE_SLUG_SECRET: ${SUDDOE_SLUG_SECRET:?SUDDOE_SLUG_SECRET is not set in .env}
+      SUDDOE_ORG_PARAM: "0"
+      SUDDOE_LLM: qwen
+      SUDDOE_QWEN_MODEL: ${SUDDOE_QWEN_MODEL:-qwen3.7-plus}
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
+      # RunPod(vLLM)을 쓰지 않으므로 GPU watchdog 을 끈다.
+      SUDDOE_GPU_IDLE_MIN: "0"
+      TZ: Asia/Seoul
+    volumes:
+      # L3 업로드 원본 파일. Cloud Run 에서는 컨테이너 재시작 시 사라졌지만 여기서는 볼륨에 유지된다.
+      - l3_uploads:/app/_l3_업로드
+    mem_limit: 6g
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/api/health', timeout=5).status == 200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      # 기동 시 임베딩 모델 warm-up 이 동기로 실행되어 수십 초 걸린다.
+      start_period: 180s
+    logging: *logging
+
+  # Caddy: 리버스 프록시 + Let's Encrypt 인증서 자동 발급/갱신.
+  caddy:
+    image: caddy:2.10
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      SUDDOE_DOMAIN: ${SUDDOE_DOMAIN:?SUDDOE_DOMAIN is not set in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    logging: *logging
+
+volumes:
+  pgdata:
+  l3_uploads:
+  caddy_data:
+  caddy_config:

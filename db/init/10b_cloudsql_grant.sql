@@ -7,7 +7,21 @@
 
 
 -- 스키마 접근
-GRANT USAGE ON SCHEMA tenant, corpus TO suddoe_app;
+-- extensions: pgvector 타입·연산자(extensions.vector, <=>)가 있는 스키마. USAGE 가 없으면 벡터 검색이
+-- "permission denied for schema extensions" 로 실패한다 (운영 DB 에는 수동으로 부여돼 있었고 이 파일에는 빠져 있었다).
+GRANT USAGE ON SCHEMA tenant, corpus, extensions TO suddoe_app;
+
+-- 로그인용 SECURITY DEFINER 함수 실행 권한. 11_accounts_login.sql 과 같은 내용이다.
+-- pg_dump --no-privileges 덤프를 복원하면 함수 권한이 기본값(PUBLIC EXECUTE)으로 돌아가므로 여기서 다시 설정한다.
+-- 로컬 init 에서는 이 파일이 11 보다 먼저 실행되어 함수가 아직 없으므로, 함수가 있을 때만 적용한다.
+DO $$
+BEGIN
+    IF to_regprocedure('tenant.계정찾기(text)') IS NOT NULL THEN
+        REVOKE ALL ON FUNCTION tenant.계정찾기(text) FROM PUBLIC;
+        GRANT EXECUTE ON FUNCTION tenant.계정찾기(text) TO suddoe_app;
+    END IF;
+END
+$$;
 
 -- eval 은 운영에 없다 — 정답셋이라 가면 안 된다. 없는 스키마에 REVOKE 를 치면 그 줄에서 죽으므로 REVOKE 도 쓰지 않는다.
 
