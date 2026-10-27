@@ -32,6 +32,10 @@ _l3_업로드/
 _orgs_추출.json
 _orgs_추가_창업중심대학.json
 
+# 배포 설정. 이미지에 필요 없고, 서버에서는 deploy/ncp/.env(시크릿)와 백업 덤프가 이 아래에 생긴다.
+# (.dockerignore 패턴은 context 루트 기준이라 아래 .env 규칙은 deploy/ncp/.env 를 제외하지 못한다)
+deploy/
+
 # 비밀
 .env
 .env.*
