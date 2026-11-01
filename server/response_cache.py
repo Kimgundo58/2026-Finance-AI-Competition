@@ -61,10 +61,16 @@ def 꺼내기(k: str, org: str | None) -> Any | None:
     return 값
 
 
-def 넣기(k: str, 값: Any, *, 종류: str, org: str | None) -> None:
-    """응답을 저장한다. DB 쓰기 실패는 삼킨다(캐시는 판정 결과에 영향을 주지 않는다)."""
+def 넣기(k: str, 값: Any, *, 종류: str, org: str | None, 설정_해시: str | None = None) -> None:
+    """응답을 저장한다. DB 쓰기 실패는 삼킨다(캐시는 판정 결과에 영향을 주지 않는다).
+
+    설정_해시 는 요청 시작 때 요청_해시() 로 계산한 값을 넘긴다. 저장 시점에 다시 계산하면, 규정 활성화
+    전에 시작해 옛 규정으로 판정한 결과가 새 해시로 저장되어 이후 요청에 적중한다.
+    """
+    if 설정_해시 is None:
+        설정_해시 = _게스트_해시() if org is None else _설정_해시()
     if org is None:
-        해시 = _게스트_해시()
+        해시 = 설정_해시
         with _락:
             if len(_메모리) >= _상한:          # FIFO. LRU 까지는 필요 없다
                 _메모리.pop(next(iter(_메모리), None), None)
@@ -76,7 +82,17 @@ def 넣기(k: str, 값: Any, *, 종류: str, org: str | None) -> None:
         'ON CONFLICT (key) DO UPDATE SET '
         '  value = EXCLUDED.value, 설정_해시 = EXCLUDED.설정_해시, '
         '  expires_at = EXCLUDED.expires_at, created_at = now()',
-        (k, org, 종류, _jsonb(값), _설정_해시(), _TTL초))
+        (k, org, 종류, _jsonb(값), 설정_해시, _TTL초))
+
+
+def 요청_해시() -> str:
+    """요청 시작 때의 설정 해시. 판정 라우트가 검색 전에 계산해 넣기(설정_해시=) 로 넘긴다."""
+    return _게스트_해시()
+
+
+def 설정_해시_무효화() -> None:
+    """설정 해시의 프로세스 캐시(SUDDOE_CONFIG_HASH_TTL)를 지운다. 규정 활성화 직후에 부른다."""
+    _설정_해시_조회.무효화()
 
 
 def 상태() -> dict:

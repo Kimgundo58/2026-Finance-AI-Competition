@@ -38,7 +38,7 @@ if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
 import corpus_ingest  # noqa: E402
-from server import auth  # noqa: E402
+from server import auth, response_cache  # noqa: E402
 
 _log = logging.getLogger("suddoe.routes_ingest")
 
@@ -336,6 +336,9 @@ def 활성화(doc_id: str, 본문: 활성화요청 | None = None,
         결과: dict[str, Any] = corpus_ingest.활성화(
             conn, doc_id, 대체_doc_id=본문.대체_doc_id, 신규문서=본문.신규문서,
             중복_허용=본문.중복_허용)
+    # 활성화는 judge_cache 를 비우지만, 이 프로세스가 들고 있는 설정 해시(최대 300초)도 지워야
+    # 이후 요청이 새 해시로 조회·저장한다.
+    response_cache.설정_해시_무효화()
     _log.info("규정 활성화 doc_id=%s 대체=%s", doc_id, 결과["대체한_doc_id"])
     return 활성화응답(**결과)
 

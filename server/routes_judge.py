@@ -66,6 +66,8 @@ def judge(req: Request, body: 판정요청, 목: str | None = None):
         # ?목= 은 mock 모드에서만 응답을 바꾼다. live 에서 키에 넣으면 캐시를 우회할 수 있다.
         *([목] if MOCK else []))
     캐시 = response_cache.꺼내기(k, body.org_id)
+    # 검색 전에 계산한다. 판정 도중 규정이 활성화되면 결과는 옛 해시로 저장되어 이후 요청에 적중하지 않는다.
+    설정해시 = response_cache.요청_해시()
 
     def gen():
         for 단계, 설명 in (("검색", "관련 조항을 찾는 중"),
@@ -80,13 +82,13 @@ def judge(req: Request, body: 판정요청, 목: str | None = None):
         elif MOCK:
             out = dict(목_판정.get(목 or "가능", 목_판정["가능"]))
             decision_id = None
-            response_cache.넣기(k, out, 종류="judge", org=body.org_id)
+            response_cache.넣기(k, out, 종류="judge", org=body.org_id, 설정_해시=설정해시)
         else:
             out, 실패 = yield from _판정_실행(body)
             # decision_id 를 캐시에 넣으면 다른 요청이 남의 판정 행을 자기 계획에 연결한다.
             decision_id = out.pop("decision_id", None)
             if not 실패:              # 일시적 장애의 판단불가를 캐시에 고정하지 않는다
-                response_cache.넣기(k, out, 종류="judge", org=body.org_id)
+                response_cache.넣기(k, out, 종류="judge", org=body.org_id, 설정_해시=설정해시)
         yield from _판정_이벤트(out)
         yield _sse("저장", _판정_저장_시도(body, out, decision_id,
                                           캐시적중=캐시 is not None, 실패=실패))

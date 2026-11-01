@@ -349,8 +349,10 @@ def _실_동기화(plan_id: int, body: 할일동기화, org_id: str | None = Non
     """판정 결과를 `tenant.plan_tasks` 에 한 트랜잭션으로 반영한다.
 
     중간에 DB 오류가 나면 전부 롤백하고 예외를 전파한다(라우트는 500). 계획이 없거나 다른 기관 것이면 404.
+    org_id 는 ?org_id= 로 받은 검증되지 않은 값일 수 있으므로 RLS 설정(app.org_id)에 넘기지 않는다.
+    트랜잭션() 은 미들웨어가 검증한 현재_org 를 쓴다.
     """
-    with 트랜잭션(org_id) as cur:
+    with 트랜잭션() as cur:
         return 동기화_실행(cur, plan_id, body, org_id)
 
 
