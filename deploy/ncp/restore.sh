@@ -3,12 +3,12 @@
 #   1) 빈 DB 에 앱 롤(suddoe_app) 생성
 #   2) pg_dump(-Fc) 덤프 복원
 #   3) db/init/10b_app_grants.sql 로 권한·search_path 설정
-#   4) 권한 검증(①~④, ⑥), suddoe_app 실제 쿼리(⑦), 테이블별 행 수 비교(선택), RLS 격리 테스트(⑤)
+#   4) 권한 검증(1~5), suddoe_app 실제 쿼리(5-b), 테이블별 행 수 비교(선택), RLS 격리 테스트(6)
 #
 # 사용법 (deploy/ncp 디렉터리에서):
 #   ./restore.sh <suddoe.dump> [source_rowcounts.txt]
 #
-# 검증 항목은 db/init/10b_app_grants.sql 하단 주석과 같다. 하나라도 실패하면 exit 1 로 종료한다.
+# 검증 항목 번호는 db/init/10b_app_grants.sql 하단 주석과 같다. 하나라도 실패하면 exit 1 로 종료한다.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -71,16 +71,16 @@ SQL
 ok "pg_restore + ANALYZE"
 
 # ── 3. 권한·search_path ──────────────────────────────────────────────
-# Cloud SQL 용으로 작성된 파일이지만 GRANT/ALTER 문만 있어 self-hosted PostgreSQL 에도 그대로 적용된다.
+# 로컬 init 과 같은 파일이다. GRANT/ALTER 만 있어 다시 실행해도 같은 상태가 된다.
 psql_admin < ../../db/init/10b_app_grants.sql
 ok "10b_app_grants.sql"
 
-# ── 4. 권한 검증 ①~④ ─────────────────────────────────────────────────
+# ── 4. 권한 검증 1~5 ──────────────────────────────────────────────────
 r=$(psql_admin -tA <<'SQL'
 select rolsuper::text || '/' || rolbypassrls::text from pg_roles where rolname = 'suddoe_app';
 SQL
 )
-[ "$r" = "false/false" ] && ok "① suddoe_app: NOSUPERUSER, NOBYPASSRLS" || fail "① suddoe_app rolsuper/rolbypassrls = $r"
+[ "$r" = "false/false" ] && ok "1 suddoe_app: NOSUPERUSER, NOBYPASSRLS" || fail "1 suddoe_app rolsuper/rolbypassrls = $r"
 
 # information_schema 에는 materialized view 가 나오지 않으므로 pg_class 기준으로 확인한다.
 missing=$(psql_admin -tA <<'SQL'
@@ -94,25 +94,25 @@ select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace
              and has_table_privilege('suddoe_app', c.oid, 'DELETE')));
 SQL
 )
-[ "$missing" = "0" ] && ok "② table privileges (corpus: SELECT, tenant: SELECT/INSERT/UPDATE/DELETE)" \
-                     || fail "② 권한이 누락된 테이블 $missing 개"
+[ "$missing" = "0" ] && ok "2 table privileges (corpus: SELECT, tenant: SELECT/INSERT/UPDATE/DELETE)" \
+                     || fail "2 권한이 누락된 테이블 $missing 개"
 
 acl=$(psql_admin -tA <<'SQL'
 select string_agg(defaclobjtype::text, '' order by defaclobjtype::text) from pg_default_acl;
 SQL
 )
 case "$acl" in
-    *S*) ok "③ default privileges on sequences ($acl)" ;;
-    *)   fail "③ 시퀀스 default privileges 가 없다 ($acl)" ;;
+    *S*) ok "3 default privileges on sequences ($acl)" ;;
+    *)   fail "3 시퀀스 default privileges 가 없다 ($acl)" ;;
 esac
 
 e=$(psql_admin -tA <<'SQL'
 select count(*) from pg_namespace where nspname = 'eval';
 SQL
 )
-[ "$e" = "0" ] && ok "④ eval schema absent" || fail "④ 운영 DB 에 eval(골든셋) 스키마가 있다"
+[ "$e" = "0" ] && ok "4 eval schema absent" || fail "4 운영 DB 에 eval(골든셋) 스키마가 있다"
 
-# ⑥ 스키마·함수 권한. ①~④ 만으로는 extensions 스키마 USAGE 누락을 잡지 못한다(벡터 검색만 실패한다).
+# 5 스키마·함수 권한. 1~4 만으로는 extensions 스키마 USAGE 누락을 잡지 못한다(벡터 검색만 실패한다).
 p=$(psql_admin -tA <<'SQL'
 select has_schema_privilege('suddoe_app', 'extensions', 'USAGE')::text || '/' ||
        has_function_privilege('suddoe_app', 'tenant.계정찾기(text)', 'EXECUTE')::text || '/' ||
@@ -121,15 +121,15 @@ select has_schema_privilege('suddoe_app', 'extensions', 'USAGE')::text || '/' ||
            and a.grantee = 0 and a.privilege_type = 'EXECUTE')::text;
 SQL
 )
-[ "$p" = "true/true/0" ] && ok "⑥ extensions USAGE, 계정찾기() EXECUTE (PUBLIC 회수됨)" \
-                         || fail "⑥ extensions USAGE / 계정찾기 EXECUTE / PUBLIC EXECUTE 수 = $p"
+[ "$p" = "true/true/0" ] && ok "5 extensions USAGE, 계정찾기() EXECUTE (PUBLIC 회수됨)" \
+                         || fail "5 extensions USAGE / 계정찾기 EXECUTE / PUBLIC EXECUTE 수 = $p"
 
-# ⑦ suddoe_app 으로 실제 쿼리 실행: 벡터 거리 연산(검색 경로)과 로그인 함수
-psql_app -tA >/dev/null <<'SQL' || fail "⑦ suddoe_app 으로 벡터 검색 쿼리 또는 계정찾기() 호출 실패"
+# 5-b suddoe_app 으로 실제 쿼리 실행: 벡터 거리 연산(검색 경로)과 로그인 함수
+psql_app -tA >/dev/null <<'SQL' || fail "5-b suddoe_app 으로 벡터 검색 쿼리 또는 계정찾기() 호출 실패"
 SELECT 1 - (embedding <=> embedding) FROM corpus.chunks WHERE embedding IS NOT NULL LIMIT 1;
 SELECT count(*) FROM tenant.계정찾기('restore-check@example.invalid');
 SQL
-ok "⑦ suddoe_app: 벡터 검색 쿼리, 계정찾기() 호출"
+ok "5-b suddoe_app: 벡터 검색 쿼리, 계정찾기() 호출"
 
 # ── 행 수 비교 (선택) ─────────────────────────────────────────────────
 if [ -n "$COUNTS" ]; then
@@ -148,7 +148,7 @@ SQL
     fi
 fi
 
-# ── 5. RLS 격리 테스트 ───────────────────────────────────────────────
+# ── 6. RLS 격리 테스트 ───────────────────────────────────────────────
 # suddoe_app 으로 직접 INSERT 해 본다. 모든 트랜잭션은 ROLLBACK 하므로 데이터는 남지 않는다.
 orgs=$(psql_admin -tA <<'SQL'
 select org_id from tenant.orgs order by org_id limit 2;
@@ -156,15 +156,15 @@ SQL
 )
 A=$(printf '%s\n' "$orgs" | sed -n 1p)
 B=$(printf '%s\n' "$orgs" | sed -n 2p)
-[ -n "$A" ] && [ -n "$B" ] || fail "⑤ 테스트할 org 가 2개 미만"
+[ -n "$A" ] && [ -n "$B" ] || fail "6 테스트할 org 가 2개 미만"
 
-psql_app -tA -v org="$A" >/dev/null <<'SQL' || fail "⑤-a 자기 org INSERT 실패 (또는 suddoe_app 비밀번호 접속 실패)"
+psql_app -tA -v org="$A" >/dev/null <<'SQL' || fail "6-a 자기 org INSERT 실패 (또는 suddoe_app 비밀번호 접속 실패)"
 BEGIN;
 SELECT set_config('app.org_id', :'org', true);
 INSERT INTO tenant.expense_plans (org_id, 질문원문) VALUES (:'org', 'rls-test') RETURNING plan_id;
 ROLLBACK;
 SQL
-ok "⑤-a app.org_id 설정 후 자기 org INSERT: 허용"
+ok "6-a app.org_id 설정 후 자기 org INSERT: 허용"
 
 out=$(psql_app -tA -v org="$A" 2>&1 <<'SQL' || true
 BEGIN;
@@ -173,8 +173,8 @@ ROLLBACK;
 SQL
 )
 case "$out" in
-    *42501*) ok "⑤-b app.org_id 미설정 INSERT: 거부 (42501)" ;;
-    *)       fail "⑤-b app.org_id 미설정 INSERT 가 42501 로 거부되지 않았다: $out" ;;
+    *42501*) ok "6-b app.org_id 미설정 INSERT: 거부 (42501)" ;;
+    *)       fail "6-b app.org_id 미설정 INSERT 가 42501 로 거부되지 않았다: $out" ;;
 esac
 
 out=$(psql_app -tA -v org="$A" -v other="$B" 2>&1 <<'SQL' || true
@@ -185,8 +185,8 @@ ROLLBACK;
 SQL
 )
 case "$out" in
-    *42501*) ok "⑤-c 다른 org 로 INSERT: 거부 (42501)" ;;
-    *)       fail "⑤-c 다른 org INSERT 가 42501 로 거부되지 않았다: $out" ;;
+    *42501*) ok "6-c 다른 org 로 INSERT: 거부 (42501)" ;;
+    *)       fail "6-c 다른 org INSERT 가 42501 로 거부되지 않았다: $out" ;;
 esac
 
 echo "restore and verification complete. next: docker compose up -d --build"

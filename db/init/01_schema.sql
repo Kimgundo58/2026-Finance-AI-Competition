@@ -1,21 +1,21 @@
--- 「써도돼요」 판정 엔진 스키마.
---   corpus      공개 규범·룰·refs. 전 사용자 공통, RLS 없음. PostgREST 미노출
---   tenant      L3·계정·F축·판정로그. org 별 격리, RLS 필수. PostgREST 미노출
---   eval        골든셋. Supabase 로 올리지 않는다 (pg_dump 대상 제외)
+-- 써도돼요 판정 엔진의 기본 스키마. 스키마 4개와 핵심 테이블, RLS 정책을 만든다.
+--   corpus      공개 규범·룰·참조 그래프. 전 사용자 공통, RLS 없음
+--   tenant      L3·계정·F축·판정 로그. org 별 격리, RLS 필수
+--   eval        골든셋과 평가 결과. 운영 DB 로 옮기지 않는다
 --   extensions  pgvector. public 은 비워 둔다
--- 컨테이너를 처음 만들 때만 자동 실행된다 (/docker-entrypoint-initdb.d 는 볼륨이 비었을 때만 돈다).
+-- 실행 시점: init. /docker-entrypoint-initdb.d 는 볼륨이 비어 있을 때만 실행된다.
 
 CREATE SCHEMA corpus;
 CREATE SCHEMA tenant;
 CREATE SCHEMA eval;
 CREATE SCHEMA extensions;
 
--- pgvector 는 Supabase 와 같은 배치(extensions 스키마)에 둔다 — pg_dump 의 `extensions.vector(1024)` 가 그대로 복원된다.
+-- pgvector 를 extensions 스키마에 둔다. pg_dump 의 `extensions.vector(1024)` 가 그대로 복원된다.
 CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA extensions;
 
 SET search_path = corpus, tenant, eval, extensions, public;
 
--- 스크립트가 테이블명을 스키마 없이 쓰므로 DB 기본 search_path 를 박아 둔다.
+-- 스크립트가 테이블명을 스키마 없이 쓰므로 DB 기본 search_path 를 설정한다.
 DO $do$
 BEGIN
     EXECUTE format(
@@ -41,7 +41,7 @@ CREATE TABLE corpus.documents (
                   CHECK (extraction IN ('native','dedupe','hancom','vlm')),
     src_path      TEXT NOT NULL,
     index_target  BOOLEAN NOT NULL DEFAULT FALSE, -- chunks 에 넣을 문서인가
-    -- 진입점 = 임베딩·BM25 검색 후보 / 폐포전용 = doc_articles + refs 로만 도달 (인용은 정상 작동)
+    -- 진입점 = 임베딩·BM25 검색 후보 / 폐포전용 = 참조 확장 전용(검색 후보 아님). doc_articles + refs 로만 도달하고 인용은 가능하다
     retrieval_scope TEXT NOT NULL DEFAULT '진입점'
                     CHECK (retrieval_scope IN ('진입점','폐포전용')),
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -50,7 +50,7 @@ COMMENT ON TABLE corpus.documents IS '원본 문서 대장. 인덱서는 status=
 COMMENT ON COLUMN corpus.documents.retrieval_scope IS
   '진입점 = 검색 후보 / 폐포전용 = refs 로만 도달. 좁히기는 측정(Recall@5) 후 UPDATE 로 확정한다.';
 
--- corpus.doc_articles : 조(條) 단위 원문. 폐포 전용 문서도 여기까지는 온다.
+-- corpus.doc_articles : 조(條) 단위 원문. 참조 확장 전용 문서도 여기에는 들어간다.
 CREATE TABLE corpus.doc_articles (
     article_id  BIGSERIAL PRIMARY KEY,
     doc_id      TEXT NOT NULL REFERENCES corpus.documents(doc_id) ON DELETE CASCADE,
@@ -64,10 +64,10 @@ CREATE TABLE corpus.doc_articles (
     UNIQUE (doc_id, 조번호)
 );
 CREATE INDEX ix_articles_doc ON corpus.doc_articles (doc_id, 조번호_int);
--- 폐포 조회(refs.dst → 원문)의 진입 경로
+-- 참조 확장 조회(refs.dst → 원문)용 인덱스
 CREATE INDEX ix_articles_lookup ON corpus.doc_articles (doc_id, 조번호);
 
--- corpus.chunks : 판정 인덱스 (A등급 근거). L1·L2 + 현재 기관 L3 뿐이고 타 기관 규정·정답셋은 넣지 않는다.
+-- corpus.chunks : 검색 인덱스(A등급 근거). L1·L2 만 넣는다. L3·정답셋은 넣지 않는다.
 CREATE TABLE corpus.chunks (
     chunk_id    BIGSERIAL PRIMARY KEY,
     doc_id      TEXT NOT NULL REFERENCES corpus.documents(doc_id) ON DELETE CASCADE,
@@ -92,7 +92,7 @@ CREATE TABLE corpus.chunks (
                                  -- 임베딩·BM25 입력은 text 가 아니라 [컨텍스트 헤더]+text
     embedding   extensions.vector(1024)     -- KURE-v1
 );
--- pre-filter 가 검색보다 먼저 (구버전·타사업·타기관·폐포전용 차단)
+-- 검색 전에 pre-filter 로 구버전·타사업·타기관·참조 확장 전용 청크를 제외한다
 CREATE INDEX ix_chunks_filter ON corpus.chunks
     (status, parse_quality, retrieval_scope, layer, 적용대상, 기관ID);
 CREATE INDEX ix_chunks_사업   ON corpus.chunks USING GIN (사업명);
@@ -125,24 +125,11 @@ CREATE TABLE corpus.rules (
 );
 CREATE INDEX ix_rules_lookup ON corpus.rules (사업명, 비목);
 
--- corpus.rules 의 TRUNCATE 를 막는다. 재적재가 정말 필요하면 사람이 트리거를 의도적으로 떨군다:
---   DROP TRIGGER trg_rules_truncate_금지 ON corpus.rules;
-CREATE OR REPLACE FUNCTION corpus.f_rules_truncate_금지() RETURNS trigger AS $$
-BEGIN
-  RAISE EXCEPTION
-    '🔴 corpus.rules TRUNCATE 는 막혀 있다 (2026-09-06 오너 결정). '
-    'seed_rules.py 의 rows() 는 2026-09-02 스냅샷이고 이후 DB 변경이 거기 없다. '
-    '재적재하면 되돌릴 수 없이 사라진다. '
-    '정말 필요하면 사람이 DROP TRIGGER trg_rules_truncate_금지 ON corpus.rules; 를 «의도적으로» 친다.';
-END $$ LANGUAGE plpgsql;
-
-CREATE TRIGGER trg_rules_truncate_금지
-  BEFORE TRUNCATE ON corpus.rules
-  FOR EACH STATEMENT EXECUTE FUNCTION corpus.f_rules_truncate_금지();
+-- TRUNCATE 금지 트리거와 저장 전 검증 트리거는 16_rules_guard.sql 에 있다.
 COMMENT ON COLUMN corpus.rules.verified IS 'false 인 룰만으로 "가능" 판정 금지. 조문 인용 동반 필수.';
 -- layer='L3' 행은 기관 데이터지만 overlay 설계에 따라 corpus 에 둔다.
 
--- corpus.precedence_rules : 우선순위 조항. "어느 계층이 이기는가" — 비목 룰이 아니라 충돌 해소 룰이다.
+-- corpus.precedence_rules : 우선순위 조항. 어느 계층이 우선하는지를 담는 충돌 해소 룰이다(비목 룰 아님).
 CREATE TABLE corpus.precedence_rules (
     prec_id     BIGSERIAL PRIMARY KEY,
     사업명      TEXT NOT NULL,
@@ -150,7 +137,7 @@ CREATE TABLE corpus.precedence_rules (
     열위계층    TEXT NOT NULL CHECK (열위계층 IN ('L1','L2','L3')),
     범위        TEXT NOT NULL DEFAULT 'all'
                 CHECK (범위 IN ('all','unspecified_only')),  -- unspecified_only: 상위에 미규정인 사항만 하위 적용
-    -- 상위 규범이 사업마다 다르다 (모두의창업 = 운영요령). 'L1 > L2' 로 뭉뚱그리지 않는다
+    -- 상위 규범이 사업마다 다르다 (모두의창업 = 운영요령). 'L1 > L2' 로 일반화하지 않는다
     우선규범    TEXT,
     근거        JSONB NOT NULL DEFAULT '[]',   -- [{doc_id, 조번호}]
     원문        TEXT NOT NULL,                 -- 조항 원문 그대로 (화면에서 인용)
@@ -165,14 +152,14 @@ COMMENT ON TABLE corpus.precedence_rules IS
   '우선순위 조항. 없으면 폴백(상위 규범 우선 + 엄격한 값 우선). 사업별로 문구가 달라 사람 검수 대상.';
 COMMENT ON COLUMN corpus.precedence_rules.범위 IS
   'all = 항상 우선계층이 이김(재도전성공패키지 제3조) / unspecified_only = 상위에 없는 사항만 하위 적용(초격차 제3조)';
--- 조회 키가 사업명이다. 모두의창업 로컬트랙(제3편)은 위임 계통이 달라 범위 밖으로 잘라낸다 (build_precedence.범위밖_구간).
+-- 조회 키가 사업명이다. 모두의창업 로컬트랙(제3편)은 위임 관계가 달라 범위에서 제외한다.
 
 -- corpus.refs : 참조 그래프. 한 행 = 엣지 하나 ("어느 조가 어느 조를 가리키는가"). 깊이 3, 재귀 CTE 로 조회한다.
 CREATE TABLE corpus.refs (
     ref_id      BIGSERIAL PRIMARY KEY,
     src_doc_id  TEXT NOT NULL,
     src_조번호  TEXT NOT NULL,
-    -- 엣지의 출처 레이어. 폐포 수집의 레이어별 상한·집계 축
+    -- 엣지의 출처 레이어. 참조 확장의 레이어별 상한과 집계에 쓴다
     src_layer   TEXT CHECK (src_layer IN ('L1','L2','L3','사례') OR src_layer IS NULL),
     참조문자열  TEXT NOT NULL,   -- 원문 표기 그대로: "통합관리지침 제33조부터 제42조까지"
     관계        TEXT NOT NULL CHECK (관계 IN ('위임','준용','별표참조','인용','미규정위임')),
@@ -180,7 +167,7 @@ CREATE TABLE corpus.refs (
     dst_조번호  TEXT,
     해소상태    TEXT NOT NULL CHECK (해소상태 IN ('resolved','shifted','dangling')),
     보정근거    TEXT,            -- shifted 일 때: "조제목 '기계장치, 공구·기구' 로 재매칭"
-    depth_hint  INT,             -- 위임 계통 복원 시의 단계 (있으면)
+    depth_hint  INT,             -- 위임 관계를 재구성할 때의 단계 (있으면)
     발견일      TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (src_doc_id, src_조번호, 참조문자열)
 );
@@ -243,10 +230,10 @@ CREATE TABLE corpus.xref_mismatch (
 );
 
 
--- tenant : 기관별 데이터. RLS 는 2차 방어선이고 1차는 코드(앱이 항상 org_id 를 명시적으로 건다).
---   로컬 postgres 는 슈퍼유저라 RLS 를 우회한다. 정책은 비특권 롤에서만 문다.
+-- tenant : 기관별 데이터. RLS 는 2차 방어선이고 1차는 코드(앱이 항상 org_id 조건을 명시한다).
+--   로컬 postgres 는 슈퍼유저라 RLS 를 우회한다. 정책은 비특권 롤(suddoe_app)에만 적용된다.
 
--- Supabase(PostgREST) 는 request.jwt.claims 를, 로컬은 SET app.org_id 를 쓴다. 한 함수로 흡수한다.
+-- PostgREST 계열은 request.jwt.claims 를, 앱은 GUC app.org_id 를 쓴다. 한 함수에서 둘 다 읽는다.
 CREATE FUNCTION tenant.current_org() RETURNS uuid
 LANGUAGE plpgsql STABLE AS $fn$
 DECLARE v text;
@@ -308,7 +295,7 @@ CREATE TABLE tenant.accounts (
     account_id  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     org_id      UUID NOT NULL REFERENCES tenant.orgs(org_id) ON DELETE CASCADE,
     email       TEXT NOT NULL UNIQUE,
-    -- 비밀번호는 Supabase 가 든다. 우리는 (email → org_id) 만 든다. 자체 로그인을 되살릴 때만 채운다
+    -- 비밀번호는 Supabase Auth 가 관리한다. 이 테이블은 (email → org_id) 만 담는다. 자체 로그인을 쓸 때만 채운다
     pw_hash     TEXT,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -353,7 +340,7 @@ CREATE TABLE tenant.f_personnel (
     겸직          BOOLEAN
 );
 
--- 결핍 루프. 주간 집계로 상위 항목을 F 필드로 승격한다.
+-- 미매핑 전제 집계. 자주 나오는 항목을 F 필드로 승격하기 위한 표다. 현재 앱은 쓰지 않는다.
 CREATE TABLE tenant.unmapped_premise (
     id           BIGSERIAL PRIMARY KEY,
     premise_text TEXT NOT NULL,
@@ -413,10 +400,10 @@ CREATE POLICY org_isolation ON tenant.f_exec USING (
     profile_id IN (SELECT profile_id FROM tenant.f_profile WHERE org_id = tenant.current_org()));
 CREATE POLICY org_isolation ON tenant.f_personnel USING (
     profile_id IN (SELECT profile_id FROM tenant.f_profile WHERE org_id = tenant.current_org()));
--- 결핍 집계는 org 축이 없다(전사 통계). 클라이언트에는 열지 않는다 — 정책 없이 RLS 만 켠다.
+-- unmapped_premise 는 org 컬럼이 없는 전체 통계라 정책 없이 RLS 만 켠다. suddoe_app 은 읽기 0행, 쓰기 거부다.
 
 
--- eval : 평가 정답지. Supabase 로 올리지 않는다 (pg_dump 는 --schema=corpus --schema=tenant 로만 뜬다).
+-- eval : 평가 정답지. 운영 DB 로 옮기지 않는다 (운영 덤프는 corpus·tenant 스키마만 포함한다).
 CREATE TABLE eval.golden_set (
     gold_id     BIGSERIAL PRIMARY KEY,
     세트        TEXT NOT NULL,   -- 별첨4 | 직접작성 | 적대적 | 연구재단홀드아웃
@@ -435,31 +422,8 @@ COMMENT ON TABLE eval.golden_set IS
   '절대 corpus.chunks 에 넣지 말 것 (정답 유출). Supabase 덤프 대상도 아니다.';
 
 
--- 권한 — public 은 비워 두고, corpus/tenant/eval 은 PUBLIC 롤에서 회수한다.
---   Supabase 에서는 expose_schemas 에서 corpus·tenant 를 뺀다 (앱은 서비스 롤로 직접 접속한다).
+-- 권한: public 은 비워 두고, corpus/tenant/eval 은 PUBLIC 롤에서 회수한다.
+--   앱 롤 권한은 10b_app_grants.sql 이 부여한다.
 REVOKE ALL ON SCHEMA corpus, tenant, eval FROM PUBLIC;
 
-
--- 확인용 뷰 : 적재 현황을 한눈에 본다
-CREATE VIEW corpus.v_적재현황 AS
-SELECT '01. corpus.documents'      AS 테이블, count(*) AS 건수 FROM corpus.documents
-UNION ALL SELECT '02. corpus.doc_articles',     count(*) FROM corpus.doc_articles
-UNION ALL SELECT '03. corpus.chunks',           count(*) FROM corpus.chunks
-UNION ALL SELECT '05. corpus.rules',            count(*) FROM corpus.rules
-UNION ALL SELECT '06. corpus.precedence_rules', count(*) FROM corpus.precedence_rules
-UNION ALL SELECT '07. corpus.refs',             count(*) FROM corpus.refs
-UNION ALL SELECT '08. corpus.chunk_terms',      count(*) FROM corpus.chunk_terms
-UNION ALL SELECT '09. corpus.chunk_len',        count(*) FROM corpus.chunk_len
-UNION ALL SELECT '10. corpus.item_alias',       count(*) FROM corpus.item_alias
-UNION ALL SELECT '11. corpus.xref_mismatch',    count(*) FROM corpus.xref_mismatch
-UNION ALL SELECT '12. tenant.orgs',             count(*) FROM tenant.orgs
-UNION ALL SELECT '13. tenant.l3_documents',     count(*) FROM tenant.l3_documents
-UNION ALL SELECT '14. tenant.l3_articles',      count(*) FROM tenant.l3_articles
-UNION ALL SELECT '15. tenant.accounts',         count(*) FROM tenant.accounts
-UNION ALL SELECT '16. tenant.f_profile',        count(*) FROM tenant.f_profile
-UNION ALL SELECT '17. tenant.f_exec',           count(*) FROM tenant.f_exec
-UNION ALL SELECT '18. tenant.f_personnel',      count(*) FROM tenant.f_personnel
-UNION ALL SELECT '19. tenant.unmapped_premise', count(*) FROM tenant.unmapped_premise
-UNION ALL SELECT '20. tenant.decisions',        count(*) FROM tenant.decisions
-UNION ALL SELECT '21. eval.golden_set',         count(*) FROM eval.golden_set
-ORDER BY 1;
+-- 적재 현황 확인용 뷰 corpus.v_적재현황 은 모든 테이블이 생긴 뒤 17_check_items_questions.sql 에서 만든다.

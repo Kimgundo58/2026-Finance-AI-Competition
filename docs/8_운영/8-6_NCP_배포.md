@@ -1,7 +1,7 @@
-# 8-6 NCP 배포 (GCP → 네이버클라우드 마이그레이션)
+# 8-6 NCP 배포 (현재 운영)
 
 네이버클라우드 VM 1대에 API · PostgreSQL · Caddy 를 Docker Compose 로 운영한다.
-배포 파일은 `deploy/ncp/` 에 있다. GCP(Cloud Run + Cloud SQL) 절차는 [[8-5_배포_레시피]].
+배포 파일은 `deploy/ncp/` 에 있다. 이관 전 GCP(Cloud Run + Cloud SQL) 기록은 [[8-5_배포_레시피]].
 
 ## 구성
 
@@ -77,6 +77,7 @@ docker compose ps                                              # 3개 모두 hea
 | 작업 | 명령 |
 |---|---|
 | 코드 업데이트 배포 | `git pull && docker compose up -d --build api` |
+| 스키마 변경 | `db/migrations/README.md` 순서대로 postgres 롤로 적용 (적용 전 `./backup.sh`) |
 | 로그 | `docker compose logs -f api` (json-file, 20MB × 5 로테이션) |
 | 수동 백업 | `./backup.sh` → `backups/` |
 | 백업 외부 보관 | 로컬 PC 에서 `scp root@<IP>:/opt/suddoe/deploy/ncp/backups/*.dump .` 주기적으로 |
@@ -87,9 +88,10 @@ docker compose ps                                              # 3개 모두 hea
 - `SUDDOE_DEMO_SECRET` · `SUDDOE_SLUG_SECRET` 은 GCP 운영에서 미설정이었다(개발용 기본값 사용). 새 값으로 바꾸면 기관 slug 가 전부 바뀐다.
 - `postgres` 롤은 이 구성에서 superuser 다. 앱 DSN 은 반드시 `suddoe_app` 을 쓴다(compose 에 고정).
 - `db/docker-compose.yml`(개발용)은 5432 와 pgweb 을 외부에 노출한다. 서버에서 쓰지 않는다.
-- Document AI(L3 스캔 OCR)는 GCP 전용이라 이관하지 않는다. 기존 운영에서도 비활성이었다.
-- 덤프는 `--no-privileges` 라 권한이 복원되지 않는다. 권한은 `10b_cloudsql_grant.sql` 로 다시 설정하며,
-  2026-10-27 리허설에서 운영 DB 의 GRANT/REVOKE 50줄과 일치함을 확인했다 (`extensions` 스키마 USAGE 누락을 이때 발견해 추가).
+- 스캔 PDF(텍스트 없는 L3)는 OCR 하지 않는다. 업로드는 실패로 처리되고 사유를 알린다.
+- 덤프는 `--no-privileges` 라 권한이 복원되지 않는다. `restore.sh` 가 `db/init/10b_app_grants.sql` 로
+  권한과 search_path 를 다시 설정한다(로컬 init 과 같은 파일, `extensions` 스키마 USAGE 포함).
+- Caddy 는 요청 본문을 35MB 로 제한한다(L3 업로드 앱 상한 30MB).
 - 로컬 리허설 결과 (2026-10-27, Docker Desktop): 이미지 콜드 빌드 16분, 복원+검증 22초, API healthy 20초,
   HTTPS·CORS·관리자 토큰·데모 세션·검색 정상, DashScope 키 없이 판정 시 판단불가로 종료.
-- 미검증: `setup_server.sh` 를 NCP 이미지에서 실행한 적 없음. 2vCPU/8GB 에서 동시 판정 4건 부하는 측정하지 않음.
+- 측정하지 않은 것: 2vCPU/8GB 에서 동시 판정 4건 부하.

@@ -7,10 +7,10 @@
 [![Python](https://img.shields.io/badge/Python-3.10-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.141-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-pgvector-4169E1?style=flat-square&logo=postgresql&logoColor=white)](https://github.com/pgvector/pgvector)
-[![Cloud Run](https://img.shields.io/badge/Cloud%20Run-GCP-4285F4?style=flat-square&logo=googlecloud&logoColor=white)](https://cloud.google.com/run)
+[![NCP](https://img.shields.io/badge/NCP-Docker%20Compose-03C75A?style=flat-square&logo=naver&logoColor=white)](docs/8_운영/8-6_NCP_배포.md)
 [![Qwen](https://img.shields.io/badge/LLM-Qwen3.7--plus-FF6A00?style=flat-square)](https://www.alibabacloud.com/en/product/modelstudio)
 
-[🚀 Demo Version Execution](https://2026-finance-ai-competition-fronten.vercel.app/) · [🩺 서버 상태 확인](https://suddoe-api-1081277785480.asia-northeast3.run.app/api/health) · [📘 프로젝트 문서](docs/README.md)
+[🚀 Demo Version Execution](https://2026-finance-ai-competition-fronten.vercel.app/) · [📘 프로젝트 문서](docs/README.md)
 
 </div>
 
@@ -34,7 +34,7 @@
 ### 프로젝트 소개
 
 창업기업이 "이거 사도 돼요?"를 물으면 중소벤처기업부·창업진흥원·주관기관 규정을 찾아
-**가능 · 조건부 · 불가 · 판단불가** 네 갈래로 답한다. 
+**가능 · 조건부 · 불가 · 판단불가** 네 가지로 답한다.
 
 근거는 LLM이 새로 쓰지 않고, 검색·룰
 조회로 찾은 원문 문장에 번호(S01…)를 매겨 그 번호만 인용한다. 
@@ -49,7 +49,7 @@ LLM은 정규화와 최종 조립만 맡아, 판정 1건이 LLM 호출 2~3회로
 | 대상 사업 | 창업진흥원 8종(예비창업패키지·초기창업패키지·창업도약패키지·창업중심대학·재도전성공패키지·초격차 스타트업 프로젝트·TIPS·모두의창업) |
 | 판정 결과 | 가능 · 조건부 · 불가 · 판단불가 |
 | 배포 주소 | [Vercel 데모](https://2026-finance-ai-competition-fronten.vercel.app/) |
-| 구성 | 백엔드 FastAPI on Cloud Run(asia-northeast3) + Cloud SQL(PostgreSQL 17 + pgvector), 프론트 Vercel(별도 레포) |
+| 구성 | 백엔드 FastAPI + PostgreSQL 17(pgvector) + Caddy, 네이버클라우드 VM 1대에서 Docker Compose 로 운영. 프론트 Vercel(별도 레포) |
 | 저장소 | 이 레포(백엔드·수집·평가) |
 
 ### 🖥️ 시연 홈화면
@@ -75,40 +75,45 @@ cd db
 docker compose up -d
 # http://localhost:8081 (pgweb, 로그인 없음) — v_적재현황 이 첫 확인 지점
 
-# 2) 환경변수
-copy ..\.env.example ..\.env
-# 값은 채워 넣는다. 이름과 뜻은 .env.example 주석 참조
+# 2) 환경변수 — 서버는 프로세스 환경변수만 읽는다(.env 파일을 자동으로 로드하지 않는다)
+#    키 목록과 기본값은 .env.example 주석 참조
+cd ..
+$env:PYTHONIOENCODING = 'utf-8'
+$env:DASHSCOPE_API_KEY = '<DashScope API 키>'
 
 # 3) 서버
-cd ..
 uvicorn server.main:app --reload
 ```
 
-### 목 모드
+### mock 모드
 
-DB·LLM 없이 API 형태만 확인할 때는 `SUDDOE_MOCK=1`.
-DB·LLM 서버를 활용할 경우, `SUDDOE_MOCK=0`이 필요하다.
+`SUDDOE_MOCK` 을 설정하지 않으면 live 모드(실제 DB·LLM 호출)로 실행된다.
+DB·LLM 없이 API 응답 형태만 확인할 때는 `$env:SUDDOE_MOCK = '1'` 을 명시한다.
 
 ### 배포
 
+운영 서버는 네이버클라우드(NCP) VM 1대다. API · PostgreSQL · Caddy(HTTPS)를 Docker Compose 로 실행하며
+구성 파일은 [`deploy/ncp/`](deploy/ncp/), 전체 절차는 [`docs/8_운영/8-6_NCP_배포.md`](docs/8_운영/8-6_NCP_배포.md)에 있다.
+
 ```bash
-docker build -t suddoe-api:local .
-docker build -t $IMG . && docker push $IMG
-gcloud run deploy suddoe-api --image=$IMG --region=asia-northeast3 \
-  --memory=8Gi --cpu=2 --min-instances=1 --concurrency=4 --timeout=300 \
-  --set-env-vars=SUDDOE_MOCK=0,SUDDOE_LLM=qwen,SUDDOE_QWEN_MODEL=qwen3.7-plus
+# 서버에서 (deploy/ncp)
+git pull && docker compose up -d --build api
 ```
 
- `DOCKER_BUILDKIT=1` 설정 필요
-(Dockerfile의 HF 캐시 마운트 때문), arm 머신에서는 `--platform linux/amd64`를 붙인다.
-전체 절차는 [`docs/8_운영/8-5_배포_레시피.md`](docs/8_운영/8-5_배포_레시피.md).
+로컬에서 이미지를 빌드할 때는 `DOCKER_BUILDKIT=1` 이 필요하다(Dockerfile 의 HF 캐시 마운트).
+arm 머신에서는 `--platform linux/amd64` 를 붙인다.
+
+```bash
+DOCKER_BUILDKIT=1 docker build -t suddoe-api:local .
+```
+
+운영 DB 스키마 변경은 [`db/migrations/`](db/migrations/README.md)의 SQL 을 서버에서 수동으로 적용한다.
 
 ### LLM 설정
 
-운영 기본값: DashScope Qwen3.7-plus
+DashScope Qwen(기본 모델 qwen3.7-plus)을 사용한다.
 
 ```dotenv
-SUDDOE_LLM=qwen
 DASHSCOPE_API_KEY=your_dashscope_api_key_here
 SUDDOE_QWEN_MODEL=qwen3.7-plus
 ```
@@ -146,8 +151,8 @@ SUDDOE_QWEN_MODEL=qwen3.7-plus
 
 <p>
   <img src="https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker">
-  <img src="https://img.shields.io/badge/Cloud%20Run-4285F4?style=for-the-badge&logo=googlecloud&logoColor=white" alt="Cloud Run">
-  <img src="https://img.shields.io/badge/Cloud%20SQL-4285F4?style=for-the-badge&logo=googlecloud&logoColor=white" alt="Cloud SQL">
+  <img src="https://img.shields.io/badge/Naver%20Cloud-03C75A?style=for-the-badge&logo=naver&logoColor=white" alt="Naver Cloud">
+  <img src="https://img.shields.io/badge/Caddy-1F88C0?style=for-the-badge&logo=caddy&logoColor=white" alt="Caddy">
   <img src="https://img.shields.io/badge/Supabase%20Auth-3FCF8E?style=for-the-badge&logo=supabase&logoColor=white" alt="Supabase Auth">
   <img src="https://img.shields.io/badge/Vercel-000000?style=for-the-badge&logo=vercel&logoColor=white" alt="Vercel">
 </p>
@@ -165,10 +170,9 @@ SUDDOE_QWEN_MODEL=qwen3.7-plus
 - **전제 해소** — 판정에 필요한데 아직 없는 사실(F축 데이터)을 짚어 채우게 하거나,
   채울 수 없으면 담당자 문의로 넘긴다.
 - **문의초안** — 판단불가일 때 담당자에게 보낼 질문 초안을 작성한다.
-- **L3 업로드** — 주관기관 자체 규정(HWP/HWPX/PDF)을 업로드하면 배경에서 파싱·적재하고,
-  L1·L2와 함께 판정에 반영한다. 검색하지 않고 통째로 읽어 다른 기관 규정과 섞이지 않는다.
-- **규정 자동 수집** — 발행처 현행판을 주기적으로 비교해 바뀐 조문만 사람 검수 큐로 올리는
-  경로(`/ingest/weekly`)를 구현하였다.
+- **L3 업로드** — 주관기관 자체 규정(HWP/HWPX/PDF)을 업로드하면 백그라운드에서 파싱·적재하고,
+  L1·L2와 함께 판정에 반영한다. 검색하지 않고 기관별로 전체를 읽어 다른 기관 규정과 섞이지 않는다.
+  텍스트가 없는 스캔본은 파싱 실패로 처리하고 사유를 알린다.
 
 ---
 
@@ -184,9 +188,12 @@ SUDDOE_QWEN_MODEL=qwen3.7-plus
 | 세트별 일치율 | 적대적 96.3 · 공식 70.0 · 본세트 69.3 · 공통 68.2 · L3 55.6 · 보강 25.0 |
 | 정답유형별 일치율 | 불가 85.9 · 조건부 69.4 · 가능 14.3 · 판단불가 9.5 |
 | 인용 정확도 / 근거 도달률 | 63.9% / 63.2% |
-| 안전 지표(불가를 가능으로 오판) | **0 / 320** |
+| 안전 지표(정답이 불가인 문항을 가능으로 답한 수) | **0 / 320** |
 | 전수 평가 1회 비용 | $2.92(문항당 약 12원) |
 | 판정 지연 | 1건 약 60초(정규화 4초 + 판정 55~59초) |
+
+안전 지표는 정답이 `불가`인 문항만 센 값이다. 정답이 `가능`이 아닌 모든 문항(조건부·판단불가 포함)에서
+`가능`으로 답한 수는 판정 파이프라인 평가(`scripts/eval_e2e.py`)의 치명 오답 지표로 따로 집계한다.
 
 프롬프팅의 개선으로 판정성능을 높일 여지가 존재한다는 점을 파악한 상태이다.
 [`docs/제출_공모전_설명.md`](docs/제출_공모전_설명.md).
@@ -197,16 +204,19 @@ SUDDOE_QWEN_MODEL=qwen3.7-plus
 ## 6. 🗂️ 프로젝트 구조
 
 ```text
-server/                          FastAPI 앱 — 라우트·인증·판정 오케스트레이션 진입점
+server/                          FastAPI 앱 — 라우트·인증·판정 파이프라인 진입점
 scripts/                         정규화·검색·룰조회·판정·검증·L3 파싱·수집 파이프라인
-db/init/                         스키마·RLS·시드 SQL (docker compose 로 적재)
-docs/                             설계·운영 문서 (docs/README.md 가 지도)
+db/init/                         스키마·RLS·권한 SQL (빈 볼륨에서 docker compose 가 실행)
+db/migrations/                   운영 DB 에 수동으로 적용하는 날짜별 변경 SQL
+db/seed/                         기관 명부 적재 후 수동으로 실행하는 데이터 보정 SQL
+deploy/ncp/                      운영 배포 구성 (Docker Compose · Caddy · 백업/복원 스크립트)
+docs/                            설계·운영 문서 (docs/README.md 가 지도)
 2026_Finance_DATA_FOR_RAG/       원본 규정·PMS 문서 및 데이터셋 구조 설명
 법령 PDF/                        L1(중기부 법령) 원본 PDF
 _hwp변환/                        HWP 원본을 변환한 중간 산출물
 Dockerfile                       API 컨테이너 빌드(FastAPI + KURE-v1 CPU 임베딩)
 requirements-api.txt             API 컨테이너 의존성 (torch CPU 휠 고정 등)
-.env.example                     환경변수 이름표(값은 Secret Manager)
+.env.example                     환경변수 목록과 기본값 (운영 값은 deploy/ncp/.env)
 ```
 
 ---

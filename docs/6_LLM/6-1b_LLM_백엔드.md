@@ -1,14 +1,15 @@
-# LLM 백엔드 — 모델 전환·thinking·검증
+# LLM 백엔드 — 모델·thinking·검증
 
 이 문서가 답하는 질문:
-- 호출 자리별로 지금 어떤 모델·백엔드가 도는가
-- vLLM(RunPod) ↔ DashScope 전환에서 무엇이 바뀌었나
+- 호출 자리별로 지금 어떤 모델이 실행되는가
 - 모델을 어떤 절차로 검증·교체하나
 
 (호출 자리·예산·분기 자체는 [[6-1_호출_설계]].)
 
-## 1. 지금 도는 모델 (2026-09-07 · 운영 env `SUDDOE_LLM=qwen` · `SUDDOE_QWEN_MODEL=qwen3.7-plus`)
+## 1. 모델 (`SUDDOE_QWEN_MODEL=qwen3.7-plus`)
 
+LLM 백엔드는 DashScope 국제판 하나다(`scripts/llm_qwen.py`, OpenAI 호환 엔드포인트,
+`response_format` JSON schema strict). 백엔드 선택 환경변수는 없다.
 LLM 호출 자리는 ①·④-b 둘뿐이다. L3 파싱과 문의초안은 코드다([[6-1_호출_설계]] §1).
 
 | 호출 자리 | 모델 | 실행 | thinking |
@@ -16,42 +17,24 @@ LLM 호출 자리는 ①·④-b 둘뿐이다. L3 파싱과 문의초안은 코�
 | ① 정규화 | Qwen3.7-plus | DashScope 국제판 | Off(추출 작업이라 불필요) |
 | ④-b 판정 조립 | Qwen3.7-plus | DashScope 국제판 | On |
 
-실서버 기본 경로가 RunPod·vLLM(Qwen3-32B) 에서 DashScope(Qwen3.7-plus)로 바뀌었다.
-GPU 팟은 정지 상태다. §2 의 vLLM 수치·§3 의 검증 사다리는 그 경로가 살아있던 시점의
-실측이라 다시 켤 때 대조군으로 남긴다. 최신 성능은 [[0_현황]].
+기본 모델 호출이 실패하면 `SUDDOE_QWEN_FALLBACK_MODEL`(기본 qwen3.8-flash)로 한 번 더 호출한다.
+둘 다 실패하면 판정은 판단불가로 반환된다. json_schema 를 지원하지 않는 모델 별칭
+(qwen-plus 등)은 코드에서 사용을 막는다. 최신 성능은 [[0_현황]].
 
 「DashScope 는 thinking·json_schema 를 같이 못 쓴다」는 `qwen3-32b` 한정이다.
 `qwen3.7-plus`는 둘을 같이 쓴다. 정규화는 추출 작업이라 thinking 을 꺼서 44.0초 → 4.1초
-(출력토큰 2,466→97)로 줄었을 뿐, thinking 자체를 못 켜서가 아니다. 판정(④)은 thinking 을
-켠 채로 그대로 쓴다.
+(출력토큰 2,466→97)로 줄었다. 판정(④)은 thinking 을 켠 채로 쓴다.
 
-`f_axis: bool` 호출 자리가 외부 제공자로 라우팅되면 예외를 던진다(코드 통과 조건 —
-`scripts/adapter.py` 구현·`GET /admin/gate` 로 노출). F축 제외 조건은 원칙상 없어졌고
-DashScope 경로가 열렸다(위 표) — 게이트 코드 정리는 아직 안 됐다.
-
-## 2. vLLM 운영 규칙 (GPU 팟 가동 시점 실측 — 지금은 정지)
-
-| 항목 | 값 |
-|---|---|
-| 스키마 강제 | guided_json |
-| thinking 병용 | `--reasoning-parser qwen3`(추론 종료 후부터 문법 적용, 측정도 이 구성으로) |
-| 양자화 | AWQ(`awq_marlin` 커널 확인) |
-| 컨텍스트 | `--max-model-len` 은 프롬프트 예산(1~2만 토큰)에 맞춤 |
-| 캐시 | prefix caching |
-| GPU | 8B/14B 로컬 4090 · 32B AWQ L40(48GB)@US-KS-2 |
-
-## 3. 검증 사다리 — 배치 유지의 관문
+## 2. 검증 사다리 — 모델 교체의 관문
 
 ```
 1. baseline → 2. 투표 N=3~5 → 3. 금지목록 룰분리 → 4. 프론티어 격차측정
-→ 5. 격차시 캘리브레이션 QLoRA → 6. AWQ 배포 양자화 그대로 정답셋 재실행
+→ 5. 격차시 캘리브레이션 → 6. 배포 구성 그대로 정답셋 재실행
 ```
 
-투표 불일치는 판단불가로 보낸다. 파인튜닝 표적은 **판정 캘리브레이션**
-(기관별 수치 학습 금지). API 대체 경로 재론 조건은 "4단계에서 치명 오답 0 이 깨질 때"인데,
-그 조건이 충족되기 전에 DashScope 로 전환됐다(F축 제외 없이) —
-사다리는 품질 검증 절차로는 그대로 유효하다. DashScope 로 옮긴 지금도 모델을 바꿀 때는
-이 사다리를 다시 탄다.
+투표 불일치는 판단불가로 보낸다. 파인튜닝을 한다면 표적은 **판정 캘리브레이션**이다
+(기관별 수치 학습 금지). 모델이나 프롬프트를 바꿀 때는 이 사다리를 다시 거치고,
+정답셋 재실행(`python scripts/orchestrate.py --golden`)에서 틀린 "가능" 0건을 유지해야 한다.
 
 ## 관련 문서
 
