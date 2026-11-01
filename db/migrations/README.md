@@ -44,6 +44,8 @@ docker rm -f suddoe-verify            # 익명 볼륨까지 지우려면 docker 
 | `2026-11-01_decisions_강등코드_check.sql` | 필수 | `tenant.decisions` 의 검증코드 CHECK 를 당시 코드 목록과 맞춘다 (파일명은 이전 컬럼명 기준) |
 | `2026-11-01_drop_ops_schema.sql` | 선택 | 사용하지 않는 `ops` 스키마(GPU 파드 주소 표)를 제거한다 |
 | `2026-11-01_corpus_ingest.sql` | 필수 | 규정 적재 API 용 `corpus.ingest_jobs`·`staged` 상태·`suddoe_ingest` 롤을 만든다 (`-v ingest_password=...` 필요) |
+| `2026-11-01_rules_사전승인조건_배열.sql` | 필수 | `corpus.rules.사전승인_조건` 을 `text` → `TEXT[]` 로 맞춘다(운영만 text 로 남아 판정 캐시 설정 해시가 실패). 용어 정리 전 컬럼명 기준이라 `2026-11-02_용어_정리.sql` 보다 먼저 적용한다. 운영 적용 2026-11-01 23:27 |
+| `2026-11-01_시퀀스_재설정.sql` | 필수 | 열 소유 시퀀스를 그 열의 최대값 이상으로 올린다(운영 `l3_articles`·`item_alias`·`chunks` 시퀀스가 뒤처져 L3 업로드가 UniqueViolation 으로 실패). 운영 적용 2026-11-01 23:36 |
 | `2026-11-02_용어_정리.sql` | 필수 | 테이블·컬럼·제약·저장값·COMMENT 를 표준 용어로 바꾼다. `decisions_강등코드_check` 다음에 적용한다. 변경 전 행은 `backup_20261102` 스키마에 남으니 확인 후 지운다 |
 
 ## seed

@@ -516,6 +516,11 @@ def _비교_금액(한도: float, 수치: dict, u: dict) -> dict:
     for d in u["분모"]:
         k = _분모키.get(d)
         v = 수치.get(k) if k else None
+        if v is None and d == "건":
+            # 판정 요청 하나는 한 건으로 본다. 금액이 양수라 총액이 한도 이내면 건별도 이내이고,
+            # 총액이 한도를 넘을 때만 '여러 건으로 나눴을 수 있다' 가 남는데 그 오류는 틀린 '불가'
+            # 쪽이다(틀린 '가능' 이 아니다). 건수를 몰라 비교를 포기하면 건당 한도가 늘 무시된다.
+            continue
         if v is None:
             모자란.append(k or d)
         else:
