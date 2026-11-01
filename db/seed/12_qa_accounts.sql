@@ -12,7 +12,7 @@
 --
 -- 기존 demo@suddoe.local 계정은 지우지 않는다 — .local 도메인이라 Supabase 가입이 안 돼 데모 경로로 흘러들 수 없다.
 --
---    psql "$DSN" --single-transaction -v ON_ERROR_STOP=1 -f db/init/12_qa_accounts.sql
+--    psql "$DSN" --single-transaction -v ON_ERROR_STOP=1 -f db/seed/12_qa_accounts.sql
 
 -- org 가 실재하는지 먼저 본다 — 없는데 INSERT 하면 FK 에러 메시지가 제약 이름만 나와 원인이 안 보인다.
 DO $$

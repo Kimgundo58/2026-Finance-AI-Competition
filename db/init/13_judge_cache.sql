@@ -15,7 +15,7 @@
 -- (청크수·임베딩수·refs수·문서수·최대chunk_id·룰수·검수룰수) 를 해시해 조회 시점 값과 다르면 미스로 취급한다
 -- (행을 지우진 않는다 — expires_at TTL 이 걷는다).
 
-CREATE TABLE tenant.judge_cache (
+CREATE TABLE IF NOT EXISTS tenant.judge_cache (
     key         TEXT PRIMARY KEY,        -- 비용가드.열쇠() 의 sha256 (정규화 산출 전체 포함)
     org_id      UUID NOT NULL REFERENCES tenant.orgs(org_id) ON DELETE CASCADE,
     종류        TEXT NOT NULL CHECK (종류 IN ('normalize', 'judge')),
@@ -25,10 +25,11 @@ CREATE TABLE tenant.judge_cache (
     expires_at  TIMESTAMPTZ NOT NULL
 );
 
-CREATE INDEX ix_judge_cache_expires ON tenant.judge_cache (expires_at);
-CREATE INDEX ix_judge_cache_org     ON tenant.judge_cache (org_id, 종류);
+CREATE INDEX IF NOT EXISTS ix_judge_cache_expires ON tenant.judge_cache (expires_at);
+CREATE INDEX IF NOT EXISTS ix_judge_cache_org   ON tenant.judge_cache (org_id, 종류);
 
 ALTER TABLE tenant.judge_cache ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS org_isolation ON tenant.judge_cache;
 CREATE POLICY org_isolation ON tenant.judge_cache USING (org_id = tenant.current_org());
 
 -- `10_rls_guc.sql`(로컬)·`10b_cloudsql_grant.sql`(운영) 의 ALTER DEFAULT PRIVILEGES 가

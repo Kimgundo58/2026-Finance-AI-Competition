@@ -2,13 +2,13 @@
 # DB 복원 및 검증 스크립트
 #   1) 빈 DB 에 앱 롤(suddoe_app) 생성
 #   2) pg_dump(-Fc) 덤프 복원
-#   3) db/init/10b_cloudsql_grant.sql 로 권한·search_path 설정
+#   3) db/init/10b_app_grants.sql 로 권한·search_path 설정
 #   4) 권한 검증(①~④, ⑥), suddoe_app 실제 쿼리(⑦), 테이블별 행 수 비교(선택), RLS 격리 테스트(⑤)
 #
 # 사용법 (deploy/ncp 디렉터리에서):
 #   ./restore.sh <suddoe.dump> [source_rowcounts.txt]
 #
-# 검증 항목은 db/init/10b_cloudsql_grant.sql 하단 주석과 같다. 하나라도 실패하면 exit 1 로 종료한다.
+# 검증 항목은 db/init/10b_app_grants.sql 하단 주석과 같다. 하나라도 실패하면 exit 1 로 종료한다.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -72,8 +72,8 @@ ok "pg_restore + ANALYZE"
 
 # ── 3. 권한·search_path ──────────────────────────────────────────────
 # Cloud SQL 용으로 작성된 파일이지만 GRANT/ALTER 문만 있어 self-hosted PostgreSQL 에도 그대로 적용된다.
-psql_admin < ../../db/init/10b_cloudsql_grant.sql
-ok "10b_cloudsql_grant.sql"
+psql_admin < ../../db/init/10b_app_grants.sql
+ok "10b_app_grants.sql"
 
 # ── 4. 권한 검증 ①~④ ─────────────────────────────────────────────────
 r=$(psql_admin -tA <<'SQL'

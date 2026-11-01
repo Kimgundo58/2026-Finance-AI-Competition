@@ -4,8 +4,13 @@
 # - SSE(text/event-stream) 응답은 reverse_proxy 가 즉시 flush 하므로 판정 스트리밍에 추가 설정이 필요 없다.
 # - encode(gzip)는 쓰지 않는다. 압축 버퍼 때문에 SSE heartbeat 전송이 지연될 수 있다.
 # - trusted_proxies 를 설정하지 않았으므로 Caddy 는 클라이언트가 보낸 X-Forwarded-For 를 무시하고
-#   실제 접속 IP 로 다시 설정한다. server/main.py 의 IP별 요청 제한이 이 헤더의 첫 번째 값을 사용한다.
+#   실제 접속 IP 로 다시 설정한다. 서버의 IP별 요청 제한이 이 헤더의 첫 번째 값을 사용한다.
+# - request_body 상한은 L3 업로드(앱 상한 30MB)에 multipart 오버헤드를 더한 값이다.
+#   상한을 넘는 요청은 API 컨테이너에 닿기 전에 413 으로 거부된다.
 
 {$SUDDOE_DOMAIN} {
+	request_body {
+		max_size 35MB
+	}
 	reverse_proxy api:8080
 }

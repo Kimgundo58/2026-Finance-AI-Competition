@@ -2,7 +2,7 @@
 -- tenant.accounts 정책은 org_id = current_org() 하나뿐인데, 로그인 시점엔 org 를 아직 모른다 —
 -- 비특권 롤에서는 조회가 0행이 되고 그게 403 이다. 로컬 postgres 는 superuser 라 이 문제가 안 보인다.
 -- 정책을 SELECT true 로 늘리면 이메일↔기관 명부가 통째로 읽힌다 — 대신 SECURITY DEFINER 함수 하나로
--- 노출면을 「이메일 1건 → 그 1건의 org」로 닫는다. 10_rls_guc.sql 은 건드리지 않는다.
+-- 노출면을 「이메일 1건 → 그 1건의 org」로 닫는다. 10a_rls_guc.sql 은 건드리지 않는다.
 --
 -- 적용 방법: 단일 트랜잭션으로 흘려라 — 자동커밋으로 한 문장씩 흘리면 중간에 터졌을 때
 -- PUBLIC 에 EXECUTE 가 남은 SECURITY DEFINER 함수만 남는 위험한 상태가 될 수 있다.

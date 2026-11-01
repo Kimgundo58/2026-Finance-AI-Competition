@@ -62,11 +62,8 @@ services:
       SUDDOE_DEMO_SECRET: ${SUDDOE_DEMO_SECRET:?SUDDOE_DEMO_SECRET is not set in .env}
       SUDDOE_SLUG_SECRET: ${SUDDOE_SLUG_SECRET:?SUDDOE_SLUG_SECRET is not set in .env}
       SUDDOE_ORG_PARAM: "0"
-      SUDDOE_LLM: qwen
       SUDDOE_QWEN_MODEL: ${SUDDOE_QWEN_MODEL:-qwen3.7-plus}
       DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
-      # RunPod(vLLM)을 쓰지 않으므로 GPU watchdog 을 끈다.
-      SUDDOE_GPU_IDLE_MIN: "0"
       TZ: Asia/Seoul
     volumes:
       # L3 업로드 원본 파일. Cloud Run 에서는 컨테이너 재시작 시 사라졌지만 여기서는 볼륨에 유지된다.

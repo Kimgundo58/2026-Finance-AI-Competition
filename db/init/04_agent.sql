@@ -65,18 +65,21 @@ ALTER TABLE tenant.decisions ADD COLUMN IF NOT EXISTS "강등코드" TEXT[] NOT 
 ALTER TABLE tenant.decisions ADD COLUMN IF NOT EXISTS "경로"     TEXT;
 ALTER TABLE tenant.decisions ADD COLUMN IF NOT EXISTS "실패단계" TEXT;
 
--- 강등코드 22종. 매핑표 밖의 코드는 거부한다 — 오타가 지표를 조용히 갈라놓지 못하게.
--- TASK_* 4종은 `해야할일[].설명` 대조용이고 판정을 바꾸지 않는다. 정본 철자는 `llm_validate.py` 에 있다.
+-- 강등코드 허용 목록. 목록 밖의 코드는 거부해 오타가 지표를 갈라놓지 못하게 한다.
+-- 기준 목록은 scripts/llm_validate.py 의 강등코드_전체 이고, 이 CHECK 는 같은 순서로 맞춘다.
+-- 코드를 추가하면 db/migrations/ 에 CHECK 교체 마이그레이션을 함께 낸다.
+-- TASK_STATE_*/TASK_NUMBER_*/TASK_BASIS_* 는 해야할일 설명 대조용이고 판정을 바꾸지 않는다.
 ALTER TABLE tenant.decisions DROP CONSTRAINT IF EXISTS "decisions_강등코드_check";
 ALTER TABLE tenant.decisions
   ADD CONSTRAINT "decisions_강등코드_check"
   CHECK ("강등코드" <@ ARRAY[
     'INVALID_JUDGMENT','CITE_NOT_IN_MAP','CITE_DB_MISSING','CITE_HANG_MISMATCH',
     'PREMISE_NO_BASIS','PREMISE_BASIS_NOT_IN_MAP','PREMISE_ENUM','PREMISE_UNMAPPED',
+    'PREMISE_DB_MISSING',
     'NO_CITATION','VLM_DOWNGRADE','B_GRADE_DOWNGRADE','UNVERIFIED_RULE',
-    'TASK_CODE_INVALID','L3_ONLY_DOWNGRADE','TENANT_LEAK','DANGLING_WARN',
+    'TASK_CODE_INVALID','TASK_DB_MISSING',
+    'L3_ONLY_DOWNGRADE','TENANT_LEAK','DANGLING_WARN',
     'DOMAIN_WARN','PRECEDENCE_FLIP',
-    -- 해야할일 대조 (llm_validate.py)
     'TASK_STATE_UNSOURCED','TASK_STATE_MISMATCH',
     'TASK_NUMBER_UNSOURCED','TASK_BASIS_NOT_IN_MAP'
   ]::text[]);
