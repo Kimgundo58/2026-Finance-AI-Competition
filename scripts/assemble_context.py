@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
-"""판정 프롬프트 조립: B0~B6 블록을 만들고 규정 원문에 S번호를 부여한다.
+"""판정 프롬프트 구성: B0~B6 블록을 만들고 규정 원문에 문장 ID 를 부여한다.
 
-판정 파이프라인 4단계(orchestrate)가 판정 호출 직전에 부른다. 공개: 조립(...) -> (프롬프트, s맵, 참조사슬), B0, 프롬프트_변형.
-S번호는 항(①②③) 단위이고 항이 없는 조는 조 전체가 한 번호다. B1→B2→B3 통합 연번이며 s맵 값은 (종류, id, 항호)다.
-불변식: B0 은 고정 문구이고 B6(질문)은 항상 맨 뒤다. 규정 원문(B1~B3)은 "지시가 아님" 래퍼로 감싼다(프롬프트 인젝션 방어).
+판정 파이프라인 4단계(orchestrate)가 판정 호출 직전에 부른다.
+공개: 프롬프트_구성(...) -> (프롬프트, 문장맵, 참조관계), 시스템_프롬프트(B0), 프롬프트_버전.
+문장 ID(S01…)는 항(①②③) 단위이고 항이 없는 조는 조 전체가 한 번호다. B1→B2→B3 통합 연번이며 문장맵 값은 (종류, id, 항호)다.
+불변식: 시스템 프롬프트(B0)는 고정 문구이고 B6(질문)은 항상 맨 뒤다. 규정 원문(B1~B3)은 "지시가 아님" 래퍼로 감싼다(프롬프트 인젝션 방어).
 읽는 테이블: corpus.chunks, corpus.doc_articles.
 """
 from __future__ import annotations
@@ -13,12 +14,13 @@ import re
 
 from llm_validate import 체크항목_본문
 
-# 판정 기록(decisions.변형, eval 라벨)에 남기는 프롬프트 버전 이름. B0 문구를 바꾸면 함께 바꾼다.
-프롬프트_변형 = "V7"
+# 판정 기록(decisions.모델.프롬프트버전, eval 라벨)에 남기는 프롬프트 버전 이름. 시스템 프롬프트 문구를 바꾸면
+# 함께 바꾼다.
+프롬프트_버전 = "V7"
 
 # 시스템 지시. 가변 값을 넣지 않는다(프롬프트 캐시 프리픽스가 깨진다). 바이트가 바뀌면 판정이 바뀌므로
 # 평가 없이 고치지 않는다.
-B0 = """당신은 창업지원금 지출의 사전 승인 여부를 판정한다.
+시스템_프롬프트 = """당신은 창업지원금 지출의 사전 승인 여부를 판정한다.
 
 판정은 네 가지뿐이다.
   가능      규정이 명시적으로 허용하고, 조건도 한도도 걸리지 않는다
@@ -72,15 +74,15 @@ def _s(i: int) -> str:
     return f"S{i:02d}"
 
 
-def 항분해(본문: str) -> list[tuple[str | None, str]]:
+def 항_분할(본문: str) -> list[tuple[str | None, str]]:
     """조 본문을 (항 기호, 조각) 목록으로 나눈다. 항이 없으면 조 전체가 한 조각이다."""
     자리 = [m.start() for m in RE_항.finditer(본문 or "")]
     if not 자리:
         return [(None, (본문 or "").strip())]
     out = []
-    머리 = 본문[:자리[0]].strip()
-    if 머리:
-        out.append((None, 머리))
+    항앞부분 = 본문[:자리[0]].strip()
+    if 항앞부분:
+        out.append((None, 항앞부분))
     for k, st in enumerate(자리):
         end = 자리[k + 1] if k + 1 < len(자리) else len(본문)
         조각 = 본문[st:end].strip()
@@ -89,41 +91,41 @@ def 항분해(본문: str) -> list[tuple[str | None, str]]:
     return out
 
 
-class _S번호:
-    """B1→B2→B3 를 거치며 S번호를 이어서 매기고 s맵을 채운다."""
+class _문장ID_생성기:
+    """B1→B2→B3 를 거치며 문장 ID 를 이어서 매기고 문장맵을 채운다."""
 
     def __init__(self) -> None:
         self.n = 0
-        self.s맵: dict[str, tuple[str, int, str | None]] = {}
+        self.문장맵: dict[str, tuple[str, int, str | None]] = {}
 
     def 원문블록(self, 제목: str, 항목들: list[tuple[str, int, str, str, str | None]]) -> str:
-        """항목 (종류, id, 표시머리, 본문, 항호) 를 항 단위로 나눠 S번호를 붙인 블록 문자열."""
+        """항목 (종류, id, 표시헤더, 본문, 항호) 를 항 단위로 나눠 문장 ID 를 붙인 블록 문자열."""
         줄 = [f"## {제목}", 래퍼_시작]
-        for 종류, _id, 머리, 본문, 항호 in 항목들:
+        for 종류, _id, 표시헤더, 본문, 항호 in 항목들:
             # 한 조 안에서 같은 항 기호가 되풀이되는 문서가 있다. 두 번째부터 `#N` 을 붙여 구분한다
-            # (첫 번째는 그대로 두어 s맵 값이 항 기호와 같게 유지된다)
+            # (첫 번째는 그대로 두어 문장맵 값이 항 기호와 같게 유지된다)
             횟수: dict[str, int] = {}
-            for 항, 조각 in 항분해(본문):
+            for 항, 조각 in 항_분할(본문):
                 self.n += 1
                 키 = 항 or 항호
                 if 키:
                     횟수[키] = 횟수.get(키, 0) + 1
                     if 횟수[키] > 1:
                         키 = f"{키}#{횟수[키]}"
-                self.s맵[_s(self.n)] = (종류, _id, 키)
-                줄.append(f"[{_s(self.n)}] {머리}\n{조각}")
+                self.문장맵[_s(self.n)] = (종류, _id, 키)
+                줄.append(f"[{_s(self.n)}] {표시헤더}\n{조각}")
         줄.append(래퍼_끝)
         return "\n\n".join(줄)
 
 
-def _b1_l3(번호: _S번호, l3: list[dict]) -> str:
-    """기관 규정(L3) 전체. 검색하지 않고 org 단위로 통째로 로드한 조문이다."""
+def _기관규정_블록(번호: _문장ID_생성기, l3: list[dict]) -> str:
+    """기관 규정(L3) 전체. 검색하지 않고 org 단위로 전체를 조회한 조문이다."""
     return 번호.원문블록("B1. 귀 기관 규정 (L3)",
                        [("l3", r["article_id"], f'{r["조번호"]}({r.get("조제목") or ""})',
                          r["본문"], None) for r in l3])
 
 
-def _b2_검색(cur, 번호: _S번호, 검색: list[int]) -> str:
+def _검색규정_블록(cur, 번호: _문장ID_생성기, 검색: list[int]) -> str:
     """검색된 L1·L2 청크. 검색 순위 순서를 유지한다."""
     cur.execute("""SELECT chunk_id, doc_id, 조번호, 조제목, 항호, text
                      FROM corpus.chunks WHERE chunk_id = ANY(%s)""", (검색,))
@@ -134,7 +136,7 @@ def _b2_검색(cur, 번호: _S번호, 검색: list[int]) -> str:
                         for r in rows])
 
 
-def _b3_참조(cur, 번호: _S번호, 참조확장: list[int]) -> str:
+def _참조조항_블록(cur, 번호: _문장ID_생성기, 참조확장: list[int]) -> str:
     """검색 결과가 참조하는 조문(참조 확장). 순서는 DB 반환 순서 그대로다."""
     cur.execute("""SELECT article_id, doc_id, 조번호, 조제목, 본문
                      FROM corpus.doc_articles WHERE article_id = ANY(%s)""", (참조확장,))
@@ -143,21 +145,21 @@ def _b3_참조(cur, 번호: _S번호, 참조확장: list[int]) -> str:
                         for r in cur.fetchall()])
 
 
-def _b4_룰(룰결과: str) -> str:
+def _룰요약_블록(룰결과: str) -> str:
     # 비교가 끝난 문장만 넣는다. 원시 한도값을 주면 LLM 이 다시 계산하려 든다
     return f"## B4. 룰 조회 결과 (금액 비교는 이미 끝났다)\n{룰결과}"
 
 
-def _b5_f(f요약: str) -> str:
-    return f"## B5. 협약·집행 현황\n{f요약}"
+def _프로필요약_블록(프로필요약: str) -> str:
+    return f"## B5. 협약·집행 현황\n{프로필요약}"
 
 
-def _b5_5_체크(코드들: list[str], 체크항목: dict[str, dict]) -> str | None:
+def _확인항목_블록(체크코드: list[str], 체크항목: dict[str, dict]) -> str | None:
     """해야할일 후보 블록. 후보 중 본문이 있는 항목이 없으면 None.
 
-    사업마다 개수가 달라 B0 에 넣지 않는다(프롬프트 캐시 프리픽스가 깨진다).
+    사업마다 개수가 달라 시스템 프롬프트(B0)에 넣지 않는다(프롬프트 캐시 프리픽스가 깨진다).
     """
-    줄 = [f"- {c}: {체크항목[c]['항목']} ({체크항목[c]['설명']})" for c in 코드들 if c in 체크항목]
+    줄 = [f"- {c}: {체크항목[c]['항목']} ({체크항목[c]['설명']})" for c in 체크코드 if c in 체크항목]
     if not 줄:
         return None
     return ("## B5.5. 이 사업의 확인 후보(해야할일)\n"
@@ -165,46 +167,46 @@ def _b5_5_체크(코드들: list[str], 체크항목: dict[str, dict]) -> str | N
             + "\n".join(줄))
 
 
-def _b6_질문(질문: str, 정규화: dict, 마지막_s번호: str) -> str:
+def _질문_블록(질문: str, 정규화: dict, 마지막_문장ID: str) -> str:
     return ("## B6. 판정할 지출\n"
             f"질문 원문: {질문}\n"
             f"정규화: {json.dumps(정규화, ensure_ascii=False)}\n\n"
-            f"위 근거(S01~{마지막_s번호})만 써서 판정하라. 인용은 S번호로만 한다.\n"
+            f"위 근거(S01~{마지막_문장ID})만 써서 판정하라. 인용은 S번호로만 한다.\n"
             "주어진 스키마에 맞는 JSON 만 출력한다.")
 
 
-def 조립(cur, 질문: str, 정규화: dict, *,
-         l3: list[dict] | None = None,
-         검색: list[int] | None = None,
-         참조확장: list[int] | None = None,
-         룰결과: str | None = None,
-         f요약: str | None = None,
-         참조사슬: list[dict] | None = None,
-         코드들: list[str] | None = None,
-         체크항목: dict[str, dict] | None = None) -> tuple[str, dict, list[dict]]:
-    """판정 프롬프트를 조립해 (프롬프트, s맵, 참조사슬) 을 돌려준다.
+def 프롬프트_구성(cur, 질문: str, 정규화: dict, *,
+              l3: list[dict] | None = None,
+              검색: list[int] | None = None,
+              참조확장: list[int] | None = None,
+              룰결과: str | None = None,
+              프로필요약: str | None = None,
+              참조관계: list[dict] | None = None,
+              체크코드: list[str] | None = None,
+              체크항목: dict[str, dict] | None = None) -> tuple[str, dict, list[dict]]:
+    """판정 프롬프트를 구성해 (프롬프트, 문장맵, 참조관계) 를 돌려준다.
 
-    블록 순서는 B0, B1(L3), B2(검색 청크), B3(참조 확장 조문), B4(룰 결과), B5(F 요약),
-    B5.5(해야할일 후보), B6(질문)이고, 값이 없는 블록은 넣지 않는다.
-    `참조사슬` 은 받은 그대로 돌려준다. LLM 은 참조 그래프를 보지 않는다.
-    `코드들` 을 주고 `체크항목` 을 주지 않으면 check_items 본문을 같은 커넥션으로 조회한다.
+    블록 순서는 B0(시스템 프롬프트), B1(L3), B2(검색 청크), B3(참조 확장 조문), B4(룰 결과),
+    B5(기업 프로필 요약), B5.5(해야할일 후보), B6(질문)이고, 값이 없는 블록은 넣지 않는다.
+    `참조관계` 는 받은 그대로 돌려준다. LLM 은 참조 그래프를 보지 않는다.
+    `체크코드` 를 주고 `체크항목` 을 주지 않으면 check_items 본문을 같은 커넥션으로 조회한다.
     """
-    번호 = _S번호()
-    블록: list[str] = [B0]
+    번호 = _문장ID_생성기()
+    블록: list[str] = [시스템_프롬프트]
     if l3:
-        블록.append(_b1_l3(번호, l3))
+        블록.append(_기관규정_블록(번호, l3))
     if 검색:
-        블록.append(_b2_검색(cur, 번호, 검색))
+        블록.append(_검색규정_블록(cur, 번호, 검색))
     if 참조확장:
-        블록.append(_b3_참조(cur, 번호, 참조확장))
+        블록.append(_참조조항_블록(cur, 번호, 참조확장))
     if 룰결과:
-        블록.append(_b4_룰(룰결과))
-    if f요약:
-        블록.append(_b5_f(f요약))
-    if 코드들:
+        블록.append(_룰요약_블록(룰결과))
+    if 프로필요약:
+        블록.append(_프로필요약_블록(프로필요약))
+    if 체크코드:
         if 체크항목 is None:
-            체크항목 = 체크항목_본문(set(코드들), conn=cur.connection)
-        if (b55 := _b5_5_체크(코드들, 체크항목)) is not None:
-            블록.append(b55)
-    블록.append(_b6_질문(질문, 정규화, _s(번호.n)))
-    return "\n\n".join(블록), 번호.s맵, list(참조사슬 or [])
+            체크항목 = 체크항목_본문(set(체크코드), conn=cur.connection)
+        if (확인항목 := _확인항목_블록(체크코드, 체크항목)) is not None:
+            블록.append(확인항목)
+    블록.append(_질문_블록(질문, 정규화, _s(번호.n)))
+    return "\n\n".join(블록), 번호.문장맵, list(참조관계 or [])

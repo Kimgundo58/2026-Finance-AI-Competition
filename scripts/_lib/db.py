@@ -15,7 +15,7 @@ import psycopg
 
 DSN = os.environ.get("SUDDOE_DSN", "postgresql://postgres:devpw@localhost:5432/suddoe")
 
-# DB 에 닿지 못할 때 무한정 기다리지 않도록 기본 접속 타임아웃을 둔다(초).
+# DB 에 연결할 수 없을 때 무한정 기다리지 않도록 기본 접속 타임아웃을 둔다(초).
 _기본_접속타임아웃 = 5
 
 

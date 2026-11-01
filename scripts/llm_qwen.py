@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""판정 파이프라인의 LLM 클라이언트. DashScope 국제판의 OpenAI 호환 API 를 부른다.
+"""판정 파이프라인의 LLM 클라이언트. DashScope 국제 리전(International)의 OpenAI 호환 API 를 부른다.
 
 normalize_run(정규화 호출, 폼 경로 비목후보 추출)과 orchestrate(판정 호출)가 쓰는 유일한 LLM 백엔드다.
 공개: llm_호출(프롬프트, 스키마, *, 모델, 온도, 최대토큰, 타임아웃, 재시도, 추론) -> (출력, 메타), 예외 LLM실패.
@@ -44,7 +44,7 @@ def _client_얻기() -> OpenAI:
     return _client
 
 
-def _thinking_꺼야하나(모델: str) -> bool:
+def _추론_비활성_대상(모델: str) -> bool:
     """flash 계열은 추론을 켜면 출력이 지나치게 길어지고, 오픈소스 qwen3-* 계열은 비스트리밍
     호출에서 추론을 켜면 400 으로 거부한다. 두 계열은 항상 끈다."""
     return "flash" in 모델 or 모델.startswith("qwen3-")
@@ -65,13 +65,13 @@ def _호출_1회(client: OpenAI, 모델: str, 프롬프트: str, 스키마: dict
             "type": "json_schema",
             "json_schema": {"name": "판정", "schema": 스키마, "strict": True},
         }
-    if 추론 is False or _thinking_꺼야하나(모델):
+    if 추론 is False or _추론_비활성_대상(모델):
         kwargs["extra_body"] = {"enable_thinking": False}
 
     t = time.time()
     r = client.chat.completions.create(**kwargs)
     내용 = r.choices[0].message.content or ""
-    추론content = getattr(r.choices[0].message, "reasoning_content", None) or ""
+    추론내용 = getattr(r.choices[0].message, "reasoning_content", None) or ""
     usage = r.usage
     메타 = {
         "지연ms": int((time.time() - t) * 1000),
@@ -81,9 +81,8 @@ def _호출_1회(client: OpenAI, 모델: str, 프롬프트: str, 스키마: dict
         "종료이유": r.choices[0].finish_reason,
         "모델": 모델,
         "최대토큰": 최대토큰,        # 실제로 보낸 max_tokens (_최소_출력토큰 적용 후)
-        # 키 이름은 저장된 decisions.모델 과 비교할 수 있게 유지한다
-        "추론content있음": bool(추론content),
-        "추론content길이": len(추론content),
+        "추론내용있음": bool(추론내용),
+        "추론내용길이": len(추론내용),
     }
     if 스키마 is None:
         return 내용, 메타
@@ -100,7 +99,7 @@ def llm_호출(프롬프트: str, 스키마: dict | None, *,
     """프롬프트 하나를 보내고 (출력, 메타) 를 돌려준다.
 
     출력은 스키마를 주면 파싱한 JSON, 아니면 문자열이다. 메타에는 지연ms·토큰·종료이유·모델·
-    추론content있음/길이가 들어간다.
+    추론내용있음/추론내용길이가 들어간다.
     `모델` 을 생략하면 기본 모델로 `재시도`+1 번 시도하고, 모두 실패하면 폴백 모델로 한 번 더
     시도한다. 모델을 직접 지정하면 폴백하지 않는다. 최악의 지연은 (재시도+2) x 타임아웃이다.
     `추론=False` 는 모델과 무관하게 thinking 을 끈다(정규화처럼 값을 뽑기만 하는 호출용).

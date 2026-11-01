@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-"""룰 조회: 금지목록 즉시 판정(게이트 A), 비목 확정, 효력 결정(L1·L2·L3 병합), L3 게이팅.
+"""룰 조회: 금지목록 즉시 판정(게이트 A), 비목 후보 조회, 효력 결정(L1·L2·L3 병합), L3 상위 규정 확인.
 
-판정 파이프라인(orchestrate) 2단계가 금지적중·비목확정·effective_rule·l3_게이팅 을, 서버 기동
-워밍업이 warmup 을 호출한다. corpus.programs·rules·precedence_rules·item_alias·item_vocab 을 읽기만 한다.
-판정은 만들지 않는다. 룰이 없으면 None, DB 오류는 예외로 올려 판정 파이프라인이 판단불가로 반환한다.
-금지목록 적중은 정규화(NFKC·공백·구두점·조사) 뒤 문자 그대로의 일치·포함만 인정한다.
+판정 파이프라인(orchestrate) 2단계가 금지목록_일치·비목후보_조회·effective_rule·l3_상위확인 을, 서버
+기동 시 워밍업 단계가 워밍업() 을 호출한다. corpus.programs·rules·precedence_rules·item_alias·item_vocab 을
+읽기만 한다. 판정은 만들지 않는다. 룰이 없으면 None, DB 오류는 예외로 올려 판정 파이프라인이 판단불가로 반환한다.
+금지목록 일치는 정규화(NFKC·공백·구두점·조사) 뒤 문자 그대로의 일치·포함만 인정한다.
 자기검사·스모크·감사는 scripts/rule_lookup_check.py 에 있다.
 """
 from __future__ import annotations
@@ -14,7 +14,7 @@ import re
 import unicodedata
 from typing import Any, Sequence
 
-허용_강도 = {"불가": 3, "조건부": 2, "가능": 1}   # 클수록 엄격
+허용_엄격도 = {"불가": 3, "조건부": 2, "가능": 1}   # 클수록 엄격
 
 
 # 정규화: 조사·공백·구두점·괄호만 다룬다. 의미 해석은 하지 않는다
@@ -26,7 +26,7 @@ _조사 = (
     "로써", "로서", "께서", "이며", "며", "이고", "고", "은", "는", "이", "가",
     "을", "를", "의", "에", "와", "과", "도", "만", "나", "로", "께",
 )
-_꼬리 = ("입니다", "이다", "인가요", "나요", "되나요", "됩니까", "해요", "요", "임", "함")
+_어미 = ("입니다", "이다", "인가요", "나요", "되나요", "됩니까", "해요", "요", "임", "함")
 
 _구두점 = re.compile(r"[\s··・,，.\-–—~〜/／·:;'\"“”‘’!?()（）\[\]<>「」『』]+")
 _괄호 = re.compile(r"[（(]([^）)]*)[）)]")
@@ -36,14 +36,14 @@ def _nfkc(s: str) -> str:
     return unicodedata.normalize("NFKC", (s or "")).strip()
 
 
-def _조사떼기(tok: str) -> str:
+def _조사제거(tok: str) -> str:
     """어간이 2자 이상 남을 때만, 더 뗄 것이 없을 때까지 반복해서 뗀다.
 
     한 번만 떼면 '손잡이를'과 '손잡이'의 정규형이 달라진다. 양쪽 모두 끝까지 떼야 같아진다.
     """
     for _ in range(4):
         before = tok
-        for k in _꼬리 + _조사:
+        for k in _어미 + _조사:
             if tok.endswith(k) and len(tok) - len(k) >= 2:
                 tok = tok[: -len(k)]
                 break
@@ -56,10 +56,10 @@ def _norm(s: str) -> str:
     """비교용 정규형. 공백 제거 · 구두점 제거 · 조사 제거 · 소문자."""
     s = _nfkc(s).lower()
     toks = [t for t in _구두점.split(s) if t]
-    return "".join(_조사떼기(t) for t in toks)
+    return "".join(_조사제거(t) for t in toks)
 
 
-# 금지예시 해부: 본문(괄호 밖)과 예외 단서
+# 금지예시 파싱: 본문(괄호 밖)과 예외 단서
 
 # 괄호 안이 이 항목을 조건부로 바꾸는 단서인 경우.
 #   예외로 보는 것: 예외 / 제외 / 집행 제한 / "…비로 집행|구매해야"(비목 재분류)
@@ -70,7 +70,7 @@ _예외단서 = re.compile(r"(예외|제외|집행\s*제한)")
 _비목재분류 = re.compile(r"[가-힣]+비로\s*(집행|구매)")
 
 
-def 금지예시_해부(예시: str) -> dict[str, Any]:
+def 금지예시_파싱(예시: str) -> dict[str, Any]:
     """금지예시 한 줄 → {본문, 본문_정규형, 예외단서, 무조건}.
 
     괄호는 부연('법인은 …로 등재된 법인')일 수도, 예외 단서('사전승인 시 예외')일 수도 있다.
@@ -88,7 +88,7 @@ def 금지예시_해부(예시: str) -> dict[str, Any]:
     }
 
 
-# 룰 행 조회: base 는 L1(사업명 NULL, 창업 계통만) ∪ L2(사업명 일치)
+# 룰 행 조회: 상위 룰은 L1(사업명 NULL, 창업 비목체계만) ∪ L2(사업명 일치)
 
 _룰컬럼 = """rule_id, layer, 기관id, 사업명, 비목, 허용, 사전승인, 사전승인_조건,
              한도_유형, 한도_값, 한도_단위, 증빙, 금지예시, 허용예시, 근거,
@@ -122,34 +122,34 @@ def _행(cur, sql: str, args: Sequence[Any]) -> list[dict]:
 
 
 def _사업정보(cur, 사업명: str | None) -> dict | None:
-    """corpus.programs 에서 사업의 비목계통과 우선규범을 한 번에 읽는다. → {"계통", "우선규범"} | None
+    """corpus.programs 에서 사업의 비목체계와 우선규범을 한 번에 읽는다. → {"비목체계", "우선규범"} | None
 
-    사업명이 없으면(공통 문항) 창업 계통으로 본다. 사업명이 있는데 행이 없거나 비목계통이 비어
-    있으면 None 이다. 모르는 사업을 창업 계통으로 가정하면 R&D 계통 질문에 창업 계통 지침이 근거로
+    사업명이 없으면(공통 문항) 창업 비목체계로 본다. 사업명이 있는데 행이 없거나 비목체계가 비어
+    있으면 None 이다. 모르는 사업을 창업 비목체계로 가정하면 R&D 비목체계 질문에 창업 비목체계 지침이 근거로
     붙는다. DB 오류는 삼키지 않는다(판정 파이프라인이 판단불가로 반환한다).
     """
     if not 사업명:
-        return {"계통": "창업", "우선규범": None}
-    cur.execute("SELECT 비목계통, 우선규범 FROM corpus.programs WHERE 사업명 = %s", [사업명])
+        return {"비목체계": "창업", "우선규범": None}
+    cur.execute("SELECT 비목체계, 우선규범 FROM corpus.programs WHERE 사업명 = %s", [사업명])
     r = cur.fetchone()
     if not r or not r[0]:
         return None
-    return {"계통": r[0], "우선규범": r[1]}
+    return {"비목체계": r[0], "우선규범": r[1]}
 
 
-def base_룰(cur, 사업명: str | None, 비목: str | None, 계통: str | None) -> list[dict]:
-    """L1·L2 룰 행. 계통 은 _사업정보()["계통"] 이고, None(모르는 사업)이면 조회 없이 빈 리스트다.
+def 상위_룰(cur, 사업명: str | None, 비목: str | None, 비목체계: str | None) -> list[dict]:
+    """L1·L2 룰 행. 비목체계 는 _사업정보()["비목체계"] 이고, None(모르는 사업)이면 조회 없이 빈 리스트다.
 
     조건이 `layer IN ('L1','L2') AND 사업명=?` 가 아닌 이유:
     - L1 행은 사업명이 NULL 이다. `NULL = ?` 는 항상 거짓이라 L1 을 찾지 못한다.
-    - L1 은 창업 계통 사업에만 붙인다. TIPS 는 상위 근거법이 다르다(「중소기업창업 지원사업
-      통합관리지침」이 아니라 「중소기업기술혁신 촉진법」 등). 계통 조건이 없으면 창업 지침이
+    - L1 은 창업 비목체계 사업에만 붙인다. TIPS 는 상위 근거법이 다르다(「중소기업창업 지원사업
+      통합관리지침」이 아니라 「중소기업기술혁신 촉진법」 등). 비목체계 조건이 없으면 창업 지침이
       TIPS 질문의 근거로 붙어 오답이 된다.
     """
-    if 계통 is None:
+    if 비목체계 is None:
         return []
     where = ["((layer='L1' AND 사업명 IS NULL AND %s) OR (layer='L2' AND 사업명 = %s))"]
-    args: list[Any] = [계통 == "창업", 사업명]
+    args: list[Any] = [비목체계 == "창업", 사업명]
     if 비목:
         where.append("비목 = %s")
         args.append(비목)
@@ -157,10 +157,10 @@ def base_룰(cur, 사업명: str | None, 비목: str | None, 계통: str | None)
                     + " ORDER BY layer, rule_id", args)
 
 
-def _l3정규화(l3: dict | None) -> dict | None:
-    """l3_load.l3룰() 결과를 병합에 넣을 룰 행 모양으로 맞춘다.
+def _l3_룰행변환(l3: dict | None) -> dict | None:
+    """l3_load.l3룰() 결과를 병합에 넣을 룰 행 형식으로 맞춘다.
 
-    L3 룰은 corpus.rules 가 아니라 tenant.l3_articles 에서 조립되므로 rule_id 가 없다.
+    L3 룰은 corpus.rules 가 아니라 tenant.l3_articles 에서 만들어지므로 rule_id 가 없다.
     인용 식별자는 근거의 article_id 다.
     """
     if l3 is None:
@@ -188,7 +188,7 @@ def _precedence(cur, 사업명: str | None) -> list[dict]:
     """corpus.precedence_rules 의 이 사업 행. 사업명이 없으면 빈 리스트."""
     if not 사업명:
         return []
-    cur.execute("SELECT 사업명, 우선계층, 열위계층, 범위, 우선규범, 근거, 원문, 해석, verified "
+    cur.execute("SELECT 사업명, 우선계층, 후순위계층, 범위, 우선규범, 근거, 원문, 해석, verified "
                 "FROM corpus.precedence_rules WHERE 사업명 = %s", [사업명])
     cols = [d[0] for d in cur.description]
     out = []
@@ -201,9 +201,9 @@ def _precedence(cur, 사업명: str | None) -> list[dict]:
 
 
 def _우선규범(정보: dict, 우선순위: Sequence[dict]) -> str | None:
-    """사업의 상위 규범 이름. corpus.programs.우선규범 이 기준이고, 없으면 precedence_rules 값을 쓴다.
+    """사업의 상위 규정 이름. corpus.programs.우선규범 이 기준이고, 없으면 precedence_rules 값을 쓴다.
 
-    초격차·모두의 창업처럼 상위 규범이 통합관리지침이 아닌 사업이 있다.
+    초격차·모두의 창업처럼 상위 규정이 통합관리지침이 아닌 사업이 있다.
     """
     if 정보.get("우선규범"):
         return 정보["우선규범"]
@@ -212,7 +212,7 @@ def _우선규범(정보: dict, 우선순위: Sequence[dict]) -> str | None:
 
 def _L2우선L3(우선순위: Sequence[dict]) -> bool:
     """사업 세부관리기준이 주관기관 규정보다 우선한다고 범위 'all' 로 정했는가."""
-    return any(p["우선계층"] == "L2" and p["열위계층"] == "L3" and p["범위"] == "all"
+    return any(p["우선계층"] == "L2" and p["후순위계층"] == "L3" and p["범위"] == "all"
                for p in 우선순위)
 
 
@@ -235,9 +235,9 @@ def 금지후보(cur, 품목: str | None, 용도: str | None, 사업명: str | N
         return 결과
 
     정보 = _사업정보(cur, 사업명)
-    for r in base_룰(cur, 사업명, 비목, 정보["계통"] if 정보 else None):
+    for r in 상위_룰(cur, 사업명, 비목, 정보["비목체계"] if 정보 else None):
         for 예시 in r["금지예시"]:
-            h = 금지예시_해부(예시)
+            h = 금지예시_파싱(예시)
             본문n = h["본문_정규형"]
             if len(본문n) < _최소매칭길이:
                 continue
@@ -267,13 +267,13 @@ def 금지후보(cur, 품목: str | None, 용도: str | None, 사업명: str | N
     return 결과
 
 
-def 금지적중(cur, 품목: str | None, 용도: str | None, 사업명: str | None,
-             비목: str | None) -> dict | None:
-    """게이트 A. 적중하면 판정 파이프라인이 LLM 호출 없이 "불가"를 반환한다.
+def 금지목록_일치(cur, 품목: str | None, 용도: str | None, 사업명: str | None,
+                비목: str | None) -> dict | None:
+    """게이트 A. 일치하면 판정 파이프라인이 LLM 호출 없이 "불가"를 반환한다.
 
     정확일치(정규화 후 품목 == 금지예시 본문) 또는 구절포함(금지예시 본문이 품목+용도 안에 문자
     그대로 들어 있음)만 인정한다. 유사 매칭은 하지 않는다. 오탐이 곧 근거 달린 틀린 "불가"가 된다.
-    예외 단서가 붙은 금지예시('귀금속·보석·원석(사전승인 시 예외)')는 적중으로 보지 않는다.
+    예외 단서가 붙은 금지예시('귀금속·보석·원석(사전승인 시 예외)')는 일치로 보지 않는다.
     조건부 사안이므로 effective_rule() 과 LLM 판정 경로로 간다.
 
     반환: 가장 앞선 무조건 후보 {"예시", "예시_원문", "근거", "rule_id", "비목", "사업명", "layer",
@@ -283,25 +283,25 @@ def 금지적중(cur, 품목: str | None, 용도: str | None, 사업명: str | N
     return 후보["무조건"][0] if 후보["무조건"] else None
 
 
-# 비목 확정
+# 비목 후보 조회
 
 _모델 = None
 
 
-def warmup() -> None:
-    """비목확정 벡터 조회에 쓰는 KURE-v1 을 미리 올린다. 서버 기동 워밍업이 호출한다.
+def 워밍업() -> None:
+    """비목후보_조회 의 벡터 조회에 쓰는 KURE-v1 을 미리 로드한다. 서버 기동 워밍업 단계가 호출한다.
 
-    retrieve.모델() 과 같은 인스턴스를 쓴다. 가중치가 같아 벡터가 동일하므로 따로 올리면 로딩
+    retrieve.임베딩_모델() 과 같은 인스턴스를 쓴다. 가중치가 같아 벡터가 동일하므로 따로 올리면 로딩
     시간과 메모리만 두 배가 된다. 모델을 올리지 못하면 예외가 그대로 올라간다.
     """
     global _모델
     if _모델 is None:
         import retrieve                                         # noqa: PLC0415
-        _모델 = retrieve.모델()
+        _모델 = retrieve.임베딩_모델()
 
 
 def 임베딩(texts: Sequence[str]):
-    warmup()
+    워밍업()
     return _모델.encode(list(texts), normalize_embeddings=True,
                         convert_to_numpy=True, show_progress_bar=False)
 
@@ -310,9 +310,9 @@ def _vecstr(v) -> str:
     return "[" + ",".join(f"{float(x):.6f}" for x in v) + "]"
 
 
-def 비목확정(cur, 품목: str | None, 사업명: str | None, *,
-             임계치: float = 0.75, top_n: int = 3,
-             벡터허용: bool = True) -> list[dict]:
+def 비목후보_조회(cur, 품목: str | None, 사업명: str | None, *,
+                임계치: float = 0.75, top_n: int = 3,
+                벡터허용: bool = True) -> list[dict]:
     """품목 → 비목 후보 [{"비목", "신뢰도", "출처": "alias"|"vector", "매칭", "별칭사업명", "별칭출처"}].
 
     신뢰도 내림차순, 최대 top_n 개. 순서대로 본다.
@@ -332,21 +332,21 @@ def 비목확정(cur, 품목: str | None, 사업명: str | None, *,
     처리한_비목: set[str] = set()
 
     # 정확 조회
-    cur.execute("SELECT 상품명, 비목, 사업명, 출처 FROM corpus.item_alias "
+    cur.execute("SELECT 품목, 비목, 사업명, 출처 FROM corpus.item_alias "
                 "WHERE 사업명 = %s OR 사업명 IS NULL", [사업명])
-    for 상품명, 비목, 별칭사업, 출처 in cur.fetchall():
-        if _norm(상품명) != 품목n:
+    for 별칭품목, 비목, 별칭사업, 출처 in cur.fetchall():
+        if _norm(별칭품목) != 품목n:
             continue
         신뢰도 = 1.0 if 별칭사업 else 0.95
         if 비목 not in 처리한_비목 or 신뢰도 > next(o["신뢰도"] for o in out if o["비목"] == 비목):
             out = [o for o in out if o["비목"] != 비목]
             out.append({"비목": 비목, "신뢰도": 신뢰도, "출처": "alias",
-                        "매칭": 상품명, "별칭사업명": 별칭사업, "별칭출처": 출처})
+                        "매칭": 별칭품목, "별칭사업명": 별칭사업, "별칭출처": 출처})
             처리한_비목.add(비목)
 
     # 비목명·별칭·하위항목 자체와의 일치 (corpus.item_vocab)
     if not out:
-        for 비목, 신뢰도 in _용어사전_직결(cur, 품목n):
+        for 비목, 신뢰도 in _어휘집_일치(cur, 품목n):
             if 비목 not in 처리한_비목:
                 out.append({"비목": 비목, "신뢰도": 신뢰도, "출처": "alias",
                             "매칭": 품목, "별칭사업명": None, "별칭출처": "item_vocab"})
@@ -361,22 +361,22 @@ def 비목확정(cur, 품목: str | None, 사업명: str | None, *,
         return []
     q = _vecstr(임베딩([품목])[0])
     cur.execute(
-        "SELECT 비목, 상품명, 1 - (embedding <=> %s::vector) AS sim FROM corpus.item_alias "
+        "SELECT 비목, 품목, 1 - (embedding <=> %s::vector) AS sim FROM corpus.item_alias "
         "WHERE embedding IS NOT NULL AND (사업명 = %s OR 사업명 IS NULL) "
         "ORDER BY embedding <=> %s::vector LIMIT 30", [q, 사업명, q])
-    for 비목, 상품명, sim in cur.fetchall():
+    for 비목, 별칭품목, sim in cur.fetchall():
         sim = float(sim)
         if sim < 임계치 or 비목 in 처리한_비목:
             continue
         out.append({"비목": 비목, "신뢰도": round(sim, 4), "출처": "vector",
-                    "매칭": 상품명, "별칭사업명": None, "별칭출처": None})
+                    "매칭": 별칭품목, "별칭사업명": None, "별칭출처": None})
         처리한_비목.add(비목)
     return sorted(out, key=lambda o: -o["신뢰도"])[:top_n]
 
 
-def _용어사전_직결(cur, 품목n: str) -> list[tuple[str, float]]:
-    """품목이 창업 계통 비목명·별칭·하위항목 그 자체일 때(사용자가 비목명을 그대로 쓴 경우)의 후보."""
-    cur.execute("SELECT 비목, 별칭, 하위항목 FROM corpus.item_vocab WHERE 계통='창업'")
+def _어휘집_일치(cur, 품목n: str) -> list[tuple[str, float]]:
+    """품목이 창업 비목체계 비목명·별칭·하위항목 그 자체일 때(사용자가 비목명을 그대로 쓴 경우)의 후보."""
+    cur.execute("SELECT 비목, 별칭, 하위항목 FROM corpus.item_vocab WHERE 비목체계='창업'")
     hits = []
     for 비목, 별칭, 하위 in cur.fetchall():
         if _norm(비목) == 품목n:
@@ -422,7 +422,7 @@ def _괄호안(s: str) -> str:
     return " ".join("".join(out).split())
 
 
-def _단위해부(단위: str | None) -> dict[str, Any]:
+def _단위파싱(단위: str | None) -> dict[str, Any]:
     """'원/인/일(멘토링비 한정, 시간당 …)' → {기본:'원', 분모:['인','일'], 한정:'멘토링비', 부연}."""
     if not 단위:
         return {"기본": None, "분모": [], "한정": None, "부연": None}
@@ -430,7 +430,7 @@ def _단위해부(단위: str | None) -> dict[str, Any]:
     부연 = _괄호안(원문) or None
     # 괄호가 중첩된다. 재도전 지급수수료가 실제로 이렇다:
     #   "원/인/일(멘토링비 한정 … (예비)재창업자별 … 총액 500만원(사업기간 중 합산) …)"
-    # 비중첩 정규식(_괄호)으로 지우면 안쪽 (예비) 에서 끊겨 뒤의 산문이 남고, 그것이 '/' 분해에
+    # 비중첩 정규식(_괄호)으로 지우면 안쪽 (예비) 에서 끊겨 뒤의 산문이 남고, 그것이 '/' 분할에
     # 섞여 분모가 "일재창업자별 멘토링비 총액 500만원 …" 이 된다. 그래서 깊이를 세어 지운다.
     단위본문 = _괄호밖(원문)
     조각 = [p.strip() for p in 단위본문.split("/") if p.strip()]
@@ -456,7 +456,7 @@ _추가한도 = re.compile(r"(초과\s*불가|별도\s*한도|광역시|그\s*�
 _세금 = re.compile(r"초과\s*시.{0,20}(공제|소득세)")
 
 
-_신호말 = [("초과 불가", "별도의 상한"), ("별도 한도", "별도의 한도"),
+_추가한도_표현 = [("초과 불가", "별도의 상한"), ("별도 한도", "별도의 한도"),
            ("광역시", "지역별로 다른 한도"), ("그 밖의 지역", "지역별로 다른 한도"),
            ("총액", "총액 한도"), ("이내", "별도의 상한"), ("한도", "별도의 한도"),
            ("까지", "별도의 상한")]
@@ -465,7 +465,7 @@ _신호말 = [("초과 불가", "별도의 상한"), ("별도 한도", "별도�
 def 미파싱한도(단위: str | None) -> list[str]:
     """한도_단위 산문 안에 있는 추가 한도의 신호. 없으면 빈 리스트.
 
-    반환값은 사용자에게 보이는 B4문장에 들어가므로, 정규식이 잡은 조각("총액 5")이 아니라
+    반환값은 룰요약문(B4)에 들어가므로, 정규식이 잡은 조각("총액 5")이 아니라
     읽을 수 있는 말("총액 한도")로 바꿔서 반환한다.
     """
     if not 단위:
@@ -474,14 +474,14 @@ def 미파싱한도(단위: str | None) -> list[str]:
     raw = [m[0] if isinstance(m, tuple) else m for m in _추가한도.findall(본문)]
     if not raw:
         return []
-    말: list[str] = []
+    표현들: list[str] = []
     for 조각 in raw:
-        납작 = re.sub(r"\s+", "", 조각)
-        for 키, 라벨 in _신호말:
-            if re.sub(r"\s+", "", 키) in 납작 and 라벨 not in 말:
-                말.append(라벨)
+        공백제거 = re.sub(r"\s+", "", 조각)
+        for 키, 라벨 in _추가한도_표현:
+            if re.sub(r"\s+", "", 키) in 공백제거 and 라벨 not in 표현들:
+                표현들.append(라벨)
                 break
-    return 말 or ["별도의 한도"]
+    return 표현들 or ["별도의 한도"]
 
 
 def _비교_비율(한도: float, 수치: dict, u: dict) -> dict:
@@ -531,7 +531,7 @@ def _비교_금액(한도: float, 수치: dict, u: dict) -> dict:
 _유형별_비교 = {"비율": _비교_비율, "개수": _비교_개수, "금액": _비교_금액}
 
 
-def 금액비교(rule: dict, 수치: dict | None, 하위항목: str | None = None) -> dict | None:
+def 한도비교(rule: dict, 수치: dict | None, 하위항목: str | None = None) -> dict | None:
     """룰 행 하나의 한도와 입력 수치를 비교한다. → {"초과": bool | None, "사유": str} | None
 
     한도가 없으면 None. 비교에 필요한 값(금액·인원·일수·계약총액 등)이 없으면 추측하지 않고
@@ -542,7 +542,7 @@ def 금액비교(rule: dict, 수치: dict | None, 하위항목: str | None = Non
         return None
     수치 = dict(수치 or {})
     한도 = float(rule["한도_값"])
-    u = _단위해부(rule.get("한도_단위"))
+    u = _단위파싱(rule.get("한도_단위"))
 
     # 하위항목 한정: '멘토링비 한정' 한도를 사무실임차료에 적용하면 틀린 초과가 된다
     if u["한정"]:
@@ -558,7 +558,7 @@ def 금액비교(rule: dict, 수치: dict | None, 하위항목: str | None = Non
     return 비교(한도, 수치, u)
 
 
-def _한도전수(한도목록: Sequence[dict], 수치: dict | None,
+def _한도_전체비교(한도목록: Sequence[dict], 수치: dict | None,
               하위항목: str | None = None) -> dict | None:
     """한도가 여럿이면 모두 비교해 결과 하나로 합친다. 하나라도 넘으면 초과다.
 
@@ -566,7 +566,7 @@ def _한도전수(한도목록: Sequence[dict], 수치: dict | None,
     둘 다 지켜야 한다. 하나라도 초과면 초과, 초과는 없는데 비교하지 못한 것이 있으면 초과=None
     (전제로 넘긴다), 전부 이내여야 이내다.
     """
-    결과 = [x for x in (금액비교(r, 수치, 하위항목) for r in 한도목록) if x is not None]
+    결과 = [x for x in (한도비교(r, 수치, 하위항목) for r in 한도목록) if x is not None]
     if not 결과:
         return None
     넘음 = [x for x in 결과 if x["초과"] is True]
@@ -578,15 +578,15 @@ def _한도전수(한도목록: Sequence[dict], 수치: dict | None,
         return {"초과": None, "사유": " · ".join(dict.fromkeys(x["사유"] for x in 미상))}
 
     # "한도 이내"라고 말하기 전에 산문에 추가 한도가 있는지 본다. 있으면 이내라고 단정하지 않는다.
-    숨은 = sorted({s for r in 한도목록 for s in 미파싱한도(r.get("한도_단위"))})
-    if 숨은:
+    추가 = sorted({s for r in 한도목록 for s in 미파싱한도(r.get("한도_단위"))})
+    if 추가:
         return {"초과": None,
                 "사유": "구조화된 한도는 넘지 않으나, 같은 조문에 코드가 못 읽는 추가 한도가 "
-                        f"있다({'·'.join(숨은)}) — 이내라고 단정할 수 없다"}
+                        f"있다({'·'.join(추가)}) — 이내라고 단정할 수 없다"}
     return {"초과": False, "사유": " · ".join(dict.fromkeys(x["사유"] for x in 결과))}
 
 
-# B4 문장
+# 룰 요약문(B4)
 
 # 프롬프트 토큰 한도를 넘지 않도록 예시 개수를 제한한다. 어느 것을 자를지는 판단하지 않고
 # DB 가 준 순서대로 앞에서부터 쓴다.
@@ -597,7 +597,7 @@ def _예시_문장(라벨: str, 목록: Sequence[str] | None, 최대: int = _예
              *, 조건부보존: bool = False) -> str | None:
     """"{라벨}: 항목1 · 항목2 · … 외 N종." 최대 개수를 넘으면 자르고 남은 개수를 적는다.
 
-    조건부보존=True(금지예시 전용)면 무조건 항목만 자른다. 무조건 금지는 금지적중() 이 DB 배열을
+    조건부보존=True(금지예시 전용)면 무조건 항목만 자른다. 무조건 금지는 금지목록_일치() 가 DB 배열을
     직접 검사하므로 프롬프트에서 잘려도 게이트 A 가 잡는다. 예외 단서가 붙은 조건부 항목은 게이트
     A 가 잡지 않으므로, 잘리면 LLM 이 "제약 없음"으로 읽는다. 그래서 전부 넣는다. "외 N종" 은
     무조건 항목만 센다. 허용예시에는 조건부/무조건 판별 기준이 없어 이 옵션을 쓰지 않는다.
@@ -608,37 +608,37 @@ def _예시_문장(라벨: str, 목록: Sequence[str] | None, 최대: int = _예
         보임 = list(목록[:최대])
         남음 = len(목록) - len(보임)
     else:
-        분류 = [(x, 금지예시_해부(x)["무조건"]) for x in 목록]
+        분류 = [(x, 금지예시_파싱(x)["무조건"]) for x in 목록]
         무조건 = [x for x, 무 in 분류 if 무]
         남음 = max(0, len(무조건) - 최대)              # 잘리는 것은 무조건 항목뿐이다
-        살린무조건 = 무조건[:최대]
-        보임 = [x for x, 무 in 분류 if not 무 or x in 살린무조건]   # 원래 순서 유지
+        표시할_무조건 = 무조건[:최대]
+        보임 = [x for x, 무 in 분류 if not 무 or x in 표시할_무조건]   # 원래 순서 유지
     문장 = f"{라벨}: " + " · ".join(보임)
     if 남음 > 0:
         문장 += f" 외 {남음}종"
     return 문장 + "."
 
 
-def _실체없음(금지예시: Sequence[str] | None, 허용예시: Sequence[str] | None,
+def _구체내용없음(금지예시: Sequence[str] | None, 허용예시: Sequence[str] | None,
              비교: dict | None, 사전승인: bool, 증빙: Sequence[str]) -> bool:
     """이 비목의 룰은 있으나 이 지출을 구체적으로 다루는 내용이 없는가.
 
-    병합이 끝난 뒤(L1+L2+L3 를 합친 뒤) 판단한다. 병합 전에는 내용이 없던 두 층이 합쳐지며
-    내용이 생길 수 있어서다. 품목 단위 매칭은 하지 않는다(그건 금지적중() 이 한다). 병합 결과에
+    병합이 끝난 뒤(L1+L2+L3 를 합친 뒤) 판단한다. 병합 전에는 내용이 없던 두 계층이 합쳐지며
+    내용이 생길 수 있어서다. 품목 단위 매칭은 하지 않는다(그건 금지목록_일치() 가 한다). 병합 결과에
     금지예시·허용예시·비교 가능한 한도·사전승인·증빙 중 하나라도 있는지만 본다.
     """
     return not (금지예시 or 허용예시 or (비교 is not None) or 사전승인 or 증빙)
 
 
-# 적용층 값 → B4문장의 규범 이름. 위임 관계라 두 층이 함께 구속하는 것이 정상이다.
-_층_설명 = {"L1": "국가 통합관리지침", "L2": "사업 세부관리기준", "L3": "주관기관 내부규정",
+# 적용계층 값 → 룰요약문의 규정 이름. 위임 관계라 두 계층이 함께 구속하는 것이 정상이다.
+_계층_설명 = {"L1": "국가 통합관리지침", "L2": "사업 세부관리기준", "L3": "주관기관 내부규정",
            "L1+L2": "국가 통합관리지침과 사업 세부관리기준",
            "L1+L3": "국가 통합관리지침과 주관기관 내부규정",
            "L2+L3": "사업 세부관리기준과 주관기관 내부규정",
            "L1+L2+L3": "국가 통합관리지침·사업 세부관리기준·주관기관 내부규정"}
 
 
-def B4문장(비목: str | None, eff: dict, 비교: dict | None, 우선규범: str | None,
+def 룰요약문(비목: str | None, eff: dict, 비교: dict | None, 우선규범: str | None,
            참고_L3: dict | None = None) -> str:
     """프롬프트 룰 요약 블록(B4) 문장. 원시 한도값은 넣지 않고 비교 결과만 말한다.
 
@@ -651,7 +651,7 @@ def B4문장(비목: str | None, eff: dict, 비교: dict | None, 우선규범: s
         있는데 구체적인 내용이 없다       -> "조건을 붙여 허용한다" 대신 그 사실을 말한다
     세 번째를 따로 두지 않으면 룰 행이 있다는 이유만으로 무슨 조건인지 없는 확정 문장이 나간다.
 
-    eff 는 _엄격병합()/_오버레이() 결과다. 참고_L3 는 base 와 L3 가 모두 있을 때 주어진다
+    eff 는 _엄격병합()/_오버레이() 결과다. 참고_L3 는 상위 규정 병합 결과와 L3 가 모두 있을 때 주어진다
     ({"모드", "L3더엄격", "L3반영"}, _l3_반영 참고). 기관 규정 문장은 코드가 정한 효력 결과만 말한다.
         모드 '사업우선'  세부관리기준이 L2 > L3 를 범위 all 로 정했다. L3 는 반영하지 않았다
         모드 '엄격병합'  그런 조항이 없다. L3 를 엄격한 쪽으로 합쳤고, 반영한 것이 없으면 말하지 않는다
@@ -662,11 +662,11 @@ def B4문장(비목: str | None, eff: dict, 비교: dict | None, 우선규범: s
     증빙 = eff.get("증빙") or []
     금지예시, 허용예시 = eff.get("금지예시"), eff.get("허용예시")
     사전승인_조건 = " ".join(eff.get("사전승인_조건") or [])
-    적용층 = eff.get("적용층")
+    적용계층 = eff.get("적용계층")
 
     조각: list[str] = []
-    실체없음 = 허용 in 허용_강도 and _실체없음(금지예시, 허용예시, 비교, 사전승인, 증빙)
-    if 실체없음:
+    구체내용없음 = 허용 in 허용_엄격도 and _구체내용없음(금지예시, 허용예시, 비교, 사전승인, 증빙)
+    if 구체내용없음:
         조각.append(f"{비목} 룰은 있으나 이 지출을 구체적으로 다루는 금지예시·허용예시·"
                     "한도가 없다. 아래 검색 근거로 판단하라.")
     elif 허용 == "불가":
@@ -699,8 +699,8 @@ def B4문장(비목: str | None, eff: dict, 비교: dict | None, 우선규범: s
     허용문 = _예시_문장("허용 예시", 허용예시)
     if 허용문:
         조각.append(허용문)
-    if 적용층:
-        조각.append(f"적용된 규범은 {_층_설명.get(적용층, 적용층)}이다.")
+    if 적용계층:
+        조각.append(f"적용된 규범은 {_계층_설명.get(적용계층, 적용계층)}이다.")
     if 우선규범:
         조각.append(f"이 사업의 상위 규범은 「{우선규범}」이다.")
     if 참고_L3:
@@ -711,7 +711,7 @@ def B4문장(비목: str | None, eff: dict, 비교: dict | None, 우선규범: s
 
 
 def _L3_안내(참고_L3: dict) -> str | None:
-    """B4문장 의 기관 규정 문장. 실제 병합 결과와 다른 말을 하지 않는다.
+    """룰요약문 의 기관 규정 문장. 실제 병합 결과와 다른 말을 하지 않는다.
 
     엄격병합 모드에서 "본 사업 관리기준이 우선한다" 고 쓰면, L3 의 불가가 이미 반영된 결과를 두고
     LLM 이 더 관대한 사업 기준을 따르게 된다.
@@ -742,18 +742,18 @@ def _문장키(문장: str) -> str:
 
 
 def _조건합치기(rows: Sequence[dict]) -> tuple[list[str], list[str]]:
-    """여러 층의 사전승인_조건 을 문장 단위로 합친다. → (문장 목록, 새 문장을 보탠 층)
+    """여러 계층의 사전승인_조건 을 문장 단위로 합친다. → (문장 목록, 새 문장을 추가한 계층)
 
     배열 원소 하나에 문장이 여럿 들어 있을 수 있어(예: "2천만원 초과 시 사전심의. 부적정 1개
     이상이면 불가.") 원소가 아니라 문장 단위로 중복을 뺀다. 순서는 rows 순서(L1 → L2 → L3)다.
     마침표로 끝나지 않는 문장(예: "…제출하여야 한다(제38조④)")에는 마침표를 붙인다. 그대로
-    이으면 다음 층의 문장과 한 문장처럼 읽혀 층 경계가 보이지 않는다.
+    이으면 다음 계층의 문장과 한 문장처럼 읽혀 계층 경계가 보이지 않는다.
     """
     문장들: list[str] = []
     처리한_키: set[str] = set()
-    층: list[str] = []
+    계층: list[str] = []
     for r in rows:
-        보탬 = False
+        추가여부 = False
         for 원소 in r.get("사전승인_조건") or []:
             for 문 in _문장분할(원소):
                 키 = _문장키(문)
@@ -761,10 +761,10 @@ def _조건합치기(rows: Sequence[dict]) -> tuple[list[str], list[str]]:
                     continue
                 처리한_키.add(키)
                 문장들.append(문 if 문.endswith(".") else 문 + ".")
-                보탬 = True
-        if 보탬 and r["layer"] not in 층:
-            층.append(r["layer"])
-    return 문장들, 층
+                추가여부 = True
+        if 추가여부 and r["layer"] not in 계층:
+            계층.append(r["layer"])
+    return 문장들, 계층
 
 
 def _한도키(r: dict) -> str:
@@ -789,83 +789,83 @@ def _한도목록_병합(한도목록: list[dict], r: dict) -> None:
 
 
 def _합집합(rows: Sequence[dict], 키: str) -> tuple[list, list[str]]:
-    """rows 의 목록형 필드를 순서를 지켜 중복 없이 합친다. → (값, 새 값을 보탠 층)
+    """rows 의 목록형 필드를 순서를 지켜 중복 없이 합친다. → (값, 새 값을 추가한 계층)
 
-    layer 키가 없는 dict(병합 결과)는 층 집계에서 빠진다.
+    layer 키가 없는 dict(병합 결과)는 계층 집계에서 빠진다.
     """
     값: list = []
-    층: list[str] = []
+    계층: list[str] = []
     for r in rows:
         for e in r.get(키) or []:
             if e not in 값:
                 값.append(e)
-                if r.get("layer") and r["layer"] not in 층:
-                    층.append(r["layer"])
-    return 값, 층
+                if r.get("layer") and r["layer"] not in 계층:
+                    계층.append(r["layer"])
+    return 값, 계층
 
 
-def _엄격병합(rows: Sequence[dict], *, 허용층우선: str | None = None) -> dict:
-    """룰 행들을 필드별로 병합한다. 상위 층 행으로 전체 대체하지 않는다.
+def _엄격병합(rows: Sequence[dict], *, 허용_우선계층: str | None = None) -> dict:
+    """룰 행들을 필드별로 병합한다. 상위 계층 행으로 전체 대체하지 않는다.
 
     L1 과 L2 는 충돌이 아니라 위임 관계다. 지침 제36조②가 "제1항에서 명시되지 않은 증빙서류는
     …사업별 세부관리기준에 따라"라고 직접 위임한다. L2 는 L1 을 뒤집지 않고 구체화하므로 필드마다
     따로 고른다.
 
-        허용            엄격한 쪽(불가 > 조건부 > 가능). 허용층우선 이 주어지면 그 층의 값
+        허용            엄격한 쪽(불가 > 조건부 > 가능). 허용_우선계층 이 주어지면 그 계층의 값
         한도            같은 유형·단위끼리 min, 다르면 모두 남긴다(한도목록)
         사전승인        OR
-        사전승인_조건    문장 단위 합집합(문장 목록으로 두고 B4문장 이 이어 붙인다)
-        증빙·금지예시·허용예시  층 무관 합집합
-        적용층          값을 실제로 준 층. 여럿이면 'L1+L2'
+        사전승인_조건    문장 단위 합집합(문장 목록으로 두고 룰요약문 이 이어 붙인다)
+        증빙·금지예시·허용예시  계층 무관 합집합
+        적용계층        값을 실제로 준 계층. 여럿이면 'L1+L2'
 
     한도가 NULL 로 덮이면 무제한 허용이 되어 틀린 "가능"이 된다. L1(한도 NULL)이 L2(1대/인)를
     가리면 "PC 몇 대까지" 문항에 한도가 붙지 않는다.
     """
-    강도 = lambda a: 허용_강도.get(a, 0)
-    허용원 = ([r for r in rows if r["layer"] == 허용층우선] if 허용층우선 else []) or list(rows)
-    허용 = max((r["허용"] for r in 허용원), key=강도)
-    허용층 = [r["layer"] for r in 허용원 if r["허용"] == 허용]
+    엄격도 = lambda a: 허용_엄격도.get(a, 0)
+    허용원 = ([r for r in rows if r["layer"] == 허용_우선계층] if 허용_우선계층 else []) or list(rows)
+    허용 = max((r["허용"] for r in 허용원), key=엄격도)
+    허용계층 = [r["layer"] for r in 허용원 if r["허용"] == 허용]
 
     한도목록: list[dict] = []
     for r in rows:
         _한도목록_병합(한도목록, r)
 
-    사전승인_조건, 조건층 = _조건합치기(rows)
-    증빙, 증빙층 = _합집합(rows, "증빙")
-    금지예시, 금지층 = _합집합(rows, "금지예시")
-    허용예시, 허용예시층 = _합집합(rows, "허용예시")
-    승인층 = [r["layer"] for r in rows if r["사전승인"]]
+    사전승인_조건, 조건계층 = _조건합치기(rows)
+    증빙, 증빙계층 = _합집합(rows, "증빙")
+    금지예시, 금지계층 = _합집합(rows, "금지예시")
+    허용예시, 허용예시계층 = _합집합(rows, "허용예시")
+    승인계층 = [r["layer"] for r in rows if r["사전승인"]]
 
-    # 적용층은 구속력 있는 값을 실제로 준 층이다. 한도·허용뿐 아니라 증빙·금지예시·허용예시·
-    # 사전승인·사전승인_조건을 준 층도 포함한다. 초격차 지급수수료처럼 한도가 없고 허용이 L1 으로
+    # 적용계층은 구속력 있는 값을 실제로 준 계층이다. 한도·허용뿐 아니라 증빙·금지예시·허용예시·
+    # 사전승인·사전승인_조건을 준 계층도 포함한다. 초격차 지급수수료처럼 한도가 없고 허용이 L1 으로
     # 정해져도 L2 가 금지예시를 추가하면 L2 도 구속한다.
-    기여 = sorted({r["layer"] for r in 한도목록} | set(허용층) | set(증빙층)
-                  | set(금지층) | set(승인층) | set(허용예시층) | set(조건층))
+    반영계층 = sorted({r["layer"] for r in 한도목록} | set(허용계층) | set(증빙계층)
+                    | set(금지계층) | set(승인계층) | set(허용예시계층) | set(조건계층))
     return {
         "허용": 허용,
         "사전승인": any(r["사전승인"] for r in rows),
         "사전승인_조건": 사전승인_조건,
         "한도목록": 한도목록,
-        # 가장 낮은 한도값(단위가 달라도 최솟값). 층 간 한도 비교는 한도목록 의 같은 _한도키 끼리 한다
+        # 가장 낮은 한도값(단위가 달라도 최솟값). 계층 간 한도 비교는 한도목록 의 같은 _한도키 끼리 한다
         "한도_값": min(r["한도_값"] for r in 한도목록) if 한도목록 else None,
         "증빙": 증빙,
         "금지예시": 금지예시,
         "허용예시": 허용예시,
-        "적용층": "+".join(기여),
-        "적용층_기여": sorted({r["layer"] for r in rows}),
+        "적용계층": "+".join(반영계층),
+        "적용계층_목록": sorted({r["layer"] for r in rows}),
     }
 
 
 def _오버레이(eff: dict, l3: dict) -> dict:
-    """L2 > L3 우선 조항이 없는 사업에서 L3 를 base 병합 결과에 엄격한 쪽으로 합친다.
+    """L2 > L3 우선 조항이 없는 사업에서 L3 를 상위 규정 병합 결과에 엄격한 쪽으로 합친다.
 
     규칙은 _엄격병합 과 같다(허용: 불가 > 조건부 > 가능, 한도: min, 사전승인: OR, 목록: 합집합).
-    L2↔L3 만 "base 우선"으로 두면 L3 의 "불가"가 최종 "조건부"로 완화되어 틀린 "가능" 쪽으로
+    L2↔L3 만 "상위 우선"으로 두면 L3 의 "불가"가 최종 "조건부"로 완화되어 틀린 "가능" 쪽으로
     기운다. unspecified_only(L1 > L2) 조항은 L1 과 L2 사이의 규칙이라 여기서는 쓰지 않는다.
     """
-    강도 = lambda a: 허용_강도.get(a, 0)
+    엄격도 = lambda a: 허용_엄격도.get(a, 0)
     합 = dict(eff)
-    L3_허용이_엄격 = 강도(l3.get("허용")) > 강도(eff.get("허용"))
+    L3_허용이_엄격 = 엄격도(l3.get("허용")) > 엄격도(eff.get("허용"))
     if L3_허용이_엄격:
         합["허용"] = l3["허용"]
 
@@ -876,7 +876,7 @@ def _오버레이(eff: dict, l3: dict) -> dict:
     합["한도_값"] = 주["한도_값"] if 주 else None
 
     합["사전승인"] = bool(eff.get("사전승인")) or bool(l3.get("사전승인"))
-    # L3 조건은 추가 제약이라 base 문장 뒤에 붙인다(일반 → 특수). base 와 같은 문장은 빼고,
+    # L3 조건은 추가 제약이라 상위 규정 문장 뒤에 붙인다(일반 → 특수). 상위 규정과 같은 문장은 빼고,
     # _조건합치기 와 같이 마침표로 끝나게 한다.
     처리한_키 = {_문장키(문) for 문 in eff.get("사전승인_조건") or []}
     추가조건: list[str] = []
@@ -891,83 +891,83 @@ def _오버레이(eff: dict, l3: dict) -> dict:
     for 키 in ("증빙", "금지예시", "허용예시"):
         합[키] = _합집합([eff, l3], 키)[0]
 
-    # 사전승인 불리언은 base 와 같고 조건 문장만 보탠 경우도 L3 가 구속한 것으로 센다.
+    # 사전승인 불리언은 상위 규정과 같고 조건 문장만 추가한 경우도 L3 가 구속한 것으로 센다.
     # L3 한도가 한도목록에 남았으면(같은 종류보다 낮거나 단위가 달라 따로 남음) 최솟값이 아니어도 구속한다.
-    l3_기여 = (L3_허용이_엄격 or any(r is l3 for r in 한도목록)
+    l3_반영됨 = (L3_허용이_엄격 or any(r is l3 for r in 한도목록)
               or bool(l3.get("사전승인")) or bool(추가조건)
               or bool(l3.get("증빙")) or bool(l3.get("금지예시"))
               or bool(l3.get("허용예시")))
-    if l3_기여:
-        합["적용층"] = "+".join(sorted(set(eff["적용층"].split("+")) | {"L3"}))
-        합["적용층_기여"] = sorted(set(eff["적용층_기여"]) | {"L3"})
+    if l3_반영됨:
+        합["적용계층"] = "+".join(sorted(set(eff["적용계층"].split("+")) | {"L3"}))
+        합["적용계층_목록"] = sorted(set(eff["적용계층_목록"]) | {"L3"})
     return 합
 
 
 def _L3더엄격(l3: dict, eff: dict) -> bool:
-    """L3 가 base 병합 결과보다 엄격한가. 허용이 더 엄격하거나, 허용이 같고 한도가 더 엄격하면 True.
+    """L3 가 상위 규정 병합 결과보다 엄격한가. 허용이 더 엄격하거나, 허용이 같고 한도가 더 엄격하면 True.
 
-    한도는 유형·단위가 같은 것끼리만 비교한다(1 대/인 과 300000 원은 비교할 수 없다). base 에 같은
+    한도는 유형·단위가 같은 것끼리만 비교한다(1 대/인 과 300000 원은 비교할 수 없다). 상위 규정에 같은
     종류의 한도가 없으면 L3 한도는 새 제약이므로 더 엄격한 것으로 본다.
     """
-    a, b = 허용_강도.get(l3.get("허용"), 0), 허용_강도.get(eff.get("허용"), 0)
+    a, b = 허용_엄격도.get(l3.get("허용"), 0), 허용_엄격도.get(eff.get("허용"), 0)
     같은종류 = [r["한도_값"] for r in eff.get("한도목록") or [] if _한도키(r) == _한도키(l3)]
     낮은한도 = (l3.get("한도_값") is not None
                 and (not 같은종류 or l3["한도_값"] < min(같은종류)))
     return a > b or (a == b and 낮은한도)
 
 
-def _층병합(base: Sequence[dict], 우선순위: Sequence[dict]) -> tuple[list[dict], str | None]:
-    """병합할 L1·L2 행과 허용을 정할 층. → (행, 허용층우선)
+def _계층병합(상위: Sequence[dict], 우선순위: Sequence[dict]) -> tuple[list[dict], str | None]:
+    """병합할 L1·L2 행과 허용을 정할 계층. → (행, 허용_우선계층)
 
     unspecified_only("지침을 우선 적용하되, 지침에 명시되지 않은 사항만 본 기준") 조항이 정하는
-    것은 허용과 우선규범뿐이다. 상위 층 행으로 전체 대체하면 초격차의 사업별 금지예시·증빙이
-    사라진다. 금지예시·증빙·사전승인·한도는 두 층을 합쳐야 한다(L2 는 L1 을 구체화한다).
-    그래서 행은 늘 둘 다 넘기고, 허용만 허용층우선 으로 L1 값을 쓰게 한다.
+    것은 허용과 우선규범뿐이다. 상위 계층 행으로 전체 대체하면 초격차의 사업별 금지예시·증빙이
+    사라진다. 금지예시·증빙·사전승인·한도는 두 계층을 합쳐야 한다(L2 는 L1 을 구체화한다).
+    그래서 행은 늘 둘 다 넘기고, 허용만 허용_우선계층 으로 L1 값을 쓰게 한다.
     """
-    L1 = [r for r in base if r["layer"] == "L1"]
-    L2 = [r for r in base if r["layer"] == "L2"]
-    unspec = any(p["우선계층"] == "L1" and p["열위계층"] == "L2"
+    L1 = [r for r in 상위 if r["layer"] == "L1"]
+    L2 = [r for r in 상위 if r["layer"] == "L2"]
+    unspec = any(p["우선계층"] == "L1" and p["후순위계층"] == "L2"
                  and p["범위"] == "unspecified_only" for p in 우선순위)
     return L1 + L2, ("L1" if unspec and L1 else None)
 
 
 # 효력 결정: effective_rule
 
-def _l3_선택(l3룰: dict | None, 계통: str | None) -> dict | None:
-    """병합에 넣을 L3 룰. 창업 계통 사업에만 붙인다.
+def _l3_선택(l3룰: dict | None, 비목체계: str | None) -> dict | None:
+    """병합에 넣을 L3 룰. 창업 비목체계 사업에만 붙인다.
 
-    L1 의 계통 조건과 이유가 다르다. L3 룰은 corpus.item_vocab(계통='창업') 비목으로 조립되는데,
-    TIPS 의 비목 체계는 R&D 계통(연구활동비·연구수당·학생인건비·간접비…)이라 '인건비'처럼 이름이
-    겹쳐도 뜻이 다르다. 모르는 사업(계통 None)에도 붙이지 않는다.
+    L1 의 비목체계 조건과 이유가 다르다. L3 룰은 corpus.item_vocab(비목체계='창업') 의 비목으로 분류되는데,
+    TIPS 는 R&D 비목체계(연구활동비·연구수당·학생인건비·간접비…)라 '인건비'처럼 이름이
+    겹쳐도 뜻이 다르다. 모르는 사업(비목체계 None)에도 붙이지 않는다.
     """
-    if l3룰 is None or 계통 != "창업":
+    if l3룰 is None or 비목체계 != "창업":
         return None
-    return _l3정규화(l3룰)
+    return _l3_룰행변환(l3룰)
 
 
 def _l3_반영(eff: dict | None, l3: dict | None,
             우선순위: Sequence[dict]) -> tuple[dict | None, dict | None]:
-    """base 병합 결과에 L3 를 반영한다. → (최종 병합 결과 | None, 참고_L3 | None)
+    """상위 규정 병합 결과에 L3 를 반영한다. → (최종 병합 결과 | None, 참고_L3 | None)
 
-    - base 가 없으면 L3 단독으로 병합한다. 그 L3 에 허용값이 없으면(상위 조문을 가리키기만 하는
+    - 상위 규정 병합 결과가 없으면 L3 단독으로 병합한다. 그 L3 에 허용값이 없으면(상위 조문을 가리키기만 하는
       참조만 조문) 따라갈 상위도 스스로 정한 것도 없으므로 룰이 없는 것(None)으로 본다.
       허용=None 을 내보내면 허용 enum(가능|조건부|불가) 밖의 값이 된다.
     - 사업 세부관리기준이 L2 > L3 를 범위 'all' 로 정하면 L3 는 반영하지 않는다(모드 '사업우선').
     - 그런 조항이 없으면(예: 초격차) 엄격한 쪽을 적용한다(_오버레이, 모드 '엄격병합').
     참고_L3 = {"모드", "L3더엄격", "L3반영"}. 엄격병합 모드의 L3더엄격 은 L3 가 허용이나 한도를 실제로
-    더 엄격하게 바꿨는지, L3반영 은 L3 가 조금이라도 기여했는지(적용층에 L3 포함)다.
+    더 엄격하게 바꿨는지, L3반영 은 L3 가 결과에 조금이라도 반영됐는지(적용계층에 L3 포함)다.
     """
     if l3 is None:
         return eff, None
     if eff is None:
-        if l3.get("허용") not in 허용_강도:
+        if l3.get("허용") not in 허용_엄격도:
             return None, None
         return _엄격병합([l3]), None
     if _L2우선L3(우선순위):
         return eff, {"모드": "사업우선", "L3더엄격": _L3더엄격(l3, eff), "L3반영": False}
     합 = _오버레이(eff, l3)
     엄격 = 합["허용"] != eff.get("허용") or any(r is l3 for r in 합["한도목록"])
-    return 합, {"모드": "엄격병합", "L3더엄격": 엄격, "L3반영": "L3" in 합["적용층_기여"]}
+    return 합, {"모드": "엄격병합", "L3더엄격": 엄격, "L3반영": "L3" in 합["적용계층_목록"]}
 
 
 def _결과(비목: str | None, eff: dict, 비교: dict | None, 우선규범: str | None,
@@ -981,10 +981,10 @@ def _결과(비목: str | None, eff: dict, 비교: dict | None, 우선규범: st
                      "rule_id": l3.get("rule_id"), "article_id": l3.get("article_id")})
     return {
         "허용": eff["허용"],
-        "적용층": eff["적용층"],
-        "적용층_기여": eff["적용층_기여"],
+        "적용계층": eff["적용계층"],
+        "적용계층_목록": eff["적용계층_목록"],
         "증빙": eff["증빙"],
-        "B4문장": B4문장(비목, eff, 비교, 우선규범, 참고_L3),
+        "룰요약문": 룰요약문(비목, eff, 비교, 우선규범, 참고_L3),
         "룰들": 룰들,
         "L2우선L3": L2우선L3,
     }
@@ -995,7 +995,7 @@ def effective_rule(cur, 사업명: str | None, 비목: str | None, *,
                    하위항목: str | None = None) -> dict | None:
     """사업·비목에 적용되는 룰을 L1·L2·L3 병합으로 결정한다.
 
-    반환: {"허용", "적용층", "적용층_기여", "증빙", "B4문장", "룰들", "L2우선L3"} | None.
+    반환: {"허용", "적용계층", "적용계층_목록", "증빙", "룰요약문", "룰들", "L2우선L3"} | None.
     None 은 오류가 아니다. 룰이 없는 사업·비목이 있고, corpus.programs 에 없는 사업명도 None 이다
     (서버는 모르는 사업명을 먼저 422 로 거부한다). DB 오류는 예외로 올린다.
 
@@ -1005,24 +1005,24 @@ def effective_rule(cur, 사업명: str | None, 비목: str | None, *,
     주관기관 규정이 더 엄격해도 사업 관리기준이 우선한다.
     """
     정보 = _사업정보(cur, 사업명)
-    계통 = 정보["계통"] if 정보 else None
-    base = base_룰(cur, 사업명, 비목, 계통)
-    l3 = _l3_선택(l3룰, 계통)
-    if not base and not l3:
+    비목체계 = 정보["비목체계"] if 정보 else None
+    상위 = 상위_룰(cur, 사업명, 비목, 비목체계)
+    l3 = _l3_선택(l3룰, 비목체계)
+    if not 상위 and not l3:
         return None
 
     우선순위 = _precedence(cur, 사업명)
-    행, 허용층우선 = _층병합(base, 우선순위)
-    eff = _엄격병합(행, 허용층우선=허용층우선) if 행 else None
+    행, 허용_우선계층 = _계층병합(상위, 우선순위)
+    eff = _엄격병합(행, 허용_우선계층=허용_우선계층) if 행 else None
     eff, 참고_L3 = _l3_반영(eff, l3, 우선순위)
     if eff is None:
         return None
-    비교 = _한도전수(eff["한도목록"], 수치, 하위항목)
+    비교 = _한도_전체비교(eff["한도목록"], 수치, 하위항목)
     return _결과(비목, eff, 비교, _우선규범(정보, 우선순위), 참고_L3, 행, l3,
                 _L2우선L3(우선순위))
 
 
-# L3 게이팅
+# L3 상위 규정 확인
 
 def _참조만(r: dict) -> bool:
     """"지침 제N조에 따른다"만 있고 자기 내용이 없는 L3 룰인가.
@@ -1031,13 +1031,13 @@ def _참조만(r: dict) -> bool:
     """
     if r.get("참조만") is not None:
         return bool(r["참조만"])
-    실체 = (r.get("금지예시") or []) + (r.get("허용예시") or []) + (r.get("증빙") or [])
-    return (not 실체 and r.get("한도_값") is None and not r.get("사전승인")
+    구체내용 = (r.get("금지예시") or []) + (r.get("허용예시") or []) + (r.get("증빙") or [])
+    return (not 구체내용 and r.get("한도_값") is None and not r.get("사전승인")
             and bool(r.get("근거")))
 
 
-def l3_게이팅(l3룰: dict | None) -> dict:
-    """상위(L1·L2) 규범을 확인해야 하는지 코드로 판단한다. LLM 에게 묻지 않는다.
+def l3_상위확인(l3룰: dict | None) -> dict:
+    """상위(L1·L2) 규정을 확인해야 하는지 코드로 판단한다. LLM 에게 묻지 않는다.
 
     반환: {"need_upper": bool, "seed_refs": [...], "분기": str, "사유": str}
     L3 가 "가능"이면 need_upper=True 로 둔다. 주관기관 규정은 국가 지침을 전제로 그 위에 추가하는
@@ -1046,17 +1046,17 @@ def l3_게이팅(l3룰: dict | None) -> dict:
     """
     if not l3룰:
         return {"need_upper": True, "seed_refs": [],
-                "분기": "1-미규정", "사유": "L3 에 해당 비목 규정이 없다 = 정하지 아니한 사항"}
+                "분기": "미규정", "사유": "L3 에 해당 비목 규정이 없다 = 정하지 아니한 사항"}
     근거 = list(l3룰.get("근거") or [])
     if _참조만(l3룰):
         return {"need_upper": True, "seed_refs": 근거,
-                "분기": "2-참조만", "사유": "L3 가 상위 조문을 가리키기만 한다"}
+                "분기": "참조만", "사유": "L3 가 상위 조문을 가리키기만 한다"}
     허용 = l3룰.get("허용")
     if 허용 in ("불가", "조건부"):
         return {"need_upper": False, "seed_refs": 근거,
-                "분기": "3-L3제약", "사유": "L3 가 막거나 조건을 건다 — 상위가 관대해도 결론 불변"}
+                "분기": "L3제약", "사유": "L3 가 막거나 조건을 건다 — 상위가 관대해도 결론 불변"}
     if 허용 == "가능":
         return {"need_upper": True, "seed_refs": 근거,
-                "분기": "4-L3가능", "사유": "L3 단독 '가능' 은 확정하지 않는다 (오답 비대칭)"}
+                "분기": "L3가능", "사유": "L3 단독 '가능' 은 확정하지 않는다 (오류 비용 비대칭)"}
     return {"need_upper": True, "seed_refs": 근거,
-            "분기": "0-불명", "사유": f"허용값 '{허용}' 을 해석할 수 없다 — 안전측으로 상위를 본다"}
+            "분기": "불명", "사유": f"허용값 '{허용}' 을 해석할 수 없다 — 안전측으로 상위를 본다"}

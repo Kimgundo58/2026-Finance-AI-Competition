@@ -18,7 +18,7 @@ from llm_schema import 비목_enum, 정규화_스키마
 
 _log = logging.getLogger(__name__)
 
-# corpus.item_alias 의 (상품명, 비목) 행. 정규화 호출마다 전체를 다시 읽지 않도록 10분 TTL 로 캐시한다.
+# corpus.item_alias 의 (품목, 비목) 행. 정규화 호출마다 전체를 다시 읽지 않도록 10분 TTL 로 캐시한다.
 # 조회 실패는 캐시하지 않는다. 다음 호출이 다시 시도한다.
 _별칭_TTL초 = 600
 _별칭_캐시: tuple[float, list] | None = None
@@ -30,7 +30,7 @@ def _별칭_행() -> list | None:
         return _별칭_캐시[1]
     try:
         with db.connect(autocommit=True, connect_timeout=3) as conn:
-            행 = conn.execute('SELECT "상품명", "비목" FROM corpus.item_alias').fetchall()
+            행 = conn.execute('SELECT "품목", "비목" FROM corpus.item_alias').fetchall()
     except Exception as e:                              # noqa: BLE001
         _log.warning("item_alias 조회 실패(%s): 별칭 힌트 없이 진행한다", type(e).__name__)
         return None
@@ -39,7 +39,7 @@ def _별칭_행() -> list | None:
 
 
 def 별칭_힌트(질문: str) -> str:
-    """질문에 실제로 나온 상품명을 `corpus.item_alias` 에서 찾아 비목과 함께 보여주는 프롬프트 조각.
+    """질문에 실제로 나온 품목을 `corpus.item_alias` 에서 찾아 비목과 함께 보여주는 프롬프트 조각.
 
     질문에 나온 것만 넣는다. 전체를 넣으면 프롬프트가 커지고 관계없는 별칭이 다른 비목으로 유도한다.
     찾지 못하거나 DB 조회가 실패하면 빈 문자열을 돌려준다. 정규화를 실패시키지 않는다.
@@ -51,15 +51,15 @@ def 별칭_힌트(질문: str) -> str:
     if 행 is None:
         return ""
     맞음: dict[str, str] = {}
-    for 상품명, 비목 in 행:
-        이름 = (상품명 or "").strip()
+    for 품목, 비목 in 행:
+        이름 = (품목 or "").strip()
         if len(이름) >= 2 and 이름.replace(" ", "") in q:
             맞음.setdefault(이름, 비목)
     if not 맞음:
         return ""
     줄 = chr(10).join(f"- {k} -> {v}" for k, v in sorted(맞음.items()))
-    머리 = "질문에 나온 품목 중 이미 등록된 것 (참고, 이대로 강제하지는 않는다)"
-    return chr(10) * 2 + 머리 + chr(10) + 줄
+    헤더 = "질문에 나온 품목 중 이미 등록된 것 (참고, 이대로 강제하지는 않는다)"
+    return chr(10) * 2 + 헤더 + chr(10) + 줄
 
 
 # 정규화 프롬프트. 바이트가 바뀌면 판정이 바뀌므로 평가 없이 고치지 않는다.
@@ -89,7 +89,7 @@ _지시 = """다음 문장은 창업지원금으로 무언가를 사거나 지�
 _RE_금액 = re.compile(
     r"(?:(\d[\d,]*)\s*(억|천만|백만|만)?\s*원)|(?:(\d[\d,]*)\s*(억|천만|백만|만))")
 _배수 = {"억": 100_000_000, "천만": 10_000_000, "백만": 1_000_000, "만": 10_000, None: 1}
-_불용 = re.compile(r"(구매|구입|결제|지출|사도|써도|사용|가능|되나요|될까요|하려|합니다|"
+_불용어 = re.compile(r"(구매|구입|결제|지출|사도|써도|사용|가능|되나요|될까요|하려|합니다|"
                    r"인데|인가요|해도|되는지|괜찮|처리|집행)")
 
 # 어절 전체가 수량일 때만 버린다. 부분 치환하면 '200만원짜리' 가 '짜리' 로, '1인' 이 '인' 으로 남는다.
@@ -99,28 +99,28 @@ _RE_수량어절 = re.compile(
 # 조사는 어절 끝에서만 뗀다. 가운데를 건드리면 '재료비' 가 '재료' 가 된다
 _조사 = re.compile(r"(?:으로|로|를|을|이|가|은|는|에서|에|의|도|만|와|과|랑)$")
 _구두점 = re.compile(r"^[\"'(\[]+|[,.\"')\]·]+$")
-_비목표기_캐시: dict[str, str] | None = None
+_비목표준화_캐시: dict[str, str] | None = None
 
 
 def _어절정리(w: str) -> str:
     """앞뒤 구두점을 떼고 끝의 조사 1개를 뗀다.
 
-    조사를 떼고 남는 게 한 글자면 떼지 않는다. '회의' 의 '의' 를 조사로 보면 '회' 가 되어 비목확정이
+    조사를 떼고 남는 게 한 글자면 떼지 않는다. '회의' 의 '의' 를 조사로 보면 '회' 가 되어 비목후보_조회가
     엉뚱한 항목을 고른다.
     """
     w = _구두점.sub("", w)
-    벗 = _조사.sub("", w)
-    return w if len(벗) < 2 else 벗
+    조사제거 = _조사.sub("", w)
+    return w if len(조사제거) < 2 else 조사제거
 
 
-def 비목표기(k: str) -> str | None:
+def 비목_표준화(k: str) -> str | None:
     """비목 표기 변형 -> 표준 표기. 표준 표기는 `_비목_어휘집.json` 의 enum 이다.
 
     질문은 `특허권 등 무형자산 취득비` 처럼 띄어 쓰고 어휘집은 붙여 쓴다. 공백·가운뎃점을 지운 표기도
     같은 비목으로 연결한다. 모르는 표기는 None.
     """
-    global _비목표기_캐시
-    if _비목표기_캐시 is None:
+    global _비목표준화_캐시
+    if _비목표준화_캐시 is None:
         표 = {}
         for b in 비목_enum():
             for v in (b, b.replace(" ", ""), b.replace("·", ""),
@@ -129,8 +129,8 @@ def 비목표기(k: str) -> str | None:
         표.update({"홍보비": "광고선전비", "광고비": "광고선전비", "교육비": "교육훈련비",
                   "출장비": "여비", "외주비": "외주용역비", "수수료": "지급수수료",
                   "멘토링비": "지급수수료", "회의비": "지급수수료"})
-        _비목표기_캐시 = 표
-    return _비목표기_캐시.get(k)
+        _비목표준화_캐시 = 표
+    return _비목표준화_캐시.get(k)
 
 
 def 규칙_정규화(질문: str) -> dict:
@@ -146,18 +146,18 @@ def 규칙_정규화(질문: str) -> dict:
         if 수:
             금액 = int(수) * _배수.get(단위, 1)
             추정 = bool(re.search(r"(약|정도|가량|쯤)", 질문))
-    # 품목은 금액·수량·비목명·조사·서술어를 뗀 앞 2어절이다. rule_lookup.비목확정 이 품목 문자열 전체로
+    # 품목은 금액·수량·비목명·조사·서술어를 뗀 앞 2어절이다. rule_lookup.비목후보_조회 가 품목 문자열 전체로
     # 매칭하므로 금액이나 비목명이 섞이면 안 된다. 비목명은 버리지 않고 비목후보로 옮긴다.
     # 띄어 쓴 비목명이 있어 4어절까지 이어 긴 것부터 본다. 짧은 것부터 보면 '수수료' 가 먼저 매칭되어
     # 앞 어절을 잘라낸다.
-    머리 = re.split(r"[?？.\n]", 질문.strip())[0]
-    토큰 = [_어절정리(w) for w in 머리.split() if not _불용.search(w)]
+    첫문장 = re.split(r"[?？.\n]", 질문.strip())[0]
+    토큰 = [_어절정리(w) for w in 첫문장.split() if not _불용어.search(w)]
     토큰 = [w for w in 토큰 if w and not _RE_수량어절.match(w)]
 
     후보비목, 어절, i = [], [], 0
     while i < len(토큰):
         for n in (4, 3, 2, 1):
-            표준 = 비목표기(" ".join(토큰[i:i + n])) if i + n <= len(토큰) else None
+            표준 = 비목_표준화(" ".join(토큰[i:i + n])) if i + n <= len(토큰) else None
             if 표준:
                 if 표준 not in 후보비목:
                     후보비목.append(표준)
@@ -166,7 +166,7 @@ def 규칙_정규화(질문: str) -> dict:
         else:
             어절.append(토큰[i])
             i += 1
-    품목 = " ".join(어절[:2])[:60] or " ".join(머리.split()[:2])[:60]
+    품목 = " ".join(어절[:2])[:60] or " ".join(첫문장.split()[:2])[:60]
     return {"품목": 품목, "금액": 금액, "금액_추정여부": 추정,
             "용도": "", "비목후보": 후보비목, "누락필드": [] if 금액 else ["금액"],
             "_출처": "규칙(dry)"}
