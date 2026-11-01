@@ -48,10 +48,25 @@ def _client_얻기() -> OpenAI:
     return _client
 
 
+def _모델_이름(모델: str) -> str:
+    """게이트웨이용 'qwen/qwen3.7-plus' 같은 공급자 접두어를 떼고 모델 이름만 돌려준다."""
+    return 모델.rsplit("/", 1)[-1]
+
+
 def _thinking_꺼야하나(모델: str) -> bool:
     """flash 계열은 추론을 켜면 출력이 지나치게 길어지고, 오픈소스 qwen3-* 계열은 비스트리밍
     호출에서 추론을 켜면 400 으로 거부한다. 두 계열은 항상 끈다."""
-    return "flash" in 모델 or 모델.startswith("qwen3-")
+    이름 = _모델_이름(모델)
+    return "flash" in 이름 or 이름.startswith("qwen3-")
+
+
+def _thinking_끄기_옵션() -> dict:
+    """DashScope 는 enable_thinking 을 받는다. OpenAI 호환 게이트웨이(Runyour 등)는 이 값을
+    무시하고 reasoning.effort='none' 만 thinking 을 끈다. effort 를 low/medium 으로 주면
+    게이트웨이가 thinking_budget 8192 로 바꿔 보내므로 예산 조절에는 쓰지 않는다."""
+    if ENDPOINT == _DASHSCOPE_ENDPOINT:
+        return {"enable_thinking": False}
+    return {"reasoning": {"effort": "none"}}
 
 
 def _호출_1회(client: OpenAI, 모델: str, 프롬프트: str, 스키마: dict | None,
@@ -70,12 +85,17 @@ def _호출_1회(client: OpenAI, 모델: str, 프롬프트: str, 스키마: dict
             "json_schema": {"name": "판정", "schema": 스키마, "strict": True},
         }
     if 추론 is False or _thinking_꺼야하나(모델):
-        kwargs["extra_body"] = {"enable_thinking": False}
+        kwargs["extra_body"] = _thinking_끄기_옵션()
 
     t = time.time()
     r = client.chat.completions.create(**kwargs)
-    내용 = r.choices[0].message.content or ""
-    추론content = getattr(r.choices[0].message, "reasoning_content", None) or ""
+    msg = r.choices[0].message
+    내용 = msg.content or ""
+    # DashScope 는 reasoning_content, 게이트웨이는 reasoning 필드에 추론 텍스트를 담는다
+    추론content = (getattr(msg, "reasoning_content", None)
+                 or (msg.model_extra or {}).get("reasoning") or "")
+    if not isinstance(추론content, str):
+        추론content = json.dumps(추론content, ensure_ascii=False)
     usage = r.usage
     메타 = {
         "지연ms": int((time.time() - t) * 1000),
@@ -111,7 +131,7 @@ def llm_호출(프롬프트: str, 스키마: dict | None, *,
     모든 실패는 LLM실패 로 올린다.
     """
     쓸_모델 = 모델 or 기본_모델
-    if 쓸_모델 in _금지_모델:
+    if _모델_이름(쓸_모델) in _금지_모델:
         raise LLM실패(f"'{쓸_모델}' 은 사용 금지 모델명이다 — json_schema 지원 목록에 없다")
     최대토큰 = max(최대토큰, _최소_출력토큰)
 
@@ -125,7 +145,7 @@ def llm_호출(프롬프트: str, 스키마: dict | None, *,
         except Exception as e:  # noqa: BLE001 — SDK·HTTP·타임아웃 오류를 모두 LLM실패 로 바꾼다
             마지막 = f"{type(e).__name__}: {str(e)[:200]}"
 
-    if 모델 is None and 폴백_모델 != 쓸_모델 and 폴백_모델 not in _금지_모델:
+    if 모델 is None and 폴백_모델 != 쓸_모델 and _모델_이름(폴백_모델) not in _금지_모델:
         try:
             return _호출_1회(client, 폴백_모델, 프롬프트, 스키마, 온도, 최대토큰, 타임아웃, 추론)
         except Exception as e:  # noqa: BLE001
