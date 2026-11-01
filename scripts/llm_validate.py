@@ -23,7 +23,8 @@ _log = logging.getLogger(__name__)
 
 # 강등코드의 기준 목록. tenant.decisions 의 decisions_강등코드_check 와 같은 순서·같은 집합이어야 한다.
 # 여기 없는 코드는 _강등 이 거부하고, CHECK 에 없는 코드는 INSERT 가 거부된다.
-# TASK_STATE_UNSOURCED 이하 4종은 지금 내보내지 않지만 CHECK 와 맞추려고 남긴다.
+# 마지막 4종(TASK_STATE_UNSOURCED, TASK_STATE_MISMATCH, TASK_NUMBER_UNSOURCED, TASK_BASIS_NOT_IN_MAP)은
+# 자유서술 해야할일 검사를 없앤 뒤로 내보내지 않는다. 저장된 행과 CHECK 에 남아 있어 목록에서 빼지 않는다.
 강등코드_전체: tuple[str, ...] = (
     "INVALID_JUDGMENT", "CITE_NOT_IN_MAP", "CITE_DB_MISSING", "CITE_HANG_MISMATCH",
     "PREMISE_NO_BASIS", "PREMISE_BASIS_NOT_IN_MAP", "PREMISE_ENUM", "PREMISE_UNMAPPED",

@@ -232,6 +232,8 @@ def 비목후보_추출(품목: str | None, 용도: str, 금액: float | None, �
         return [{"비목": c["비목"], "신뢰도": float(c.get("신뢰도") or 0.0)}
                 for c in (후보 or [])
                 if isinstance(c, dict) and c.get("비목") in 비목들][:3], False
+    except NameError:
+        raise                       # 코드 오류는 LLM 실패로 숨기지 않는다
     except Exception:                                         # noqa: BLE001
         _log.exception("폼 경로 비목후보 추출 실패: 빈 후보로 폴백한다")
         return [], True

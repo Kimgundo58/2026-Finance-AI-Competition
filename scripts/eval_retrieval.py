@@ -47,8 +47,9 @@ class 검색결과:
 
 
 def _사업필터_기본() -> bool:
-    """serving(orchestrate)과 같은 기본값: SUDDOE_PROGRAM_FILTER 가 '0' 이 아니면 켠다."""
-    return os.environ.get("SUDDOE_PROGRAM_FILTER", "1") != "0"
+    """serving(orchestrate.사업필터)과 같은 기본값. SUDDOE_PROGRAM_FILTER(없으면 예전 이름 SUDDOE_사업필터)가
+    '0' 이 아니면 켠다."""
+    return (os.environ.get("SUDDOE_PROGRAM_FILTER") or os.environ.get("SUDDOE_사업필터", "1")) != "0"
 
 
 # ── 정답 역추적 ──────────────────────────────────────────────────────────────
@@ -218,7 +219,7 @@ def 보고_dangling(cur, 데이터: list[문항], 결과: 검색결과, a) -> No
         else:
             빈 += 1
     print()
-    print(f"[dangling] {len(데이터)}문항 중 발화 {len(있음)}건 / 없음 {빈}건 "
+    print(f"[dangling] {len(데이터)}문항 중 끊긴 참조 있음 {len(있음)}건 / 없음 {빈}건 "
           f"(사업필터={'켬' if a.사업필터 else '끔'})")
     for gid, dang in 있음[:10]:
         print(f"    gold_id={gid:3}  {len(dang)}건  {dang[:3]}")
@@ -359,6 +360,7 @@ def 결과_기록(데이터: list[문항], 결과: 검색결과, a, ks: list[int
               for 이름, res in (("dense", 결과.dense), ("BM25", 결과.bm25), ("RRF", 결과.rrf))
               for k, v in 지표(res, ks).items()}
     if a.overlap and 결과.겹침:
+        # 키 이름의 'C6' 은 예전 출력 표시다. 지난 eval.runs 행과 비교할 수 있게 저장 키는 바꾸지 않는다
         지표들["C6.겹침평균_20"] = sum(결과.겹침) / len(결과.겹침)
         지표들["C6.겹침률_%"] = sum(결과.겹침) / len(결과.겹침) / 20 * 100
     필터 = "on" if a.사업필터 else "off"
@@ -424,7 +426,8 @@ def main() -> None:
     ap.add_argument("--참조확장", "--폐포", dest="참조확장", action="store_true",
                     help="top-5 + 참조 확장까지 합쳤을 때의 조 단위 커버리지")
     a = ap.parse_args()
-    ks = [1, 5, 10, 20, a.k]
+    # 검색 깊이(a.k)보다 큰 k 는 hit@a.k 와 같아 의미가 없고, 같은 k 가 두 번 들어가면 표에 열이 겹친다
+    ks = sorted({k for k in (1, 5, 10, 20) if k <= a.k} | {a.k})
 
     # 읽기 전용이라도 트랜잭션을 열어 두면 다른 세션의 DDL 과 락 대기가 생길 수 있어 autocommit 으로 연다.
     with db.connect(autocommit=True) as conn:

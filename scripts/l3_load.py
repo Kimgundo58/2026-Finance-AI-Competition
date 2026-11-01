@@ -339,7 +339,11 @@ def _rls_org_설정(cur, org_id: str) -> None:
 
 
 def _조문들(cur, org_id: str) -> list[dict[str, Any]]:
-    """기관의 active L3 문서에서 사업비 관련 장의 조문을 조번호 순으로 읽는다."""
+    """기관의 active L3 문서에서 사업비 관련 장의 조문을 조번호 순으로 읽는다.
+
+    app.org_id GUC 의 유효 범위: 커넥션이 쉬는 중이면 여기서 연 BEGIN/COMMIT 이 끝날 때 사라진다.
+    호출자가 이미 트랜잭션 안이면 SAVEPOINT 를 해제해도 남으므로 바깥 트랜잭션이 끝날 때까지 이 기관 값이다.
+    """
     # set_config(..., true) 는 트랜잭션 범위다. autocommit 커넥션에서 따로 실행하면
     # 다음 SELECT 전에 GUC 가 사라져 RLS 정책이 0행을 돌려준다. 같은 트랜잭션
     # (autocommit 이면 BEGIN/COMMIT, 아니면 SAVEPOINT) 안에서 함께 실행한다.

@@ -101,9 +101,16 @@ def _xml_루트(path: Path) -> str:
     """XML 루트 태그 이름. 법령 XML 과 HWPML 을 나누는 데만 쓴다."""
     from lxml import etree
 
-    for _, el in etree.iterparse(str(path), events=("start",)):
-        return el.tag
-    return ""
+    # 첫 start 이벤트에서 멈춘다. 파서가 연 파일은 close() 로 바로 닫는다(Windows 에서 파일 잠금이 남지 않게).
+    it = etree.iterparse(str(path), events=("start",))
+    try:
+        for _, el in it:
+            return el.tag
+        return ""
+    finally:
+        close = getattr(it, "close", None)
+        if close:
+            close()
 
 
 # ── PDF ──────────────────────────────────────────────────────────
@@ -333,7 +340,8 @@ def 서러게이트_정리(text: str, 라벨: str = "") -> str:
 # ── 디스패처 ─────────────────────────────────────────────────────
 def _형식(path: Path) -> str:
     """파일 앞 바이트로 형식을 판정한다. 판정할 수 없고 .txt 도 아니면 ValueError."""
-    head = path.open("rb").read(16)
+    with path.open("rb") as f:
+        head = f.read(16)
     if head.startswith(b"%PDF"):
         return "pdf"
     if head.startswith(b"\xd0\xcf\x11\xe0"):

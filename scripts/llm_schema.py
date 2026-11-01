@@ -62,7 +62,8 @@ def 판정_스키마(s번호들: list[str] | None = None,
     `s번호들` 을 주면 `인용`·`전제.근거조항` 을 그 집합으로 제한한다. 디코딩 단계에서 막으면 검증에서
     버릴 인용이 줄어든다. 주지 않으면 S번호 패턴만 건다.
     `해야할일` 은 `코드들`(check_items code) 중에서 code 만 고른다. 항목·설명은 llm_validate 가 DB 원문으로
-    채운다. `코드들` 이 비면 enum 이 비어 고를 수 있는 code 가 없다.
+    채운다. `코드들` 이 비면 `해야할일` 을 빈 배열로 고정한다(maxItems 0). 빈 enum 은 strict 스키마에서
+    거부될 수 있다.
     """
     s번호 = ({"type": "string", "enum": list(s번호들)} if s번호들
              else {"type": "string", "pattern": S번호_PATTERN})
@@ -75,11 +76,12 @@ def 판정_스키마(s번호들: list[str] | None = None,
             # 요약을 S번호 나열만으로 채우는 출력을 막으려고 최소 길이를 둔다(문안 규칙은 B0 에 있다)
             "요약": {"type": "string", "minLength": 20, "maxLength": 300},
             "해야할일": {
-                "type": "array", "maxItems": 10,
+                "type": "array", "maxItems": 10 if 코드들 else 0,
                 "items": {
                     "type": "object", "additionalProperties": False,
                     "required": ["code"],
-                    "properties": {"code": {"type": "string", "enum": list(코드들 or [])}},
+                    "properties": {"code": ({"type": "string", "enum": list(코드들)} if 코드들
+                                            else {"type": "string"})},
                 },
             },
             # 인용은 S번호만 받는다. 원문은 LLM 이 쓰지 않고 llm_validate 가 DB 에서 치환한다

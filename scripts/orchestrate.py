@@ -36,7 +36,8 @@ _log = logging.getLogger(__name__)
 # 게이트 C: 비목 후보 1·2위가 모두 최소 신뢰도 이상이고 차이가 이 값 미만이면 후보가 비슷하다고 본다.
 게이트C_격차 = float(os.environ.get("SUDDOE_GATE_C", "0.15"))
 게이트C_최소신뢰 = 0.35
-# 판정 호출의 max_tokens 와 온도. decisions.모델.요청 에 같은 값을 기록한다.
+# 판정 호출에 넘기는 max_tokens 와 온도. llm_qwen 이 _최소_출력토큰 보다 작은 값은 올려 보내므로
+# decisions.모델.요청.최대토큰 에는 실제로 보낸 값(메타의 최대토큰)을 기록한다.
 판정_최대토큰 = int((os.environ.get("SUDDOE_JUDGE_MAX_TOKENS") or os.environ.get("SUDDOE_판정_최대토큰", "1500")))
 판정_온도 = 0.0
 # 판정 경로는 사업 필터를 켠다. 끄면 다른 사업의 규정이 인용 근거(B2)에 들어간다.
@@ -226,7 +227,7 @@ def _모델메타(정규화호출: int, 메타1: dict, 메타4: dict) -> dict:
             "사고흔적길이": 메타4.get("사고흔적길이"),
             "추론content있음": 메타4.get("추론content있음"),
             "추론content길이": 메타4.get("추론content길이"),
-            "요청": {"최대토큰": 판정_최대토큰, "온도": 판정_온도}}
+            "요청": {"최대토큰": 메타4.get("최대토큰", 판정_최대토큰), "온도": 판정_온도}}
 
 
 # F 값과 전제 해소

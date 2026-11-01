@@ -24,6 +24,7 @@ paths.ensure_on_path()
 import orchestrate  # noqa: E402
 import retrieve  # noqa: E402
 from assemble_context import 프롬프트_변형  # noqa: E402
+from eval_store import 사업키  # noqa: E402
 
 _log = logging.getLogger(__name__)
 
@@ -62,11 +63,6 @@ def _fault_실행(종류: list[str], 질문: str | None, 사업명: str | None,
     return 나쁨
 
 
-def _사업키(사업명: str | None, 적용범위: str | None) -> str | None:
-    """골든 문항의 사업명을 판정 입력으로 바꾼다. 공통 문항(적용범위 있음 또는 '공통…')은 None."""
-    return None if (적용범위 or (사업명 or "").startswith("공통")) else 사업명
-
-
 def _golden_실행(a: argparse.Namespace, 참조확장_사용: bool) -> list[dict]:
     워밍업()
     with db.connect(autocommit=True) as conn:
@@ -82,7 +78,7 @@ def _golden_실행(a: argparse.Namespace, 참조확장_사용: bool) -> list[dic
     out = []
     t0 = time.time()
     for gid, 세트, q, 사업, 정답, 적용범위 in rows:
-        r = orchestrate.판정(q, 사업명=_사업키(사업, 적용범위), dry=a.dry, 기록=not a.no_log,
+        r = orchestrate.판정(q, 사업명=사업키(사업, 적용범위), dry=a.dry, 기록=not a.no_log,
                            참조확장_사용=참조확장_사용)
         out.append({"gold_id": gid, "세트": 세트, "정답": 정답, **r})
         print(f"{gid:3} [{세트:4}] 게이트={r.get('게이트')} 경로={r.get('경로')} "

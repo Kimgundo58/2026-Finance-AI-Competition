@@ -80,6 +80,7 @@ def _호출_1회(client: OpenAI, 모델: str, 프롬프트: str, 스키마: dict
                "total_tokens": getattr(usage, "total_tokens", None)},
         "종료이유": r.choices[0].finish_reason,
         "모델": 모델,
+        "최대토큰": 최대토큰,        # 실제로 보낸 max_tokens (_최소_출력토큰 적용 후)
         # 키 이름은 저장된 decisions.모델 과 비교할 수 있게 유지한다
         "추론content있음": bool(추론content),
         "추론content길이": len(추론content),

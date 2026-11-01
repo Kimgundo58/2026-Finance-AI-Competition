@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import os
 import traceback
+import uuid
 from pathlib import Path
 
 import l3_load
@@ -23,8 +24,8 @@ from stage0_extract import extract, 빈_추출_글자수_임계치
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# server/routes_l3.원본경로() 와 같은 규칙이어야 한다. 저장한 쪽과 읽는 쪽이 다른 경로를
-# 보면 '원본 파일 없음' 으로 실패한다. 서버 코드를 import 하지 않으려고 규칙만 복제한다.
+# 업로드 원본 저장 경로 규칙. server/routes_l3 가 원본경로() 로 저장하고 파싱() 이 같은 함수로 읽는다.
+# 두 쪽이 다른 경로를 보면 '원본 파일 없음' 으로 실패하므로 규칙은 여기 한 곳에만 둔다.
 _허용_확장자 = {"pdf", "hwpx", "hwp"}
 L3_저장소 = Path(os.environ.get("SUDDOE_L3_DIR", str(ROOT / "_l3_업로드")))
 
@@ -32,8 +33,12 @@ _스캔본_사유 = "텍스트가 없다(스캔본으로 보임) — 스캔본 �
 
 
 def 원본경로(doc_id: str, 확장: str) -> Path:
+    """L3_저장소/<doc_id>.<확장>. doc_id 는 UUID 표준 표기로 바꿔 쓴다(UUID 가 아니면 ValueError).
+
+    파일 이름이 doc_id 에서 나오므로, UUID 가 아닌 값이 들어와 저장소 밖 경로가 되는 일을 막는다.
+    """
     안전확장 = 확장 if 확장 in _허용_확장자 else "bin"
-    return L3_저장소 / f"{doc_id}.{안전확장}"
+    return L3_저장소 / f"{uuid.UUID(str(doc_id))}.{안전확장}"
 
 
 def _확장자(원본파일명: str) -> str:
