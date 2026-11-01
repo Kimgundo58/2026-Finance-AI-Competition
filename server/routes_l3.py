@@ -78,7 +78,7 @@ def _업로드_주인(요청: Request, 자기신고: str | None) -> str:
 
 
 @router.post("/upload", response_model=L3업로드응답, status_code=202)
-async def 업로드(
+def 업로드(
     요청: Request,
     배경: BackgroundTasks,
     파일: UploadFile = File(...),
@@ -97,7 +97,8 @@ async def 업로드(
     if 확장 not in 허용_확장자:
         raise HTTPException(415, f"지원하지 않는 형식입니다 (.{확장 or '?'}). PDF·HWPX·HWP 만 받습니다.")
 
-    본문 = await 파일.read()
+    # 최대 크기보다 1바이트만 더 읽는다. 전체를 메모리에 올린 뒤 크기를 보면 큰 업로드로 메모리가 고갈된다.
+    본문 = 파일.file.read(최대_바이트 + 1)
     if not 본문:
         raise HTTPException(400, "빈 파일입니다.")
     if len(본문) > 최대_바이트:
@@ -218,6 +219,9 @@ def 파싱_배경(doc_id: str, org_id: str) -> None:
             conn.execute("SELECT set_config('app.org_id', %s, true)", (str(org_id),))
             with conn.cursor() as cur:
                 결과 = 파싱(cur, doc_id)
+                if 결과.get("ok", True):
+                    # L3 가 바뀌면 이 기관의 판정 캐시는 낡은 근거로 답할 수 있다. 같은 트랜잭션에서 지운다.
+                    cur.execute("DELETE FROM tenant.judge_cache WHERE org_id = %s", (str(org_id),))
             conn.commit()
         if not 결과.get("ok", True):
             # 파싱() 은 실패도 예외 없이 dict 로 돌려준다 — 여기서 'fail' 로 닫는다
