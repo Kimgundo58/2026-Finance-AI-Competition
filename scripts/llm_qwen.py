@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
-"""판정 파이프라인의 LLM 클라이언트. DashScope 국제판의 OpenAI 호환 API 를 부른다.
+"""판정 파이프라인의 LLM 클라이언트. OpenAI 호환 API(기본값 DashScope 국제판)를 부른다.
 
 normalize_run(정규화 호출, 폼 경로 비목후보 추출)과 orchestrate(판정 호출)가 쓰는 유일한 LLM 백엔드다.
 공개: llm_호출(프롬프트, 스키마, *, 모델, 온도, 최대토큰, 타임아웃, 재시도, 추론) -> (출력, 메타), 예외 LLM실패.
-환경변수: DASHSCOPE_API_KEY(필수), SUDDOE_QWEN_MODEL, SUDDOE_QWEN_FALLBACK_MODEL.
+환경변수: SUDDOE_LLM_API_KEY(필수, 없으면 DASHSCOPE_API_KEY), SUDDOE_LLM_BASE_URL(기본값 DashScope 국제판),
+SUDDOE_QWEN_MODEL, SUDDOE_QWEN_FALLBACK_MODEL. 다른 OpenAI 호환 라우터(예: Runyour AI)를 쓰면 BASE_URL 과
+모델 ID(예: qwen/qwen3.7-plus)를 그 라우터 기준으로 넣는다.
 스키마를 주면 response_format(json_schema, strict)으로 JSON 출력을 강제한다.
 모든 실패는 LLM실패 로 올린다. 호출자는 이를 판단불가로 반환한다.
 """
@@ -21,7 +23,8 @@ class LLM실패(Exception):
     """LLM 호출 또는 응답 파싱 실패. 호출자는 판단불가로 반환한다."""
 
 
-ENDPOINT = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+_DASHSCOPE_ENDPOINT = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+ENDPOINT = os.environ.get("SUDDOE_LLM_BASE_URL", "").strip() or _DASHSCOPE_ENDPOINT
 기본_모델 = os.environ.get("SUDDOE_QWEN_MODEL", "qwen3.7-plus")
 폴백_모델 = os.environ.get("SUDDOE_QWEN_FALLBACK_MODEL", "qwen3.8-flash")
 # 판정 출력이 3,000 토큰 가까이 나오므로 호출자가 더 작게 넘겨도 최소 이만큼은 준다.
@@ -36,9 +39,10 @@ _client: OpenAI | None = None
 def _client_얻기() -> OpenAI:
     global _client
     if _client is None:
-        key = os.environ.get("DASHSCOPE_API_KEY")
+        key = (os.environ.get("SUDDOE_LLM_API_KEY", "").strip()
+               or os.environ.get("DASHSCOPE_API_KEY", "").strip())
         if not key:
-            raise LLM실패("DASHSCOPE_API_KEY 환경변수가 없다")
+            raise LLM실패("LLM API 키가 없다(SUDDOE_LLM_API_KEY 또는 DASHSCOPE_API_KEY)")
         # SDK 자체 재시도(기본 2회)를 끈다. 재시도는 llm_호출 의 루프 한 곳에서만 한다
         _client = OpenAI(api_key=key, base_url=ENDPOINT, max_retries=0)
     return _client
