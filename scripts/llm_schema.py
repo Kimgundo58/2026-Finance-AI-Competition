@@ -72,7 +72,8 @@ def 비목_정의(경로: Path | None = None) -> dict[str, str]:
 
 
 # ── [1겹] guided_json — ④-b 판정 조립 호출 자리 ──
-def 체크코드_enum(dsn: str | None = None, 사업명: str | None = None) -> list[str]:
+def 체크코드_enum(dsn: str | None = None, 사업명: str | None = None, *,
+               conn=None) -> list[str]:
     """`corpus.check_items.code` 중 이 사업에 해당하는 것만. 해야할일 폐쇄 목록의 기준 문서.
 
     이 테이블의 존재 이유는 안정 식별자다 — 열어 두면 LLM 이 매번 다른 문구를
@@ -85,7 +86,7 @@ def 체크코드_enum(dsn: str | None = None, 사업명: str | None = None) -> l
     제안하는 것보다 항목이 모자란 게 낫다.
     """
     from _lib import db
-    with db.connect(dsn) as conn:
+    with db.borrow(conn, dsn=dsn) as conn:
         return [r[0] for r in conn.execute(
             'SELECT code FROM corpus.check_items '
             'WHERE "사업명" IS NULL OR "사업명" = %s ORDER BY code', [사업명]).fetchall()]

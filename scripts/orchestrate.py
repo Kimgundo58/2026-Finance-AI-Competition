@@ -20,15 +20,18 @@ import sys
 import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Callable, Optional
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _lib import db, paths                                           # noqa: E402
 paths.ensure_on_path()
+import l3_load                                                       # noqa: E402
+import retrieve                                                      # noqa: E402
 from assemble_context import 조립                                    # noqa: E402
+from llm_qwen import LLM실패, llm_호출                                # noqa: E402
 from llm_schema import 판정_스키마, 체크코드_enum                      # noqa: E402
-from llm_validate import 검증, f_경로집합                              # noqa: E402
-from normalize_run import LLM실패, llm_호출, 정규화                     # noqa: E402
+from llm_validate import 검증, 체크항목_본문                           # noqa: E402
+from normalize_run import 정규화                                     # noqa: E402
+from rule_lookup import effective_rule, l3_게이팅, 금지적중, 비목확정     # noqa: E402
 
 DSN = db.DSN
 
@@ -43,77 +46,12 @@ DSN = db.DSN
 # (4) 판정 호출의 max_tokens. 기록되는 값과 실제 쓰이는 값이 같은 이름을 보도록 한 곳에 둔다.
 판정_최대토큰 = int((os.environ.get("SUDDOE_JUDGE_MAX_TOKENS") or os.environ.get("SUDDOE_판정_최대토큰", "1500")))
 
-# 강등코드 18종 (검증 단계가 발행한다)
-강등코드_전체: tuple[str, ...] = (
-    "INVALID_JUDGMENT", "CITE_NOT_IN_MAP", "CITE_DB_MISSING", "CITE_HANG_MISMATCH",
-    "PREMISE_NO_BASIS", "PREMISE_BASIS_NOT_IN_MAP", "PREMISE_ENUM", "PREMISE_UNMAPPED",
-    "NO_CITATION", "VLM_DOWNGRADE", "B_GRADE_DOWNGRADE", "UNVERIFIED_RULE",
-    "TASK_CODE_INVALID", "L3_ONLY_DOWNGRADE", "TENANT_LEAK", "DANGLING_WARN",
-    "DOMAIN_WARN", "PRECEDENCE_FLIP",
-)
-
-
-# 선택 모듈 — 있으면 쓰고 없으면 스텁
-def _옵션임포트(모듈: str, 이름: str) -> Optional[Callable]:
-    try:
-        m = __import__(모듈)
-        return getattr(m, 이름, None)
-    except Exception:
-        return None
-
-
-_C_검색 = _옵션임포트("retrieve", "검색")                       # STUB: C
-_B_비목확정 = _옵션임포트("rule_lookup", "비목확정")             # STUB: B
-_B_금지적중 = _옵션임포트("rule_lookup", "금지적중")             # STUB: B
-_B_effective = _옵션임포트("rule_lookup", "effective_rule")     # STUB: B
-_B_게이팅 = _옵션임포트("rule_lookup", "l3_게이팅")              # STUB: B
-_E_로드 = _옵션임포트("l3_load", "로드")                         # STUB: E
-_E_l3룰 = _옵션임포트("l3_load", "l3룰")                         # STUB: E
-
-모듈상태 = {"C": bool(_C_검색), "B": bool(_B_effective), "E": bool(_E_로드)}
-
-
 def 워밍업() -> None:
     """프로세스당 1회. 임베딩 모델·kiwi 로드를 첫 판정 밖으로 뺀다."""
     try:
-        import retrieve
         retrieve.워밍업()
     except Exception as e:
         print(f"⚠️ 검색 워밍업 실패(계속 진행): {type(e).__name__}: {e}", file=sys.stderr)
-
-
-# 검색 스텁: eval_retrieval.py 의 SQL 로 실제 검색한다. 폐포·참조사슬·dangling 은 빈 값이다.
-_임베더 = None
-
-
-def _임베딩(질문: str):
-    global _임베더
-    if _임베더 is None:
-        from sentence_transformers import SentenceTransformer
-        _임베더 = SentenceTransformer("nlpai-lab/KURE-v1", device="cpu")
-        _임베더.max_seq_length = 1024
-    return _임베더.encode([질문], normalize_embeddings=True, convert_to_numpy=True)[0]
-
-
-def _스텁_검색(cur, 질문: str, 사업명: str | None, *, top_k: int = 5,
-              사업필터: bool = False) -> dict:
-    from eval_retrieval import BM25, DENSE, rrf
-    from stage2_bm25 import 토큰화
-    v = _임베딩(질문)
-    vec = "[" + ",".join(f"{x:.6f}" for x in v) + "]"
-    cur.execute(DENSE, (vec, 50))
-    dense = [r[0] for r in cur.fetchall()]
-    cur.execute(BM25, {"terms": 토큰화([질문])[0], "k": 50})
-    bm = [r[0] for r in cur.fetchall()]
-    # 게이트값 = dense 코사인 최고값. pgvector `<=>` 는 코사인 거리라 `1 - 거리` 다
-    게이트값 = 0.0
-    if dense:
-        cur.execute("SELECT 1 - (embedding <=> %s::extensions.vector(1024)) "
-                    "FROM corpus.chunks WHERE chunk_id=%s", (vec, dense[0]))
-        게이트값 = float(cur.fetchone()[0])
-    return {"top5": rrf([dense, bm])[:top_k], "폐포": [], "참조사슬": [],
-            "게이트값": 게이트값, "dangling": [], "후보수": len(set(dense) | set(bm)),
-            "_출처": "STUB:A(eval_retrieval SQL)"}
 
 
 # 판정 경로는 사업 필터를 켠다 — 끄면 다른 사업의 규정이 인용 근거(B2)에 실린다.
@@ -122,10 +60,7 @@ def _스텁_검색(cur, 질문: str, 사업명: str | None, *, top_k: int = 5,
 
 
 def _검색(cur, 질문, 사업명, *, top_k=5) -> dict:
-    try:
-        r = (_C_검색 or _스텁_검색)(cur, 질문, 사업명, top_k=top_k, 사업필터=사업필터)
-    except TypeError:
-        r = (_C_검색 or _스텁_검색)(cur, 질문, 사업명, top_k=top_k)   # 스텁 호환
+    r = retrieve.검색(cur, 질문, 사업명, top_k=top_k, 사업필터=사업필터)
     # 0건이어도 None 이 아니라 빈 리스트로 맞춘다
     for k, 기본 in (("top5", []), ("폐포", []), ("참조사슬", []), ("dangling", [])):
         if r.get(k) is None:
@@ -136,45 +71,30 @@ def _검색(cur, 질문, 사업명, *, top_k=5) -> dict:
 
 
 def _비목확정(cur, 품목, 사업명) -> list[dict]:
-    if _B_비목확정:
-        return _B_비목확정(cur, 품목, 사업명) or []
-    return []                                                    # STUB: B
+    return 비목확정(cur, 품목, 사업명) or []
 
 
 def _금지적중(cur, 품목, 용도, 사업명, 비목):
-    return _B_금지적중(cur, 품목, 용도, 사업명, 비목) if _B_금지적중 else None   # STUB: B
+    return 금지적중(cur, 품목, 용도, 사업명, 비목)
 
 
-def _effective(cur, 사업명, 비목, 기관ID=None, 수치=None):
-    # `수치=` 를 넘겨야 (2)-e 금액 비교가 돈다
-    return _B_effective(cur, 사업명, 비목, 기관ID, 수치=수치) if _B_effective else None  # STUB: B
+def _effective(cur, 사업명, 비목, *, 수치=None, l3룰=None, 하위항목=None):
+    # `수치=` 를 넘겨야 (2)-e 금액 비교가 돈다. `l3룰` 을 넘겨야 L3 가 효력 결정에 들어간다
+    return effective_rule(cur, 사업명, 비목, 수치=수치, l3룰=l3룰, 하위항목=하위항목)
 
 
 def _게이팅(l3룰) -> dict:
-    if _B_게이팅:
-        return _B_게이팅(l3룰)
-    # STUB: B — L3 가 "가능" 이면 상위 규범 확인(need_upper)을 강제한다
-    if not l3룰:
-        return {"need_upper": True, "seed_refs": []}
-    if l3룰.get("참조만"):
-        return {"need_upper": True, "seed_refs": list(l3룰.get("근거") or [])}
-    if l3룰.get("허용") in ("불가", "조건부"):
-        return {"need_upper": False, "seed_refs": []}
-    return {"need_upper": True, "seed_refs": []}          # 허용='가능' → 상위 확인 강제
+    return l3_게이팅(l3룰)
 
 
-def _l3로드(cur, org_id, 사업명, 비목=None) -> list[dict]:
-    # `비목` 은 정렬 힌트다 (SUDDOE_L3_비목순=on 일 때만 발효). 조를 버리지는 않는다.
-    if _E_로드 and org_id:
-        try:
-            return _E_로드(cur, org_id, 사업명, 비목) or []
-        except TypeError:            # 3인자 서명이면 그대로 부른다
-            return _E_로드(cur, org_id, 사업명) or []
-    return []                                                    # STUB: E
+def _l3로드(cur, org_id, 비목=None) -> list[dict]:
+    if org_id:
+        return l3_load.로드(cur, org_id, 비목=비목) or []
+    return []
 
 
 def _l3룰(cur, org_id, 비목):
-    return _E_l3룰(cur, org_id, 비목) if (_E_l3룰 and org_id) else None          # STUB: E
+    return l3_load.l3룰(cur, org_id, 비목) if org_id else None
 
 
 # (2)-e·B4 — 룰 결과를 문장으로. 원시 한도값은 프롬프트에 넣지 않는다
@@ -341,7 +261,7 @@ def f값_경로키(값: dict | None) -> dict:
 
 
 def 전제해소(cur, 전제목록: list[dict], *, org_id, 사업명, 비목,
-          f값: dict | None = None, 기록: bool = True) -> dict:
+          f값: dict | None = None) -> dict:
     """전제를 a 즉시검증 / b 인라인요청 / c 미매핑 으로 가른다. a·b 는 F 축에 값이 있느냐로 갈린다."""
     f값 = f값 or {}
     a, b, c = [], [], []
@@ -355,53 +275,7 @@ def 전제해소(cur, 전제목록: list[dict], *, org_id, 사업명, 비목,
         else:
             p = dict(p, 필요입력=[x for x in 경로 if f값.get(x) is None])
             b.append(p)
-    if c and 기록:
-        _unmapped_적재(cur, c, 사업명=사업명, 비목=비목)
     return {"즉시검증": a, "인라인요청": b, "미매핑": c}
-
-
-def _unmapped_적재(cur, 전제들: list[dict], *, 사업명, 비목) -> None:
-    """`tenant.unmapped_premise` 에 누적한다. UNIQUE 제약이 없으면 ON CONFLICT 없이 INSERT 만 한다."""
-    # SAVEPOINT 로 되감는다 — abort 된 트랜잭션은 뒤따르는 decisions INSERT 까지 죽인다.
-    # autocommit 이면 SAVEPOINT 를 쓸 수 없어 연결 모드를 보고 건다.
-    _sp = False
-    try:
-        if not getattr(getattr(cur, "connection", None), "autocommit", True):
-            cur.execute("SAVEPOINT _unmapped_적재")
-            _sp = True
-        있음 = cur.execute("""SELECT 1 FROM pg_constraint
-                               WHERE conrelid='tenant.unmapped_premise'::regclass
-                                 AND contype='u'""").fetchone()
-        for p in 전제들:
-            인자 = ((p.get("사실") or "")[:500], json.dumps(p.get("매핑") or [],
-                    ensure_ascii=False), 사업명, 비목)
-            _unmapped_한건(cur, 있음, 인자)
-        if _sp:
-            cur.execute("RELEASE SAVEPOINT _unmapped_적재")
-    except Exception as e:
-        if _sp:
-            try:
-                cur.execute("ROLLBACK TO SAVEPOINT _unmapped_적재")
-            except Exception:
-                pass
-        # 통계 적재 실패가 판정을 죽이면 안 된다 — 로그에만 남긴다 (강등사유에 넣지 않는다)
-        sys.stderr.write("[unmapped 적재 실패 · 판정은 계속한다] "
-                         + type(e).__name__ + ": " + str(e) + chr(10))
-        return
-
-
-def _unmapped_한건(cur, 있음, 인자) -> None:
-        if 있음:
-            cur.execute("""INSERT INTO tenant.unmapped_premise
-                             (premise_text, 근거조항, 사업명, 비목, 발생횟수, 최초, 최근)
-                           VALUES (%s,%s,%s,%s,1,now(),now())
-                           ON CONFLICT (premise_text, 사업명, 비목)
-                           DO UPDATE SET 발생횟수 = tenant.unmapped_premise.발생횟수 + 1,
-                                         최근 = now()""", 인자)
-        else:
-            cur.execute("""INSERT INTO tenant.unmapped_premise
-                             (premise_text, 근거조항, 사업명, 비목, 발생횟수, 최초, 최근)
-                           VALUES (%s,%s,%s,%s,1,now(),now())""", 인자)
 
 
 # (7) 로깅
@@ -446,7 +320,7 @@ def _빈응답(판정: str, 요약: str, **추가) -> dict:
 
 
 def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool = False,
-       기관ID: str | None = None, top_k: int = 5, conn=None, 기록: bool = True,
+       top_k: int = 5, conn=None, 기록: bool = True,
        plan_id: int | None = None,
        격리근거: list[dict] | None = None, 주입: str | None = None,
        게이트임계: float | None = None, 온도: float = 0.0,
@@ -563,9 +437,9 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool 
         if 갈림 and not 격리근거 and not _비목고정:
             경로.append("C비목갈림")
             갈렸다 = True
-        # 갈림필드는 모든 종료 경로(실패 응답 포함)에 같이 싣는다
-        갈림필드 = ({"게이트": "C", "비목갈림": True, "비목후보": 후보[:2]}
-                  if 갈렸다 else {})
+        # 갈림필드는 모든 종료 경로(실패 응답 포함)에 같이 싣는다. 게이트 C 는 경로에만 남긴다 —
+        # 여기 `게이트` 를 넣으면 dict(응답, **갈림필드) 가 게이트 A·B·D 를 덮어쓴다
+        갈림필드 = ({"비목갈림": True, "비목후보": 후보[:2]} if 갈렸다 else {})
 
         # (2)-b L3 룰 조회 · (2)-c 게이팅
         t = time.time()
@@ -577,7 +451,8 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool 
         t = time.time()
         # None 인 키는 넣지 않는다 — 「넘겼는데 비교가 안 됐다」와 「넘길 게 없었다」를 가른다
         수치 = {k: v for k, v in (("금액", 정규.get("금액")),) if v is not None}
-        룰 = _effective(cur, 사업명, 비목, 기관ID, 수치=수치 or None) if 비목 else None
+        룰 = (_effective(cur, 사업명, 비목, 수치=수치 or None, l3룰=l3룰,
+                        하위항목=정규.get("하위항목")) if 비목 else None)
         잰다("effective_rule", t)
 
         # 게이트 A: 금지목록 적중 → 즉답 "불가". LLM 0회
@@ -592,8 +467,7 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool 
                        지연ms={**지연, "총": int((time.time() - t0) * 1000)},
                        모델={"호출수": 정규화호출})
             return _마무리(conn, cur, dict(응답, **갈림필드), 기록=기록, 닫기=닫기, 질문=질문,
-                        사업명=사업명, org_id=org_id, 기관ID=기관ID,
-                        plan_id=plan_id)
+                        사업명=사업명, org_id=org_id, plan_id=plan_id)
 
         # (3)-a L3 통째 로드 ∥ (3)-b~e 검색 — 독립이라 병렬이다
         t = time.time()
@@ -607,10 +481,16 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool 
             l3본문 = []
         else:
             with ThreadPoolExecutor(max_workers=2) as ex:
-                fl3 = ex.submit(_병렬_l3, org_id, 사업명, 비목)
+                fl3 = ex.submit(_병렬_l3, org_id, 비목)
                 fse = ex.submit(_병렬_검색, 질문, 사업명, top_k)
                 l3본문, l3err = fl3.result()
                 검색결과, se_err = fse.result()
+            if l3err:
+                # 기관 규정 없이 판정하면 L3 가 금지한 지출을 L1·L2 만 보고 '가능' 으로 답할 수 있다
+                return _마무리(conn, cur, _빈응답(
+                    "판단불가", "기관 규정을 불러오지 못해 판정을 내리지 않았습니다.",
+                    강등사유=[f"(3) L3 로드 실패: {l3err}"], 강등코드=[], 경로="실패",
+                    실패단계="L3로드", 지연ms=지연, **갈림필드), 기록=False, 닫기=닫기)
             if se_err:
                 # 검색이 터지면 판정하지 않는다
                 return _마무리(conn, cur, _빈응답(
@@ -635,20 +515,21 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool 
                        지연ms={**지연, "총": int((time.time() - t0) * 1000)},
                        모델={"호출수": 정규화호출})
             return _마무리(conn, cur, dict(응답, **갈림필드), 기록=기록, 닫기=닫기, 질문=질문,
-                        사업명=사업명, org_id=org_id, 기관ID=기관ID,
-                        plan_id=plan_id)
+                        사업명=사업명, org_id=org_id, plan_id=plan_id)
 
         # (4) 판정 조립
         t = time.time()
         # check_items 후보는 조립 전에 구해 프롬프트에 싣는다. 사업명을 안 넘기면 전체가 들어간다
-        코드들 = 체크코드_enum(사업명=사업명) or None
+        코드들 = 체크코드_enum(사업명=사업명, conn=conn) or None
+        # check_items 본문은 한 번만 읽어 조립(B5.5)과 검증(해야할일 채우기)에 같이 넘긴다
+        체크항목 = 체크항목_본문(set(코드들), conn=conn) if 코드들 else {}
         프롬프트, s맵, 사슬 = 조립(cur, 질문, 정규, l3=l3본문 or None,
                         검색=검색결과["top5"] or None,
                         # 폐포사용=False 면 B3 을 조립에 넣지 않는다
                         폐포=(검색결과["폐포"] or None) if 폐포사용 else None,
                         룰결과=b4_문장(룰), f요약=b5_문장(cur, org_id),
                         참조사슬=검색결과["참조사슬"], 변형=변형, 격리근거=격리근거,
-                        코드들=코드들)
+                        코드들=코드들, 체크항목=체크항목)
         잰다("조립", t)
         경로.append("4조립")
 
@@ -703,8 +584,9 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool 
             출력 = dict(출력, 인용=["S99"], 전제=[])       # s맵 밖 S번호
         응답, 사유 = 검증(출력, s맵,
                       룰들=(룰 or {}).get("룰들"),
-                      체크코드=코드들,
-                      현재기관=기관ID, 사업명=사업명,
+                      체크코드=코드들, 체크항목=체크항목,
+                      현재기관=str(org_id) if org_id else None, org_id=org_id,
+                      conn=conn, 사업명=사업명,
                       dangling=검색결과["dangling"],
                       l3게이팅=게이팅, 룰=룰,
                       # 층 B — 해야할일 설명 환각 대조
@@ -721,8 +603,7 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool 
         if 사용자F값:
             f값.update(f값_경로키(사용자F값))
         해소 = 전제해소(cur, 응답.get("전제목록") or [], org_id=org_id,
-                     사업명=사업명, 비목=비목, 기록=기록,
-                     f값=f값)
+                     사업명=사업명, 비목=비목, f값=f값)
         잰다("전제해소", t)
         if 해소["미매핑"] and "PREMISE_UNMAPPED" not in 코드:
             코드.append("PREMISE_UNMAPPED")
@@ -754,8 +635,7 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool 
                         "추론content길이": 메타4.get("추론content길이"),
                         "요청": {"최대토큰": 판정_최대토큰, "온도": 온도}})
         return _마무리(conn, cur, dict(응답, **갈림필드), 기록=기록, 닫기=닫기, 질문=질문,
-                    사업명=사업명, org_id=org_id, 기관ID=기관ID,
-                    plan_id=plan_id)
+                    사업명=사업명, org_id=org_id, plan_id=plan_id)
 
     except 주입실패 as e:
         return _마무리(conn, None, _빈응답(
@@ -771,14 +651,14 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, dry: bool 
             지연ms=지연), 기록=False, 닫기=닫기)
 
 
-def _병렬_l3(org_id, 사업명, 비목=None):
+def _병렬_l3(org_id, 비목=None):
     """스레드 안에서 자기 커넥션을 연다 — psycopg 커넥션은 공유하지 않는다."""
     if not org_id:
         return [], None
     try:
         # autocommit — 읽기 트랜잭션을 붙들면 다른 세션의 DDL 과 교착난다
         with db.connect(connect_timeout=5, autocommit=True) as c:
-            return _l3로드(c.cursor(), org_id, 사업명, 비목), None
+            return _l3로드(c.cursor(), org_id, 비목), None
     except Exception as e:
         return [], f"{type(e).__name__}: {e}"
 
@@ -793,13 +673,13 @@ def _병렬_검색(질문, 사업명, top_k):
 
 
 def _마무리(conn, cur, 응답: dict, *, 기록: bool, 닫기: bool,
-          질문: str = "", 사업명=None, org_id=None, 기관ID=None,
-          plan_id=None) -> dict:
+          질문: str = "", 사업명=None, org_id=None, plan_id=None) -> dict:
     """(7) decisions insert + 커밋 + 정리. 기록 실패가 판정을 죽이지 않는다."""
     try:
         if 기록 and cur is not None:
             행 = dict(
-                org_id=org_id, 사업명=사업명, 기관id=기관ID, 질문원문=질문,
+                # 기관id 는 corpus 문서의 발행 기관을 가리키는 컬럼이라 판정 행에는 쓰지 않는다
+                org_id=org_id, 사업명=사업명, 기관id=None, 질문원문=질문,
                 plan_id=plan_id,
                 정규화=json.dumps(응답.get("정규화") or {}, ensure_ascii=False),
                 비목=응답.get("비목"),
@@ -868,17 +748,14 @@ def main() -> None:
     ap.add_argument("--fault", help="|".join(_주입종류) + "|all")
     ap.add_argument("--no-log", action="store_true", help="decisions 기록 생략")
     ap.add_argument("--out")
-    ap.add_argument("--변형", default="V0",
-                    help="A12 프롬프트 변형. V0=기준선 · V1~V6 (assemble_context.변형들)")
+    ap.add_argument("--변형", default="V7",
+                    help="프롬프트 변형. 기본 V7 = 서빙과 같은 프롬프트 (assemble_context.변형들)")
     ap.add_argument("--eval-log", action="store_true", dest="eval_log",
                     help="eval.runs 에 기록 (D 의 eval_store 경유)")
     ap.add_argument("--폐포", choices=["on", "off"], default="on",
                     help="A1 — B3(참조 확장) 을 조립에 넣을지. 기본 on(기존 동작)")
     a = ap.parse_args()
     폐포사용 = a.폐포 != "off"
-
-    print(f"모듈 상태: " + " ".join(f"{k}={'실물' if v else 'STUB'}"
-                                for k, v in 모듈상태.items()), file=sys.stderr)
 
     if a.fault:
         종류 = list(_주입종류) if a.fault == "all" else [a.fault]
@@ -889,6 +766,9 @@ def main() -> None:
             r = 판정(a.q or "노트북 200만원 구매해도 되나요", 사업명=a.사업명,
                     dry=True, 기록=False, 주입=f, 폐포사용=폐포사용)
             ok = r["판정"] == "판단불가"
+            if f in ("schema", "cite"):
+                # 강등으로 판정이 바뀌면 LLM 이 쓴 요약("주입")이 아니라 정형문이 나가야 한다
+                ok = ok and r.get("요약") not in ("", "주입")
             나쁨 += 0 if ok else 1
             print(f"{'✅' if ok else '🔴'} 주입={f:8} 판정={r['판정']:6} "
                   f"실패단계={r.get('실패단계')} 게이트={r.get('게이트')} "
@@ -930,8 +810,11 @@ def main() -> None:
                 from eval_store import 기록 as _기록
                 n = len(out) or 1
                 일치 = sum(1 for r in out if r.get("판정") == r.get("정답"))
-                치명 = sum(1 for r in out if r.get("정답") in ("불가", "조건부")
+                # 정답이 '가능' 이 아닌데 '가능' 이라 답한 것은 전부 치명이다 (정답 판단불가 포함)
+                치명 = sum(1 for r in out if r.get("정답") != "가능"
                           and r.get("판정") == "가능")
+                치명_불가조건부 = sum(1 for r in out if r.get("정답") in ("불가", "조건부")
+                                 and r.get("판정") == "가능")
                 불가 = sum(1 for r in out if r.get("판정") == "판단불가")
                 rid = _기록({"종류": "e2e",
                            "설정": {"변형": a.변형, "사업필터": 사업필터,
@@ -940,7 +823,8 @@ def main() -> None:
                            "문항수": len(out),
                            "지표": {"일치율": 일치 / n * 100, "치명오답률": 치명 / n * 100,
                                   "판단불가율": 불가 / n * 100,
-                                  "일치": 일치, "치명": 치명, "판단불가": 불가},
+                                  "일치": 일치, "치명": 치명, "판단불가": 불가,
+                                  "치명_불가조건부": 치명_불가조건부},
                            "라벨": f"A12-{a.변형}"},
                           [{"gold_id": r["gold_id"], "예측": r.get("판정"),
                             "정답": r.get("정답"),

@@ -46,6 +46,25 @@ from llm_schema import 판정_ENUM, 미충족시_ENUM, 인용, 전제, 최종응
 
 DSN = db.DSN
 
+# 강등코드의 기준 목록. `tenant.decisions` 의 `decisions_강등코드_check` 와 같은 순서·같은 집합이어야
+# 한다 — 여기 없는 코드는 `깎()` 이 거부하고, CHECK 에 없는 코드는 INSERT 가 거부된다.
+강등코드_전체: tuple[str, ...] = (
+    "INVALID_JUDGMENT", "CITE_NOT_IN_MAP", "CITE_DB_MISSING", "CITE_HANG_MISMATCH",
+    "PREMISE_NO_BASIS", "PREMISE_BASIS_NOT_IN_MAP", "PREMISE_ENUM", "PREMISE_UNMAPPED",
+    "PREMISE_DB_MISSING", "NO_CITATION", "VLM_DOWNGRADE", "B_GRADE_DOWNGRADE",
+    "UNVERIFIED_RULE", "TASK_CODE_INVALID", "TASK_DB_MISSING", "L3_ONLY_DOWNGRADE",
+    "TENANT_LEAK", "DANGLING_WARN", "DOMAIN_WARN", "PRECEDENCE_FLIP",
+    "TASK_STATE_UNSOURCED", "TASK_STATE_MISMATCH", "TASK_NUMBER_UNSOURCED",
+    "TASK_BASIS_NOT_IN_MAP",
+)
+
+# 강등으로 판정이 LLM 의 판정과 달라졌을 때 LLM 요약 대신 쓰는 문장. LLM 요약은 LLM 이 낸
+# 판정을 설명하므로, 판정 배지와 다른 결론을 말하게 된다. 강등은 불가를 만들지 않는다.
+_강등_요약 = {
+    "조건부": "확인이 필요한 조건이 있어 조건부로 판정했습니다. 아래 확인 항목과 근거 조항을 살펴봐 주세요.",
+    "판단불가": "근거를 확인하지 못해 판정을 내리지 않았습니다. 담당자 확인이 필요합니다.",
+}
+
 # F 필드 경로 — `tenant` 실제 컬럼에서 만든다 (하드코딩 금지)
 # 경로 표기는 `["F1.정부지원.현금", ...]` 형식이다 — 컬럼 `정부지원_현금` 의
 # `_` 가 `.` 이 된다.
@@ -57,12 +76,21 @@ F5_항목 = {"친족", "전직임직원", "구매명의"}
 _메타컬럼 = {"profile_id", "org_id", "exec_id", "person_id", "created_at", "updated_at"}
 
 
-def f_경로집합(dsn: str | None = None) -> set[str]:
-    """허용되는 F 필드 경로 전체. DB 컬럼이 기준 문서이다."""
+_f경로_캐시: set[str] | None = None
+
+
+def f_경로집합(dsn: str | None = None, *, conn=None) -> set[str]:
+    """허용되는 F 필드 경로 전체. DB 컬럼이 기준 문서이다.
+
+    information_schema 는 실행 중에 바뀌지 않으므로 프로세스당 한 번만 읽는다.
+    """
+    global _f경로_캐시
+    if _f경로_캐시 is not None:
+        return set(_f경로_캐시)
     out: set[str] = {f"F5.{x}" for x in F5_항목}
     for 축, 컬럼 in F축_특례.items():
         out |= {f"{축}.{c}" for c in 컬럼}
-    with db.connect(dsn) as conn:
+    with db.borrow(conn, dsn=dsn) as conn:
         for 축, t in F축_테이블.items():
             for (c,) in conn.execute(
                     "SELECT column_name FROM information_schema.columns "
@@ -70,6 +98,7 @@ def f_경로집합(dsn: str | None = None) -> set[str]:
                 if c in _메타컬럼:
                     continue
                 out.add(f"{축}." + c.replace("_", "."))
+    _f경로_캐시 = set(out)
     return out
 
 
@@ -106,7 +135,8 @@ _항마커 = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳"
 _RE_조 = __import__("re").compile(r"제\d+조")
 
 
-def 체크항목_본문(codes: set[str] | None = None, dsn: str | None = None) -> dict[str, dict]:
+def 체크항목_본문(codes: set[str] | None = None, dsn: str | None = None, *,
+             conn=None) -> dict[str, dict]:
     """`corpus.check_items.code` → {항목, 설명}. `인용`과 같은 원칙 — 생성이 아니라 추출.
 
     해야할일은 LLM 이 code(안정 식별자)만 고르고 항목·설명은 여기서 DB 원문 그대로
@@ -116,7 +146,7 @@ def 체크항목_본문(codes: set[str] | None = None, dsn: str | None = None) -
     # `사업명`·`비목` 을 같이 싣는다. 둘 다 NULL 인 항목이 모든 지출에 걸리는
     # 공통 필수다(부가세제외·비교견적준비·사업비카드사용·협약기간내집행·거래처증빙수취·
     # 세금계산서수취 6개). 아래 `_공통필수()` 가 쓴다.
-    with db.connect(dsn) as conn:
+    with db.borrow(conn, dsn=dsn) as conn:
         if codes:
             rows = conn.execute(
                 'SELECT code, "항목", "설명", "사업명", "비목" '
@@ -217,79 +247,89 @@ def _조번호_표시(조번호: str | None) -> str | None:
     return f"{int(m.group(1))}번째 항목" if m else 조번호
 
 
-def s번호_메타(s맵: dict, dsn: str | None = None) -> dict[str, dict]:
+def s번호_메타(s맵: dict, dsn: str | None = None, *, conn=None,
+             org_id=None) -> dict[str, dict]:
     """s맵의 각 S번호 → 치환·등급산정에 필요한 DB 사실.
 
     `인용[].조번호·원문 | 코드 | S번호 → DB 원문 치환` 을 여기서 한다.
     반환 키: doc_id · 조번호 · 조제목 · 원문 · 원문범위 · version · extraction · 항호_DB
+
+    `conn` 을 주면 그 커넥션(호출자가 GUC app.org_id 를 이미 설정했다)을 쓴다. 없으면 새로
+    열고, 트랜잭션 안에서 GUC 를 설정해 L3 조회에 RLS 정책이 적용되게 한다.
     """
+    with db.borrow(conn, dsn=dsn) as c:
+        if conn is None and org_id:
+            c.execute("SELECT set_config('app.org_id', %s, true)", (str(org_id),))
+        return _s번호_메타_조회(c, s맵, org_id)
+
+
+def _s번호_메타_조회(conn, s맵: dict, org_id) -> dict[str, dict]:
     청크 = {sid: i for sid, (k, i, _) in s맵.items() if k == "chunk" and i is not None}
     조문 = {sid: i for sid, (k, i, _) in s맵.items() if k == "article" and i is not None}
     l3 = {sid: i for sid, (k, i, _) in s맵.items() if k == "l3" and i is not None}
     항호 = {sid: h for sid, (_, _, h) in s맵.items()}
     out: dict[str, dict] = {}
 
-    with db.connect(dsn) as conn:
-        # chunk — 청크가 항상 항 단위인 건 아니다. 900토큰 미만이면 조 전체가 한
-        # 청크로 남는데(청킹 설계상 정상), 그런 조는 항호=NULL 인 청크 한 행이고
-        # 조립기(`assemble_context.분해`)는 그 본문을 ①②③… 으로 갈라 S번호를 여러
-        # 개 만든다. 여기서 항호를 안 보고 `c.text` 를 통째로 쓰면 같은 조 전문이
-        # 항 개수만큼 복제돼 인용 표시·저장이 부풀어 오른다(프롬프트 토큰은 안 늘어난다
-        # — 조립기는 `분해()` 로 조각을 정확히 싣는다). `article` 분기와 같게 s맵의
-        # 항호로 잘라낸다 — 청크가 이미 한 항이면 `_항_추출` 이 그 항을 그대로
-        # 돌려주므로 기존 동작과 같다.
-        if 청크:
-            m = {r[0]: r for r in conn.execute("""
-                SELECT c.chunk_id, c.doc_id, c.조번호, c.조제목, c.항호,
-                       COALESCE(c.version, d.version), d.extraction, c.text,
-                       COALESCE(c.기관id, d.기관id), d.domain, c.layer
-                  FROM corpus.chunks c JOIN corpus.documents d ON d.doc_id = c.doc_id
-                 WHERE c.chunk_id = ANY(%s)""", (list(청크.values()),)).fetchall()}
-            for sid, cid in 청크.items():
-                if cid in m:
-                    _, doc, 조, 제목, h, ver, ex, txt, 기관, dom, lay = m[cid]
-                    원문, 범위 = _항_추출(txt or "", 항호.get(sid))
-                    out[sid] = dict(doc_id=doc, 조번호=조, 조제목=_조제목_표시(조, 제목), 원문=원문,
-                                    원문범위=("청크" if 범위 in ("조전체",) else 범위),
-                                    version=ver, extraction=ex,
-                                    항호_DB=_항호_표시(h),
-                                    기관id=기관, domain=dom, layer=lay)
-        # article — 조 전체가 오므로 s맵의 항호로 잘라낸다
-        if 조문:
-            m = {r[0]: r for r in conn.execute("""
-                SELECT a.article_id, a.doc_id, a.조번호, a.조제목, a.본문,
-                       d.version, d.extraction, d.기관id, d.domain, d.layer
-                  FROM corpus.doc_articles a JOIN corpus.documents d ON d.doc_id = a.doc_id
-                 WHERE a.article_id = ANY(%s)""", (list(조문.values()),)).fetchall()}
-            for sid, aid in 조문.items():
-                if aid in m:
-                    _, doc, 조, 제목, 본문, ver, ex, 기관, dom, lay = m[aid]
-                    원문, 범위 = _항_추출(본문, 항호.get(sid))
-                    out[sid] = dict(doc_id=doc, 조번호=조, 조제목=_조제목_표시(조, 제목), 원문=원문,
-                                    원문범위=범위, version=ver, extraction=ex, 항호_DB=None,
-                                    기관id=기관, domain=dom, layer=lay)
-        # l3 — tenant. extraction·version 축이 없다. 기관 업로드분이라 native 로 본다.
-        # `기관id` 자리에는 `org_id` 를 넣는다 — 멀티테넌시 방어의 대조 대상이다.
-        if l3:
-            # `l3_documents.원본파일명` 을 같이 읽는다. `l3_articles.doc_id` 는 UUID 라
-            # 그대로 내보내면 화면 「적용 근거」에 UUID 문자열이 그대로 찍힌다. L1·L2 는
-            # doc_id 가 사람이 읽는 제목이라 이 문제가 없고, L3 만 어긋나 있었다.
-            m = {r[0]: r for r in conn.execute("""
-                SELECT a.article_id, a.doc_id::text, a.조번호, a.조제목, a.본문,
-                       a.org_id::text, d.원본파일명
-                  FROM tenant.l3_articles a
-                  LEFT JOIN tenant.l3_documents d ON d.doc_id = a.doc_id
-                 WHERE a.article_id = ANY(%s)""",
-                (list(l3.values()),)).fetchall()}
-            for sid, aid in l3.items():
-                if aid in m:
-                    _, doc, 조, 제목, 본문, org, 파일명 = m[aid]
-                    원문, 범위 = _항_추출(본문, 항호.get(sid))
-                    out[sid] = dict(doc_id=_l3표시명(파일명) or doc, 조번호=_조번호_표시(조),
-                                    조제목=제목, 원문=원문,
-                                    원문범위=범위, version=None, extraction="native",
-                                    항호_DB=None, 기관id=org, domain="창업지원사업",
-                                    layer="L3")
+    # chunk — 청크가 항상 항 단위인 건 아니다. 900토큰 미만이면 조 전체가 한
+    # 청크로 남는데(청킹 설계상 정상), 그런 조는 항호=NULL 인 청크 한 행이고
+    # 조립기(`assemble_context.분해`)는 그 본문을 ①②③… 으로 갈라 S번호를 여러
+    # 개 만든다. 여기서 항호를 안 보고 `c.text` 를 통째로 쓰면 같은 조 전문이
+    # 항 개수만큼 복제돼 인용 표시·저장이 부풀어 오른다(프롬프트 토큰은 안 늘어난다
+    # — 조립기는 `분해()` 로 조각을 정확히 싣는다). `article` 분기와 같게 s맵의
+    # 항호로 잘라낸다 — 청크가 이미 한 항이면 `_항_추출` 이 그 항을 그대로
+    # 돌려주므로 기존 동작과 같다.
+    if 청크:
+        m = {r[0]: r for r in conn.execute("""
+            SELECT c.chunk_id, c.doc_id, c.조번호, c.조제목, c.항호,
+                   COALESCE(c.version, d.version), d.extraction, c.text,
+                   COALESCE(c.기관id, d.기관id), d.domain, c.layer
+              FROM corpus.chunks c JOIN corpus.documents d ON d.doc_id = c.doc_id
+             WHERE c.chunk_id = ANY(%s)""", (list(청크.values()),)).fetchall()}
+        for sid, cid in 청크.items():
+            if cid in m:
+                _, doc, 조, 제목, h, ver, ex, txt, 기관, dom, lay = m[cid]
+                원문, 범위 = _항_추출(txt or "", 항호.get(sid))
+                out[sid] = dict(doc_id=doc, 조번호=조, 조제목=_조제목_표시(조, 제목), 원문=원문,
+                                원문범위=("청크" if 범위 in ("조전체",) else 범위),
+                                version=ver, extraction=ex,
+                                항호_DB=_항호_표시(h),
+                                기관id=기관, domain=dom, layer=lay)
+    # article — 조 전체가 오므로 s맵의 항호로 잘라낸다
+    if 조문:
+        m = {r[0]: r for r in conn.execute("""
+            SELECT a.article_id, a.doc_id, a.조번호, a.조제목, a.본문,
+                   d.version, d.extraction, d.기관id, d.domain, d.layer
+              FROM corpus.doc_articles a JOIN corpus.documents d ON d.doc_id = a.doc_id
+             WHERE a.article_id = ANY(%s)""", (list(조문.values()),)).fetchall()}
+        for sid, aid in 조문.items():
+            if aid in m:
+                _, doc, 조, 제목, 본문, ver, ex, 기관, dom, lay = m[aid]
+                원문, 범위 = _항_추출(본문, 항호.get(sid))
+                out[sid] = dict(doc_id=doc, 조번호=조, 조제목=_조제목_표시(조, 제목), 원문=원문,
+                                원문범위=범위, version=ver, extraction=ex, 항호_DB=None,
+                                기관id=기관, domain=dom, layer=lay)
+    # l3 — tenant. extraction·version 축이 없다. 기관 업로드분이라 native 로 본다.
+    # `기관id` 자리에는 `org_id` 를 넣는다 — 멀티테넌시 방어의 대조 대상이다.
+    if l3:
+        # `l3_documents.원본파일명` 을 같이 읽는다. `l3_articles.doc_id` 는 UUID 라
+        # 그대로 내보내면 화면 「적용 근거」에 UUID 문자열이 그대로 찍힌다. L1·L2 는
+        # doc_id 가 사람이 읽는 제목이라 이 문제가 없고, L3 만 어긋나 있었다.
+        m = {r[0]: r for r in conn.execute("""
+            SELECT a.article_id, a.doc_id::text, a.조번호, a.조제목, a.본문,
+                   a.org_id::text, d.원본파일명
+              FROM tenant.l3_articles a
+              LEFT JOIN tenant.l3_documents d ON d.doc_id = a.doc_id
+             WHERE a.article_id = ANY(%s) AND a.org_id = %s::uuid""",
+            (list(l3.values()), str(org_id) if org_id else None)).fetchall()}
+        for sid, aid in l3.items():
+            if aid in m:
+                _, doc, 조, 제목, 본문, org, 파일명 = m[aid]
+                원문, 범위 = _항_추출(본문, 항호.get(sid))
+                out[sid] = dict(doc_id=_l3표시명(파일명) or doc, 조번호=_조번호_표시(조),
+                                조제목=제목, 원문=원문,
+                                원문범위=범위, version=None, extraction="native",
+                                항호_DB=None, 기관id=org, domain="창업지원사업",
+                                layer="L3")
     return out
 
 
@@ -443,6 +483,7 @@ def 검증(llm출력: dict, s맵: dict, *,
          프롬프트: str = "",
          decision_id=None,
          org_id=None,
+         conn=None,
          dsn: Optional[str] = None) -> tuple[dict, list[str]]:
     """(검증·강등된 출력, 강등사유 목록). 반환 dict 에 `강등코드` 22종이 함께 실린다.
 
@@ -464,14 +505,16 @@ def 검증(llm출력: dict, s맵: dict, *,
     코드: list[str] = []
 
     def 깎(코드값: str, 문장: str) -> None:
+        if 코드값 not in 강등코드_전체:
+            raise ValueError(f"강등코드_전체 에 없는 코드: {코드값}")
         사유.append(문장)
         if 코드값 not in 코드:
             코드.append(코드값)
 
-    메타 = 메타 if 메타 is not None else s번호_메타(s맵, dsn)
-    허용경로 = set(f경로) if f경로 is not None else f_경로집합(dsn)
+    메타 = 메타 if 메타 is not None else s번호_메타(s맵, dsn, conn=conn, org_id=org_id)
+    허용경로 = set(f경로) if f경로 is not None else f_경로집합(dsn, conn=conn)
     체크항목 = (체크항목 if 체크항목 is not None
-             else (체크항목_본문(set(체크코드), dsn) if 체크코드 else {}))
+             else (체크항목_본문(set(체크코드), dsn, conn=conn) if 체크코드 else {}))
 
     # 1. 판정 enum
     # 폐쇄 목록 밖이면 고쳐 맞추지 않는다. 모든 실패의 기본값은 판단불가다.
@@ -484,7 +527,8 @@ def 검증(llm출력: dict, s맵: dict, *,
     인용목록: list[인용] = []
     인용층: list[str] = []
     누수: list[dict] = []
-    for s in llm출력.get("인용") or []:
+    # 같은 S번호를 두 번 고르면 인용목록에 같은 조문이 두 번 나간다 — 순서를 지키며 중복을 뺀다
+    for s in dict.fromkeys(llm출력.get("인용") or []):
         if s not in s맵:
             깎("CITE_NOT_IN_MAP", f"인용 {s} 가 s맵 밖 → 폐기(환각 인용)")
             continue
@@ -689,9 +733,12 @@ def 검증(llm출력: dict, s맵: dict, *,
     # 6. 버전스탬프 — 인용 문서의 version. 코드가 채운다
     # 인용된 것만 모은다. s맵 전체를 쓰면 인용하지도 않은 문서의 판본이 화면에 붙는다.
     버전 = sorted({c.version for c in 인용목록 if c.version})
+    요약 = (llm출력.get("요약") or "").strip()
+    if 판정 != llm출력.get("판정"):
+        요약 = _강등_요약[판정]
     응답 = 최종응답(
         판정=판정,
-        요약=(llm출력.get("요약") or "").strip(),
+        요약=요약,
         해야할일=해야할일,
         인용목록=인용목록, 전제목록=전제목록,
         신뢰등급=신뢰등급,

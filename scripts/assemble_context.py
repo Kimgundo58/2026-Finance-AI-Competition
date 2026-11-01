@@ -350,9 +350,10 @@ def 조립(cur, 질문: str, 정규화: dict, *,
          룰결과: str | None = None,
          f요약: str | None = None,
          참조사슬: list[dict] | None = None,
-         변형: str = "V0",
+         변형: str = "V7",
          격리근거: list[dict] | None = None,
-         코드들: list[str] | None = None) -> tuple[str, dict, list[dict]]:
+         코드들: list[str] | None = None,
+         체크항목: dict[str, dict] | None = None) -> tuple[str, dict, list[dict]]:
     """(프롬프트, s맵, 참조사슬) 을 돌려준다.
 
     `격리근거` 를 주면 B2·B3 대신 그것을 쓴다 — 판정 단계 격리 테스트(D6) 전용이고
@@ -434,9 +435,10 @@ def 조립(cur, 질문: str, 정규화: dict, *,
 
     # ── B5.5 해야할일 후보 — 가변(사업마다 개수 다름). B0 에 넣지 않는다 ──
     if 코드들:
-        from llm_validate import 체크항목_본문   # 지연 임포트 — 이 인자를 안 쓰면 안 불린다
-
-        본문 = 체크항목_본문(set(코드들))
+        if 체크항목 is None:
+            from llm_validate import 체크항목_본문   # 지연 임포트 — 이 인자를 안 쓰면 안 불린다
+            체크항목 = 체크항목_본문(set(코드들))
+        본문 = 체크항목
         줄 = [f"- {c}: {본문[c]['항목']} ({본문[c]['설명']})" for c in 코드들 if c in 본문]
         if 줄:
             블록.append("## B5.5. 이 사업의 확인 후보(해야할일)\n"

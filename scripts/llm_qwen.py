@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
 """Qwen(DashScope 국제판) LLM 어댑터.
 
-`llm_호출` 은 `normalize_run.llm_호출` 과 같은 계약을 따른다. `스위치_적용()` 이 환경변수
-`SUDDOE_LLM`(vllm|qwen) 에 따라 `normalize_run`·`orchestrate` 의 `llm_호출` 을 바꿔 끼운다.
-JSON 강제는 `response_format` 을 쓴다 — vLLM 의 `guided_json` 은 이 엔드포인트에서 무시된다.
+판정 파이프라인의 유일한 LLM 클라이언트다. `normalize_run`·`orchestrate` 가 `llm_호출` 과
+`LLM실패` 를 여기서 가져간다. JSON 강제는 `response_format` 을 쓴다.
 """
 from __future__ import annotations
 
@@ -14,11 +13,9 @@ from typing import Any
 
 from openai import OpenAI
 
-import normalize_run as _nr_모듈
-from normalize_run import LLM실패  # noqa: E402 — 예외 타입만 재사용
 
-# 패치 전 원본 llm_호출. SUDDOE_LLM=vllm 이면 이 객체 그 자체로 되돌린다.
-_원본_vllm_llm_호출 = _nr_모듈.llm_호출
+class LLM실패(Exception):
+    """LLM 호출·파싱 실패. 부르는 쪽은 이걸 잡아 판단불가로 반환한다."""
 
 ENDPOINT = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
 기본_모델 = os.environ.get("SUDDOE_QWEN_MODEL", "qwen3.7-plus")
@@ -38,7 +35,8 @@ def _client_얻기() -> OpenAI:
         key = os.environ.get("DASHSCOPE_API_KEY")
         if not key:
             raise LLM실패("DASHSCOPE_API_KEY 환경변수가 없다")
-        _client = OpenAI(api_key=key, base_url=ENDPOINT)
+        # SDK 자체 재시도(기본 2회)를 끈다. 재시도는 아래 llm_호출 의 루프 한 곳에서만 한다
+        _client = OpenAI(api_key=key, base_url=ENDPOINT, max_retries=0)
     return _client
 
 
@@ -123,20 +121,3 @@ def llm_호출(프롬프트: str, 스키마: dict | None, *,
 
     raise LLM실패(마지막 or "알 수 없는 실패")
 
-
-def 스위치_적용() -> str:
-    """`SUDDOE_LLM`(vllm|qwen, 기본 vllm)에 맞춰 `normalize_run.llm_호출` 과 `orchestrate.llm_호출` 을
-    같은 값으로 맞춘다. 몇 번을 불러도 안전하다. 적용된 백엔드 이름을 돌려준다.
-    """
-    backend = os.environ.get("SUDDOE_LLM", "vllm")
-    if backend == "qwen":
-        새값 = llm_호출
-    elif backend == "vllm":
-        새값 = _원본_vllm_llm_호출
-    else:
-        raise LLM실패(f"SUDDOE_LLM={backend!r} — 'vllm' 또는 'qwen' 만 허용")
-
-    _nr_모듈.llm_호출 = 새값
-    import orchestrate as _orch_모듈  # noqa: PLC0415 — 지연 import
-    _orch_모듈.llm_호출 = 새값
-    return backend

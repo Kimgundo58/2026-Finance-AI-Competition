@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
-"""(1) 입력 정규화 호출 자리 + 공용 vLLM 클라이언트.
+"""(1) 입력 정규화 호출 자리.
 
 자연어 질문 한 줄을 판정 파이프라인이 먹는 JSON `{품목, 금액, 금액_추정여부, 용도, 비목후보[], 누락필드}` 로 만든다.
-`orchestrate.py` 와 `judge_run.py` 가 같은 HTTP 호출을 쓰므로 vLLM 클라이언트를 여기에 둔다 (순환 import 방지).
-`--dry` 는 LLM 없이 규칙만으로 정규화한다 — 배관 검증 전용.
+LLM 클라이언트는 `llm_qwen` 하나다. `--dry` 는 LLM 없이 규칙만으로 정규화한다 — 배관 검증 전용.
 
 실행:
     PYTHONIOENCODING=utf-8 python scripts/normalize_run.py --q "맥북 250만원 디자이너용"
@@ -17,181 +16,11 @@ import os
 import re
 import sys
 import time
-import urllib.error
-import urllib.request
-from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _lib import db  # noqa: E402
+from llm_qwen import LLM실패, llm_호출  # noqa: E402
 from llm_schema import 비목_enum, 비목_정의  # noqa: E402
-from adapter import 사고흔적_걷기  # noqa: E402
-
-DSN = db.DSN
-VLLM = os.environ.get("VLLM_URL", "http://localhost:8000")
-MODEL = os.environ.get("VLLM_MODEL", "Qwen/Qwen3-32B-AWQ")
-MODEL_1 = os.environ.get("VLLM_MODEL_1", "")     # 호출 자리 ① 을 다른 모델로 돌릴 때만
-
-
-class LLM실패(Exception):
-    """vLLM 호출·파싱 실패. 부르는 쪽은 이걸 잡아 판단불가로 닫는다."""
-
-
-# ════════════════════════════════════════════════════════════════════════════
-# 스트리밍 — RunPod 프록시(Cloudflare)의 125초 타임아웃을 우회한다
-# ════════════════════════════════════════════════════════════════════════════
-# 비스트리밍 요청은 응답 시작이 늦으면 HTTP 524 로 끊긴다. stream=true 로 첫
-# 바이트를 먼저 보내면 524 의 조건이 성립하지 않는다. 판정 결과는 안 바뀐다 —
-# 온도 0 · guided_json 은 logits 단계라 전송 방식과 무관하다.
-#
-# 타임아웃의 뜻이 갈린다. 비스트리밍에서는 응답 전체를 기다리는 시간이고,
-# 스트리밍에서는 소켓 타임아웃이 조각 사이 간격에만 걸린다. 그래서 총 마감을
-# 따로 잰다 — 안 그러면 서버가 조금씩 뱉으며 영원히 붙들 수 있다.
-#
-# 끄는 길: `SUDDOE_LLM_STREAM=0` 이면 종전(비스트리밍) 경로 그대로다.
-_스트리밍기본 = os.environ.get("SUDDOE_LLM_STREAM", "1") == "1"
-_무응답한계 = int(os.environ.get("SUDDOE_LLM_STREAM_IDLE", "60"))   # 조각 사이 최대 공백
-
-
-def _sse_수집(r, *, 데드라인: float) -> dict:
-    """vLLM 의 SSE 스트림을 모아 비스트리밍 응답과 같은 모양의 dict 로 돌려준다.
-
-    `reasoning_content` 도 같이 모은다 — Qwen3 는 사고가 여기로 갈라져 나온다.
-    """
-    조각: list[str] = []
-    추론조각: list[str] = []
-    종료이유 = None
-    usage: dict = {}
-    for raw in r:                       # HTTPResponse 는 줄 단위로 순회된다
-        if time.time() > 데드라인:
-            raise TimeoutError("스트리밍 총 마감 초과 — 조각은 오는데 안 끝난다")
-        줄 = raw.decode("utf-8", "replace").strip()
-        if not 줄.startswith("data:"):
-            continue                    # 빈 줄·주석(`: ping`) 은 버린다
-        몸통 = 줄[5:].strip()
-        if 몸통 == "[DONE]":
-            break
-        try:
-            d = json.loads(몸통)
-        except json.JSONDecodeError:
-            continue
-        if d.get("usage"):
-            usage = d["usage"]          # stream_options.include_usage 로 마지막에 온다
-        for ch in d.get("choices") or []:
-            델타 = ch.get("delta") or {}
-            if 델타.get("content"):
-                조각.append(델타["content"])
-            if 델타.get("reasoning_content"):
-                추론조각.append(델타["reasoning_content"])
-            if ch.get("finish_reason"):
-                종료이유 = ch["finish_reason"]
-    return {"choices": [{"message": {"content": "".join(조각),
-                                     "reasoning_content": "".join(추론조각)},
-                         "finish_reason": 종료이유}],
-            "usage": usage}
-
-
-def llm_호출(프롬프트: str, 스키마: dict | None, *,
-            모델: str | None = None,
-            온도: float = 0.0,
-            최대토큰: int = 1500,
-            타임아웃: int = 240,          # adapter.LLMAdapter.호출 과 값을 맞춘다
-            재시도: int = 1,
-            스트리밍: bool | None = None,
-            # Qwen 판(`llm_qwen.llm_호출`)과 같은 인자 계약을 갖기 위한 자리다.
-            # vLLM 은 서버 기동 옵션(`--reasoning-parser qwen3`)이 사고를 정하므로
-            # 요청 단위로 못 끈다 — 받아서 무시한다.
-            사고: bool | None = None,
-            **_무시) -> tuple[Any, dict]:
-    """vLLM OpenAI 호환 엔드포인트. (파싱된 출력, 메타).
-
-    온도 0 고정이 기본이다 — 재현성이 이 도메인의 요건이다. 투표(N=3~5)를
-    켤 때만 부르는 쪽이 온도를 올린다.
-
-    스키마 위반은 1회 재시도한다. guided_json 이 걸려 있으면 사실상 안
-    일어나지만, 서버가 그 키를 무시했을 때 여기서 걸린다.
-
-    `타임아웃` 은 한 번의 시도에 걸리는 총 마감이다. 재시도가 붙으므로 최악은
-    2배다. 스트리밍에서는 소켓 타임아웃(조각 사이 공백)이 `_무응답한계`,
-    총 마감이 `타임아웃` 이다.
-    """
-    스트리밍 = _스트리밍기본 if 스트리밍 is None else 스트리밍
-    본문 = {"model": 모델 or MODEL,
-            "messages": [{"role": "user", "content": 프롬프트}],
-            "temperature": 온도,
-            "max_tokens": 최대토큰}
-    if 스키마 is not None:
-        본문["guided_json"] = 스키마          # 🔴 최상위. extra_body 로 감싸지 않는다
-    if 스트리밍:
-        본문["stream"] = True
-        # 🔴 이게 없으면 usage 가 «안 온다». 토큰 수는 잘림(finish_reason=length) 판별의
-        #    한쪽 축이라 비워두면 run 194 에서 고친 계측 구멍이 되살아난다.
-        본문["stream_options"] = {"include_usage": True}
-    data = json.dumps(본문, ensure_ascii=False).encode()
-
-    마지막 = None
-    for 회차 in range(재시도 + 1):
-        t = time.time()
-        try:
-            # User-Agent 를 명시한다 — RunPod 프록시 앞단 Cloudflare 가 기본
-            # urllib UA 를 봇으로 보고 끊는다. 로컬 vLLM 직결에서는 무해하다.
-            # 주소는 호출 시점에 푼다 — 모듈 상수 `VLLM` 로 굳히면 팟 주소가
-            # 바뀌었을 때 안 따라간다.
-            try:
-                from adapter import vllm_url                       # noqa: PLC0415
-                base = vllm_url()
-            except Exception:                                      # noqa: BLE001
-                base = VLLM
-            req = urllib.request.Request(
-                f"{base}/v1/chat/completions", data=data,
-                headers={"Content-Type": "application/json",
-                         "User-Agent": "suddoe-judge/1.0"})
-            if 스트리밍:
-                # 소켓 타임아웃은 조각 사이 간격(`_무응답한계`)에만 건다 — 총 마감
-                # (`타임아웃`)을 그대로 넣으면 서버가 계속 조각을 뱉는 한 소켓이 안
-                # 끊긴다. 총 마감은 `_sse_수집` 이 `데드라인` 으로 따로 지킨다.
-                with urllib.request.urlopen(req, timeout=_무응답한계) as r:
-                    d = _sse_수집(r, 데드라인=t + 타임아웃)
-            else:
-                with urllib.request.urlopen(req, timeout=타임아웃) as r:
-                    d = json.loads(r.read().decode())
-            _메시지 = d["choices"][0]["message"]
-            내용 = _메시지.get("content") or ""
-            # 파서가 갈라 준 경우 `reasoning_content` 에 사고가 들어가고
-            # `content` 는 이미 깨끗하다. 안 갈라진 경우만 여기서 걷어낸다.
-            내용, 사고사실 = 사고흔적_걷기(내용)
-            # `사고흔적_걷기()` 는 `content` 안에 `<think>` 가 섞여 들어온(파서 실패)
-            # 경우만 본다 — 정상 분리된 `reasoning_content` 도 따로 재서 합쳐 넣는다.
-            # 완료토큰 예산(`max_tokens`)은 사고도 먹으므로 길이를 놓치면 안 된다.
-            추론content = _메시지.get("reasoning_content") or ""
-            메타 = {"지연ms": int((time.time() - t) * 1000),
-                   "토큰": d.get("usage", {}),
-                   "종료이유": d["choices"][0].get("finish_reason"),
-                   "모델": 본문["model"], "재시도": 회차,
-                   **사고사실,
-                   "추론content있음": bool(추론content),
-                   "추론content길이": len(추론content)}
-            if 스키마 is None:
-                return 내용, 메타
-            try:
-                return json.loads(내용), 메타
-            except json.JSONDecodeError as e:
-                마지막 = f"JSON 파싱 실패: {e} · 앞 200자 {내용[:200]!r}"
-        except urllib.error.HTTPError as e:
-            마지막 = f"HTTP {e.code}: {e.read()[:300]!r}"
-        except Exception as e:                                  # 타임아웃·연결 끊김 포함
-            마지막 = f"{type(e).__name__}: {str(e)[:200]}"
-    raise LLM실패(마지막 or "알 수 없는 실패")
-
-
-def 사고흔적_제거(내용: str) -> str:
-    """호환용 얇은 래퍼 — 실제 정의는 `adapter.사고흔적_걷기()` 하나뿐이다.
-
-    사고 흔적이 있었는지·몇 자였는지가 필요하면 `사고흔적_걷기()` 를 직접 불러라.
-    """
-    정리됨, _ = 사고흔적_걷기(내용)
-    return 정리됨
-
-
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -226,6 +55,26 @@ def 호출자리1_스키마(비목목록: list[str] | None = None) -> dict:
     }
 
 
+# corpus.item_alias 의 (상품명, 비목) 행. 정규화 호출마다 전체를 다시 읽지 않도록 10분 TTL 로 둔다.
+# 조회 실패는 캐시하지 않는다 — 다음 호출이 다시 시도한다.
+_별칭_TTL초 = 600
+_별칭_캐시: tuple[float, list] | None = None
+
+
+def _별칭_행() -> list | None:
+    global _별칭_캐시
+    if _별칭_캐시 is not None and time.time() - _별칭_캐시[0] < _별칭_TTL초:
+        return _별칭_캐시[1]
+    try:
+        with db.connect(autocommit=True, connect_timeout=3) as conn:
+            행 = conn.execute('SELECT "상품명", "비목" FROM corpus.item_alias').fetchall()
+    except Exception as e:                              # noqa: BLE001
+        print(f"item_alias 조회 실패({type(e).__name__}) — 별칭 힌트 없이 간다", file=sys.stderr)
+        return None
+    _별칭_캐시 = (time.time(), 행)
+    return 행
+
+
 def _별칭_힌트(질문: str) -> str:
     """질문에 실제로 등장한 상품명을 `corpus.item_alias` 에서 찾아 비목과 함께 보여준다.
 
@@ -236,12 +85,8 @@ def _별칭_힌트(질문: str) -> str:
     q = (질문 or "").replace(" ", "")
     if not q:
         return ""
-    try:
-        from _lib import db as _db                      # noqa: PLC0415 — 지연 import
-        with _db.connect(autocommit=True) as conn:
-            행 = conn.execute('SELECT "상품명", "비목" FROM corpus.item_alias').fetchall()
-    except Exception as e:                              # noqa: BLE001
-        print(f"item_alias 조회 실패({type(e).__name__}) — 별칭 힌트 없이 간다", file=sys.stderr)
+    행 = _별칭_행()
+    if 행 is None:
         return ""
     맞음: dict[str, str] = {}
     for 상품명, 비목 in 행:
@@ -447,9 +292,7 @@ def 정규화(질문: str, *, dry: bool = False, 비목목록: list[str] | None 
     # 나고 `LLM실패` 로 올라가 판단불가가 된다 — 「모델이 모른다」가 아니라
     # 「자리를 안 줬다」다.
     # 사고=False — 정규화는 문장에서 값을 뽑는 추출이라 사고가 필요 없다.
-    # vLLM 경로는 이 인자를 무시한다.
-    출력, 메타 = llm_호출(프롬프트, 스키마, 사고=False, 모델=MODEL_1 or None,
-                       최대토큰=2000, 타임아웃=타임아웃)
+    출력, 메타 = llm_호출(프롬프트, 스키마, 사고=False, 최대토큰=2000, 타임아웃=타임아웃)
     # guided_json 이 걸려 있어도 서버가 무시했을 때를 대비해 최소 형태만 확인한다
     if not isinstance(출력, dict) or "품목" not in 출력:
         raise LLM실패(f"슬롯① 출력이 스키마 밖: {str(출력)[:200]}")
