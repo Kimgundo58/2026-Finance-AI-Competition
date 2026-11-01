@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
-"""평가 결과 적재 (`eval.runs` · `eval.run_items`).
+"""평가 결과를 `eval.runs` / `eval.run_items` 에 저장하고 되읽는다.
 
-`지표`·`원출력` 은 jsonb 로 통째로 받는다. `코퍼스버전`·`git커밋` 은 안 주면 여기서 실측해 채운다.
-채점은 전부 결정론적이며 LLM-as-judge 는 붙이지 않는다.
+`eval_retrieval.py`, 판정 파이프라인 골든셋 실행(`orchestrate.py --eval-log`)이 호출한다.
+공개 함수: `기록(run, items, *, conn)`, `요약(run_id, *, conn)`, `코퍼스버전(cur)`, `사업키(사업명, 적용범위)`.
+`지표`·`원출력` 은 jsonb 로 그대로 저장하고, `코퍼스버전`·`git커밋` 을 주지 않으면 여기서 계산해 채운다.
+채점은 전부 결정론적이며 LLM-as-judge 는 쓰지 않는다.
 """
 from __future__ import annotations
 
@@ -15,13 +17,11 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _lib import db                                                   # noqa: E402
 
-DSN = db.DSN
-
 _종류 = ("e2e", "retrieval", "judge")
 
 
 def 코퍼스버전(cur) -> str:
-    """판정 인덱스 상태를 한 문자열로 압축한다 — (청크수, 임베딩수, refs수, doc수, 최대 chunk_id) 해시."""
+    """검색 대상 코퍼스 상태를 한 문자열로 압축한다 — (청크수, 임베딩수, refs수, doc수, 최대 chunk_id) 해시."""
     cur.execute("""
         SELECT (SELECT count(*) FROM corpus.chunks),
                (SELECT count(*) FROM corpus.chunks WHERE embedding IS NOT NULL),
@@ -31,32 +31,6 @@ def 코퍼스버전(cur) -> str:
     n = cur.fetchone()
     h = hashlib.sha1("|".join(map(str, n)).encode()).hexdigest()[:8]
     return f"c{n[0]}-e{n[1]}-r{n[2]}-d{n[3]}-{h}"
-
-
-def 골든고정(cur) -> str:
-    """정답지(`eval.golden_chunks`·`eval.golden_set`) 상태를 한 문자열로 압축한다.
-
-    행 수·매칭방법 분포·정답판정 분포를 함께 해시한다. 이 지문이 다른 run 끼리는 hit@k 를 비교하지 않는다.
-    """
-    cur.execute("""
-        SELECT (SELECT count(*) FROM eval.golden_chunks),
-               (SELECT count(*) FROM eval.golden_chunks WHERE 매칭방법='실패'),
-               (SELECT count(DISTINCT gold_id) FROM eval.golden_chunks),
-               (SELECT coalesce(max(gc_id),0) FROM eval.golden_chunks)""")
-    n = cur.fetchone()
-    cur.execute("SELECT 매칭방법, count(*) FROM eval.golden_chunks GROUP BY 1 ORDER BY 1")
-    분포 = cur.fetchall()
-
-    # golden_set 의 정답 라벨이 바뀌어도 지문이 움직이도록 씨앗에 더한다.
-    cur.execute("SELECT count(*), count(*) FILTER (WHERE verified) FROM eval.golden_set")
-    총, 검증됨 = cur.fetchone()
-    cur.execute("SELECT 정답판정, count(*) FROM eval.golden_set GROUP BY 1 ORDER BY 1")
-    판정분포 = cur.fetchall()
-
-    씨앗 = ("|".join(map(str, n)) + "|" + ",".join(f"{k}:{v}" for k, v in 분포)
-            + f"|s{총}v{검증됨}|" + ",".join(f"{k}:{v}" for k, v in 판정분포))
-    h = hashlib.sha1(씨앗.encode()).hexdigest()[:8]
-    return f"g{n[0]}-f{n[1]}-q{n[2]}-s{총}v{검증됨}-{h}"
 
 
 def _git커밋() -> str | None:
@@ -74,7 +48,11 @@ def _git커밋() -> str | None:
 
 
 def 기록(run: dict, items: list[dict] | None = None, *, conn=None) -> int:
-    """평가 1회를 남기고 run_id 를 돌려준다. items 는 없어도 된다(집계만 남기는 실행)."""
+    """평가 1회를 저장하고 run_id 를 반환한다. items 는 없어도 된다(집계만 남기는 실행).
+
+    `run["종류"]` 가 허용 값이 아니면 ValueError. `conn` 을 주지 않으면 새 커넥션을 열고 닫는다.
+    끝에 commit 한다.
+    """
     종류 = run.get("종류")
     if 종류 not in _종류:
         raise ValueError(f"종류는 {_종류} 중 하나여야 한다: {종류!r}")
@@ -113,45 +91,19 @@ def 기록(run: dict, items: list[dict] | None = None, *, conn=None) -> int:
         return run_id
 
 
-def 정답청크(cur, gold_id: int) -> set[int]:
-    """고정된 정답 청크(`eval.golden_chunks`). 원문 재매칭을 하지 않는다 — 청킹이 바뀌어도 정답 집합이 안 흔들린다."""
-    cur.execute(
-        "SELECT chunk_id FROM eval.golden_chunks WHERE gold_id=%s AND chunk_id IS NOT NULL",
-        (gold_id,))
-    return {r[0] for r in cur.fetchall()}
+def 사업키(사업명: str | None, 적용범위: str | None = None) -> str | None:
+    """골든셋 문항의 사업명을 검색용 사업명으로 바꾼다. 공통 문항이면 None.
 
-
-def 평가대상(cur, *, 세트: str | None = None, 범위밖포함: bool = False) -> list[dict]:
-    """평가 분모가 되는 문항 목록.
-
-    정답 청크가 고정된 문항에 더해 `정답판정='판단불가'` 와 `세트='L3'` 는 골든청크 없이도 든다
-    (둘 다 인용적중은 `eval_e2e` 가 채점에서 뺀다). `평가범위='범위밖…'` 은 `범위밖포함=True` 가 아니면 뺀다.
+    `적용범위` 가 있거나 사업명이 '공통…' 이면 사업 이름이 아니라 적용범위 표시다.
+    그대로 사업 필터에 넣으면 존재하지 않는 사업으로 걸러 후보가 0건이 된다.
     """
-    cur.execute(
-        """SELECT g.gold_id, g.세트, g.사업명, g.적용범위, g.질문, g.정답판정, g.비목,
-                  g.대상, g.평가범위, g.채점모드, g.해야할일
-             FROM eval.golden_set g
-            WHERE (g.정답판정 = '판단불가'
-                   OR g.세트 = 'L3'
-                   OR EXISTS (SELECT 1 FROM eval.golden_chunks gc
-                               WHERE gc.gold_id = g.gold_id AND gc.chunk_id IS NOT NULL))
-              AND (%s::text IS NULL OR g.세트 = %s::text)
-              AND (%s OR g.평가범위 IS NULL OR g.평가범위 NOT LIKE '범위밖%%')
-            ORDER BY g.gold_id""", (세트, 세트, 범위밖포함))
-    cols =("gold_id", "세트", "사업명", "적용범위", "질문", "정답판정", "비목",
-            "대상", "평가범위", "채점모드", "해야할일")
-    return [dict(zip(cols, r)) for r in cur.fetchall()]
-
-
-def 사업키(사업명: str | None) -> str | None:
-    """공통 문항('공통…')은 사업명 NULL 로 접는다 — 존재하지 않는 사업으로 필터링되는 것을 막는다."""
-    if not 사업명 or 사업명.startswith("공통"):
+    if 적용범위 or not 사업명 or 사업명.startswith("공통"):
         return None
     return 사업명
 
 
 def 요약(run_id: int, *, conn=None) -> dict:
-    """적재된 실행 하나를 사람이 읽는 형태로 되읽는다 (검증용)."""
+    """저장된 실행 하나를 사람이 읽는 형태로 되읽는다. 없으면 LookupError."""
     with db.borrow(conn) as conn:
         cur = conn.cursor()
         cur.execute("SELECT 종류, 시작, 코퍼스버전, git커밋, 문항수, 지표, 설정, 라벨 "
@@ -167,10 +119,14 @@ def 요약(run_id: int, *, conn=None) -> dict:
                 "items": n, "적중": hit}
 
 
-if __name__ == "__main__":
-    # 스모크 — 실제 표에 1행 넣고 되읽는다.
+def main() -> None:
+    """스모크 테스트 — eval.runs 에 1행을 실제로 저장하고 되읽는다."""
     rid = 기록({"종류": "judge", "설정": {"smoke": True}, "지표": {},
-               "라벨": "eval_store 스모크", "비고": "D4 자체 점검"}, [])
+               "라벨": "eval_store 스모크", "비고": "eval_store 스모크 테스트"}, [])
     print("run_id =", rid)
     for k, v in 요약(rid).items():
         print(f"  {k:10} {v}")
+
+
+if __name__ == "__main__":
+    main()
