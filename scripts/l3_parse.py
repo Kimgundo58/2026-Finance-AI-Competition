@@ -19,8 +19,8 @@ from pathlib import Path
 
 import l3_load
 from _lib import db
-from stage0_articles import split_articles, validate
-from stage0_extract import extract, 빈_추출_글자수_임계치
+from article_split import split_articles, validate
+from text_extract import extract, 빈_추출_글자수_임계치
 
 ROOT = Path(__file__).resolve().parent.parent
 

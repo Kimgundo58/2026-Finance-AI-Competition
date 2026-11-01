@@ -223,7 +223,7 @@ def _준비(작업: dict) -> dict:
 
     반환: {조문, 전략, 추출방식, 품질, 경고, 청크}. staged 로 둘 수 없으면 _적재실패.
     """
-    from stage0_articles import is_deleted, validate
+    from article_split import is_deleted, validate
 
     doc_id, layer = 작업["doc_id"], 작업["layer"]
     조문, 전략, 추출방식 = _조문_추출(Path(작업["저장경로"]))
@@ -270,8 +270,8 @@ def _조문_추출(경로: Path) -> tuple[list[dict], str, str]:
     글자가 두 번씩 찍힌 텍스트 레이어와 2단 조판을 풀어 준다. stage0_extract.extract_pdf 는 둘 다
     풀지 않아 조 헤더가 깨진다. 이 경로는 페이지 오프셋이 없어 페이지는 NULL 이다(기존 행과 같다).
     """
-    from stage0_articles import sanitize, split_articles
-    from stage0_extract import extract, 빈_추출_글자수_임계치
+    from article_split import sanitize, split_articles
+    from text_extract import extract, 빈_추출_글자수_임계치
 
     try:
         if 경로.suffix.lower() == ".pdf":
@@ -452,7 +452,7 @@ def _청크_만들기(조문: list[dict], *, layer: str, 사업: list[str] | Non
 
     삭제 조, 빈 조, 적용대상을 정하지 못한 조는 청크로 만들지 않는다.
     """
-    from stage2_bm25 import _장맵, _헤더
+    from bm25_index import _장맵, _헤더
 
     장 = _장맵(조문)
     청크: list[dict] = []
@@ -597,7 +597,7 @@ def _bm25_색인(cur, doc_id: str) -> int:
     입력은 stage2_bm25.보충 과 같다: 컨텍스트 헤더 + 줄바꿈 + text. 장 제목은 문서의 조 전체를 순서대로 보고
     정하므로 적재 때 임베딩 입력에 쓴 헤더와 같다. 이미 색인된 청크(보충 이 먼저 넣은 경우)는 건너뛴다.
     """
-    from stage2_bm25 import _장맵, _헤더, 토큰화
+    from bm25_index import _장맵, _헤더, 토큰화
 
     장 = _장맵([{"조번호": r[0], "본문": r[1]} for r in cur.execute(
         "SELECT 조번호, 본문 FROM corpus.doc_articles WHERE doc_id = %s ORDER BY article_id",
