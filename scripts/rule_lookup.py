@@ -151,14 +151,12 @@ def 비목계통(cur, 사업명: str | None) -> str | None:
     """
     if not 사업명:
         return "창업"
-    try:
-        cur.execute("SELECT 비목계통 FROM corpus.programs WHERE 사업명 = %s", [사업명])
-        r = cur.fetchone()
-        if r and r[0]:
-            return r[0]
-    except Exception:                       # programs 가 아직 없는 워킹트리
-        cur.connection.rollback()
-        return "창업"                       # 표 자체가 없는 워킹트리 — 기존 동작 유지
+    # DB 오류는 삼키지 않는다 — "창업"으로 넘기면 R&D 사업에 창업 계통 룰이 붙는다.
+    # 예외는 판정 파이프라인의 예외 경로에서 판단불가로 반환된다.
+    cur.execute("SELECT 비목계통 FROM corpus.programs WHERE 사업명 = %s", [사업명])
+    r = cur.fetchone()
+    if r and r[0]:
+        return r[0]
     return None                             # 표는 있는데 이 사업명이 없다 — 판단불가로 닫는다
 
 
@@ -302,13 +300,10 @@ def _우선규범(cur, 사업명: str | None) -> str | None:
     """
     if not 사업명:
         return None
-    try:
-        cur.execute("SELECT 우선규범 FROM corpus.programs WHERE 사업명 = %s", [사업명])
-        r = cur.fetchone()
-        if r and r[0]:
-            return r[0]
-    except Exception:                       # programs 가 아직 없는 워킹트리
-        cur.connection.rollback()
+    cur.execute("SELECT 우선규범 FROM corpus.programs WHERE 사업명 = %s", [사업명])
+    r = cur.fetchone()
+    if r and r[0]:
+        return r[0]
     for p in _precedence(cur, 사업명):
         if p.get("우선규범"):
             return p["우선규범"]
@@ -483,11 +478,7 @@ def 비목확정(cur, 품목: str | None, 사업명: str | None, *,
 
 def _용어사전_직결(cur, 품목n: str) -> list[tuple[str, float]]:
     """품목이 비목 정본명·별칭·하위항목 그 자체일 때 (사용자가 비목명을 그대로 쓴 경우)."""
-    try:
-        cur.execute("SELECT 비목, 별칭, 하위항목 FROM corpus.item_vocab WHERE 계통='창업'")
-    except Exception:
-        cur.connection.rollback()
-        return []
+    cur.execute("SELECT 비목, 별칭, 하위항목 FROM corpus.item_vocab WHERE 계통='창업'")
     hits = []
     for 비목, 별칭, 하위 in cur.fetchall():
         if _norm(비목) == 품목n:
@@ -1589,6 +1580,7 @@ def _calibrate() -> int:
         print(f"  임계 {th:.2f}  발화 {len(sel)/len(res):5.1%}  "
               f"비목일치 {sum(x['일치'] for x in sel)/len(sel):5.1%}  (n={len(sel)})")
     out = ROOT / "scripts" / "_work" / "_B_비목확정_임계교정.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps({"표본": len(res), "표": 표,
                                "오분류": [x for x in res if not x["일치"]]},
                               ensure_ascii=False, indent=1), encoding="utf-8")
@@ -1634,6 +1626,7 @@ def _audit() -> int:
     for x in 골든["적중목록"]:
         print(f"   #{x['gold_id']} 정답={x['정답']}  ← {x['예시']}")
     out = ROOT / "scripts" / "_work" / "_B_금지매칭_감사.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps({"자기재현": 자기재현, "골든셋": 골든,
                                "괄호_분류": 괄호분류},
                               ensure_ascii=False, indent=1), encoding="utf-8")
@@ -1722,6 +1715,7 @@ def _golden() -> int:
                        "적용층": eff["적용층"] if eff else None,
                        "B4문장": eff["B4문장"] if eff else None})
     out = ROOT / "scripts" / "_work" / "_B_골든셋_룰커버.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps({"카운트": 카운트, "행": 행}, ensure_ascii=False, indent=1),
                    encoding="utf-8")
     print(json.dumps(카운트, ensure_ascii=False))
