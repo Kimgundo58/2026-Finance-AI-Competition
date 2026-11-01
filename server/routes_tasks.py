@@ -1,8 +1,11 @@
 # -*- coding: utf-8 -*-
-"""할일 「확인필요」 — 화면 11 ⑧ 집행 준비 · 화면 6 ⑥ 다가오는 일정.
+"""할일 API — 계획 상세의 집행 준비 체크리스트와 홈의 다가오는 일정(캘린더).
 
-체크리스트와 캘린더는 같은 테이블 같은 행이다 — due_date 유무로만 갈린다.
-목 경로가 기본 구현이고 실 경로는 `_실_*` 함수와 `코드_매칭()` 에 있다.
+POST /api/plans/{plan_id}/tasks:sync (판정 결과 반영, persist.판정_저장 도 함수로 호출),
+POST/PATCH /api/plans/{plan_id}/tasks, GET /api/tasks. 체크리스트와 캘린더는
+tenant.plan_tasks 의 같은 행이고 due_date 유무로만 나뉜다. mock 모드(SUDDOE_MOCK=1)에서는
+mock_data 를 쓰고, DB 모드 구현은 `_실_*` 함수에 있다. 동기화는 출처='user' 행과
+사용자가 고친 due_date 를 덮지 않으며, DB 오류는 롤백 후 예외로 전파한다.
 """
 from __future__ import annotations
 
@@ -14,12 +17,11 @@ from datetime import timedelta
 
 from fastapi import APIRouter, HTTPException, Query
 
-from ._common import MOCK, 할일구분_ENUM, 트랜잭션, _질의, _실행
+from ._common import MOCK, 할일구분_ENUM, 트랜잭션, _org조건, _질의, _실행
 from . import l3_deadline
 from .l3_deadline import 바이그램
 from .models import (할일, 할일동기화, 할일동기화응답, 할일목록응답, 할일생성, 할일수정)
 from . import mock_data
-from .routes_plans import _org조건
 
 router = APIRouter(tags=["할일"])
 _log = logging.getLogger(__name__)
@@ -31,12 +33,11 @@ _log = logging.getLogger(__name__)
 
 @router.post("/api/plans/{plan_id}/tasks:sync", response_model=할일동기화응답)
 def 동기화(plan_id: int, body: 할일동기화, org_id: str | None = None) -> 할일동기화응답:
-    """재판정 규칙 4개.
+    """판정의 해야할일 목록을 이 계획의 plan_tasks 에 반영한다.
 
-    ① 출처='user' 행은 건드리지 않는다
-    ② 날짜_사용자수정=true 인 행의 due_date 는 덮지 않는다
-    ③ 같은 코드의 ai 행은 갱신, 없어진 것은 지운다
-    ④ 코드가 없으면(코드=NULL) 항목 텍스트로 대조한다
+    재판정 규칙: (1) 출처='user' 행은 건드리지 않는다. (2) 날짜_사용자수정=true 행의 due_date 는
+    덮지 않는다. (3) 같은 code 의 ai 행은 갱신하고, 이번 결과에 없는 ai 행은 지운다.
+    (4) code 가 없으면 항목 텍스트로 대조한다. DB 오류는 예외로 전파한다(HTTP 500).
     """
     if MOCK:
         보존u = sum(1 for t in mock_data.목_할일
@@ -50,6 +51,10 @@ def 동기화(plan_id: int, body: 할일동기화, org_id: str | None = None) ->
         )
     return _실_동기화(plan_id, body, org_id)
 
+
+# ════════════════════════════════════════════════════════════════════
+# 항목 텍스트 → check_items code 추정
+# ════════════════════════════════════════════════════════════════════
 
 _조사_RE = re.compile(r"(으로|에서|에게|이나|만큼|까지|부터|은|는|이|가|을|를|와|과|만|도|의|나|로)$")
 _어미_RULES = (
@@ -154,7 +159,7 @@ def 추가(plan_id: int, body: 할일생성, org_id: str | None = None) -> 할�
 
 
 # ════════════════════════════════════════════════════════════════════
-# 토글·날짜 — PATCH /api/plans/{plan_id}/tasks/{task_id}
+# 상태·날짜·유형 수정 — PATCH /api/plans/{plan_id}/tasks/{task_id}
 # ════════════════════════════════════════════════════════════════════
 
 @router.patch("/api/plans/{plan_id}/tasks/{task_id}", response_model=할일)
@@ -167,7 +172,7 @@ def 수정(plan_id: int, task_id: int, body: 할일수정, org_id: str | None = 
             행["상태"] = body.상태
         if body.due_date is not None:
             행["due_date"] = body.due_date
-            행["날짜_사용자수정"] = True      # 이후 재판정이 이 날짜를 덮지 않는다
+            행["날짜_사용자수정"] = True      # 이후 재판정이 이 날짜를 덮지 않게 한다
         if body.유형 is not None:
             행["유형"] = body.유형
         return 할일(**행)
@@ -175,7 +180,7 @@ def 수정(plan_id: int, task_id: int, body: 할일수정, org_id: str | None = 
 
 
 # ════════════════════════════════════════════════════════════════════
-# 홈 「조건부」 집계 · 캘린더 — GET /api/tasks
+# 홈 집계 · 캘린더 — GET /api/tasks
 # ════════════════════════════════════════════════════════════════════
 
 @router.get("/api/tasks", response_model=할일목록응답)
@@ -206,10 +211,10 @@ def 목록(
 
 
 # ════════════════════════════════════════════════════════════════════
-# 실 경로 구역
+# DB 모드 구현
 # ════════════════════════════════════════════════════════════════════
 
-# 목록 조회에 공용으로 쓰는 컬럼 순서. `계획제목` 은 JOIN 으로 붙인다.
+# 목록·단건 조회가 같이 쓰는 SELECT 와 컬럼 순서. `계획제목` 은 expense_plans JOIN 으로 가져온다.
 _할일_SELECT = (
     'SELECT t.task_id, t.plan_id, t.출처, t.코드, t.구분, t.항목, t.설명, '
     't.due_date, t."유형", t.날짜_사용자수정, t.상태, p.제목 '
@@ -394,10 +399,8 @@ def _실_추가(plan_id: int, body: 할일생성, org_id: str | None = None) -> 
 
 
 def _실_수정(plan_id: int, task_id: int, body: 할일수정, org_id: str | None = None) -> 할일:
-    """소유 판정의 기준은 계획(expense_plans.org_id)이다 — 할일 자체의 org_id 가 아니다.
-
-    `_실_추가`·`_실_동기화` 와 같은 기준으로 통일한 것이다 — 쓰기 경로마다 기준이
-    다르면 「추가는 되는데 수정은 404」 같은 어긋남이 생긴다.
+    """할일 상태·날짜·유형을 고친다. 소유 확인은 할일의 org_id 가 아니라 계획(expense_plans.org_id)
+    기준이다. `_실_추가`·`_실_동기화` 와 기준이 같아야 추가는 되는데 수정은 404 인 상황이 생기지 않는다.
     """
     조건, org인자 = _org조건(org_id, "p")
     존재 = _질의(f'SELECT 1 FROM tenant.plan_tasks t '
@@ -415,7 +418,7 @@ def _실_수정(plan_id: int, task_id: int, body: 할일수정, org_id: str | No
     if body.due_date is not None:
         수정절.append("due_date=%s")
         인자.append(body.due_date)
-        수정절.append("날짜_사용자수정=true")     # 이후 재판정이 이 날짜를 덮지 않는다
+        수정절.append("날짜_사용자수정=true")     # 이후 재판정이 이 날짜를 덮지 않게 한다
     if body.유형 is not None:
         수정절.append('"유형"=%s')
         인자.append(body.유형)

@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
-"""지출계획 — 화면 6 홈 · 화면 7 목록 · 화면 11 상세.
+"""지출계획 API — 홈, 목록, 상세 화면이 쓰는 /api/plans 라우터.
 
-목(mock) 경로가 기본 구현이고 실 경로는 `_실_*` 함수에만 있다. 응답 모델을
-바꾸면 프론트가 깨지므로 필드를 바꾸려면 먼저 합의한다. CSV 는 만들지 않는다
-(브라우저 생성으로 확정). 통계는 별도 API 없이 목록 응답에 얹는다.
+GET/POST /api/plans, GET/DELETE /api/plans/{plan_id}. mock 모드(SUDDOE_MOCK=1)에서는
+mock_data 를 쓰고, DB 모드 구현은 `_실_*` 함수에 있다. 읽고 쓰는 테이블은
+tenant.expense_plans, tenant.decisions, tenant.plan_tasks 이다.
+응답 모델(models.계획*)을 바꾸면 프론트가 깨지므로 필드는 합의 후에만 바꾼다.
+통계는 별도 API 없이 목록 응답에 포함한다. 다른 기관의 계획은 404 로 숨긴다.
 """
 from __future__ import annotations
 
@@ -12,16 +14,13 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from ._common import MOCK, 탭_판정, _질의, _실행
+from ._common import MOCK, 탭_판정, _jsonb, _org조건, _질의, _실행
 from .models import 계획목록응답, 계획상세, 계획생성, 계획통계, 계획요약
-from . import mock_data
+from . import auth, mock_data
 
 router = APIRouter(prefix="/api/plans", tags=["지출계획"])
 
 _log = logging.getLogger(__name__)
-
-# 게스트(org_id=None)와 «값을 안 넘김» 을 구별하려는 센티넬
-_주어지지않음 = object()
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -44,7 +43,7 @@ def 목록(
     행 = mock_data.목_계획요약() if MOCK else _실_목록(org_id)
     통계 = 계획통계(**(mock_data.목_통계() if MOCK else _실_통계(org_id)))
 
-    # 통계는 필터 적용 전 전체 기준이다 — 탭 배지가 필터에 따라 흔들리면 안 된다
+    # 통계는 필터 적용 전 전체 기준이다. 탭 배지 숫자가 필터에 따라 바뀌면 안 된다.
     걸린 = _거르기(행, 탭, 사업명, 확정비목, q, 금액_최소, 금액_최대)
     걸린 = _정렬(걸린, 정렬)
     시작 = (페이지 - 1) * 크기
@@ -97,49 +96,47 @@ def _정렬(행: list[dict], 정렬: str) -> list[dict]:
 # 생성 — POST /api/plans
 # ════════════════════════════════════════════════════════════════════
 
-def _질의_저장(sql: str, 인자: tuple, 주인: str | None) -> list[tuple]:
-    """저장용 `_질의` — 실패 사유(DB 다운/권한·RLS 차단/제약 위반)를 갈라서 반환한다.
+def _질의_저장(sql: str, 인자: tuple, 소유_org: str | None) -> list[tuple]:
+    """저장용 `_질의`. 실패 사유(DB 연결 실패 / RLS 거부 / 제약 위반)에 따라 HTTP 상태를 나눈다.
 
-    `예외전파=True` 는 여기서만 켠다 — 호출부가 많아 기본값을 바꾸면 조용하던
-    실패가 전부 500 으로 튄다. 사용자에게는 SQLSTATE·DB 메시지를 주지 않는다
-    (호스트·포트 등이 그대로 실릴 수 있다) — 사유는 로그에만 남긴다.
+    사용자 응답에는 SQLSTATE 나 DB 메시지를 넣지 않는다(호스트·포트가 포함될 수 있다).
+    사유는 로그에만 남긴다.
     """
     try:
         return _질의(sql, 인자, 예외전파=True)
     except Exception as e:                                    # noqa: BLE001
         상태 = getattr(e, "sqlstate", None)
-        _log.exception("지출계획 저장 실패 — sqlstate=%s 주인=%s", 상태, 주인)
-        if 상태 == "42501":              # insufficient_privilege = RLS 가 물었다
-            if 주인 is None:
-                # 게스트다 — 「권한 없음」이 아니라 「누군지 모름」이므로 401 로 답한다
+        _log.exception("지출계획 저장 실패 — sqlstate=%s 소유_org=%s", 상태, 소유_org)
+        if 상태 == "42501":              # insufficient_privilege: RLS 정책에 의해 거부됨
+            if 소유_org is None:
+                # 게스트는 권한 부족이 아니라 신원 미확인이므로 401 로 답한다
                 raise HTTPException(401, "저장하려면 로그인이 필요합니다") from e
             raise HTTPException(403, "이 기관으로 저장할 권한이 없습니다") from e
-        if 상태 is None:                 # 접속 자체가 안 됐다 (OperationalError)
+        if 상태 is None:                 # 접속 자체가 실패했다 (OperationalError)
             raise HTTPException(503, "지출계획을 저장하지 못했습니다 (DB 연결 실패)") from e
         raise HTTPException(500, "지출계획을 저장하지 못했습니다") from e
 
 
-def _계획_주인(요청: Request, 자기신고: str | None) -> str | None:
-    """계획의 주인(org_id)을 정한다. 본문의 org_id 는 절대 쓰지 않는다 — 클라이언트
-    값을 그대로 INSERT 하면 남의 기관 이름으로 행을 심을 수 있다.
+def _계획_org(요청: Request, 요청_org_id: str | None) -> str | None:
+    """새 계획의 소유 org 를 정한다. 검증된 주체(토큰)의 org 만 쓰고, 없으면 게스트(None)다.
 
-    반환값은 `auth.OrgId주입` 이 GUC(app.org_id)에 세운 값과 같아야 한다 — RLS 정책이
-    org_id = current_org() 라서 어긋나면 INSERT 가 거부된다. 본문에 org_id 가 와도
-    400 으로 막지 않고 무시한 채 로그만 남긴다.
+    본문의 org_id(클라이언트가 보낸 검증되지 않은 값)는 쓰지 않는다. 그대로 INSERT 하면
+    다른 기관 이름으로 행을 만들 수 있다. 반환값은 OrgId주입 미들웨어가 GUC app.org_id 에
+    설정한 값과 같아야 RLS 정책(org_id = current_org())을 통과한다. 본문 org_id 는 400 으로
+    거부하지 않고 무시한 채 로그만 남긴다.
     """
-    주 = 요청.scope.get("suddoe_주체")
-    주인 = str(주.org_id) if (주 is not None and 주.검증됨 and 주.org_id) else None
-    if 자기신고:
-        if 주인 is None:
-            _log.warning("계획 생성 본문에 org_id=%s 가 왔지만 «검증된 주체» 가 없다 "
-                         "— 무시한다(게스트로 저장 시도)", 자기신고)
-        elif str(자기신고) != 주인:
+    소유_org = auth.검증된_org(요청)
+    if 요청_org_id:
+        if 소유_org is None:
+            _log.warning("계획 생성 본문에 org_id=%s 가 왔지만 검증된 주체가 없다 "
+                         "— 무시한다(게스트로 저장 시도)", 요청_org_id)
+        elif str(요청_org_id) != 소유_org:
             _log.warning("계획 생성 org_id 불일치 — 토큰=%s 본문=%s · 토큰을 쓴다",
-                         주인, 자기신고)
+                         소유_org, 요청_org_id)
         else:
-            _log.info("계획 생성 본문이 아직 org_id 를 보낸다(값은 일치) — 프론트에서 "
+            _log.info("계획 생성 본문에 org_id 가 포함돼 있다(값은 일치). 프론트에서 "
                       "빼도 된다")
-    return 주인
+    return 소유_org
 
 
 @router.post("", response_model=계획상세, status_code=201)
@@ -156,16 +153,16 @@ def 생성(요청: Request, body: 계획생성) -> 계획상세:
         }
         mock_data.목_계획.append(행)
         return 계획상세(**행, 할일=[], 판정상세=None)
-    return _실_생성(body, org_id=_계획_주인(요청, body.org_id))
+    return _실_생성(body, org_id=_계획_org(요청, body.org_id))
 
 
 def _합성(body: 계획생성) -> str:
-    """폼 값을 문장으로 합성한다 — `expense_plans.질문원문` 이 NOT NULL 이라서다.
+    """폼 값을 질문 문장으로 합성한다. `expense_plans.질문원문` 이 NOT NULL 이라서 필요하다.
 
-    스키마를 바꾸지 않으려는 방법이다. 이 문장은 저장·검색·표시 전용이고 LLM 입력으로 다시 쓰지 않는다.
+    이 문장은 저장·검색·표시 전용이고 LLM 입력으로 다시 쓰지 않는다.
     """
-    만원 = f"{int(body.금액):,}원"
-    return f"{body.사업명}에서 {body.용도} {body.품목} {만원}을 사도 되나요?"
+    금액문 = f"{int(body.금액):,}원"
+    return f"{body.사업명}에서 {body.용도} {body.품목} {금액문}을 사도 되나요?"
 
 
 def _지금() -> str:
@@ -173,7 +170,7 @@ def _지금() -> str:
 
 
 # ════════════════════════════════════════════════════════════════════
-# 상세 — GET /api/plans/{plan_id}
+# 상세 · 삭제 — GET/DELETE /api/plans/{plan_id}
 # ════════════════════════════════════════════════════════════════════
 
 @router.get("/{plan_id}", response_model=계획상세)
@@ -183,7 +180,7 @@ def 상세(plan_id: int, org_id: str | None = None) -> 계획상세:
         if not 행:
             raise HTTPException(404, f"지출계획 {plan_id} 을(를) 찾을 수 없습니다")
         할일 = [t for t in mock_data.목_할일 if t["plan_id"] == plan_id]
-        # 생성() 이 만든 행에는 「정규화」 키가 있고 시드 데이터엔 없다 — 병합 시 중복 키 주의
+        # 생성() 이 만든 행에는 '정규화' 키가 있고 시드 데이터에는 없어서 병합해 넘긴다
         return 계획상세(**{**행, "정규화": 행.get("정규화") or {}},
                        할일=할일, 판정상세=None)
     return _실_상세(plan_id, org_id)
@@ -191,10 +188,10 @@ def 상세(plan_id: int, org_id: str | None = None) -> 계획상세:
 
 @router.delete("/{plan_id}", status_code=200)
 def 삭제(plan_id: int, org_id: str | None = None) -> dict:
-    """지출계획 하나를 지운다 — 자기 org 것만 지워진다.
+    """지출계획 하나를 지운다. 요청한 org 의 계획만 지워진다.
 
-    FK 로 plan_tasks 는 CASCADE(같이 삭제), decisions 는 SET NULL(판정 기록은
-    감사 흔적으로 남기고 연결만 끊는다). 되돌릴 수 없어 같이 지워진 건수를 반환한다.
+    FK 설정상 plan_tasks 는 CASCADE 로 같이 삭제되고, decisions 는 SET NULL 로 연결만 끊긴다
+    (판정 기록은 감사 기록으로 남긴다). 되돌릴 수 없으므로 같이 지워진 할일 건수를 반환한다.
     """
     if MOCK:
         전 = len(mock_data.목_계획)
@@ -206,13 +203,13 @@ def 삭제(plan_id: int, org_id: str | None = None) -> dict:
         return {"삭제": True, "plan_id": plan_id, "할일삭제": len(할일)}
 
     조건, org인자 = _org조건(org_id, "p")
-    # 지우기 전에 센다 — CASCADE 뒤에는 못 센다
+    # CASCADE 뒤에는 셀 수 없으므로 지우기 전에 센다
     행 = _질의(
         f"SELECT p.제목, (SELECT count(*) FROM tenant.plan_tasks t WHERE t.plan_id = p.plan_id) "
         f"  FROM tenant.expense_plans p WHERE p.plan_id = %s AND {조건}",
         (plan_id, *org인자))
     if not 행:
-        # 남의 org 것이어도 404 다 — 403 을 주면 id 존재 여부가 샌다
+        # 다른 org 의 계획이어도 404 다. 403 을 주면 id 존재 여부가 드러난다
         raise HTTPException(404, f"지출계획 {plan_id} 을(를) 찾을 수 없습니다")
     제목, 할일수 = 행[0]
     n = _실행(f"DELETE FROM tenant.expense_plans p WHERE p.plan_id = %s AND {조건}",
@@ -224,33 +221,28 @@ def 삭제(plan_id: int, org_id: str | None = None) -> dict:
 
 
 # ════════════════════════════════════════════════════════════════════
-# 실 경로 구역 — 아래 넷이 전부다
+# DB 모드 구현
 # ════════════════════════════════════════════════════════════════════
 
 def _문자열(v) -> str | None:
-    """DATE·TIMESTAMPTZ (psycopg 가 date/datetime 객체로 준다) → ISO 문자열."""
+    """DATE·TIMESTAMPTZ(psycopg 가 date/datetime 객체로 준다)를 ISO 문자열로 바꾼다."""
     return v.isoformat() if v is not None else None
 
 
-def _jsonb(v):
-    """JSONB 컬럼 바인딩용. `psycopg` 는 dict 를 자동 변환하지 않는다 (`Json` 래퍼 필요).
-    목 모드에선 이 코드가 안 불리므로 psycopg 미설치라도 import 는 지연시킨다."""
-    from psycopg.types.json import Json
-    return Json(v)
+def _실수(v) -> float | None:
+    """NUMERIC(psycopg 가 Decimal 로 준다)을 float 로 바꾼다."""
+    return float(v) if v is not None else None
 
 
-def _org조건(org_id: str | None, 별칭: str = "p") -> tuple[str, tuple]:
-    """org_id 가 None 이면 게스트(org_id IS NULL) 행만 반환한다 — 남의 기관 행이 새면 TENANT_LEAK."""
-    if org_id is None:
-        return f"{별칭}.org_id IS NULL", ()
-    return f"{별칭}.org_id = %s", (org_id,)
+_목록_컬럼 = ("plan_id", "제목", "확정비목", "금액", "판정", "집행예정일",
+             "updated_at", "사업명", "상태")
 
 
 def _실_목록(org_id: str | None) -> list[dict]:
     """tenant.expense_plans LEFT JOIN tenant.decisions ON latest_decision_id.
 
-    반환 dict 의 키는 `models.계획요약` 필드와 정확히 같아야 한다. org_id 가 None 이면
-    게스트(org_id IS NULL) 행만 본다 — 남의 기관 행이 새면 TENANT_LEAK.
+    반환 dict 의 키는 `models.계획요약` 필드와 같다. org_id 가 None 이면 게스트(org_id IS NULL)
+    행만 본다.
     """
     조건, 인자 = _org조건(org_id)
     행 = _질의(f"""
@@ -261,19 +253,18 @@ def _실_목록(org_id: str | None) -> list[dict]:
         WHERE {조건}
         ORDER BY p.updated_at DESC
     """, 인자)
-    return [
-        {
-            "plan_id": r[0], "제목": r[1], "확정비목": r[2],
-            "금액": float(r[3]) if r[3] is not None else None,
-            "판정": r[4], "집행예정일": _문자열(r[5]),
-            "updated_at": _문자열(r[6]), "사업명": r[7], "상태": r[8],
-        }
-        for r in 행
-    ]
+    out = []
+    for r in 행:
+        d = dict(zip(_목록_컬럼, r))
+        d["금액"] = _실수(d["금액"])
+        d["집행예정일"] = _문자열(d["집행예정일"])
+        d["updated_at"] = _문자열(d["updated_at"])
+        out.append(d)
+    return out
 
 
 def _실_통계(org_id: str | None) -> dict:
-    """같은 JOIN 한 번으로 5개 카운트 + 금액합계. 키는 `models.계획통계` 와 동일."""
+    """같은 JOIN 한 번으로 탭별 건수 5개와 금액합계를 센다. 키는 `models.계획통계` 와 같다."""
     조건, 인자 = _org조건(org_id)
     행 = _질의(f"""
         SELECT
@@ -287,7 +278,7 @@ def _실_통계(org_id: str | None) -> dict:
         LEFT JOIN tenant.decisions d ON d.decision_id = p.latest_decision_id
         WHERE {조건}
     """, 인자)
-    # _질의 는 DB 접속 실패 시도 빈 리스트를 준다 — 0건과 구분해 0으로 채운다
+    # _질의 는 DB 접속 실패에도 빈 리스트를 준다. 이때는 0 으로 채운다
     if not 행:
         return {"전체": 0, "확인필요": 0, "위험": 0, "특이사항없음": 0, "점검전": 0, "금액합계": 0.0}
     r = 행[0]
@@ -297,13 +288,15 @@ def _실_통계(org_id: str | None) -> dict:
     }
 
 
-def _실_생성(body: 계획생성, *, org_id=_주어지지않음) -> 계획상세:
+_생성_컬럼 = ("plan_id", "제목", "확정비목", "금액", "집행예정일", "updated_at", "created_at",
+             "사업명", "상태", "질문원문", "거래처", "추가설명", "정규화", "latest_decision_id")
+
+
+def _실_생성(body: 계획생성, *, org_id: str | None) -> 계획상세:
     """INSERT INTO tenant.expense_plans. 질문원문이 없으면 `_합성(body)` 을 쓴다.
 
-    org_id 는 HTTP 경로에서 반드시 넘겨야 한다 — 안 넘기면 body.org_id(자기신고)로
-    떨어지는데, 이 통로는 테스트의 직접 호출 전용이다. 라우터에서 타면 기관 사칭이 된다.
+    org_id 는 호출자가 검증된 주체에서 정한 값이다(`_계획_org`). body.org_id 는 쓰지 않는다.
     """
-    주인 = body.org_id if org_id is _주어지지않음 else org_id
     제목 = body.제목 or body.품목
     질문원문 = body.질문원문 or _합성(body)
     행 = _질의_저장(
@@ -314,27 +307,38 @@ def _실_생성(body: 계획생성, *, org_id=_주어지지않음) -> 계획상�
         RETURNING plan_id, 제목, 확정비목, 금액, 집행예정일, updated_at, created_at,
                   사업명, 상태, 질문원문, 거래처, 추가설명, 정규화, latest_decision_id
         """,
-        (주인, 제목, 질문원문, _jsonb(body.정규화), body.사업명,
+        (org_id, 제목, 질문원문, _jsonb(body.정규화), body.사업명,
          body.확정비목, body.금액, body.집행예정일, body.거래처, body.추가설명),
-        주인,
+        org_id,
     )
     if not 행:
-        # _질의_저장 이 실패를 예외로 던지므로 정상 경로에선 여기 안 온다 — 방어적 처리
+        # _질의_저장 은 실패를 예외로 던지므로 정상 경로에서는 여기 오지 않는다
         raise HTTPException(500, "지출계획을 저장하지 못했습니다")
-    r = 행[0]
+    r = dict(zip(_생성_컬럼, 행[0]))
     return 계획상세(
-        plan_id=r[0], 제목=r[1], 확정비목=r[2],
-        금액=float(r[3]) if r[3] is not None else None,
+        plan_id=r["plan_id"], 제목=r["제목"], 확정비목=r["확정비목"], 금액=_실수(r["금액"]),
         판정=None,                              # 방금 만든 계획이라 아직 판정이 없다
-        집행예정일=_문자열(r[4]), updated_at=_문자열(r[5]), created_at=_문자열(r[6]),
-        사업명=r[7], 상태=r[8], 질문원문=r[9], 용도=body.용도, 거래처=r[10],
-        추가설명=r[11], 정규화=r[12] or {}, latest_decision_id=r[13],
+        집행예정일=_문자열(r["집행예정일"]), updated_at=_문자열(r["updated_at"]),
+        created_at=_문자열(r["created_at"]),
+        사업명=r["사업명"], 상태=r["상태"], 질문원문=r["질문원문"], 용도=body.용도,
+        거래처=r["거래처"], 추가설명=r["추가설명"], 정규화=r["정규화"] or {},
+        latest_decision_id=r["latest_decision_id"],
         판정상세=None, 할일=[],
     )
 
 
+_상세_컬럼 = ("plan_id", "제목", "확정비목", "금액", "판정", "집행예정일",
+             "updated_at", "created_at", "사업명", "상태", "질문원문",
+             "거래처", "추가설명", "정규화", "latest_decision_id",
+             "요약", "해야할일", "인용", "전제", "신뢰등급", "버전스탬프",
+             "참조사슬", "강등사유")
+
+_계획할일_컬럼 = ("task_id", "plan_id", "출처", "코드", "구분", "항목", "설명", "due_date",
+               "유형", "날짜_사용자수정", "상태")
+
+
 def _실_상세(plan_id: int, org_id: str | None) -> 계획상세:
-    """계획 + 최신 판정 + plan_tasks 를 한 번에. 없으면 404."""
+    """계획, 최신 판정, plan_tasks 를 함께 돌려준다. 없거나 다른 기관 것이면 404."""
     조건, org인자 = _org조건(org_id)
     행 = _질의(f"""
         SELECT p.plan_id, p.제목, p.확정비목, p.금액, d.판정, p.집행예정일,
@@ -348,25 +352,27 @@ def _실_상세(plan_id: int, org_id: str | None) -> 계획상세:
     """, (plan_id, *org인자))
     if not 행:
         raise HTTPException(404, f"지출계획 {plan_id} 을(를) 찾을 수 없습니다")
-    r = 행[0]
+    r = dict(zip(_상세_컬럼, 행[0]))
+    정규화 = r["정규화"] or {}
 
     판정상세 = None
-    if r[14] is not None:          # latest_decision_id 있음 = 판정을 받은 적 있다
+    if r["latest_decision_id"] is not None:          # 판정을 받은 적이 있다
         판정상세 = {
-            "판정": r[4], "요약": r[15], "해야할일": r[16] or [], "인용": r[17] or [],
-            "전제": r[18] or [], "신뢰등급": r[19], "버전스탬프": r[20],
-            "참조사슬": r[21] or [], "강등사유": r[22] or [],
+            "판정": r["판정"], "요약": r["요약"], "해야할일": r["해야할일"] or [],
+            "인용": r["인용"] or [], "전제": r["전제"] or [], "신뢰등급": r["신뢰등급"],
+            "버전스탬프": r["버전스탬프"], "참조사슬": r["참조사슬"] or [],
+            "강등사유": r["강등사유"] or [],
         }
-        # 문의초안은 저장하지 않고 여기서 매번 다시 만든다 — 인용·전제·정규화(저장됨)에서
-        # 파생되는 글이라 스키마를 안 늘려도 되고, 문구를 고치면 옛 판정에도 적용된다.
+        # 문의초안은 저장하지 않고 조회 때마다 만든다. 저장된 인용·전제·정규화에서 파생되는
+        # 글이라 스키마를 늘릴 필요가 없고, 문구를 고치면 이전 판정에도 적용된다.
         # 판단불가가 아니면 문의초안() 이 None 을 준다
         try:
             from .inquiry import 문의초안 as _초안
             판정상세["문의초안"] = _초안(
-                정규화=r[13] or {}, 판정=r[4] or "",
-                인용=r[17] or [], 전제=r[18] or [], 사업명=r[8])
+                정규화=정규화, 판정=r["판정"] or "",
+                인용=r["인용"] or [], 전제=r["전제"] or [], 사업명=r["사업명"])
         except Exception:                                     # noqa: BLE001
-            # 초안을 못 만들어도 계획 조회를 죽이지 않는다 — 부가 정보다.
+            # 부가 정보라서 초안 생성이 실패해도 계획 조회는 실패시키지 않는다
             _log.exception("문의초안 재생성 실패 plan_id=%s", plan_id)
             판정상세["문의초안"] = None
 
@@ -378,21 +384,19 @@ def _실_상세(plan_id: int, org_id: str | None) -> 계획상세:
         """,
         (plan_id,),
     )
-    할일 = [
-        {
-            "task_id": t[0], "plan_id": t[1], "출처": t[2], "코드": t[3],
-            "구분": t[4], "항목": t[5], "설명": t[6], "due_date": _문자열(t[7]),
-            "유형": t[8], "날짜_사용자수정": t[9], "상태": t[10], "계획제목": r[1],
-        }
-        for t in 할일행
-    ]
+    할일 = []
+    for t in 할일행:
+        d = dict(zip(_계획할일_컬럼, t))
+        d["due_date"] = _문자열(d["due_date"])
+        d["계획제목"] = r["제목"]
+        할일.append(d)
 
-    정규화 = r[13] or {}
     return 계획상세(
-        plan_id=r[0], 제목=r[1], 확정비목=r[2],
-        금액=float(r[3]) if r[3] is not None else None,
-        판정=r[4], 집행예정일=_문자열(r[5]), updated_at=_문자열(r[6]), created_at=_문자열(r[7]),
-        사업명=r[8], 상태=r[9], 질문원문=r[10], 용도=정규화.get("용도"),
-        거래처=r[11], 추가설명=r[12], 정규화=정규화, latest_decision_id=r[14],
+        plan_id=r["plan_id"], 제목=r["제목"], 확정비목=r["확정비목"], 금액=_실수(r["금액"]),
+        판정=r["판정"], 집행예정일=_문자열(r["집행예정일"]),
+        updated_at=_문자열(r["updated_at"]), created_at=_문자열(r["created_at"]),
+        사업명=r["사업명"], 상태=r["상태"], 질문원문=r["질문원문"], 용도=정규화.get("용도"),
+        거래처=r["거래처"], 추가설명=r["추가설명"], 정규화=정규화,
+        latest_decision_id=r["latest_decision_id"],
         판정상세=판정상세, 할일=할일,
     )
