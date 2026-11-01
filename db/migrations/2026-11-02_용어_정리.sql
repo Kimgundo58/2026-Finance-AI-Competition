@@ -25,7 +25,6 @@
 --   - 판정 라벨(가능·조건부·불가·판단불가)과 공식 규정 용어(비목·협약·주관기관·세부관리기준 등)
 --   - 프롬프트에 들어가는 값: decisions.전제[].매핑, check_items.필요프로필필드 값, rules.사전승인_조건·금지예시·허용예시,
 --     check_items.항목·설명, programs.우선규범. 프롬프트 변경과 같은 배포에서 따로 바꾼다.
---   - decisions.검색스냅샷 의 'dangling' 키(현재 코드가 같은 키로 쓴다)
 --
 -- 적용 후
 --   10절 확인을 통과해야 커밋된다. 커밋 뒤 corpus.chunks·corpus.refs 를 VACUUM ANALYZE 한다.
@@ -196,8 +195,9 @@ BEGIN
     s := replace(s, 'F축', '기업 프로필');
     s := regexp_replace(s, '^\(1\) 정규화 실패', '정규화 실패');
     s := regexp_replace(s, '^\(3\) L3 로드 실패', 'L3 로드 실패');
+    s := regexp_replace(s, '^\(3\) 검색 실패', '검색 실패');
     s := regexp_replace(s, '^\(4\) LLM 실패', '판정 호출 실패');
-    s := regexp_replace(s, '^\(7\) decisions 저장 실패', 'decisions 저장 실패');
+    s := regexp_replace(s, '^\(7\) decisions (저장|적재) 실패', 'decisions 저장 실패');
     RETURN s;
 END $f$;
 
@@ -534,7 +534,8 @@ UPDATE tenant.decisions SET
     "처리단계"   = pg_temp.단계변경("처리단계"),
     "실패단계"   = CASE "실패단계" WHEN '조립' THEN '프롬프트구성' WHEN '판정LLM' THEN '판정호출' ELSE "실패단계" END,
     "지연ms"     = pg_temp.상위키변경("지연ms", pg_temp.지연키()),
-    "검색스냅샷" = pg_temp.상위키변경("검색스냅샷", '{"s맵": "문장맵", "게이트값": "최고유사도"}'),
+    "검색스냅샷" = pg_temp.상위키변경("검색스냅샷",
+                     '{"s맵": "문장맵", "게이트값": "최고유사도", "dangling": "미해결참조"}'),
     "모델"       = pg_temp.키변경("모델", pg_temp.모델키()),
     "인용"       = pg_temp.키변경("인용", '{"s번호": "문장ID"}'),
     "참조관계"   = CASE WHEN jsonb_typeof("참조관계") = 'array' THEN (
@@ -939,6 +940,26 @@ BEGIN
                 WHEN 'jang'      THEN 'chapter'
                 ELSE "분할전략" END
          WHERE "분할전략" IN ('jo_titled', 'jo_bare', 'jang');
+        -- 경고 문구(article_split.validate 플래그, corpus_ingest 경고)와 실패 사유 접두어
+        UPDATE corpus.ingest_jobs SET "경고" = (
+                SELECT coalesce(jsonb_agg(CASE WHEN jsonb_typeof(e) = 'string' THEN to_jsonb(
+                         regexp_replace(regexp_replace(regexp_replace(regexp_replace(e #>> '{}',
+                           '^V2:조_개수_부족\(([0-9]+)\)$', '조개수부족:\1'),
+                           '^V1:조번호_비단조\(([0-9]+)건: (.*)\)$', '조번호역전:\1건 (\2)'),
+                           '^V3:빈조_과다\(([0-9]+/[0-9]+)\)$', '빈조과다:\1'),
+                           '^박스표 부속 ', '괘선표 첨부 '))
+                       ELSE e END ORDER BY i), '[]'::jsonb)
+                  FROM jsonb_array_elements("경고") WITH ORDINALITY a(e, i))
+         WHERE jsonb_typeof("경고") = 'array' AND "경고"::text ~ '"(V[123]:|박스표 부속 )';
+        UPDATE corpus.ingest_jobs SET "실패사유" = replace("실패사유", 'HWP-DRM:', 'HWP-PROTECTED:')
+         WHERE "실패사유" LIKE '%HWP-DRM:%';
+    END IF;
+    -- 테이블이 없으면 아래 SELECT 를 계획할 수 없으므로 IF 를 나눈다
+    IF to_regclass('corpus.ingest_jobs') IS NOT NULL THEN
+        IF EXISTS (SELECT 1 FROM corpus.ingest_jobs
+                    WHERE "경고"::text ~ '"(V[123]:|박스표 부속 )' OR "실패사유" LIKE '%HWP-DRM:%') THEN
+            RAISE EXCEPTION '용어 정리: corpus.ingest_jobs 의 경고·실패사유에 옛 문구가 남았다';
+        END IF;
     END IF;
 END $$;
 
@@ -961,7 +982,7 @@ BEGIN
                       OR "실패단계" IN ('조립', '판정LLM')
         UNION ALL SELECT 'decisions.JSONB 키', count(*) FROM tenant.decisions
                    WHERE "지연ms" ?| ARRAY['비목확정', 'l3게이팅', '금지적중', '판정LLM', '조립', '전제해소']
-                      OR "검색스냅샷" ?| ARRAY['s맵', '게이트값']
+                      OR "검색스냅샷" ?| ARRAY['s맵', '게이트값', 'dangling']
                       OR "모델"::text ~ '"(변형|추론content[^"]*)":'
                       OR "인용"::text ~ '"s번호":'
                       OR "참조관계"::text ~ '"(표기|보정)":'
