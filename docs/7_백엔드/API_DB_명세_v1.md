@@ -4,11 +4,11 @@
 찾을 것이 정해져 있으면 목차에서 바로 내려가라.
 
 > 이 문서는 "지금 실제로 무엇이 있는가"다. "왜 이렇게 주는가"(계약·근거·
-> 금지사항)는 `docs/7_백엔드/API_계약_v1.0.md` 가 기준이고, 충돌하면 계약 문서가 이긴다.
+> 금지사항)는 `docs/7_백엔드/API_계약_v1.0.md` 가 기준이고, 충돌하면 계약 문서가 우선한다.
 >
 > 손으로 쓴 문서가 아니다. API 는 `app.openapi()`, DB 는 `information_schema` +
 > `pg_constraint` **실조회**에서 생성했다. 스키마가 바뀌면 이 파일을 고치지 말고
-> 생성기를 다시 돌려라.
+> 생성기를 다시 실행하라. 단 2026-11-02 용어 정리(이름 변경)는 생성기 없이 손으로 반영했다.
 >
 > ```bash
 > PYTHONIOENCODING=utf-8 python db/tools/gen_api_db_spec.py     # 저장소 루트에서 (생성기는 트리 정리로 제거됨 — 히스토리 0a5a733 이전에 있다)
@@ -24,14 +24,14 @@
 | 답하는 질문 | 왜 이렇게 주는가 | 지금 실제로 무엇이 있는가 |
 | 담는 것 | 계약·근거·금지사항·미결 주체 | 스펙·스키마·타입·제약 |
 | 갱신 | 사람이 판단해서 고친다 | **재생성한다** |
-| 충돌 시 | **이긴다** | 진다 |
+| 충돌 시 | **우선한다** | 계약 문서를 따른다 |
 
-여기 있는 것이 다 굳은 것은 아니다. 무엇이 동결이고 무엇이 아직 값이 안
-채워졌는지는 `API_계약_v1.0.md` 가 기준이다. 코드를 얹기
+여기 있는 것이 다 확정된 것은 아니다. 무엇이 동결이고 무엇이 아직 값이 안
+채워졌는지는 `API_계약_v1.0.md` 가 기준이다. 코드를 추가하기
 전에 그 문서를 먼저 봐라 — 이 문서에 컬럼이 있다는 것과 그게 계약이라는 것은 다르다.
 (확정도를 여기에도 적으면 둘 중 하나가 먼저 낡는다. 그래서 안 적는다.)
 
-계약 문서가 "만들지 않는 것"(§8)이라 못 박은 기능은 이 문서에 스키마가 있어도
+계약 문서가 "만들지 않는 것"(§8)이라 명시한 기능은 이 문서에 스키마가 있어도
 만들지 않는다.
 
 
@@ -43,7 +43,7 @@
 
 | 메서드 | 경로 | 요청 | 응답(2xx) |
 |---|---|---|---|
-| GET | `/admin/cost` | — | dict |
+| GET | `/admin/status` | — | dict |
 | GET | `/admin/queue` | — | dict |
 | POST | `/admin/warmup` | — | dict |
 | GET | `/api/health` | — | dict |
@@ -67,7 +67,7 @@
 
 OpenAPI `parameters` 실측. `기본값` 이 있으면 안 보내도 된다.
 
-**`GET /admin/cost`**
+**`GET /admin/status`**
 
 | 이름 | 위치 | 타입 | 필수 | 기본값 | 설명 |
 |---|---|---|:--:|---|---|
@@ -95,7 +95,7 @@ OpenAPI `parameters` 실측. `기본값` 이 있으면 안 보내도 된다.
 
 | 이름 | 위치 | 타입 | 필수 | 기본값 | 설명 |
 |---|---|---|:--:|---|---|
-| `목` | query | str \| null |  | — |  |
+| `mock` | query | str \| null |  | — |  |
 
 **`GET /api/l3/{doc_id}`**
 
@@ -182,7 +182,7 @@ OpenAPI `parameters` 실측. `기본값` 이 있으면 안 보내도 된다.
 
 `server/models.py` 의 pydantic 모델에서 직접 뽑았다. 필수 = 기본값이 없는 필드.
 
-**`F1`**
+**`협약정보`**
 
 | 필드 | 타입 | 필수 | 기본값 |
 |---|---|:--:|---|
@@ -191,7 +191,7 @@ OpenAPI `parameters` 실측. `기본값` 이 있으면 안 보내도 된다.
 | `협약시작일` | str \| null |  | — |
 | `협약종료일` | str \| null |  | — |
 
-**`F3항`**
+**`집행내역항목`**
 
 | 필드 | 타입 | 필수 | 기본값 |
 |---|---|:--:|---|
@@ -202,7 +202,7 @@ OpenAPI `parameters` 실측. `기본값` 이 있으면 안 보내도 된다.
 | `귀속월` | str \| null |  | — |
 | `금액` | float |  | `0` |
 
-**`F4항`**
+**`참여인력항목`**
 
 | 필드 | 타입 | 필수 | 기본값 |
 |---|---|:--:|---|
@@ -212,7 +212,7 @@ OpenAPI `parameters` 실측. `기본값` 이 있으면 안 보내도 된다.
 | `소속기관유형` | str \| null |  | — |
 | `겸직` | bool |  | `False` |
 
-**`F5`**
+**`특수관계`**
 
 | 필드 | 타입 | 필수 | 기본값 |
 |---|---|:--:|---|
@@ -228,7 +228,7 @@ OpenAPI `parameters` 실측. `기본값` 이 있으면 안 보내도 된다.
 | `확장자` | str | O | — |
 | `상태` | `파싱대기` \| `파싱중` \| `완료` \| `실패` |  | `'파싱대기'` |
 | `조_건수` | int \| null |  | — |
-| `dangling` | dict[str, Any][] |  | `[]` |
+| `미해결참조` | dict[str, Any][] |  | `[]` |
 | `메시지` | str \| null |  | — |
 
 **`계획목록응답`**
@@ -318,7 +318,7 @@ OpenAPI `parameters` 실측. `기본값` 이 있으면 안 보내도 된다.
 | `추가설명` | str \| null |  | — |
 | `질문` | str \| null |  | — |
 | `사업명` | str \| null |  | — |
-| `f5` | `F5` |  | `F5(친족거래=False, 전직임직원업체=False)` |
+| `특수관계` | `특수관계` |  | `특수관계(친족거래=False, 전직임직원업체=False)` |
 
 **`판정요청`**
 
@@ -329,15 +329,15 @@ OpenAPI `parameters` 실측. `기본값` 이 있으면 안 보내도 된다.
 | `사업명` | str \| null |  | — |
 | `org_id` | str \| null |  | — |
 | `plan_id` | int \| null |  | — |
-| `f5` | `F5` |  | `F5(친족거래=False, 전직임직원업체=False)` |
+| `특수관계` | `특수관계` |  | `특수관계(친족거래=False, 전직임직원업체=False)` |
 
 **`프로필`**
 
 | 필드 | 타입 | 필수 | 기본값 |
 |---|---|:--:|---|
-| `f1` | `F1` |  | `F1(정부지원_현금=0, 자기부담_현금=0, 협약시작일=None, 협약종료일=None)` |
-| `f3` | `F3항`[] |  | `[]` |
-| `f4` | `F4항`[] |  | `[]` |
+| `협약` | `협약정보` |  | `협약정보(정부지원_현금=0, 자기부담_현금=0, 협약시작일=None, 협약종료일=None)` |
+| `집행내역` | `집행내역항목`[] |  | `[]` |
+| `참여인력` | `참여인력항목`[] |  | `[]` |
 
 **`할일`**
 
@@ -346,7 +346,7 @@ OpenAPI `parameters` 실측. `기본값` 이 있으면 안 보내도 된다.
 | `task_id` | int | O | — |
 | `plan_id` | int \| null |  | — |
 | `출처` | `ai` \| `user` |  | `'ai'` |
-| `코드` | str \| null |  | — |
+| `code` | str \| null |  | — |
 | `구분` | `결제전` \| `결제후` \| `집행` |  | `'결제전'` |
 | `항목` | str | O | — |
 | `설명` | str \| null |  | — |
@@ -369,10 +369,10 @@ OpenAPI `parameters` 실측. `기본값` 이 있으면 안 보내도 된다.
 |---|---|:--:|---|
 | `생성` | int |  | `0` |
 | `갱신` | int |  | `0` |
-| `보존_user` | int |  | `0` |
+| `보존_사용자` | int |  | `0` |
 | `보존_날짜수정` | int |  | `0` |
 | `코드매칭` | int |  | `0` |
-| `코드미상` | int |  | `0` |
+| `코드미매칭` | int |  | `0` |
 
 **`할일목록응답`**
 
@@ -408,13 +408,13 @@ OpenAPI `parameters` 실측. `기본값` 이 있으면 안 보내도 된다.
 ### `POST /api/judge` — 이벤트 8종, 이 순서
 
 ```text
-event: 진행       {"단계":"검색|룰조회|조립", "설명":"..."}      ← 3회
-event: 판정       {판정, 요약, 신뢰등급, 버전스탬프}
+event: 진행       {"단계":"검색|룰조회|판정생성", "설명":"..."}      ← 3회
+event: 판정       {판정, 요약, 신뢰등급, 규정버전}
 event: 해야할일    [ {항목, 설명}, ... ]
 event: 인용       [ {조번호, 조제목, 원문, doc_id}, ... ]
 event: 전제       [ {사실, 근거조항, 매핑[], 미충족시}, ... ]
-event: 참조사슬    [ {from{doc_id,조번호}, 표기, 관계, to{...}, 보정}, ... ]
-event: 문의초안    "..."        ← 판정이 「판단불가」일 때만. 참조사슬과 결과 사이
+event: 참조관계    [ {from{doc_id,조번호}, 참조문자열, 관계, to{...}, 해결근거}, ... ]
+event: 문의초안    "..."        ← 판정이 「판단불가」일 때만. 참조관계와 결과 사이
 event: 결과       { 전체 JSON }                ← 이것 하나만 들어도 화면이 그려진다
 event: 저장       {저장: bool, 사유?: str, ...}
 event: 완료       {캐시: bool}
@@ -424,15 +424,15 @@ event: 완료       {캐시: bool}
 그리면 안 된다 — `plan_id 없음` · `캐시 적중 — 새 판정 기록 없음` ·
 `decision_id 없음 — 판정이 기록되지 않았다`.
 
-`결과` 이벤트에 `decision_id` 는 **실리지 않는다.** 캐시·응답에 박히면 다른 요청이
-남의 판정 기록을 자기 계획에 가리키게 된다(TENANT_LEAK 류). 회귀 테스트로 잠가 뒀다.
+`결과` 이벤트에 `decision_id` 는 **포함되지 않는다.** 캐시·응답에 포함되면 다른 요청이
+남의 판정 기록을 자기 계획에 가리키게 된다(TENANT_LEAK 류). 회귀 테스트로 막아 뒀다.
 
-`?목=가능|조건부|불가|판단불가` 로 4-way 화면을 전부 그려볼 수 있다.
+`?mock=가능|조건부|불가|판단불가` 로 4종 판정 화면을 전부 그려볼 수 있다(mock 모드).
 
 ### `POST /api/normalize`
 
 ```text
-event: 진행   {"단계":"정규화","설명":"질문에서 사실을 뽑는 중"}
+event: 진행   {"단계":"정규화","설명":"입력에서 정보를 추출하는 중"}
 event: 필드   {품목|금액|금액_추정여부|용도|비목후보 중 하나}   ← 스트리밍 렌더용. 안 들어도 된다
 event: 결과   { 전체 JSON }
 event: 완료   {"캐시": bool}
@@ -441,34 +441,34 @@ event: 완료   {"캐시": bool}
 실패하면 `event: 오류` → `event: 완료 {"실패":true}`. **500 을 던지지 않는다** —
 모든 실패의 기본값은 판단불가다.
 
-### 오류 봉투 — 전부 한 모양
+### 오류 응답 형식 — 전부 같은 형식
 
 ```json
 { "오류": "지출계획 999 을(를) 찾을 수 없습니다", "상태": 404 }
 { "오류": "...", "상태": 422, "필드": null }        ← 422 만 `필드` 가 붙는다
 ```
 
-pydantic 기본 `{"detail":[...]}` 는 서버가 걷어냈다. 렌더러는 한 벌이면 된다.
+pydantic 기본 `{"detail":[...]}` 는 서버가 제거했다. 렌더러는 하나면 된다.
 
 
 ## 3. DB 스키마 (실조회)
 
 ### 소유와 경계
 
-- **`tenant.*` 는 우리(프론트–백엔드) 소유다.** 읽고 쓴다.
-- **`corpus.*` 는 Agent 세션 소유다 — 이 문서에서는 "읽기 참조".**
-  우리가 실제로 쓰는 것은 `check_items` 하나뿐이다(할일 코드·구분·유형·오프셋일).
+- **`tenant.*` 는 API 서버 담당(프론트–백엔드) 소유다.** 읽고 쓴다.
+- **`corpus.*` 는 판정 파이프라인 담당 소유다 — 이 문서에서는 "읽기 참조".**
+  API 서버가 실제로 쓰는 것은 `check_items` 하나뿐이다(할일 코드·구분·유형·오프셋일).
   나머지는 판정 파이프라인이 쓰는 표이고, **여기서 구조를 바꾸자고 하면 안 된다.**
 - `eval.*` 은 평가 전용이라 이 문서 범위 밖이다.
 
 표기 — `NN` = NOT NULL · `PK` = 기본키 · `FK→` = 외래키 · `CHECK` 는 표 아래 별도.
 
 행수는 재생성 시점의 스냅샷이다 — 계약이 아니다. 특히 `expense_plans` 의
-현재 행은 테스트 픽스처 찌꺼기가 섞여 있어 실사용 데이터가 아니다. 컬럼·타입·제약만
+현재 행은 테스트 픽스처 잔여 데이터가 섞여 있어 실사용 데이터가 아니다. 컬럼·타입·제약만
 믿어라.
 
 
-### 3-1. `tenant.*` — 우리 소유 (읽기·쓰기)
+### 3-1. `tenant.*` — API 서버 담당 소유 (읽기·쓰기)
 
 #### `tenant.accounts`  · 5컬럼 · 0행
 
@@ -506,15 +506,15 @@ pydantic 기본 `{"detail":[...]}` 는 서버가 걷어냈다. 렌더러는 한 
 | `코퍼스버전` | text |  | — |
 | `plan_id` | bigint | FK→expense_plans(plan_id) | — |
 | `요약` | text |  | — |
-| `버전스탬프` | text |  | — |
-| `참조사슬` | jsonb |  | — |
-| `강등사유` | ARRAY |  | — |
+| `규정버전` | text |  | — |
+| `참조관계` | jsonb |  | — |
+| `검증사유` | ARRAY |  | — |
 | `미매핑전제` | jsonb |  | — |
-| `강등코드` | ARRAY | NN | `'{}'::text[]` |
-| `경로` | text |  | — |
+| `검증코드` | ARRAY | NN | `'{}'::text[]` |
+| `처리단계` | text |  | — |
 | `실패단계` | text |  | — |
 
-- CHECK `decisions_강등코드_check` — `(("강등코드" <@ ARRAY['INVALID_JUDGMENT'::text, 'CITE_NOT_IN_MAP'::text, 'CITE_DB_MISSING'::text, 'CITE_HANG_MISMATCH'::text, 'PREMISE_NO_BASIS'::text, 'PREMISE_BASIS_NOT_IN_MAP'::text, 'PREMISE_ENUM'::text, 'PREMISE_UNMAPPED'::text, 'PREMISE_DB_MISSING'::text, 'NO_CITATION'::text, 'VLM_DOWNGRADE'::text, 'B_GRADE_DOWNGRADE'::text, 'UNVERIFIED_RULE'::text, 'TASK_CODE_INVALID'::text, 'TASK_DB_MISSING'::text, 'L3_ONLY_DOWNGRADE'::text, 'TENANT_LEAK'::text, 'DANGLING_WARN'::text, 'DOMAIN_WARN'::text, 'PRECEDENCE_FLIP'::text, 'TASK_STATE_UNSOURCED'::text, 'TASK_STATE_MISMATCH'::text, 'TASK_NUMBER_UNSOURCED'::text, 'TASK_BASIS_NOT_IN_MAP'::text]))`
+- CHECK `decisions_검증코드_check` — `(("검증코드" <@ ARRAY['INVALID_JUDGMENT'::text, 'CITE_NOT_IN_MAP'::text, 'CITE_DB_MISSING'::text, 'CITE_PARAGRAPH_MISMATCH'::text, 'PREMISE_NO_BASIS'::text, 'PREMISE_BASIS_NOT_IN_MAP'::text, 'PREMISE_INVALID_OUTCOME'::text, 'PREMISE_UNMAPPED'::text, 'PREMISE_DB_MISSING'::text, 'NO_CITATION'::text, 'VLM_DOWNGRADE'::text, 'B_GRADE_DOWNGRADE'::text, 'UNVERIFIED_RULE'::text, 'TASK_CODE_INVALID'::text, 'TASK_DB_MISSING'::text, 'L3_ONLY_DOWNGRADE'::text, 'TENANT_LEAK'::text, 'DANGLING_WARN'::text, 'DOMAIN_WARN'::text, 'PRECEDENCE_OVERRIDE'::text, 'TASK_STATE_UNSOURCED'::text, 'TASK_STATE_MISMATCH'::text, 'TASK_NUMBER_UNSOURCED'::text, 'TASK_BASIS_NOT_IN_MAP'::text]))`
 - CHECK `decisions_신뢰등급_check` — `((("신뢰등급" = ANY (ARRAY['A'::text, 'B'::text])) OR ("신뢰등급" IS NULL)))`
 - CHECK `decisions_판정_check` — `((("판정" = ANY (ARRAY['가능'::text, '조건부'::text, '불가'::text, '판단불가'::text])) OR ("판정" IS NULL)))`
 
@@ -540,12 +540,12 @@ pydantic 기본 `{"detail":[...]}` 는 서버가 걷어냈다. 렌더러는 한 
 
 - CHECK `expense_plans_상태_check` — `(("상태" = ANY (ARRAY['draft'::text, 'judged'::text])))`
 
-#### `tenant.f_exec`  · 9컬럼 · 0행
+#### `tenant.profile_expenditures`  · 9컬럼 · 0행
 
 | 컬럼 | 타입 | | 기본값 |
 |---|---|---|---|
-| `exec_id` | bigint | PK | `nextval('f_exec_exec_id_seq'::regclass)` |
-| `profile_id` | uuid | NN · FK→f_profile(profile_id) | — |
+| `exec_id` | bigint | PK | `nextval('profile_expenditures_exec_id_seq'::regclass)` |
+| `profile_id` | uuid | NN · FK→profile_agreements(profile_id) | — |
 | `비목` | text | NN | — |
 | `재원` | text | NN | — |
 | `거래처` | text |  | — |
@@ -554,23 +554,23 @@ pydantic 기본 `{"detail":[...]}` 는 서버가 걷어냈다. 렌더러는 한 
 | `금액` | numeric | NN | — |
 | `created_at` | timestamptz | NN | `now()` |
 
-- CHECK `f_exec_재원_check` — `(("재원" = ANY (ARRAY['정부지원'::text, '자기부담'::text])))`
+- CHECK `profile_expenditures_재원_check` — `(("재원" = ANY (ARRAY['정부지원'::text, '자기부담'::text])))`
 
-#### `tenant.f_personnel`  · 7컬럼 · 0행
+#### `tenant.profile_personnel`  · 7컬럼 · 0행
 
 | 컬럼 | 타입 | | 기본값 |
 |---|---|---|---|
-| `person_id` | bigint | PK | `nextval('f_personnel_person_id_seq'::regclass)` |
-| `profile_id` | uuid | NN · FK→f_profile(profile_id) | — |
+| `person_id` | bigint | PK | `nextval('profile_personnel_person_id_seq'::regclass)` |
+| `profile_id` | uuid | NN · FK→profile_agreements(profile_id) | — |
 | `역할` | text | NN | — |
 | `고용형태` | text |  | — |
 | `타사업참여율` | numeric |  | — |
 | `소속기관유형` | text |  | — |
 | `겸직` | boolean |  | — |
 
-- CHECK `f_personnel_역할_check` — `(("역할" = ANY (ARRAY['대표자'::text, '신규채용'::text, '기존직원'::text])))`
+- CHECK `profile_personnel_역할_check` — `(("역할" = ANY (ARRAY['대표자'::text, '신규채용'::text, '기존직원'::text])))`
 
-#### `tenant.f_profile`  · 9컬럼 · 0행
+#### `tenant.profile_agreements`  · 9컬럼 · 0행
 
 | 컬럼 | 타입 | | 기본값 |
 |---|---|---|---|
@@ -601,7 +601,7 @@ pydantic 기본 `{"detail":[...]}` 는 서버가 걷어냈다. 렌더러는 한 
 | `상세` | jsonb | NN | `'{}'::jsonb` |
 | `해소` | boolean | NN | `false` |
 
-- CHECK `incidents_종류_check` — `(("종류" = ANY (ARRAY['TENANT_LEAK'::text, 'INDEX_GUARD'::text, 'SCHEMA_VIOLATION'::text, 'ROUTING_BLOCK'::text, '기타'::text])))`
+- CHECK `incidents_종류_check` — `(("종류" = ANY (ARRAY['TENANT_LEAK'::text, 'INDEX_GUARD'::text, 'SCHEMA_VIOLATION'::text, 'ROUTING_BLOCK'::text, 'OTHER'::text])))`
 
 #### `tenant.l3_articles`  · 9컬럼 · 17행
 
@@ -612,7 +612,7 @@ pydantic 기본 `{"detail":[...]}` 는 서버가 걷어냈다. 렌더러는 한 
 | `org_id` | uuid | NN | — |
 | `조번호` | text | NN | — |
 | `조제목` | text |  | — |
-| `조번호_int` | integer |  | — |
+| `조순번` | integer |  | — |
 | `장` | text |  | — |
 | `본문` | text | NN | — |
 | `페이지` | integer |  | — |
@@ -631,14 +631,14 @@ pydantic 기본 `{"detail":[...]}` 는 서버가 걷어냈다. 렌더러는 한 
 | `status` | text | NN | — |
 | `extraction` | text | NN | `'native'::text` |
 | `파싱품질` | text | NN | — |
-| `dangling수` | integer | NN | `0` |
+| `미해결참조수` | integer | NN | `0` |
 | `created_at` | timestamptz | NN | `now()` |
 | `출처` | text | NN | `'기관업로드'::text` |
 
 - CHECK `l3_documents_extraction_check` — `((extraction = ANY (ARRAY['native'::text, 'dedupe'::text, 'hancom'::text, 'vlm'::text, 'hwpx'::text, 'hwp'::text])))`
 - CHECK `l3_documents_status_check` — `((status = ANY (ARRAY['active'::text, 'superseded'::text])))`
 - CHECK `l3_documents_출처_check` — `(("출처" = ANY (ARRAY['기관업로드'::text, '테스트픽스처'::text])))`
-- CHECK `l3_documents_파싱품질_check` — `(("파싱품질" = ANY (ARRAY['대기'::text, 'pass'::text, 'warn'::text, 'fail'::text])))`
+- CHECK `l3_documents_파싱품질_check` — `(("파싱품질" = ANY (ARRAY['pending'::text, 'pass'::text, 'warn'::text, 'fail'::text])))`
 
 #### `tenant.orgs`  · 6컬럼 · 2행
 
@@ -686,15 +686,15 @@ pydantic 기본 `{"detail":[...]}` 는 서버가 걷어냈다. 렌더러는 한 
 | `사업명` | text |  | — |
 | `비목` | text |  | — |
 | `발생횟수` | integer | NN | `1` |
-| `최초` | timestamptz | NN | `now()` |
-| `최근` | timestamptz | NN | `now()` |
+| `최초발생` | timestamptz | NN | `now()` |
+| `최근발생` | timestamptz | NN | `now()` |
 
 - UNIQUE — `UNIQUE NULLS NOT DISTINCT (premise_text, "사업명", "비목")`
 
 
-### 3-2. `corpus.*` — Agent 세션 소유 · **읽기 참조**
+### 3-2. `corpus.*` — 판정 파이프라인 담당 소유 · **읽기 참조**
 
-우리가 쓰는 것은 `check_items` 하나뿐이라 그것만 편다. 나머지는 판정 파이프라인의 표이고 구조를 바꾸자고 하지 않는다 — 여기 베껴 두면 사본이 곧 낡는다. 구조가 필요하면 DB 를 직접 조회해라.
+API 서버가 쓰는 것은 `check_items` 하나뿐이라 그것만 적는다. 나머지는 판정 파이프라인의 표이고 구조를 바꾸자고 하지 않는다 — 여기 베껴 두면 사본이 곧 낡는다. 구조가 필요하면 DB 를 직접 조회해라.
 
 #### `corpus.check_items`  · 12컬럼 · 52행
 
@@ -723,7 +723,7 @@ pydantic 기본 `{"detail":[...]}` 는 서버가 걷어냈다. 렌더러는 한 
 | 도구 | 무엇을 하나 |
 |---|---|
 | `db/tools/gen_api_db_spec.py` | **이 문서 전체를 다시 만든다** (API + DB). 산문까지 이 스크립트 안에 있다 |
-| `db/tools/dump_db_schema.py` | 살아있는 DB 스키마만 덤프한다. 이 문서와 **독립 교차검증**용 |
+| `db/tools/dump_db_schema.py` | 실행 중인 DB 스키마만 덤프한다. 이 문서와 **독립 교차검증**용 |
 
 두 도구가 서로를 검증한다. 2026-09-01 대조에서 13개 표·CHECK 18개가 전부 일치했다.
 
@@ -731,20 +731,20 @@ pydantic 기본 `{"detail":[...]}` 는 서버가 걷어냈다. 렌더러는 한 
 
 | 질문 | 방법 | 답하는 것 |
 |---|---|---|
-| **빈 DB 로 `db/init` 을 돌리면 지금 DB 와 같은가** | 새 DB 를 만들어 `db/init/*.sql` 적용 후 덤프 대조 | "초기화 스크립트가 현재 상태를 재현한다" |
+| **빈 DB 로 `db/init` 을 실행하면 지금 DB 와 같은가** | 새 DB 를 만들어 `db/init/*.sql` 적용 후 덤프 대조 | "초기화 스크립트가 현재 상태를 재현한다" |
 | **이미 있는 DB 에 `db/init` 을 다시 적용하면 최신이 되는가** | 기존 DB 에 적용 후 덤프 대조 | "기존 DB 가 갱신된다" |
 
 앞의 질문에 통과해도 뒤의 질문은 미해결일 수 있다. 예를 들어 변경 사항이
 `CREATE TABLE IF NOT EXISTS` 안에 인라인이고 `ALTER` 가 없으면(`check_items.유형` ·
-`l3_documents.파싱품질='대기'` 사례), 빈 DB 는 최신으로 서는데 기존 DB 는 영원히 갱신이
+`l3_documents.파싱품질` CHECK 사례), 빈 DB 는 최신 상태가 되는데 기존 DB 는 영원히 갱신이
 안 된다. 빈 DB 로만 대조하고 안심하면 이걸 못 본다.
 
 
 ## 5. 이 문서가 다루지 않는 것
 
 - **왜 그런가** — 계약 문서 `docs/7_백엔드/API_계약_v1.0.md` 를 봐라. 특히 §8 "만들지 않는
-  것"과 §9 "실서버로 갈아끼울 때 버그로 오해할 것"은 이 문서에 대응물이 없다.
-- **판정 품질 수치** — `docs/제출_공모전_설명.md` 가 기준이다. 일치율을 인용할 때는 **다수결
-  기준선을 반드시 병기**해야 한다(골든셋 정답이 "불가"로 쏠려 상수 예측기가 이미
+  것"과 §9 "운영 서버로 전환할 때 버그로 오해할 것"은 이 문서에 대응물이 없다.
+- **판정 품질 수치** — `docs/제출_공모전_설명.md` 가 기준이다. 일치율을 인용할 때는 **최빈 클래스
+  기준선을 반드시 병기**해야 한다(골든셋 정답이 "불가"로 편중되어 상수 예측기가 이미
   66.1% 를 낸다). 검색 지표(hit@k)는 그 편향과 무관하다.
-- **eval 스키마** · 코퍼스 적재 절차 — Agent 세션 범위다.
+- **eval 스키마** · 코퍼스 적재 절차 — 판정 파이프라인 담당 범위다.

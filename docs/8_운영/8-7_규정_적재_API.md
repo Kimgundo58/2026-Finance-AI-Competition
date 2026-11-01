@@ -8,7 +8,7 @@
 
 ```
 POST /admin/documents        202, ingest_jobs.상태=parsing
-  백그라운드: 추출 -> 조 분해·품질 판정 -> 조별 적용대상 -> 청크 -> 임베딩(KURE-v1) -> 참조 -> 저장(staged)
+  백그라운드: 추출 -> 조문 분할·품질 판정 -> 조별 적용대상 -> 청크 -> 임베딩(KURE-v1) -> 참조 -> 저장(staged)
   실패: 상태 failed + 실패사유. documents·chunks 에는 아무것도 남지 않는다
 GET  /admin/documents/{doc_id}           상태·품질·조 수·경고·조문 샘플
 POST /admin/documents/{doc_id}/activate  staged -> active, 이전 판 -> superseded, BM25 색인 (한 트랜잭션)
@@ -35,7 +35,7 @@ GET  /admin/documents?status=staged      목록
 롤 `suddoe_ingest` 는 corpus SELECT, 파이프라인이 쓰는 7개 테이블(documents, doc_articles, chunks, chunk_terms,
 chunk_len, refs, ingest_jobs)만 쓰기, term_df REFRESH, judge_cache 삭제 권한을 가진다. 앱 롤 `suddoe_app` 은 그대로다.
 마이그레이션은 `term_df(term)` 고유 인덱스도 만든다(활성화의 `REFRESH ... CONCURRENTLY` 에 필요).
-되돌리기 SQL 은 마이그레이션 파일 머리 주석에 있다.
+되돌리기 SQL 은 마이그레이션 파일 상단 주석에 있다.
 
 로컬: 새 볼륨이면 `18_corpus_ingest.sql` 이 자동 적용된다(비밀번호 `devpw`). 기존 볼륨이면 위 마이그레이션을
 `-v ingest_password=devpw` 로 실행하고 `.env` 에 `SUDDOE_INGEST_DSN=postgresql://suddoe_ingest:devpw@localhost:5432/suddoe`.
@@ -83,17 +83,17 @@ curl -s -X POST "$API/admin/documents/<doc_id>/activate" -H "$H" -H "Content-Typ
 ## 판정 캐시 반영
 
 - DB 판정 캐시(`tenant.judge_cache`): 활성화 트랜잭션에서 전부 지운다.
-- 설정 해시(`server/response_cache.py` `_설정_해시`): active 청크 수가 바뀌므로 `SUDDOE_CONFIG_HASH_TTL`(기본 300초) 안에 바뀐다.
-- 게스트 메모리 캐시: 항목마다 설정 해시를 저장해 비교하므로, 위 해시가 바뀌면 적중하지 않는다.
+- 데이터 버전 해시(`server/response_cache.py` `_데이터버전_해시`): active 청크 수가 바뀌므로 `SUDDOE_DATA_VERSION_TTL`(기본 300초) 안에 바뀐다.
+- 게스트 메모리 캐시: 항목마다 데이터 버전 해시를 저장해 비교하므로, 위 해시가 바뀌면 적중하지 않는다.
   즉시 반영이 필요하면 `docker compose restart api`.
 
 ## 제한·주의
 
-- 텍스트가 200자 미만인 파일(스캔본)과 배포용·암호화 HWP 는 failed 다. L3 업로드와 달리 VLM 판독을 하지 않는다.
-- 품질 low(조 5개 미만, 단락·장 단위 분해, 조번호 비단조, 빈 조 과다)는 활성화할 수 없다. 원본을 고쳐 다시 올린다.
-- 적재는 한 번에 하나씩 돈다. 임베딩이 CPU 를 쓰므로 그동안 판정 응답이 느려질 수 있다.
+- 텍스트가 200자 미만인 파일(스캔본)과 배포용·암호화 HWP 는 failed 다. L3 업로드와 달리 VLM 추출을 하지 않는다.
+- 품질 low(조 5개 미만, 단락·장 단위 분할, 조번호 역전, 빈 조 과다)는 활성화할 수 없다. 원본을 고쳐 다시 올린다.
+- 적재는 한 번에 하나씩 실행된다. 임베딩이 CPU 를 쓰므로 그동안 판정 응답이 느려질 수 있다.
   실측(개발 PC): PDF 480KB·48조·54청크 약 75초.
 - 서버가 재시작되면 parsing 중이던 업로드는 parsing 으로 남는다. DELETE 후 다시 올린다.
 - 참조: 새 문서에서 나가는 참조는 active 문서만 대상으로 만든다. `지침 제N조` 는 build_refs 에 고정된
-  통합관리지침 제14차 doc_id 로 해소되므로, 새 통합관리지침을 올리면 해소 대상을 따로 확인한다.
-- 로컬 DB 는 `eval.golden_chunks` 가 이전 판 청크를 참조하면 활성화가 409 다(정답셋 재매칭 필요). 운영 DB 에는 eval 이 없다.
+  통합관리지침 제14차 doc_id 로 해결되므로, 새 통합관리지침을 올리면 해결 대상을 따로 확인한다.
+- 로컬 DB 는 `eval.golden_chunks` 가 이전 판 청크를 참조하면 활성화가 409 다(골든셋 재매칭 필요). 운영 DB 에는 eval 이 없다.

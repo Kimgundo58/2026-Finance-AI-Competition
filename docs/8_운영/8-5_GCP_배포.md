@@ -1,4 +1,4 @@
-# 8-5 배포 레시피 (GCP, 이관 전 기록)
+# 8-5 GCP 배포 (이관 전 기록)
 
 > 2026-10-27 운영을 네이버클라우드로 옮겼다. 현재 배포 절차는 [[8-6_NCP_배포]] 다.
 > 이 문서는 Cloud Run + Cloud SQL 로 운영하던 때의 절차와 측정값 기록이다.
@@ -8,18 +8,18 @@
 
 배포는 **수동**이었다(Cloud Build 트리거 없음). 마지막 리비전은 v30 · 00043.
 
-## 증명한 것과 안 잰 것
+## 검증한 것과 측정하지 않은 것
 
-2026-09-03 로컬 실측(Docker Desktop 29.7.2): 빌드된다 · 오프라인으로 모델이 뜬다 · `/api/health` 200.
+2026-09-03 로컬 실측(Docker Desktop 29.7.2): 빌드된다 · 오프라인으로 모델이 로드된다 · `/api/health` 200.
 
 2026-09-04 기준으로 4~7단계도 검증됐다.
 
 - Cloud Run `suddoe-api` 리비전 00011
 - Cloud SQL `suddoe-db` PG17 RUNNABLE
-- `/api/health` 200 · `"모드":"live"` · 실판정 1건 완주
-- 비특권 롤로 저장 후 새 트랜잭션 되읽기 (PR #22 · #24 · #25)
+- `/api/health` 200 · `"모드":"live"` · 실제 판정 1건 정상 완료
+- 비특권 역할로 저장 후 새 트랜잭션에서 다시 읽기 (PR #22 · #24 · #25)
 
-안 잰 것은 콜드스타트 하나다. `--min-instances=1` 이라 안 겪는다는 것은 가정이다.
+측정하지 않은 것은 콜드스타트 하나다. `--min-instances=1` 이라 겪지 않는다는 것은 가정이다.
 리비전이 나갔다는 사실은 배포됐다는 증거이고, 판정이 맞다는 증거는 [[제출_공모전_설명]] 에 있다.
 
 ## 사전 준비
@@ -43,8 +43,8 @@ docker run --rm --network none suddoe-api:local \
 docker run --rm -p 8080:8080 -e SUDDOE_MOCK=1 suddoe-api:local   # /api/health 가 200
 ```
 
-`--network none` 이 핵심이다. 모델이 구워졌는지를 이 한 줄이 판정한다.
-빌드 로그의 HF 비인증 경고는 CI 에서 자주 돌릴 때만 문제다. 그때만 `HF_TOKEN` 을 넣는다.
+`--network none` 이 핵심이다. 모델이 이미지에 포함됐는지를 이 한 줄로 확인한다.
+빌드 로그의 HF 비인증 경고는 CI 에서 자주 실행할 때만 문제다. 그때만 `HF_TOKEN` 을 넣는다.
 
 ### 2. DB — Cloud SQL for PostgreSQL
 
@@ -55,7 +55,7 @@ gcloud sql databases create suddoe --instance=suddoe-db
 ```
 
 - 총 335MB 라 20GB 는 60배 여유다. 늘릴 이유가 없다
-- pgvector 는 `CREATE EXTENSION vector;` 를 스키마 적재 전에 친다
+- pgvector 는 `CREATE EXTENSION vector;` 를 스키마 적재 전에 실행한다
 - 덤프 적재 순서는 [[8-1_실행_절차]] 에 있다
 
 ### 3. 이미지 푸시
@@ -66,14 +66,14 @@ docker build -t $IMG . && docker push $IMG
 ```
 
 Apple Silicon 등 arm 머신이면 `--platform linux/amd64` 를 붙인다.
-안 붙이면 Cloud Run 이 기동 직전에 죽는다.
+안 붙이면 Cloud Run 에서 기동에 실패한다.
 
 `DOCKER_BUILDKIT=1` 이 필수다. Dockerfile 의 HF 캐시가 `--mount=type=cache` 를 쓴다.
 BuildKit 전용 문법이라 클래식 빌더에서는 즉시 실패한다. Cloud Build 의 기본 `docker` 빌더가 그렇다.
 로컬 Docker Desktop 은 BuildKit 이 기본이라 로컬에서 되고 CI 에서만 깨진다.
 
-캐시 마운트는 빌더 로컬이다. 매번 차가운 CI 로 옮기면 이득이 0 이다.
-388초 절약은 같은 머신에서 다시 빌드할 때만 참이다. CI 로 옮길 거면 되돌려라.
+캐시 마운트는 빌더 로컬이다. 매번 캐시가 없는 CI 에서 빌드하면 이점이 없다.
+388초 절약은 같은 머신에서 다시 빌드할 때만 성립한다. CI 로 옮길 거면 되돌려라.
 
 ### 4. Cloud Run 배포
 
@@ -82,41 +82,41 @@ gcloud run deploy suddoe-api --image=$IMG --region=asia-northeast3 \
   --memory=8Gi --cpu=2 --min-instances=1 --max-instances=3 \
   --concurrency=4 --timeout=300 --allow-unauthenticated \
   --add-cloudsql-instances=<PROJECT_ID>:asia-northeast3:suddoe-db \
-  --set-env-vars=SUDDOE_MOCK=0,SUDDOE_QWEN_MODEL=qwen3.7-plus,SUDDOE_ORG_PARAM=0,SUDDOE_CORS=https://<프론트>,SUDDOE_JWKS_URL=<supabase jwks> \
+  --set-env-vars=SUDDOE_MOCK=0,SUDDOE_QWEN_MODEL=qwen3.7-plus,SUDDOE_ALLOW_ORG_PARAM=0,SUDDOE_CORS=https://<프론트>,SUDDOE_JWKS_URL=<supabase jwks> \
   --set-secrets=SUDDOE_DSN=suddoe-dsn:latest,SUDDOE_ADMIN_TOKEN=suddoe-admin:latest,DASHSCOPE_API_KEY=<secret>:latest
 ```
 
 | 옵션 | 왜 이 값인가 |
 |---|---|
-| `--min-instances=1` | 임베딩 로드가 실측 8~21초다. 0 이면 첫 심사위원이 그걸 다 문다 |
+| `--min-instances=1` | 임베딩 로드가 실측 8~21초다. 0 이면 첫 요청(첫 심사위원)이 그 지연을 그대로 겪는다 |
 | `--memory=8Gi` | 임베딩만으로 peak RSS 2.4GB 실측. 아래 설명 참조 |
 | `--concurrency=4` | 판정 1건이 CPU 임베딩을 쓴다. 높이면 서로 CPU 를 뺏는다 |
 | `--timeout=300` | SSE 판정 스트림이 짧으면 중간에 잘린다 |
 
 메모리 8Gi 는 결정 사항이다.
-4Gi 면 남는 게 1.5GB 뿐인데, uvicorn·kiwi 사전·동시 4건이 그 안에 든다는 것은 재지 않은 추론이다.
+4Gi 면 남는 게 1.5GB 뿐인데, uvicorn·kiwi 사전·동시 4건이 그 안에 든다는 것은 측정하지 않은 추론이다.
 
-무료티어로는 못 덮는다. `min-instances=1` 은 월 2,592,000초 상주다.
+무료티어로는 충당하지 못한다. `min-instances=1` 은 월 2,592,000초 상주다.
 Cloud Run 무료분(월 36만 GiB-초 수준)을 8Gi 로는 약 58배 넘긴다. 4Gi 도 29배다.
 그래서 이건 무료냐 아니냐를 가르는 선택이 아니다. 신규 계정 $300 크레딧으로 결제한다.
-심사까지 4일 상주 기준 추정은 8Gi 약 $9 · 4Gi 약 $5 다(리전 Tier1 정가 가정 · 재지 않음).
+심사까지 4일 상주 기준 추정은 8Gi 약 $9 · 4Gi 약 $5 다(리전 Tier1 정가 가정 · 측정하지 않음).
 
 값과 키는 `--set-env-vars` 가 아니라 Secret Manager 로 넣는다.
 이름 목록은 `.env.example` 에 있다.
 
-심사 전 필수. `SUDDOE_ORG_PARAM=0` · `SUDDOE_JWKS_URL` · `SUDDOE_DEMO_SECRET` ·
-`SUDDOE_SLUG_SECRET` 을 빠뜨리면 조용히 개발 기본비밀과 자기신고 org 폴백으로 돈다(`server/auth.py`).
+심사 전 필수. `SUDDOE_ALLOW_ORG_PARAM=0` · `SUDDOE_JWKS_URL` · `SUDDOE_DEMO_SECRET` ·
+`SUDDOE_SLUG_SECRET` 을 빠뜨리면 경고 없이 개발용 기본 시크릿과 클라이언트가 보낸 org_id 폴백으로 동작한다(`server/auth.py`).
 
-## 뜬 뒤 확인
+## 배포 후 확인
 
 순서대로 본다. 하나라도 아니면 멈춘다.
 
 ```bash
-curl -s $URL/api/health                                    # 모드가 mock 이면 SUDDOE_MOCK 이 안 먹었다
+curl -s $URL/api/health                                    # 모드가 mock 이면 SUDDOE_MOCK 이 적용되지 않았다
 curl -s -X POST $URL/admin/warmup -H "X-Admin-Token: <토큰>"  # 발표 30분 전에도 한 번 더
 ```
 
-그 다음 프론트에서 판정을 1건 돌린다.
+그 다음 프론트에서 판정을 1건 실행한다.
 health 200 은 판정이 맞다는 증거가 아니다.
 
 ## 실측 (2026-09-03 로컬 Docker)

@@ -1,7 +1,7 @@
 # 8-6 NCP 배포 (현재 운영)
 
 네이버클라우드 VM 1대에 API · PostgreSQL · Caddy 를 Docker Compose 로 운영한다.
-배포 파일은 `deploy/ncp/` 에 있다. 이관 전 GCP(Cloud Run + Cloud SQL) 기록은 [[8-5_배포_레시피]].
+배포 파일은 `deploy/ncp/` 에 있다. 이관 전 GCP(Cloud Run + Cloud SQL) 기록은 [[8-5_GCP_배포]].
 
 ## 구성
 
@@ -28,7 +28,7 @@ VM 82,240원 + SSD 50GB 약 5,800원 + 공인 IP 4,032원 = **월 약 92,000원*
 
 ## 1. 결제 전 (로컬)
 
-1. 로컬 리허설: `deploy/ncp/.env` 생성(도메인 `localhost`) → `./restore.sh <dump> <rowcounts>` → `docker compose up -d --build`
+1. 로컬 사전 점검: `deploy/ncp/.env` 생성(도메인 `localhost`) → `./restore.sh <dump> <rowcounts>` → `docker compose up -d --build`
 2. DashScope API 키 확보 (GCP Secret Manager 는 결제 중지로 조회 불가)
 3. `deploy/ncp/` 를 GitHub main 에 push (서버가 clone 한다)
 
@@ -92,6 +92,6 @@ docker compose ps                                              # 3개 모두 hea
 - 덤프는 `--no-privileges` 라 권한이 복원되지 않는다. `restore.sh` 가 `db/init/10b_app_grants.sql` 로
   권한과 search_path 를 다시 설정한다(로컬 init 과 같은 파일, `extensions` 스키마 USAGE 포함).
 - Caddy 는 요청 본문을 35MB 로 제한한다(L3 업로드 앱 상한 30MB).
-- 로컬 리허설 결과 (2026-10-27, Docker Desktop): 이미지 콜드 빌드 16분, 복원+검증 22초, API healthy 20초,
+- 로컬 사전 점검 결과 (2026-10-27, Docker Desktop): 이미지 콜드 빌드 16분, 복원+검증 22초, API healthy 20초,
   HTTPS·CORS·관리자 토큰·데모 세션·검색 정상, DashScope 키 없이 판정 시 판단불가로 종료.
 - 측정하지 않은 것: 2vCPU/8GB 에서 동시 판정 4건 부하.
