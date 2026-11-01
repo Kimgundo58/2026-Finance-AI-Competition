@@ -41,6 +41,7 @@ docker rm -f suddoe-verify            # 익명 볼륨까지 지우려면 docker 
 |---|---|---|
 | `2026-11-01_decisions_강등코드_check.sql` | 필수 | `tenant.decisions` 강등코드 CHECK 를 `llm_validate.강등코드_전체` 와 맞춘다 |
 | `2026-11-01_drop_ops_schema.sql` | 선택 | 사용하지 않는 `ops` 스키마(GPU 팟 주소 표)를 제거한다 |
+| `2026-11-01_rules_사전승인조건_배열.sql` | 필수 | `corpus.rules.사전승인_조건` 을 `text` → `TEXT[]` 로 맞춘다(운영만 text 로 남아 판정 캐시 설정 해시가 실패). 운영 적용 2026-11-01 23:27 |
 
 ## seed
 
