@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-"""판정 결과 → DB 영속화.
+"""판정 결과를 지출계획(tenant.expense_plans)에 연결한다.
 
-live 판정은 `orchestrate.decisions_적재()` 가 판정 시점에 `tenant.decisions` 행을 이미 만든다.
-여기서는 잇기만 한다:
-  1. 이미 있는 `decisions` 행에 `plan_id` 를 UPDATE (캐시 적중이면 `경로='캐시'` 행을 새로 넣는다)
-  2. `expense_plans.latest_decision_id`·`상태='judged'` UPDATE
-  3. `routes_tasks.동기화()` 를 함수로 호출해 `plan_tasks` 를 잇는다
+live 판정은 orchestrate.decisions_적재() 가 판정 시점에 tenant.decisions 행을 이미 만든다.
+여기서는 그 행을 계획에 연결만 한다.
+  1. decisions 행의 plan_id 를 UPDATE 한다 (캐시 적중이면 경로='캐시' 행을 새로 INSERT 한다)
+  2. expense_plans.latest_decision_id 와 상태='judged' 를 UPDATE 한다
+  3. routes_tasks.동기화() 를 호출해 plan_tasks(할일)를 갱신한다
 """
 from __future__ import annotations
 
@@ -20,14 +20,14 @@ _log = logging.getLogger(__name__)
 def 판정_저장(plan_id: int | None, body, out: dict,
              org_id: str | None = None, decision_id: int | None = None, *,
              캐시적중: bool = False, 실패: bool = False) -> dict:
-    """반환 모양은 고정이다 (`main.py` 가 SSE `저장` 이벤트로 그대로 흘린다).
+    """판정을 계획에 연결한다. 반환 모양은 고정이다(routes_judge 가 SSE 저장 이벤트로 그대로 보낸다).
 
         {"저장": true,  "decision_id": 123, "plan_id": 45,
          "할일": {"생성":.., "갱신":.., "보존_user":.., "보존_날짜수정":.., "코드매칭":.., "코드미상":..}}
         {"저장": false, "사유": "..."}
 
-    `실패` 면 아무것도 쓰지 않는다 — 장애로 나온 판단불가를 계획의 판정으로 남기지 않는다.
-    `캐시적중` 이면 이 org·이 계획 이름으로 `경로='캐시'` 판정 행을 새로 넣고 잇는다.
+    실패=True 면 아무것도 쓰지 않는다 — 장애로 나온 판단불가를 계획의 판정으로 남기지 않는다.
+    캐시적중=True 면 이 org·이 계획으로 경로='캐시' 판정 행을 새로 INSERT 해 연결한다.
     """
     if plan_id is None:
         return {"저장": False, "사유": "plan_id 없음"}
@@ -54,8 +54,8 @@ def 판정_저장(plan_id: int | None, body, out: dict,
     # decisions 를 참조하므로 위 트랜잭션이 커밋된 뒤에 불러야 한다.
     from .models import 할일동기화
     from .routes_tasks import 동기화 as _할일동기화
-    # `증빙목록`(결제 후 제출 서류)은 check_items 코드가 없으므로
-    # `구분='결제후'` 힌트와 `매칭금지` 를 실어 같은 표에 심는다.
+    # 증빙목록(결제 후 제출 서류)은 check_items 코드가 없다. 구분='결제후' 와 매칭금지=True 를
+    # 붙여 해야할일과 같은 plan_tasks 에 넣는다.
     _증빙 = [
         {"항목": e["증빙명"], "구분": "결제후", "매칭금지": True,
          "설명": (f'{e["발급처"]}에서 발급받습니다.' if e.get("발급처")
@@ -81,9 +81,9 @@ def 판정_저장(plan_id: int | None, body, out: dict,
 
 def _계획에_연결(plan_id: int, body, out: dict, org_id: str | None,
                decision_id: int | None, 캐시적중: bool) -> int | None:
-    """한 트랜잭션에서 계획 확인 → (캐시 판정 행 INSERT) → 판정 행·계획 UPDATE.
+    """한 트랜잭션에서 계획 소유 확인 → (캐시 판정 행 INSERT) → 판정 행·계획 UPDATE 를 한다.
 
-    연결한 decision_id 를 돌려준다. 계획이 이 org 것이 아니면 아무것도 쓰지 않고 None.
+    연결한 decision_id 를 돌려준다. 계획이 없거나 이 org 의 것이 아니면 아무것도 쓰지 않고 None 을 돌려준다.
     """
     조건, org인자 = _org조건(org_id, "p")
     with 트랜잭션(org_id) as cur:
@@ -105,7 +105,7 @@ def _계획에_연결(plan_id: int, body, out: dict, org_id: str | None,
 
 
 def _캐시판정_행(body, out: dict, org_id: str | None, plan_id: int) -> dict:
-    """캐시가 답한 판정을 `tenant.decisions` 한 행으로. `경로='캐시'` 로 LLM 호출분과 가른다."""
+    """캐시 응답을 tenant.decisions 한 행으로 만든다. 경로='캐시' 로 LLM 을 호출한 판정과 구분한다."""
     정규화 = getattr(body, "정규화", None) or {}
     return dict(
         org_id=org_id, 사업명=getattr(body, "사업명", None), plan_id=plan_id,

@@ -1,0 +1,141 @@
+# -*- coding: utf-8 -*-
+"""정규화·판정 응답 캐시. 같은 입력이 다시 오면 LLM 을 부르지 않고 저장된 응답을 돌려준다.
+
+/api/normalize·/api/judge 가 캐시키() 로 키를 만들고 꺼내기(k, org)·넣기(k, 값, 종류=, org=) 를 부른다.
+게스트(org 없음)는 프로세스 메모리(FIFO, 재시작하면 사라진다), 인증된 org 는 tenant.judge_cache 를 쓴다.
+DB 행은 _설정_해시()(코퍼스·룰·우선순위 규칙·체크항목·별칭 버전)가 같을 때만 적중한다.
+환경변수: SUDDOE_CACHE_TTL(기본 900초), SUDDOE_CACHE_MAX(메모리 항목 수, 기본 512), SUDDOE_CONFIG_HASH_TTL(기본 300초).
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import threading
+import time
+from typing import Any
+
+from server._common import _int환경, _jsonb, _실행, _질의, ttl_캐시
+from server.rate_limit import 제한
+
+_TTL초 = _int환경("SUDDOE_CACHE_TTL", 900)
+_상한 = _int환경("SUDDOE_CACHE_MAX", 512)
+
+# 게스트용 메모리 캐시와 적중 수. AnyIO 워커 스레드가 동시에 바꾸므로 _락 안에서만 다룬다.
+_메모리: dict[str, tuple[float, Any]] = {}
+_적중 = 0
+_락 = threading.Lock()
+
+
+def 캐시키(*조각: Any) -> str:
+    """조각들의 sha256. 원문·F5 값을 메모리에 들고 있지 않으려고 해시만 키로 쓴다.
+
+    호출부는 org_id 를 조각에 넣는다 — 빠지면 A 기관의 판정이 B 기관에 나간다.
+    """
+    raw = json.dumps(조각, ensure_ascii=False, sort_keys=True, default=str)
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def 꺼내기(k: str, org: str | None) -> Any | None:
+    """저장된 응답 또는 None. 적중하면 일일 판정 카운트를 되돌린다(LLM 을 부르지 않았다)."""
+    global _적중
+    값 = _메모리_꺼내기(k) if org is None else _db_꺼내기(k, org)
+    if 값 is not None:
+        with _락:
+            _적중 += 1
+        제한.환급()
+    return 값
+
+
+def 넣기(k: str, 값: Any, *, 종류: str, org: str | None) -> None:
+    """응답을 저장한다. DB 쓰기 실패는 삼킨다(캐시는 판정 결과에 영향을 주지 않는다)."""
+    if org is None:
+        with _락:
+            if len(_메모리) >= _상한:          # FIFO. LRU 까지는 필요 없다
+                _메모리.pop(next(iter(_메모리), None), None)
+            _메모리[k] = (time.time(), 값)
+        return
+    _실행(
+        'INSERT INTO tenant.judge_cache (key, org_id, 종류, value, 설정_해시, expires_at) '
+        'VALUES (%s,%s,%s,%s,%s, now() + make_interval(secs => %s)) '
+        'ON CONFLICT (key) DO UPDATE SET '
+        '  value = EXCLUDED.value, 설정_해시 = EXCLUDED.설정_해시, '
+        '  expires_at = EXCLUDED.expires_at, created_at = now()',
+        (k, org, 종류, _jsonb(값), _설정_해시(), _TTL초))
+
+
+def 상태() -> dict:
+    """/admin/cost 용. 메모리 캐시 항목 수·TTL·적중 수(메모리+DB)."""
+    with _락:
+        return {"항목": len(_메모리), "TTL초": _TTL초, "적중": _적중}
+
+
+def _메모리_꺼내기(k: str) -> Any | None:
+    with _락:
+        v = _메모리.get(k)
+        if not v:
+            return None
+        t, 값 = v
+        if time.time() - t > _TTL초:
+            _메모리.pop(k, None)
+            return None
+        return 값
+
+
+def _db_꺼내기(k: str, org: str) -> Any | None:
+    # 게스트는 여기 오지 않는다. RLS 정책은 org_id = current_org() 라 org 가 NULL 이면 통과하지 못한다.
+    행 = _질의(
+        'SELECT value FROM tenant.judge_cache '
+        'WHERE key=%s AND org_id=%s AND expires_at > now() AND 설정_해시=%s',
+        (k, org, _설정_해시()))
+    return 행[0][0] if 행 else None
+
+
+# 캐시 무효화 기준. 코퍼스·룰·우선순위 규칙·체크항목·별칭이 바뀌면 값이 바뀌어 기존 DB 행이 미스가 된다.
+# 행 수만으로는 행 수를 그대로 둔 칸 단위 UPDATE 를 못 잡으므로, 판정에 쓰이는 룰 컬럼은
+# rule_id 순으로 이어붙여 md5 한다. TEXT[] 컬럼은 원소 순서가 흔들려도 같은 값이 나오게 정렬한다.
+_설정_해시_SQL = """SELECT (SELECT count(*) FROM corpus.chunks),
+                        (SELECT count(*) FROM corpus.chunks WHERE embedding IS NOT NULL),
+                        (SELECT count(*) FROM corpus.refs),
+                        (SELECT count(*) FROM corpus.documents),
+                        (SELECT coalesce(max(chunk_id), 0) FROM corpus.chunks),
+                        (SELECT count(*) FROM corpus.rules),
+                        (SELECT count(*) FILTER (WHERE verified) FROM corpus.rules),
+                        (SELECT coalesce(md5(string_agg(
+                             rule_id::text || '|' || coalesce("사업명",'') || '|' ||
+                             coalesce(비목,'') || '|' || 허용 || '|' ||
+                             사전승인::text || '|' ||
+                             coalesce(array_to_string(
+                                 (SELECT array_agg(x ORDER BY x)
+                                    FROM unnest(사전승인_조건) AS x), '~'), '') || '|' ||
+                             coalesce(한도_유형,'') || '|' || coalesce(한도_값::text,'') || '|' ||
+                             coalesce(한도_단위,'') || '|' ||
+                             coalesce(array_to_string(증빙,'~'),'') || '|' ||
+                             coalesce(array_to_string(금지예시,'~'),'') || '|' ||
+                             coalesce(array_to_string(허용예시,'~'),'') || '|' ||
+                             근거::text || '|' || verified::text,
+                             '#' ORDER BY rule_id)), 'empty')
+                         FROM corpus.rules),
+                        -- 우선순위 규칙·체크항목은 행이 적어 행 전체를 해시한다(칸 단위 수정도 잡는다).
+                        (SELECT md5(coalesce(string_agg(t::text, '#' ORDER BY prec_id), ''))
+                           FROM corpus.precedence_rules t),
+                        (SELECT md5(coalesce(string_agg(t::text, '#' ORDER BY code), ''))
+                           FROM corpus.check_items t),
+                        -- item_alias 는 embedding 컬럼이 커서 행 수·최대 id·최근 생성 시각만 본다.
+                        (SELECT count(*) || ':' || coalesce(max(alias_id), 0) || ':'
+                                || coalesce(max(created_at)::text, '')
+                           FROM corpus.item_alias)"""
+
+
+@ttl_캐시("SUDDOE_CONFIG_HASH_TTL", 300)
+def _설정_해시_조회() -> str:
+    """DB 를 못 읽으면 빈 문자열(캐시하지 않는다)."""
+    행 = _질의(_설정_해시_SQL)
+    if not 행:
+        return ""
+    n = 행[0]
+    h = hashlib.sha1("|".join(map(str, n)).encode()).hexdigest()[:10]
+    return f"c{n[0]}-e{n[1]}-r{n[2]}-d{n[3]}-rule{n[5]}v{n[6]}-rc{str(n[7])[:8]}-{h}"
+
+
+def _설정_해시() -> str:
+    return _설정_해시_조회() or "unknown"
