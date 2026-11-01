@@ -41,10 +41,10 @@ chmod +x "$DIR/deploy/ncp/"*.sh
 
 cat <<EOF
 setup complete. next steps:
-  1. $DIR/deploy/ncp/.env 값 입력 (시크릿 생성: openssl rand -hex 32)
-  2. 로컬 PC 에서 덤프 업로드:
+  1. fill in $DIR/deploy/ncp/.env (generate secrets with: openssl rand -hex 32)
+  2. upload the dump from your local PC:
      scp suddoe.dump source_rowcounts.txt root@<PUBLIC_IP>:$DIR/deploy/ncp/backups/
   3. cd $DIR/deploy/ncp && ./restore.sh backups/suddoe.dump backups/source_rowcounts.txt
   4. docker compose up -d --build
-  5. db/migrations/README.md 의 필수 마이그레이션 중 덤프 이후 것을 적용
+  5. apply the required migrations in db/migrations/README.md that are newer than the dump
 EOF

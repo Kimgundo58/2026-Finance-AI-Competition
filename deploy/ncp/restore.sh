@@ -46,7 +46,7 @@ n=$(psql_admin -tA <<'SQL'
 select count(*) from pg_namespace where nspname in ('corpus', 'tenant');
 SQL
 )
-[ "$n" = "0" ] || fail "corpus/tenant 스키마가 이미 있다. 다시 복원하려면 'docker compose down -v' 로 볼륨을 먼저 삭제한다"
+[ "$n" = "0" ] || fail "corpus/tenant schemas already exist. To restore again, delete the volume first with 'docker compose down -v'"
 
 # ── 1. 앱 롤 생성 ────────────────────────────────────────────────────
 # RLS 정책은 PUBLIC 대상이라 롤 생성 순서와 무관하지만, 3단계 GRANT 전에는 있어야 한다.
@@ -95,7 +95,7 @@ select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace
 SQL
 )
 [ "$missing" = "0" ] && ok "2 table privileges (corpus: SELECT, tenant: SELECT/INSERT/UPDATE/DELETE)" \
-                     || fail "2 권한이 누락된 테이블 $missing 개"
+                     || fail "2 tables missing privileges: $missing"
 
 acl=$(psql_admin -tA <<'SQL'
 select string_agg(defaclobjtype::text, '' order by defaclobjtype::text) from pg_default_acl;
@@ -103,14 +103,14 @@ SQL
 )
 case "$acl" in
     *S*) ok "3 default privileges on sequences ($acl)" ;;
-    *)   fail "3 시퀀스 default privileges 가 없다 ($acl)" ;;
+    *)   fail "3 no default privileges on sequences ($acl)" ;;
 esac
 
 e=$(psql_admin -tA <<'SQL'
 select count(*) from pg_namespace where nspname = 'eval';
 SQL
 )
-[ "$e" = "0" ] && ok "4 eval schema absent" || fail "4 운영 DB 에 eval(골든셋) 스키마가 있다"
+[ "$e" = "0" ] && ok "4 eval schema absent" || fail "4 eval (golden set) schema exists in the production DB"
 
 # 5 스키마·함수 권한. 1~4 만으로는 extensions 스키마 USAGE 누락을 잡지 못한다(벡터 검색만 실패한다).
 p=$(psql_admin -tA <<'SQL'
@@ -121,15 +121,15 @@ select has_schema_privilege('suddoe_app', 'extensions', 'USAGE')::text || '/' ||
            and a.grantee = 0 and a.privilege_type = 'EXECUTE')::text;
 SQL
 )
-[ "$p" = "true/true/0" ] && ok "5 extensions USAGE, 계정찾기() EXECUTE (PUBLIC 회수됨)" \
-                         || fail "5 extensions USAGE / 계정찾기 EXECUTE / PUBLIC EXECUTE 수 = $p"
+[ "$p" = "true/true/0" ] && ok "5 extensions USAGE, 계정찾기() EXECUTE (revoked from PUBLIC)" \
+                         || fail "5 extensions USAGE / 계정찾기 EXECUTE / PUBLIC EXECUTE count = $p"
 
 # 5-b suddoe_app 으로 실제 쿼리 실행: 벡터 거리 연산(검색 경로)과 로그인 함수
-psql_app -tA >/dev/null <<'SQL' || fail "5-b suddoe_app 으로 벡터 검색 쿼리 또는 계정찾기() 호출 실패"
+psql_app -tA >/dev/null <<'SQL' || fail "5-b suddoe_app: vector search query or 계정찾기() call failed"
 SELECT 1 - (embedding <=> embedding) FROM corpus.chunks WHERE embedding IS NOT NULL LIMIT 1;
 SELECT count(*) FROM tenant.계정찾기('restore-check@example.invalid');
 SQL
-ok "5-b suddoe_app: 벡터 검색 쿼리, 계정찾기() 호출"
+ok "5-b suddoe_app: vector search query, 계정찾기() call"
 
 # ── 행 수 비교 (선택) ─────────────────────────────────────────────────
 if [ -n "$COUNTS" ]; then
@@ -144,7 +144,7 @@ SQL
     if diff <(grep -E '^(corpus|tenant) ' "$COUNTS" | tr -d '\r' | sort) <(printf '%s\n' "$actual" | sort); then
         ok "row counts match source ($(printf '%s\n' "$actual" | wc -l) tables)"
     else
-        fail "행 수 불일치 (diff: '<' 원본, '>' 복원본)"
+        fail "row count mismatch (diff: '<' source, '>' restored)"
     fi
 fi
 
@@ -156,15 +156,15 @@ SQL
 )
 A=$(printf '%s\n' "$orgs" | sed -n 1p)
 B=$(printf '%s\n' "$orgs" | sed -n 2p)
-[ -n "$A" ] && [ -n "$B" ] || fail "6 테스트할 org 가 2개 미만"
+[ -n "$A" ] && [ -n "$B" ] || fail "6 fewer than 2 orgs to test"
 
-psql_app -tA -v org="$A" >/dev/null <<'SQL' || fail "6-a 자기 org INSERT 실패 (또는 suddoe_app 비밀번호 접속 실패)"
+psql_app -tA -v org="$A" >/dev/null <<'SQL' || fail "6-a INSERT into own org failed (or suddoe_app password login failed)"
 BEGIN;
 SELECT set_config('app.org_id', :'org', true);
 INSERT INTO tenant.expense_plans (org_id, 질문원문) VALUES (:'org', 'rls-test') RETURNING plan_id;
 ROLLBACK;
 SQL
-ok "6-a app.org_id 설정 후 자기 org INSERT: 허용"
+ok "6-a INSERT into own org with app.org_id set: allowed"
 
 out=$(psql_app -tA -v org="$A" 2>&1 <<'SQL' || true
 BEGIN;
@@ -173,8 +173,8 @@ ROLLBACK;
 SQL
 )
 case "$out" in
-    *42501*) ok "6-b app.org_id 미설정 INSERT: 거부 (42501)" ;;
-    *)       fail "6-b app.org_id 미설정 INSERT 가 42501 로 거부되지 않았다: $out" ;;
+    *42501*) ok "6-b INSERT without app.org_id: denied (42501)" ;;
+    *)       fail "6-b INSERT without app.org_id was not denied with 42501: $out" ;;
 esac
 
 out=$(psql_app -tA -v org="$A" -v other="$B" 2>&1 <<'SQL' || true
@@ -185,8 +185,8 @@ ROLLBACK;
 SQL
 )
 case "$out" in
-    *42501*) ok "6-c 다른 org 로 INSERT: 거부 (42501)" ;;
-    *)       fail "6-c 다른 org INSERT 가 42501 로 거부되지 않았다: $out" ;;
+    *42501*) ok "6-c INSERT into another org: denied (42501)" ;;
+    *)       fail "6-c INSERT into another org was not denied with 42501: $out" ;;
 esac
 
 echo "restore and verification complete. next: docker compose up -d --build"
