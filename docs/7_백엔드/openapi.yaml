@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: 써도돼요 API
-  description: 창업지원금 지출비 사전승인 판정. `프론트 연동 사양.md` §8 계약.
+  description: 창업지원금 지출의 사업비 집행 가능 여부 판정 API.
   version: 0.1.0
 paths:
   /api/plans:
@@ -126,7 +126,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/server__models________7'
+                $ref: '#/components/schemas/server__models________8'
         '422':
           description: Validation Error
           content:
@@ -160,7 +160,48 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/server__models________7'
+                $ref: '#/components/schemas/server__models________8'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - 지출계획
+      summary: 삭제
+      description: '지출계획 하나를 지운다. 요청한 org 의 계획만 지워진다.
+
+
+        FK 설정상 plan_tasks 는 CASCADE 로 같이 삭제되고, decisions 는 SET NULL 로 연결만 끊긴다
+
+        (판정 기록은 감사 기록으로 남긴다). 되돌릴 수 없으므로 같이 지워진 할일 건수를 반환한다.'
+      operationId: 삭제_api_plans__plan_id__delete
+      parameters:
+      - name: plan_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Plan Id
+      - name: org_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Org Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response 삭제 Api Plans  Plan Id  Delete
         '422':
           description: Validation Error
           content:
@@ -172,16 +213,14 @@ paths:
       tags:
       - 할일
       summary: 동기화
-      description: '🔴 재판정 규칙 — 여기가 제일 틀리기 쉽다.
+      description: '판정의 해야할일 목록을 이 계획의 plan_tasks 에 반영한다.
 
 
-        ① 출처=''user'' 행은 **절대** 건드리지 않는다
+        재판정 규칙: (1) 출처=''user'' 행은 건드리지 않는다. (2) 날짜_사용자수정=true 행의 due_date 는
 
-        ② 날짜_사용자수정=true 인 행의 due_date 는 덮지 않는다
+        덮지 않는다. (3) 같은 code 의 ai 행은 갱신하고, 이번 결과에 없는 ai 행은 지운다.
 
-        ③ 같은 `코드` 의 ai 행은 갱신, 없어진 것은 지운다
-
-        ④ 코드가 없으면(코드=NULL) 항목 텍스트로 대조한다'
+        (4) code 가 없으면 항목 텍스트로 대조한다. DB 오류는 예외로 전파한다(HTTP 500).'
       operationId: 동기화_api_plans__plan_id__tasks_sync_post
       parameters:
       - name: plan_id
@@ -403,12 +442,45 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/l3/current:
+    get:
+      tags:
+      - L3 업로드
+      summary: 현재문서
+      description: 'org 에 지금 적용 중인(status=''active'') L3 문서 목록. org_id 가 없으면(게스트)
+        빈 목록이다.
+
+
+        `/{doc_id}` 보다 먼저 등록해야 한다. 그렇지 않으면 ''current'' 가 doc_id 경로 파라미터로 매칭된다.'
+      operationId: 현재문서_api_l3_current_get
+      parameters:
+      - name: org_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Org Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/L3________'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/l3/{doc_id}:
     get:
       tags:
       - L3 업로드
       summary: 상태
-      description: 프론트가 「분석 중」 스피너를 돌리며 폴링하는 경로.
+      description: 업로드한 문서의 파싱 상태. 프론트가 '분석 중' 표시를 하며 폴링한다.
       operationId: 상태_api_l3__doc_id__get
       parameters:
       - name: doc_id
@@ -438,23 +510,94 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-  /api/health:
+  /api/orgs:
     get:
-      summary: Health
-      operationId: health_api_health_get
+      tags:
+      - 기관·데모
+      summary: 기관목록
+      description: '가입·기관 선택 화면용 기관 목록. 응답에 org_id 는 없다.
+
+
+        검색은 공백을 지운 뒤 비교한다. ''건국대학교 창업지원본부''와 ''건국대학교창업지원본부''가
+
+        같은 질의로 검색되게 하기 위해서다.'
+      operationId: 기관목록_api_orgs_get
+      parameters:
+      - name: q
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: 기관명 부분일치. 공백은 무시하고 맞춘다
+          title: Q
+        description: 기관명 부분일치. 공백은 무시하고 맞춘다
+      - name: 사업명
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: 이 사업을 하는 기관만
+          title: 사업명
+        description: 이 사업을 하는 기관만
+      - name: 페이지
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+          title: 페이지
+      - name: 크기
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 200
+          minimum: 1
+          default: 50
+          title: 크기
       responses:
         '200':
           description: Successful Response
           content:
             application/json:
               schema:
-                additionalProperties: true
-                type: object
-                title: Response Health Api Health Get
+                $ref: '#/components/schemas/server__routes_orgs__________1'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/demo/session:
+    post:
+      tags:
+      - 기관·데모
+      summary: 데모세션
+      description: '데모 세션(체험용 임시 기관). 계정 없이 요청마다 임시 기관을 새로 만들고 데모 토큰을 발급한다.
+
+
+        고정 데모 기관 하나를 쓰면 여러 사용자의 지출계획이 서로 보인다. 그래서 요청마다 기관을
+
+        새로 만들고, 보존 기간이 지난 기관은 `_낡은데모정리()` 가 지운다.
+
+        토큰을 발급할 수 없는 설정(live 모드에 SUDDOE_DEMO_SECRET 없음)이면 DB 에 쓰기 전에 503 이다.'
+      operationId: 데모세션_api_demo_session_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/server__routes_orgs__________2'
   /api/vocab:
     get:
       summary: Vocab
-      description: 비목 enum 10종. 🔴 창업활동비는 예비창업패키지에만 있다 (§9).
+      description: 비목 목록과 별칭. 창업활동비는 예비창업패키지에만 있다.
       operationId: vocab_api_vocab_get
       parameters:
       - name: 사업명
@@ -483,12 +626,12 @@ paths:
   /api/programs:
     get:
       summary: Programs
-      description: '사업 목록. 게스트에게 화면 3 에서 사업을 묻기 위한 재료 (§10 확인필요 #1).
+      description: '사업 목록과 사업별 L1/L2/L3 우선순위 규칙.
 
 
-        룰 조회 키가 `사업 × 비목` 이라 사업을 모르면 한도를 못 고른다 — 그래서
+        룰 조회 키가 사업 × 비목이라 게스트에게도 사업을 묻는다. DB 를 못 읽으면 코드에 둔
 
-        게스트에게도 물어야 한다. 그 UI 결정의 데이터는 여기가 준다.'
+        사업 이름 목록으로 답하고 비고에 그 사실을 적는다.'
       operationId: programs_api_programs_get
       responses:
         '200':
@@ -496,18 +639,11 @@ paths:
           content:
             application/json:
               schema:
-                additionalProperties: true
-                type: object
-                title: Response Programs Api Programs Get
+                $ref: '#/components/schemas/server__models__________4'
   /api/normalize:
     post:
       summary: Normalize
-      description: '화면 3 → 4. SSE.
-
-
-        이벤트 순서: `진행`* → `결과`(전체 JSON) → `완료`
-
-        프론트가 단순하게 가고 싶으면 `결과` 하나만 들어도 된다.'
+      description: 프론트가 결과만 쓰고 싶으면 결과 이벤트 하나만 읽어도 된다.
       operationId: normalize_api_normalize_post
       requestBody:
         content:
@@ -530,12 +666,10 @@ paths:
   /api/judge:
     post:
       summary: Judge
-      description: "화면 4 → 5 / 6 / 7. SSE.\n\n이벤트 순서: `진행`* → `판정` → `해야할일` → `인용` → `전제` → `참조사슬`\n \
-        \           → `결과`(전체 JSON) → `저장`(계획 연결 결과) → `완료`\n\n목 모드에서 `?목=조건부|불가|판단불가` 로 4-way 를 전부 그려볼\
-        \ 수 있다.\n\U0001F534 판단불가는 에러가 아니라 정상 경로다 — 빨간 화면이 아니라 화면 9 로 잇는다.\n\U0001F534 `저장` 은 부수 효과다 —\
-        \ `plan_id` 가 없거나 캐시 적중이거나 저장이 실패해도\n   스트림은 항상 `완료` 까지 간다 (`_판정_저장_시도` 참조).\n\U0001F534 실 판정\
-        \ 대기 중에는 `SUDDOE_JUDGE_HEARTBEAT_SEC`(기본 12초) 마다 SSE 주석\n   (`: keep-alive`)이 낀다 — EventSource\
-        \ 가 무시하는 라인이라 이벤트 목록·순서에는\n   안 잡힌다. 프록시·게이트웨이의 idle timeout 으로 스트림이 끊기는 걸 막는다."
+      description: 'mock 모드에서는 ?목=가능|조건부|불가|판단불가 로 네 판정의 고정 응답을 받는다.
+
+
+        판단불가는 오류가 아니라 정상 응답이다. 저장은 부수 효과라 실패해도 스트림은 완료까지 간다.'
       operationId: judge_api_judge_post
       parameters:
       - name: 목
@@ -551,7 +685,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/server__models________4'
+              $ref: '#/components/schemas/server__models________5'
       responses:
         '200':
           description: Successful Response
@@ -567,59 +701,33 @@ paths:
   /api/profile:
     get:
       summary: Profile Get
-      description: 게스트도 판정은 된다 — 프로필이 없으면 빈 값을 돌려주고 전제[] 가 늘어날 뿐이다.
       operationId: profile_get_api_profile_get
-      parameters:
-      - name: org_id
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Org Id
       responses:
         '200':
           description: Successful Response
           content:
             application/json:
               schema:
-                type: object
                 additionalProperties: true
+                type: object
                 title: Response Profile Get Api Profile Get
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
     put:
       summary: Profile Put
-      description: 🔴 PMS 원문·실명·과제번호는 받지 않는다. 스키마에 그 자리가 없다 (§7).
       operationId: profile_put_api_profile_put
-      parameters:
-      - name: org_id
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Org Id
       requestBody:
-        required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/___'
+              $ref: '#/components/schemas/___-Input'
+        required: true
       responses:
         '200':
           description: Successful Response
           content:
             application/json:
               schema:
-                type: object
                 additionalProperties: true
+                type: object
                 title: Response Profile Put Api Profile Put
         '422':
           description: Validation Error
@@ -655,42 +763,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-  /admin/gate:
-    get:
-      summary: Admin Gate
-      description: H5 f_axis 차단 로그. 영구 기록은 `tenant.incidents(종류='ROUTING_BLOCK')`.
-      operationId: admin_gate_admin_gate_get
-      parameters:
-      - name: x-admin-token
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: X-Admin-Token
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                type: object
-                additionalProperties: true
-                title: Response Admin Gate Admin Gate Get
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
   /admin/queue:
     get:
       summary: Admin Queue
-      description: "재검수 큐 — 관리 화면 「제N차 개정 · 변경 M개 조항 자동 반영」의 재료.\n\n`corpus.recheck_queue` 를 그대로 읽는다.\
-        \ H1(A4 개정)·H2(A2 엄격조항)·\nH3(A5 기관답변)·H4(정산 리허설)가 전부 이 한 표에 쌓인다.\n\n\U0001F534 **읽기 전용이다.** 큐를\
-        \ 승인해 `corpus.rules` 로 올리는 경로는 여기 없다 —\n   그건 사람이 검수하는 일이고(`rule_base.md` §6), API 로 열면 검수 없이\n\
-        \   룰이 바뀔 길이 생긴다. 계약서 §3 상 `rules` 쓰기는 G 소유이기도 하다."
+      description: corpus.recheck_queue 의 요약·상태별 건수·항목(최신순, 최대 200건).
       operationId: admin_queue_admin_queue_get
       parameters:
       - name: 종류
@@ -764,8 +840,6 @@ paths:
   /admin/warmup:
     post:
       summary: Admin Warmup
-      description: "발표 30분 전 워밍업 (`Agent.md` §9).\n\n\U0001F534 콜드 스타트가 두 군데다 — 임베딩 모델 로딩(수십 초)과 vLLM\
-        \ 의 `guided_json`\n   첫 호출 스키마 컴파일(`LLM.md` §1 vLLM 운영 규칙). 둘 다 미리 태운다."
       operationId: admin_warmup_admin_warmup_post
       parameters:
       - name: x-admin-token
@@ -791,6 +865,270 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /admin/documents:
+    post:
+      tags:
+      - 관리·규정 적재
+      summary: 업로드
+      description: '파일을 저장하고 접수한 뒤 202 를 돌려준다. 파싱·임베딩·저장은 응답 뒤 백그라운드에서 돈다.
+
+
+        본문을 읽기 전에 Content-Length 로 크기를 거른다. 실제 복사도 바이트를 세며 상한을 넘으면 멈춘다.'
+      operationId: 업로드_admin_documents_post
+      parameters:
+      - name: x-admin-token
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Admin-Token
+      responses:
+        '202':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/server__routes_ingest________1'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+              - 파일
+              - layer
+              - 발행기관
+              - 문서명
+              - 시행일
+              properties:
+                파일:
+                  type: string
+                  format: binary
+                  description: PDF·HWP·HWPX·DOCX·법령 XML, 30MB 이하
+                layer:
+                  type: string
+                  enum:
+                  - L1
+                  - L2
+                발행기관:
+                  type: string
+                문서명:
+                  type: string
+                  description: doc_id = 문서명_YYYYMMDD(시행일)
+                사업명:
+                  type: string
+                  description: L2 만. corpus.programs 의 사업명이나 별칭
+                시행일:
+                  type: string
+                  format: date
+                version:
+                  type: string
+                  description: 생략하면 시행일로 만든다
+                적용대상:
+                  type: string
+                  enum:
+                  - 공통
+                  - 창업기업
+                  - 주관기관
+                  default: 공통
+    get:
+      tags:
+      - 관리·규정 적재
+      summary: 목록
+      operationId: 목록_admin_documents_get
+      parameters:
+      - name: status
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - enum:
+            - parsing
+            - staged
+            - active
+            - failed
+            - superseded
+            type: string
+          - type: 'null'
+          title: Status
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 500
+          minimum: 1
+          default: 100
+          title: Limit
+      - name: x-admin-token
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Admin-Token
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/server__routes_ingest__________1'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /admin/documents/{doc_id}:
+    get:
+      tags:
+      - 관리·규정 적재
+      summary: 상태
+      operationId: 상태_admin_documents__doc_id__get
+      parameters:
+      - name: doc_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Doc Id
+      - name: x-admin-token
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Admin-Token
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/server__routes_ingest__________2'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - 관리·규정 적재
+      summary: 삭제
+      operationId: 삭제_admin_documents__doc_id__delete
+      parameters:
+      - name: doc_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Doc Id
+      - name: x-admin-token
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Admin-Token
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/server__routes_ingest________4'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /admin/documents/{doc_id}/activate:
+    post:
+      tags:
+      - 관리·규정 적재
+      summary: 활성화
+      description: staged 문서를 active 로 올린다. 이전 판을 정할 수 없으면 409 와 후보 목록을 돌려준다.
+      operationId: 활성화_admin_documents__doc_id__activate_post
+      parameters:
+      - name: doc_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Doc Id
+      - name: x-admin-token
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Admin-Token
+      requestBody:
+        content:
+          application/json:
+            schema:
+              anyOf:
+              - $ref: '#/components/schemas/server__routes_ingest_______-Input'
+              - type: 'null'
+              title: 본문
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/_____-Output'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/health:
+    get:
+      summary: Health
+      operationId: health_api_health_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Health Api Health Get
+  /api/gpu/wake:
+    post:
+      tags:
+      - gpu
+      summary: Gpu Wake
+      description: 구버전 프론트 호환용 빈 응답. 자체 GPU 서버를 쓰지 않으므로 할 일이 없다.
+      operationId: gpu_wake_api_gpu_wake_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Gpu Wake Api Gpu Wake Post
 components:
   schemas:
     Body_____api_l3_upload_post:
@@ -800,7 +1138,9 @@ components:
           contentMediaType: application/octet-stream
           title: 파일
         org_id:
-          type: string
+          anyOf:
+          - type: string
+          - type: 'null'
           title: Org Id
         기관명:
           anyOf:
@@ -810,7 +1150,6 @@ components:
       type: object
       required:
       - 파일
-      - org_id
       title: Body_업로드_api_l3_upload_post
     F1:
       properties:
@@ -908,7 +1247,7 @@ components:
           default: false
       type: object
       title: F5
-      description: 판정 후 폐기. 저장하지 않는다 (`서비스 아키텍쳐.md` §6).
+      description: 특수관계 거래 여부. 판정 요청에만 쓰고 저장하지 않는다.
     HTTPValidationError:
       properties:
         detail:
@@ -918,6 +1257,50 @@ components:
           title: Detail
       type: object
       title: HTTPValidationError
+    L3____:
+      properties:
+        doc_id:
+          type: string
+          title: Doc Id
+        원본파일명:
+          type: string
+          title: 원본파일명
+        version:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Version
+        시행일:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: 시행일
+        등록일:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: 등록일
+        파싱품질:
+          anyOf:
+          - type: string
+            enum:
+            - 대기
+            - pass
+            - warn
+            - fail
+          - type: 'null'
+          title: 파싱품질
+        조_건수:
+          type: integer
+          title: 조 건수
+          default: 0
+      type: object
+      required:
+      - doc_id
+      - 원본파일명
+      title: L3현재문서
+      description: org 에 지금 적용 중인 L3 문서 한 건. status='active' 만 포함하고 superseded 문서는
+        뺀다.
     L3_____:
       properties:
         doc_id:
@@ -954,12 +1337,33 @@ components:
           - type: string
           - type: 'null'
           title: 메시지
+        파싱품질:
+          anyOf:
+          - type: string
+            enum:
+            - 대기
+            - pass
+            - warn
+            - fail
+          - type: 'null'
+          title: 파싱품질
       type: object
       required:
       - doc_id
       - 파일명
       - 확장자
       title: L3업로드응답
+    L3________:
+      properties:
+        문서:
+          items:
+            $ref: '#/components/schemas/L3____'
+          type: array
+          title: 문서
+      type: object
+      title: L3현재문서목록응답
+      description: GET /api/l3/current 응답. org_id 가 없으면(게스트) 빈 목록이고, 다른 org 의 문서는
+        포함하지 않는다.
     ValidationError:
       properties:
         loc:
@@ -1059,7 +1463,7 @@ components:
       - task_id
       - 항목
       title: 할일
-    ___:
+    ___-Input:
       properties:
         f1:
           $ref: '#/components/schemas/F1'
@@ -1075,6 +1479,62 @@ components:
           title: F4
       type: object
       title: 프로필
+    ___-Output:
+      properties:
+        slug:
+          type: string
+          title: Slug
+          description: HMAC 기반 공개 식별자. org_id 가 아니며 org_id 로 되돌릴 수 없다
+        기관명:
+          type: string
+          title: 기관명
+        사업명:
+          items:
+            type: string
+          type: array
+          title: 사업명
+      type: object
+      required:
+      - slug
+      - 기관명
+      - 사업명
+      title: 기관항
+    _____-Output:
+      properties:
+        doc_id:
+          type: string
+          title: Doc Id
+        상태:
+          type: string
+          title: 상태
+        대체한_doc_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: 대체한 Doc Id
+        retrieval_scope:
+          type: string
+          title: Retrieval Scope
+        이전판_청크_삭제:
+          type: integer
+          title: 이전판 청크 삭제
+        판정캐시_삭제:
+          type: integer
+          title: 판정캐시 삭제
+        경고:
+          items:
+            type: string
+          type: array
+          title: 경고
+          default: []
+      type: object
+      required:
+      - doc_id
+      - 상태
+      - retrieval_scope
+      - 이전판_청크_삭제
+      - 판정캐시_삭제
+      title: 활성화응답
     _______:
       properties:
         생성:
@@ -1198,7 +1658,7 @@ components:
       required:
       - 항목
       title: 할일생성
-      description: 사용자 직접 추가. 🔴 출처는 서버가 'user' 로 강제한다 — 재판정이 안 건드린다.
+      description: 사용자가 직접 추가하는 할일. 출처는 서버가 'user' 로 고정한다(재판정해도 바뀌지 않는다).
     server__models________3:
       properties:
         상태:
@@ -1226,8 +1686,21 @@ components:
           title: 유형
       type: object
       title: 할일수정
-      description: 「확인필요」 토글 · 날짜 지정. 보낸 필드만 바뀐다.
+      description: 할일 상태 변경·날짜 지정. 보낸 필드만 바뀐다.
     server__models________4:
+      properties:
+        code:
+          type: string
+          title: Code
+        값:
+          title: 값
+      type: object
+      required:
+      - code
+      - 값
+      title: 답변항목
+      description: /api/judge 가 받는 심층질문 답 한 건.
+    server__models________5:
       properties:
         정규화:
           additionalProperties: true
@@ -1255,9 +1728,14 @@ components:
           title: Plan Id
         f5:
           $ref: '#/components/schemas/F5'
+        답변:
+          items:
+            $ref: '#/components/schemas/server__models________4'
+          type: array
+          title: 답변
       type: object
       title: 판정요청
-    server__models________5:
+    server__models________6:
       properties:
         전체:
           type: integer
@@ -1285,9 +1763,11 @@ components:
           default: 0
       type: object
       title: 계획통계
-      description: "화면 6 ④ 통계 카드 4개 + ③ 전체 현황.\n\n\U0001F511 프론트 요구서: «통계 전용 API 불필요 — 한 번의 JOIN 이면 다\
-        \ 나온다».\n   그래서 목록 응답에 얹어 보낸다. 프론트가 부르기 편한 쪽을 택했다.\n⚠️ 전체 = 확인필요 + 위험 + 특이사항없음 + 점검전 이다."
-    server__models________6:
+      description: '홈 화면 통계 카드 값. 목록 응답에 포함해 보낸다(통계 전용 API 없음).
+
+
+        전체 = 확인필요 + 위험 + 특이사항없음 + 점검전.'
+    server__models________7:
       properties:
         plan_id:
           type: integer
@@ -1343,8 +1823,8 @@ components:
       required:
       - plan_id
       title: 계획요약
-      description: 목록 표 한 행 (`프론트_데이터요구서_0901.md` §화면7-④).
-    server__models________7:
+      description: 계획 목록 표의 한 행.
+    server__models________8:
       properties:
         plan_id:
           type: integer
@@ -1445,6 +1925,35 @@ components:
       required:
       - plan_id
       title: 계획상세
+    server__models________9:
+      properties:
+        사업명:
+          type: string
+          title: 사업명
+        별칭:
+          items:
+            type: string
+          type: array
+          title: 별칭
+        비목계통:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: 비목계통
+        트랙범위:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: 트랙범위
+        우선순위규칙목록:
+          items:
+            $ref: '#/components/schemas/server__models__________3'
+          type: array
+          title: 우선순위규칙목록
+      type: object
+      required:
+      - 사업명
+      title: 사업정보
     server__models_________1:
       properties:
         decision_id:
@@ -1460,7 +1969,7 @@ components:
           title: 해야할일
       type: object
       title: 할일동기화
-      description: 판정 결과 → plan_tasks 적재. 출처='ai' 행만 만든다.
+      description: 판정 결과의 해야할일을 plan_tasks 에 반영하는 요청. 출처='ai' 행만 만든다.
     server__models_________2:
       properties:
         품목:
@@ -1511,7 +2020,7 @@ components:
     server__models__________1:
       properties:
         통계:
-          $ref: '#/components/schemas/server__models________5'
+          $ref: '#/components/schemas/server__models________6'
         건수:
           type: integer
           title: 건수
@@ -1526,7 +2035,7 @@ components:
           default: 20
         항목:
           items:
-            $ref: '#/components/schemas/server__models________6'
+            $ref: '#/components/schemas/server__models________7'
           type: array
           title: 항목
       type: object
@@ -1544,3 +2053,383 @@ components:
           title: 항목
       type: object
       title: 할일목록응답
+    server__models__________3:
+      properties:
+        우선계층:
+          type: string
+          title: 우선계층
+        열위계층:
+          type: string
+          title: 열위계층
+        범위:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: 범위
+        우선규범:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: 우선규범
+        해석:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: 해석
+      type: object
+      required:
+      - 우선계층
+      - 열위계층
+      title: 우선순위규칙
+      description: corpus.precedence_rules 한 행. L1/L2/L3 중 어느 계층이 우선하는지.
+    server__models__________4:
+      properties:
+        사업:
+          items:
+            $ref: '#/components/schemas/server__models________9'
+          type: array
+          title: 사업
+        비고:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: 비고
+      type: object
+      title: 사업목록응답
+    server__routes_ingest_______-Input:
+      properties:
+        대체_doc_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: 대체 Doc Id
+        신규문서:
+          type: boolean
+          title: 신규문서
+          default: false
+        중복_허용:
+          type: boolean
+          title: 중복 허용
+          default: false
+      additionalProperties: false
+      type: object
+      title: 활성화요청
+      description: '이전 판을 자동으로 찾지 못할 때 대체_doc_id 나 신규문서 중 하나를 지정한다.
+
+
+        신규문서인데 같은 사업·비슷한 이름의 active 문서가 있으면 409 다. 그 문서와 함께 검색돼야 하는
+
+        별개 문서임을 확인했을 때만 중복_허용=true 를 준다.'
+    server__routes_ingest________1:
+      properties:
+        doc_id:
+          type: string
+          title: Doc Id
+        상태:
+          type: string
+          const: parsing
+          title: 상태
+          default: parsing
+        파일형식:
+          type: string
+          title: 파일형식
+        파일정체:
+          type: string
+          title: 파일정체
+        안내:
+          type: string
+          title: 안내
+      type: object
+      required:
+      - doc_id
+      - 파일형식
+      - 파일정체
+      - 안내
+      title: 접수응답
+    server__routes_ingest________2:
+      properties:
+        doc_id:
+          type: string
+          title: Doc Id
+        상태:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: 상태
+        layer:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Layer
+        문서명:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: 문서명
+        사업명:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: 사업명
+        시행일:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: 시행일
+        parse_quality:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Parse Quality
+        실패사유:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: 실패사유
+        등록일시:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: 등록일시
+      type: object
+      required:
+      - doc_id
+      title: 문서요약
+    server__routes_ingest________3:
+      properties:
+        조번호:
+          type: string
+          title: 조번호
+        조제목:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: 조제목
+        본문:
+          type: string
+          title: 본문
+      type: object
+      required:
+      - 조번호
+      - 본문
+      title: 조문샘플
+    server__routes_ingest________4:
+      properties:
+        doc_id:
+          type: string
+          title: Doc Id
+        이전상태:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: 이전상태
+        청크_삭제:
+          type: integer
+          title: 청크 삭제
+        참조_삭제:
+          type: integer
+          title: 참조 삭제
+      type: object
+      required:
+      - doc_id
+      - 청크_삭제
+      - 참조_삭제
+      title: 삭제응답
+    server__routes_ingest__________1:
+      properties:
+        건수:
+          type: integer
+          title: 건수
+        문서:
+          items:
+            $ref: '#/components/schemas/server__routes_ingest________2'
+          type: array
+          title: 문서
+      type: object
+      required:
+      - 건수
+      - 문서
+      title: 문서목록응답
+    server__routes_ingest__________2:
+      properties:
+        doc_id:
+          type: string
+          title: Doc Id
+        상태:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: 상태
+        layer:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Layer
+        문서명:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: 문서명
+        발행기관:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: 발행기관
+        사업명:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: 사업명
+        시행일:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: 시행일
+        version:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Version
+        적용대상:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: 적용대상
+        원본파일명:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: 원본파일명
+        파일형식:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: 파일형식
+        parse_quality:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Parse Quality
+        retrieval_scope:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Retrieval Scope
+        분해전략:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: 분해전략
+        조_건수:
+          type: integer
+          title: 조 건수
+          default: 0
+        삭제조_건수:
+          type: integer
+          title: 삭제조 건수
+          default: 0
+        청크_건수:
+          type: integer
+          title: 청크 건수
+          default: 0
+        임베딩_누락:
+          type: integer
+          title: 임베딩 누락
+          default: 0
+        참조_건수:
+          type: integer
+          title: 참조 건수
+          default: 0
+        끊긴참조_건수:
+          type: integer
+          title: 끊긴참조 건수
+          default: 0
+        경고:
+          items:
+            type: string
+          type: array
+          title: 경고
+          default: []
+        실패사유:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: 실패사유
+        대체한_doc_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: 대체한 Doc Id
+        샘플:
+          items:
+            $ref: '#/components/schemas/server__routes_ingest________3'
+          type: array
+          title: 샘플
+          default: []
+        등록일시:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: 등록일시
+        갱신일시:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: 갱신일시
+      type: object
+      required:
+      - doc_id
+      title: 문서상태응답
+    server__routes_orgs__________1:
+      properties:
+        총건수:
+          type: integer
+          title: 총건수
+        페이지:
+          type: integer
+          title: 페이지
+        크기:
+          type: integer
+          title: 크기
+        항목:
+          items:
+            $ref: '#/components/schemas/___-Output'
+          type: array
+          title: 항목
+      type: object
+      required:
+      - 총건수
+      - 페이지
+      - 크기
+      - 항목
+      title: 기관목록응답
+    server__routes_orgs__________2:
+      properties:
+        access_token:
+          type: string
+          title: Access Token
+        token_type:
+          type: string
+          title: Token Type
+          default: Bearer
+        expires_in:
+          type: integer
+          title: Expires In
+        기관명:
+          type: string
+          title: 기관명
+        slug:
+          type: string
+          title: Slug
+      type: object
+      required:
+      - access_token
+      - expires_in
+      - 기관명
+      - slug
+      title: 데모세션응답

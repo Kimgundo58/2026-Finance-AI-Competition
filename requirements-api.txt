@@ -52,7 +52,7 @@ python-docx==1.2.0
 
 # ── 넣지 않은 것과 이유 ──────────────────────────────────────────────
 # torchvision      : 판정·파싱 경로에서 import 하지 않는다. 약 500MB 를 차지한다
-# bm25s            : 서빙 경로에서 쓰지 않는다
+# bm25s            : 쓰지 않는다. BM25 는 PostgreSQL(corpus.chunk_terms·term_df)에서 계산한다
 # requests / bs4   : 법령 수집 스크립트 전용이다. 컨테이너는 수집을 하지 않는다
 # pydantic-settings: 코드에서 import 하지 않는다
 # httpx-sse        : 서버는 SSE 를 보내기만 한다. 클라이언트 파서는 필요 없다
