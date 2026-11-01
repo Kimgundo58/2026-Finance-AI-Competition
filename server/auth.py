@@ -45,13 +45,20 @@ ORG_PARAM_허용 = os.environ.get("SUDDOE_ORG_PARAM", "1") != "0"
 _개발기본비밀 = "suddoe-dev-only-not-a-secret"
 
 
-def _비밀(이름: str) -> str:
-    """환경변수의 비밀값. 미설정이면 경고 로그를 남기고 개발 기본값을 쓴다."""
+def _비밀(이름: str) -> str | None:
+    """환경변수의 비밀값. 미설정이면 mock 모드에서만 개발용 기본값을 쓰고, live 모드에서는 None.
+
+    개발용 기본값은 코드에 공개돼 있어 live 모드에서 쓰면 누구나 데모 토큰을 만들 수 있다.
+    """
     v = os.environ.get(이름, "").strip()
     if v:
         return v
-    로그.warning("🔴 %s 미설정 — 개발 기본 비밀을 쓴다. 배포 전에 반드시 설정할 것", 이름)
-    return f"{_개발기본비밀}:{이름}"
+    return f"{_개발기본비밀}:{이름}" if _common.MOCK else None
+
+
+if not _common.MOCK and not os.environ.get("SUDDOE_SLUG_SECRET", "").strip():
+    로그.error("SUDDOE_SLUG_SECRET 미설정: 공개 slug 를 개발용 기본 비밀로 계산합니다. "
+               "누구나 org_id 에서 slug 를 계산할 수 있으니 운영에서는 반드시 설정하세요.")
 
 
 # ── 주체 ────────────────────────────────────────────────────────────
@@ -84,7 +91,15 @@ def _jwks(강제갱신: bool = False) -> dict:
     if not JWKS_URL:
         raise HTTPException(503, "SUDDOE_JWKS_URL 미설정 — Supabase 토큰을 검증할 수 없다")
     import httpx
-    본문 = httpx.get(JWKS_URL, timeout=5.0).raise_for_status().json()
+    # 미들웨어 밖으로 HTTPException 이 아닌 예외가 나가면 CORS 헤더 없는 500 이 되어
+    # 브라우저가 CORS 오류로 보고한다. 503 으로 바꿔 낸다.
+    try:
+        본문 = httpx.get(JWKS_URL, timeout=5.0).raise_for_status().json()
+        if not isinstance(본문, dict):
+            raise ValueError(f"JWKS 응답이 객체가 아니다: {type(본문).__name__}")
+    except Exception as e:                                    # noqa: BLE001
+        로그.exception("JWKS 를 가져오지 못했다")
+        raise HTTPException(503, "인증 키를 가져오지 못했습니다") from e
     with _jwks_잠금:
         _jwks_캐시 = (time.time(), 본문)
     return 본문
@@ -115,16 +130,22 @@ def _pyjwt():
 def 데모토큰_발급(org_id: str) -> tuple[str, int]:
     """서버 자체 서명 단기 토큰. Supabase 를 안 거친다. (토큰, 수명초) 를 돌려준다."""
     jwt = _pyjwt()
+    비밀 = _비밀("SUDDOE_DEMO_SECRET")
+    if 비밀 is None:
+        raise HTTPException(503, "데모 세션을 사용할 수 없습니다 (서버에 데모 토큰 비밀이 설정되지 않았습니다)")
     만료 = int(time.time()) + DEMO_TTL
     본문 = {"iss": DEMO_ISS, "sub": f"demo:{org_id}", "org": org_id,
             "iat": int(time.time()), "exp": 만료}
-    return jwt.encode(본문, _비밀("SUDDOE_DEMO_SECRET"), algorithm="HS256"), DEMO_TTL
+    return jwt.encode(본문, 비밀, algorithm="HS256"), DEMO_TTL
 
 
 def _데모해석(토큰: str) -> 주체:
     jwt = _pyjwt()
+    비밀 = _비밀("SUDDOE_DEMO_SECRET")
+    if 비밀 is None:
+        raise HTTPException(401, "이 서버는 데모 토큰을 받지 않습니다")
     try:
-        본문 = jwt.decode(토큰, _비밀("SUDDOE_DEMO_SECRET"),
+        본문 = jwt.decode(토큰, 비밀,
                           algorithms=["HS256"],          # HS256 만
                           issuer=DEMO_ISS,
                           options={"require": ["exp", "iss", "org"]})
@@ -291,5 +312,8 @@ async def _거부(send, 코드: int, 사유: str) -> None:
 
 def slug(org_id) -> str:
     """org_id 를 응답에 싣지 않기 위한 HMAC 손잡이. 슬러그에서 org_id 로 되돌릴 수 없다."""
-    h = hmac.new(_비밀("SUDDOE_SLUG_SECRET").encode(), str(org_id).encode(), hashlib.sha256)
+    # 미설정이면 live 모드에서도 개발용 기본값으로 계산한다. 시작 시점에 오류 로그를 남긴다.
+    비밀 = (os.environ.get("SUDDOE_SLUG_SECRET", "").strip()
+            or f"{_개발기본비밀}:SUDDOE_SLUG_SECRET")
+    h = hmac.new(비밀.encode(), str(org_id).encode(), hashlib.sha256)
     return h.hexdigest()[:16]

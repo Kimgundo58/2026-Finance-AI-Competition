@@ -18,8 +18,17 @@ ROOT = Path(__file__).resolve().parent.parent
 
 DSN = os.environ.get("SUDDOE_DSN", "postgresql://postgres:devpw@localhost:5432/suddoe")
 
-# SUDDOE_MOCK=1(기본) 이면 DB·GPU 없이 목 데이터로 응답한다.
-MOCK = os.environ.get("SUDDOE_MOCK", "1") == "1"
+# SUDDOE_MOCK=1 일 때만 DB·LLM 없이 고정 응답을 낸다. 미설정이면 live 모드다.
+# mock 모드는 인증 미들웨어를 건너뛰고 고정된 '가능' 을 돌려주므로 기본값이 되면 안 된다.
+MOCK = os.environ.get("SUDDOE_MOCK", "0") == "1"
+
+# 운영 설정이 있는데 mock 모드면 배포 설정 실수다. 조용히 뜨지 않고 시작 시점에 실패시킨다.
+_운영전용_환경변수 = [k for k in ("SUDDOE_JWKS_URL", "SUDDOE_ADMIN_TOKEN")
+                      if os.environ.get(k, "").strip()]
+if MOCK and _운영전용_환경변수:
+    raise RuntimeError(
+        f"SUDDOE_MOCK=1 인데 운영 설정({', '.join(_운영전용_환경변수)})이 있습니다. "
+        "운영 배포라면 SUDDOE_MOCK=0 으로, 로컬 mock 실행이라면 해당 변수를 비우고 다시 시작하세요.")
 
 
 # ── enum — DB 가 없어도 계약이 지켜지도록 코드에 한 벌 둔다 ──────────
