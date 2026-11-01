@@ -2,15 +2,17 @@
 """판정 파이프라인 결과를 /api/judge 응답 계약으로 바꾼다.
 
 routes_judge 가 orchestrate.판정() 의 결과를 파이프라인결과_매핑(r, body) 로 바꿔 SSE 로 내보낸다.
-인용·요약 내용은 새로 만들지 않는다. 요약의 S번호를 인용 목록의 조문 표기로 바꾸고, 해야할일에
+인용·요약 내용은 새로 만들지 않는다. 요약의 문장 ID 를 인용 목록의 조문 표기로 바꾸고, 해야할일에
 check_items 의 구분·유형을 붙이고, 판단불가면 server/inquiry.py 로 문의 초안을 만든다(LLM 호출 없음).
-_사용자F값_조립 은 심층질문 답을 orchestrate.판정(사용자F값=) 입력으로 바꾼다.
+_사용자프로필값_구성 은 심층질문 답을 orchestrate.판정(사용자프로필값=) 입력으로 바꾼다.
+이름을 바꾼 응답 키를 이전 이름으로도 보내는 호환 처리는 파일 끝 블록(구_판정키_포함)에 모아 둔다.
 """
 from __future__ import annotations
 
 import re
 
 from server import inquiry
+from server._common import 구키_추가
 from server.catalog import _비목_표준화, _심층질문마스터, _체크항목_표
 from server.models import 판정요청
 
@@ -32,20 +34,20 @@ def 파이프라인결과_매핑(r: dict, body: 판정요청) -> dict:
                       f"후보({' · '.join(후보)})에 없는 비목을 직접 고르셨습니다",
                 "근거조항": None, "매핑": [], "미충족시": "판단불가"}, *전제]
     인용 = r.get("인용목록") or []
-    # 판정 파이프라인이 문의 초안을 주면 그것을 쓰고, 없으면 이미 가진 값으로 조립한다.
+    # 판정 파이프라인이 문의 초안을 주면 그것을 쓰고, 없으면 이미 가진 값으로 작성한다.
     문의초안 = r.get("문의초안") or inquiry.문의초안(
         body.정규화 or {}, r.get("판정", "판단불가"), 인용, 전제, body.사업명)
 
     return {
         "판정": r.get("판정", "판단불가"),
-        "요약": _요약_나열이면_대체(_요약_S번호_풀기(r.get("요약", ""), 인용),
+        "요약": _요약_나열이면_대체(_요약_문장ID_치환(r.get("요약", ""), 인용),
                                  r.get("판정", "")),
         "해야할일": _할일_보강(_할일_중복제거(r.get("해야할일", []))),
         "인용": 인용,
         "전제": 전제,
         "신뢰등급": r.get("신뢰등급"),
-        "버전스탬프": r.get("버전스탬프"),
-        "참조사슬": r.get("참조사슬", []),
+        "규정버전": r.get("규정버전"),
+        "참조관계": r.get("참조관계", []),
         "증빙목록": r.get("증빙목록") or [],
         **({"문의초안": 문의초안} if 문의초안 else {}),
         **({"decision_id": r["decision_id"]} if r.get("decision_id") else {}),
@@ -56,15 +58,15 @@ def 파이프라인결과_매핑(r: dict, body: 판정요청) -> dict:
 
 # 요약 정리
 
-_S번호_패턴 = re.compile(r"S\d+(?!\d)")
+_문장ID_패턴 = re.compile(r"S\d+(?!\d)")
 
 
-def _요약_S번호_풀기(요약: str, 인용들: list) -> str:
-    """요약 안의 S번호를 사람이 읽는 조문 표기로 바꾼다.
+def _요약_문장ID_치환(요약: str, 인용들: list) -> str:
+    """요약 안의 문장 ID(S01 등)를 사람이 읽는 조문 표기로 바꾼다.
 
-    S번호는 프롬프트 안에서만 쓰는 인용 표기라 화면에 그대로 내보내지 않는다. 인용을 새로
-    만들지 않고 인용 목록에서 그 S번호가 가리키는 조의 이름으로만 바꾼다. 매칭되지 않는
-    S번호는 그대로 둔다.
+    문장 ID 는 프롬프트 안에서만 쓰는 인용 표기라 화면에 그대로 내보내지 않는다. 인용을 새로
+    만들지 않고 인용 목록에서 그 문장 ID 가 가리키는 조의 이름으로만 바꾼다. 매칭되지 않는
+    문장 ID 는 그대로 둔다.
     """
     if not 요약 or not 인용들:
         return 요약
@@ -72,18 +74,18 @@ def _요약_S번호_풀기(요약: str, 인용들: list) -> str:
     for c in 인용들:
         if not isinstance(c, dict):
             continue
-        s번호 = c.get("s번호") or c.get("S번호")
-        if not s번호:
+        문장ID = c.get("문장ID")
+        if not 문장ID:
             continue
         조 = " ".join(str(x) for x in (c.get("조번호"), c.get("조제목")) if x)
         항 = c.get("항호")
         이름 = (조 + (f" {항}" if 항 else "")).strip()
         if 이름:
-            표[str(s번호)] = 이름
+            표[str(문장ID)] = 이름
     if not 표:
         return 요약
-    # 뒤에 숫자가 더 붙지 않는 S번호만 바꾼다 — S1 을 바꾸면서 S10 을 깨뜨리지 않게 한다.
-    return _S번호_패턴.sub(lambda m: 표.get(m.group(0), m.group(0)), 요약)
+    # 뒤에 숫자가 더 붙지 않는 문장 ID 만 바꾼다. S1 을 바꾸면서 S10 을 깨뜨리지 않게 한다.
+    return _문장ID_패턴.sub(lambda m: 표.get(m.group(0), m.group(0)), 요약)
 
 
 # 요약이 문장이 아니라 인용 표기 나열뿐인지 판별한다. 인용 표기가 있다는 것만으로 판별하면
@@ -130,7 +132,7 @@ def _할일_중복제거(할일: list) -> list:
 def _할일_보강(할일: list) -> list:
     """code 로 check_items 를 찾아 구분·유형을 붙인다.
 
-    LLM 조립 스키마의 해야할일은 {code, 항목, 설명} 뿐이고 구분·유형의 기준값은 check_items 다.
+    판정 생성 스키마의 해야할일은 {code, 항목, 설명} 뿐이고 구분·유형의 기준값은 check_items 다.
     check_items 에 없는 code 거나 DB 를 못 읽으면 붙이지 않고 그대로 둔다.
     """
     표 = _체크항목_표()
@@ -145,17 +147,41 @@ def _할일_보강(할일: list) -> list:
 
 # 심층질문 답
 
-def _사용자F값_조립(답변: list) -> dict | None:
-    """심층질문 답 → orchestrate.판정(사용자F값=) 입력 {컬럼명: 값}. 답이 없으면 None.
+def _사용자프로필값_구성(답변: list) -> dict | None:
+    """심층질문 답 → orchestrate.판정(사용자프로필값=) 입력 {컬럼명: 값}. 답이 없으면 None.
 
-    F 축 접두사를 붙인 경로 키 변환은 orchestrate.f값_경로키() 가 한 번만 한다.
+    프로필 경로 접두사를 붙인 경로 키 변환은 orchestrate.프로필값_경로키() 가 한 번만 한다.
     check_items 에 없는 code 의 답은 버린다.
     """
     if not 답변:
         return None
-    표 = {q["code"]: q.get("필요F필드") or [] for q in _심층질문마스터()}
+    표 = {q["code"]: q.get("필요프로필필드") or [] for q in _심층질문마스터()}
     out: dict = {}
     for a in 답변:
         for 컬럼 in 표.get(a.code, []):
             out[컬럼] = a.값
     return out or None
+
+
+# ── 구 이름 호환(제거 예정: 다음 릴리스) ─────────────────────────────
+# 응답 키 이름을 바꾼 뒤 한 릴리스 동안 이전 이름도 같이 보낸다. 프론트 전환이 끝나면 이 블록과
+# 호출부(routes_judge·routes_plans)의 호환 줄을 함께 지운다. 표는 {새 키: 이전 키} 다.
+_구_판정키 = {"규정버전": "버전스탬프", "참조관계": "참조사슬", "검증사유": "강등사유"}  # 구 이름 호환(제거 예정: 다음 릴리스)
+_구_인용키 = {"문장ID": "s번호"}  # 구 이름 호환(제거 예정: 다음 릴리스)
+_구_참조관계키 = {"참조문자열": "표기", "해결근거": "보정"}  # 구 이름 호환(제거 예정: 다음 릴리스)
+구_참조관계_이벤트 = "참조사슬"  # 구 이름 호환(제거 예정: 다음 릴리스). SSE 이벤트 이름
+
+
+def 구_판정키_포함(out: dict) -> dict:
+    """판정 응답 dict 에 이전 키 이름을 덧붙인다. 새 키와 값은 그대로 두고 out 을 돌려준다.
+
+    인용·참조관계 항목 안의 키를 먼저 덧붙인 뒤 최상위 키를 복사한다. 항목 dict 는 새로 만들어
+    원본 목록을 바꾸지 않는다.
+    """
+    if isinstance(out.get("인용"), list):
+        out["인용"] = [구키_추가(dict(c), _구_인용키) if isinstance(c, dict) else c
+                      for c in out["인용"]]
+    if isinstance(out.get("참조관계"), list):
+        out["참조관계"] = [구키_추가(dict(x), _구_참조관계키) if isinstance(x, dict) else x
+                        for x in out["참조관계"]]
+    return 구키_추가(out, _구_판정키)

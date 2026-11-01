@@ -2,10 +2,11 @@
 """지출계획 API — 홈, 목록, 상세 화면이 쓰는 /api/plans 라우터.
 
 GET/POST /api/plans, GET/DELETE /api/plans/{plan_id}. mock 모드(SUDDOE_MOCK=1)에서는
-mock_data 를 쓰고, DB 모드 구현은 `_실_*` 함수에 있다. 읽고 쓰는 테이블은
+mock_data 를 쓰고, live 모드 구현은 `_live_*` 함수에 있다. 읽고 쓰는 테이블은
 tenant.expense_plans, tenant.decisions, tenant.plan_tasks 이다.
 응답 모델(models.계획*)을 바꾸면 프론트가 깨지므로 필드는 합의 후에만 바꾼다.
 통계는 별도 API 없이 목록 응답에 포함한다. 다른 기관의 계획은 404 로 숨긴다.
+판정상세의 이름을 바꾼 키는 한 릴리스 동안 이전 이름으로도 함께 보낸다(judge_response.구_판정키_포함).
 """
 from __future__ import annotations
 
@@ -15,6 +16,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from ._common import MOCK, 탭_판정, _jsonb, _org조건, _질의, _실행
+from .judge_response import 구_판정키_포함
 from .models import 계획목록응답, 계획상세, 계획생성, 계획통계, 계획요약
 from . import auth, mock_data
 
@@ -40,20 +42,20 @@ def 목록(
     크기: int = Query(20, ge=1, le=100),
     org_id: str | None = None,
 ) -> 계획목록응답:
-    행 = mock_data.목_계획요약() if MOCK else _실_목록(org_id)
-    통계 = 계획통계(**(mock_data.목_통계() if MOCK else _실_통계(org_id)))
+    행 = mock_data.mock_계획요약() if MOCK else _live_목록(org_id)
+    통계 = 계획통계(**(mock_data.mock_통계() if MOCK else _live_통계(org_id)))
 
     # 통계는 필터 적용 전 전체 기준이다. 탭 배지 숫자가 필터에 따라 바뀌면 안 된다.
-    걸린 = _거르기(행, 탭, 사업명, 확정비목, q, 금액_최소, 금액_최대)
-    걸린 = _정렬(걸린, 정렬)
+    필터결과 = _필터(행, 탭, 사업명, 확정비목, q, 금액_최소, 금액_최대)
+    필터결과 = _정렬(필터결과, 정렬)
     시작 = (페이지 - 1) * 크기
     return 계획목록응답(
-        통계=통계, 건수=len(걸린), 페이지=페이지, 크기=크기,
-        항목=[계획요약(**r) for r in 걸린[시작:시작 + 크기]],
+        통계=통계, 건수=len(필터결과), 페이지=페이지, 크기=크기,
+        항목=[계획요약(**r) for r in 필터결과[시작:시작 + 크기]],
     )
 
 
-def _거르기(행: list[dict], 탭, 사업명, 확정비목, q, 금액_최소, 금액_최대) -> list[dict]:
+def _필터(행: list[dict], 탭, 사업명, 확정비목, q, 금액_최소, 금액_최대) -> list[dict]:
     if 탭 not in 탭_판정:
         raise HTTPException(422, f"알 수 없는 탭: {탭}")
     허용 = 탭_판정[탭]
@@ -142,7 +144,7 @@ def _계획_org(요청: Request, 요청_org_id: str | None) -> str | None:
 @router.post("", response_model=계획상세, status_code=201)
 def 생성(요청: Request, body: 계획생성) -> 계획상세:
     if MOCK:
-        새 = max((p["plan_id"] for p in mock_data.목_계획), default=0) + 1
+        새 = max((p["plan_id"] for p in mock_data.mock_계획), default=0) + 1
         행 = {
             "plan_id": 새, "제목": body.제목 or body.품목, "확정비목": body.확정비목,
             "금액": body.금액, "판정": None, "집행예정일": body.집행예정일,
@@ -151,9 +153,9 @@ def 생성(요청: Request, body: 계획생성) -> 계획상세:
             "용도": body.용도, "거래처": body.거래처, "추가설명": body.추가설명,
             "정규화": body.정규화, "latest_decision_id": None,
         }
-        mock_data.목_계획.append(행)
+        mock_data.mock_계획.append(행)
         return 계획상세(**행, 할일=[], 판정상세=None)
-    return _실_생성(body, org_id=_계획_org(요청, body.org_id))
+    return _live_생성(body, org_id=_계획_org(요청, body.org_id))
 
 
 def _합성(body: 계획생성) -> str:
@@ -176,14 +178,14 @@ def _지금() -> str:
 @router.get("/{plan_id}", response_model=계획상세)
 def 상세(plan_id: int, org_id: str | None = None) -> 계획상세:
     if MOCK:
-        행 = next((p for p in mock_data.목_계획 if p["plan_id"] == plan_id), None)
+        행 = next((p for p in mock_data.mock_계획 if p["plan_id"] == plan_id), None)
         if not 행:
             raise HTTPException(404, f"지출계획 {plan_id} 을(를) 찾을 수 없습니다")
-        할일 = [t for t in mock_data.목_할일 if t["plan_id"] == plan_id]
+        할일 = [t for t in mock_data.mock_할일 if t["plan_id"] == plan_id]
         # 생성() 이 만든 행에는 '정규화' 키가 있고 시드 데이터에는 없어서 병합해 넘긴다
         return 계획상세(**{**행, "정규화": 행.get("정규화") or {}},
                        할일=할일, 판정상세=None)
-    return _실_상세(plan_id, org_id)
+    return _live_상세(plan_id, org_id)
 
 
 @router.delete("/{plan_id}", status_code=200)
@@ -194,12 +196,12 @@ def 삭제(plan_id: int, org_id: str | None = None) -> dict:
     (판정 기록은 감사 기록으로 남긴다). 되돌릴 수 없으므로 같이 지워진 할일 건수를 반환한다.
     """
     if MOCK:
-        전 = len(mock_data.목_계획)
-        mock_data.목_계획[:] = [p for p in mock_data.목_계획 if p["plan_id"] != plan_id]
-        if len(mock_data.목_계획) == 전:
+        전 = len(mock_data.mock_계획)
+        mock_data.mock_계획[:] = [p for p in mock_data.mock_계획 if p["plan_id"] != plan_id]
+        if len(mock_data.mock_계획) == 전:
             raise HTTPException(404, f"지출계획 {plan_id} 을(를) 찾을 수 없습니다")
-        할일 = [t for t in mock_data.목_할일 if t["plan_id"] == plan_id]
-        mock_data.목_할일[:] = [t for t in mock_data.목_할일 if t["plan_id"] != plan_id]
+        할일 = [t for t in mock_data.mock_할일 if t["plan_id"] == plan_id]
+        mock_data.mock_할일[:] = [t for t in mock_data.mock_할일 if t["plan_id"] != plan_id]
         return {"삭제": True, "plan_id": plan_id, "할일삭제": len(할일)}
 
     조건, org인자 = _org조건(org_id, "p")
@@ -221,7 +223,7 @@ def 삭제(plan_id: int, org_id: str | None = None) -> dict:
 
 
 # ════════════════════════════════════════════════════════════════════
-# DB 모드 구현
+# live 모드 구현
 # ════════════════════════════════════════════════════════════════════
 
 def _문자열(v) -> str | None:
@@ -229,7 +231,7 @@ def _문자열(v) -> str | None:
     return v.isoformat() if v is not None else None
 
 
-def _실수(v) -> float | None:
+def _float변환(v) -> float | None:
     """NUMERIC(psycopg 가 Decimal 로 준다)을 float 로 바꾼다."""
     return float(v) if v is not None else None
 
@@ -238,7 +240,7 @@ _목록_컬럼 = ("plan_id", "제목", "확정비목", "금액", "판정", "집�
              "updated_at", "사업명", "상태")
 
 
-def _실_목록(org_id: str | None) -> list[dict]:
+def _live_목록(org_id: str | None) -> list[dict]:
     """tenant.expense_plans LEFT JOIN tenant.decisions ON latest_decision_id.
 
     반환 dict 의 키는 `models.계획요약` 필드와 같다. org_id 가 None 이면 게스트(org_id IS NULL)
@@ -256,14 +258,14 @@ def _실_목록(org_id: str | None) -> list[dict]:
     out = []
     for r in 행:
         d = dict(zip(_목록_컬럼, r))
-        d["금액"] = _실수(d["금액"])
+        d["금액"] = _float변환(d["금액"])
         d["집행예정일"] = _문자열(d["집행예정일"])
         d["updated_at"] = _문자열(d["updated_at"])
         out.append(d)
     return out
 
 
-def _실_통계(org_id: str | None) -> dict:
+def _live_통계(org_id: str | None) -> dict:
     """같은 JOIN 한 번으로 탭별 건수 5개와 금액합계를 센다. 키는 `models.계획통계` 와 같다."""
     조건, 인자 = _org조건(org_id)
     행 = _질의(f"""
@@ -292,7 +294,7 @@ _생성_컬럼 = ("plan_id", "제목", "확정비목", "금액", "집행예정�
              "사업명", "상태", "질문원문", "거래처", "추가설명", "정규화", "latest_decision_id")
 
 
-def _실_생성(body: 계획생성, *, org_id: str | None) -> 계획상세:
+def _live_생성(body: 계획생성, *, org_id: str | None) -> 계획상세:
     """INSERT INTO tenant.expense_plans. 질문원문이 없으면 `_합성(body)` 을 쓴다.
 
     org_id 는 호출자가 검증된 주체에서 정한 값이다(`_계획_org`). body.org_id 는 쓰지 않는다.
@@ -316,7 +318,7 @@ def _실_생성(body: 계획생성, *, org_id: str | None) -> 계획상세:
         raise HTTPException(500, "지출계획을 저장하지 못했습니다")
     r = dict(zip(_생성_컬럼, 행[0]))
     return 계획상세(
-        plan_id=r["plan_id"], 제목=r["제목"], 확정비목=r["확정비목"], 금액=_실수(r["금액"]),
+        plan_id=r["plan_id"], 제목=r["제목"], 확정비목=r["확정비목"], 금액=_float변환(r["금액"]),
         판정=None,                              # 방금 만든 계획이라 아직 판정이 없다
         집행예정일=_문자열(r["집행예정일"]), updated_at=_문자열(r["updated_at"]),
         created_at=_문자열(r["created_at"]),
@@ -330,22 +332,23 @@ def _실_생성(body: 계획생성, *, org_id: str | None) -> 계획상세:
 _상세_컬럼 = ("plan_id", "제목", "확정비목", "금액", "판정", "집행예정일",
              "updated_at", "created_at", "사업명", "상태", "질문원문",
              "거래처", "추가설명", "정규화", "latest_decision_id",
-             "요약", "해야할일", "인용", "전제", "신뢰등급", "버전스탬프",
-             "참조사슬", "강등사유")
+             "요약", "해야할일", "인용", "전제", "신뢰등급", "규정버전",
+             "참조관계", "검증사유")
 
-_계획할일_컬럼 = ("task_id", "plan_id", "출처", "코드", "구분", "항목", "설명", "due_date",
+# 응답 키 순서. DB 컬럼 plan_tasks.코드 는 응답 키 code 로 내보낸다.
+_계획할일_컬럼 = ("task_id", "plan_id", "출처", "code", "구분", "항목", "설명", "due_date",
                "유형", "날짜_사용자수정", "상태")
 
 
-def _실_상세(plan_id: int, org_id: str | None) -> 계획상세:
+def _live_상세(plan_id: int, org_id: str | None) -> 계획상세:
     """계획, 최신 판정, plan_tasks 를 함께 돌려준다. 없거나 다른 기관 것이면 404."""
     조건, org인자 = _org조건(org_id)
     행 = _질의(f"""
         SELECT p.plan_id, p.제목, p.확정비목, p.금액, d.판정, p.집행예정일,
                p.updated_at, p.created_at, p.사업명, p.상태, p.질문원문,
                p.거래처, p.추가설명, p.정규화, p.latest_decision_id,
-               d.요약, d.해야할일, d.인용, d.전제, d.신뢰등급, d.버전스탬프,
-               d.참조사슬, d.강등사유
+               d.요약, d.해야할일, d.인용, d.전제, d.신뢰등급, d.규정버전,
+               d.참조관계, d.검증사유
         FROM tenant.expense_plans p
         LEFT JOIN tenant.decisions d ON d.decision_id = p.latest_decision_id
         WHERE p.plan_id = %s AND {조건}
@@ -360,9 +363,10 @@ def _실_상세(plan_id: int, org_id: str | None) -> 계획상세:
         판정상세 = {
             "판정": r["판정"], "요약": r["요약"], "해야할일": r["해야할일"] or [],
             "인용": r["인용"] or [], "전제": r["전제"] or [], "신뢰등급": r["신뢰등급"],
-            "버전스탬프": r["버전스탬프"], "참조사슬": r["참조사슬"] or [],
-            "강등사유": r["강등사유"] or [],
+            "규정버전": r["규정버전"], "참조관계": r["참조관계"] or [],
+            "검증사유": r["검증사유"] or [],
         }
+        판정상세 = 구_판정키_포함(판정상세)  # 구 이름 호환(제거 예정: 다음 릴리스)
         # 문의초안은 저장하지 않고 조회 때마다 만든다. 저장된 인용·전제·정규화에서 파생되는
         # 글이라 스키마를 늘릴 필요가 없고, 문구를 고치면 이전 판정에도 적용된다.
         # 판단불가가 아니면 문의초안() 이 None 을 준다
@@ -392,7 +396,7 @@ def _실_상세(plan_id: int, org_id: str | None) -> 계획상세:
         할일.append(d)
 
     return 계획상세(
-        plan_id=r["plan_id"], 제목=r["제목"], 확정비목=r["확정비목"], 금액=_실수(r["금액"]),
+        plan_id=r["plan_id"], 제목=r["제목"], 확정비목=r["확정비목"], 금액=_float변환(r["금액"]),
         판정=r["판정"], 집행예정일=_문자열(r["집행예정일"]),
         updated_at=_문자열(r["updated_at"]), created_at=_문자열(r["created_at"]),
         사업명=r["사업명"], 상태=r["상태"], 질문원문=r["질문원문"], 용도=정규화.get("용도"),

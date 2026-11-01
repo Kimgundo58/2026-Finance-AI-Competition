@@ -4,7 +4,7 @@
 POST /api/plans/{plan_id}/tasks:sync (판정 결과 반영, persist.판정_저장 도 함수로 호출),
 POST/PATCH /api/plans/{plan_id}/tasks, GET /api/tasks. 체크리스트와 캘린더는
 tenant.plan_tasks 의 같은 행이고 due_date 유무로만 나뉜다. mock 모드(SUDDOE_MOCK=1)에서는
-mock_data 를 쓰고, DB 모드 구현은 `_실_*` 함수에 있다. 동기화는 출처='user' 행과
+mock_data 를 쓰고, live 모드 구현은 `_live_*` 함수에 있다. 동기화는 출처='user' 행과
 사용자가 고친 due_date 를 덮지 않으며, DB 오류는 롤백 후 예외로 전파한다.
 """
 from __future__ import annotations
@@ -40,16 +40,16 @@ def 동기화(plan_id: int, body: 할일동기화, org_id: str | None = None) ->
     (4) code 가 없으면 항목 텍스트로 대조한다. DB 오류는 예외로 전파한다(HTTP 500).
     """
     if MOCK:
-        보존u = sum(1 for t in mock_data.목_할일
-                    if t["plan_id"] == plan_id and t["출처"] == "user")
-        보존d = sum(1 for t in mock_data.목_할일
-                    if t["plan_id"] == plan_id and t["날짜_사용자수정"])
-        맞춤 = sum(1 for h in body.해야할일 if h.get("code"))
+        보존_사용자 = sum(1 for t in mock_data.mock_할일
+                      if t["plan_id"] == plan_id and t["출처"] == "user")
+        보존_날짜수정 = sum(1 for t in mock_data.mock_할일
+                        if t["plan_id"] == plan_id and t["날짜_사용자수정"])
+        코드매칭수 = sum(1 for h in body.해야할일 if h.get("code"))
         return 할일동기화응답(
-            생성=len(body.해야할일), 갱신=0, 보존_user=보존u, 보존_날짜수정=보존d,
-            코드매칭=맞춤, 코드미상=len(body.해야할일) - 맞춤,
+            생성=len(body.해야할일), 갱신=0, 보존_사용자=보존_사용자, 보존_날짜수정=보존_날짜수정,
+            코드매칭=코드매칭수, 코드미매칭=len(body.해야할일) - 코드매칭수,
         )
-    return _실_동기화(plan_id, body, org_id)
+    return _live_동기화(plan_id, body, org_id)
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -57,7 +57,7 @@ def 동기화(plan_id: int, body: 할일동기화, org_id: str | None = None) ->
 # ════════════════════════════════════════════════════════════════════
 
 _조사_RE = re.compile(r"(으로|에서|에게|이나|만큼|까지|부터|은|는|이|가|을|를|와|과|만|도|의|나|로)$")
-_어미_RULES = (
+_어미_패턴 = (
     # "...아닌지/인지/됐는지 확인(해주세요)" — 결제전 항목 대다수가 이 어미를 공유한다.
     re.compile(r"(아닌지|인지|됐는지|끝났는지|맞는지)\s*확인(해주세요|하세요|해요|해)?[.]?$"),
     re.compile(r"(받아두세요|받으세요|제출하세요|등록하세요|준비하세요|보고하세요|보관하세요|검토하세요)[.]?$"),
@@ -71,7 +71,7 @@ _매칭_임계 = 0.50
 def _문장_정규화(s: str) -> str:
     """조사와 존댓말 어미를 뗀다. 떼지 않으면 공통 어미 때문에 내용이 달라도 유사도가 높게 나온다."""
     s = (s or "").strip()
-    for pat in _어미_RULES:
+    for pat in _어미_패턴:
         새 = pat.sub("", s).strip()
         if 새 != s:
             s = 새
@@ -85,21 +85,21 @@ def _IDF_바이그램(전체_항목: list[str]) -> dict[str, float]:
     문서수 = len(전체_항목)
     빈도: dict[str, int] = {}
     for t in 전체_항목:
-        for bg in 바이그램(_문장_정규화(t)):
-            빈도[bg] = 빈도.get(bg, 0) + 1
-    return {bg: math.log((문서수 + 1) / (df + 1)) + 1.0 for bg, df in 빈도.items()}
+        for 원소 in 바이그램(_문장_정규화(t)):
+            빈도[원소] = 빈도.get(원소, 0) + 1
+    return {원소: math.log((문서수 + 1) / (df + 1)) + 1.0 for 원소, df in 빈도.items()}
 
 
-def _매칭_점수(항목_정규: str, 항목_bg: set[str], 마정: str, 마bg: set[str],
-              idf: dict[str, float]) -> float:
-    seq = difflib.SequenceMatcher(None, 항목_정규, 마정).ratio()
-    교집합 = 항목_bg & 마bg
+def _매칭_점수(항목_정규: str, 항목_바이그램: set[str], 마스터_정규화문: str,
+              마스터_바이그램: set[str], idf: dict[str, float]) -> float:
+    seq = difflib.SequenceMatcher(None, 항목_정규, 마스터_정규화문).ratio()
+    교집합 = 항목_바이그램 & 마스터_바이그램
     if not 교집합:
         가중포함 = 0.0
     else:
-        분모집합 = 항목_bg if len(항목_bg) <= len(마bg) else 마bg
-        분모 = sum(idf.get(bg, 1.0) for bg in 분모집합)
-        가중포함 = sum(idf.get(bg, 1.0) for bg in 교집합) / 분모 if 분모 else 0.0
+        분모집합 = 항목_바이그램 if len(항목_바이그램) <= len(마스터_바이그램) else 마스터_바이그램
+        분모 = sum(idf.get(원소, 1.0) for 원소 in 분모집합)
+        가중포함 = sum(idf.get(원소, 1.0) for 원소 in 교집합) / 분모 if 분모 else 0.0
     return 0.35 * seq + 0.65 * 가중포함
 
 
@@ -107,7 +107,7 @@ class _코드매처:
     """항목 텍스트로 `corpus.check_items.code` 를 추정한다. 요청당 한 번 만들고 메모리에서 비교한다.
 
     판정이 code 를 주지 않았을 때만 쓰는 폴백이다. 못 찾으면 None 이고, 호출부가
-    코드=NULL 로 넣는다.
+    code 를 NULL 로 넣는다.
     """
 
     def __init__(self, 체크항목: list[tuple[str, str]]):
@@ -120,8 +120,8 @@ class _코드매처:
         self._idf = _IDF_바이그램([마스터항목 for _, 마스터항목 in 체크항목])
         self._마스터 = []
         for code, 마스터항목 in 체크항목:
-            마정 = _문장_정규화(마스터항목)
-            self._마스터.append((code, 마정, 바이그램(마정)))
+            마스터_정규화문 = _문장_정규화(마스터항목)
+            self._마스터.append((code, 마스터_정규화문, 바이그램(마스터_정규화문)))
 
     def 매칭(self, 항목: str) -> str | None:
         항목 = (항목 or "").strip()
@@ -131,10 +131,10 @@ class _코드매처:
         if 정확 is not None:
             return 정확
         항목_정규 = _문장_정규화(항목)
-        항목_bg = 바이그램(항목_정규)
+        항목_바이그램 = 바이그램(항목_정규)
         최적_code, 최적_점수 = None, 0.0
-        for code, 마정, 마bg in self._마스터:
-            점수 = _매칭_점수(항목_정규, 항목_bg, 마정, 마bg, self._idf)
+        for code, 마스터_정규화문, 마스터_바이그램 in self._마스터:
+            점수 = _매칭_점수(항목_정규, 항목_바이그램, 마스터_정규화문, 마스터_바이그램, self._idf)
             if 점수 > 최적_점수:
                 최적_code, 최적_점수 = code, 점수
         return 최적_code if 최적_점수 >= _매칭_임계 else None
@@ -147,15 +147,15 @@ class _코드매처:
 @router.post("/api/plans/{plan_id}/tasks", response_model=할일, status_code=201)
 def 추가(plan_id: int, body: 할일생성, org_id: str | None = None) -> 할일:
     if MOCK:
-        새 = max((t["task_id"] for t in mock_data.목_할일), default=0) + 1
-        행 = {"task_id": 새, "plan_id": plan_id, "출처": "user", "코드": None,
+        새 = max((t["task_id"] for t in mock_data.mock_할일), default=0) + 1
+        행 = {"task_id": 새, "plan_id": plan_id, "출처": "user", "code": None,
               "구분": body.구분, "항목": body.항목, "설명": body.설명,
               "due_date": body.due_date, "유형": body.유형,
               "날짜_사용자수정": body.due_date is not None,
               "상태": "준비필요", "계획제목": None}
-        mock_data.목_할일.append(행)
+        mock_data.mock_할일.append(행)
         return 할일(**행)
-    return _실_추가(plan_id, body, org_id)
+    return _live_추가(plan_id, body, org_id)
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -165,7 +165,7 @@ def 추가(plan_id: int, body: 할일생성, org_id: str | None = None) -> 할�
 @router.patch("/api/plans/{plan_id}/tasks/{task_id}", response_model=할일)
 def 수정(plan_id: int, task_id: int, body: 할일수정, org_id: str | None = None) -> 할일:
     if MOCK:
-        행 = next((t for t in mock_data.목_할일 if t["task_id"] == task_id), None)
+        행 = next((t for t in mock_data.mock_할일 if t["task_id"] == task_id), None)
         if not 행:
             raise HTTPException(404, f"할일 {task_id} 을(를) 찾을 수 없습니다")
         if body.상태 is not None:
@@ -176,7 +176,7 @@ def 수정(plan_id: int, task_id: int, body: 할일수정, org_id: str | None = 
         if body.유형 is not None:
             행["유형"] = body.유형
         return 할일(**행)
-    return _실_수정(plan_id, task_id, body, org_id)
+    return _live_수정(plan_id, task_id, body, org_id)
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -192,7 +192,7 @@ def 목록(
     이후: str | None = Query(None, description="YYYY-MM-DD — 이 날짜 이후만"),
     org_id: str | None = None,
 ) -> 할일목록응답:
-    행 = mock_data.목_할일 if MOCK else _실_목록(org_id)
+    행 = mock_data.mock_할일 if MOCK else _live_목록(org_id)
     out = []
     for t in 행:
         if 상태 and t["상태"] != 상태:
@@ -211,16 +211,17 @@ def 목록(
 
 
 # ════════════════════════════════════════════════════════════════════
-# DB 모드 구현
+# live 모드 구현
 # ════════════════════════════════════════════════════════════════════
 
-# 목록·단건 조회가 같이 쓰는 SELECT 와 컬럼 순서. `계획제목` 은 expense_plans JOIN 으로 가져온다.
+# 목록·단건 조회가 같이 쓰는 SELECT 와 응답 키 순서. `계획제목` 은 expense_plans JOIN 으로 가져온다.
+# DB 컬럼 plan_tasks.코드 는 응답 키 code 로 내보낸다.
 _할일_SELECT = (
     'SELECT t.task_id, t.plan_id, t.출처, t.코드, t.구분, t.항목, t.설명, '
     't.due_date, t."유형", t.날짜_사용자수정, t.상태, p.제목 '
     'FROM tenant.plan_tasks t LEFT JOIN tenant.expense_plans p ON p.plan_id = t.plan_id '
 )
-_할일_컬럼 = ("task_id", "plan_id", "출처", "코드", "구분", "항목", "설명",
+_할일_컬럼 = ("task_id", "plan_id", "출처", "code", "구분", "항목", "설명",
              "due_date", "유형", "날짜_사용자수정", "상태", "계획제목")
 
 
@@ -238,7 +239,7 @@ def _할일_조회(task_id: int) -> 할일:
     return 할일(**_행_할일(행[0]))
 
 
-def _due계산(집행예정일, l3조문: list[tuple], 항목: str, 설명: str | None,
+def _마감일_계산(집행예정일, l3조문: list[tuple], 항목: str, 설명: str | None,
             오프셋: int | None, 기한근거: str | None) -> str | None:
     """due_date 는 규정 근거가 있을 때만 만든다. 없으면 None(체크리스트에는 남고 캘린더에는 안 나온다).
 
@@ -268,7 +269,7 @@ def _동기화_준비(body: 할일동기화, 체크항목: dict[str, dict], l3�
               집행예정일) -> list[dict]:
     """판정의 해야할일 목록을 plan_tasks 에 쓸 행으로 확정한다. DB 를 읽지 않는 순수 함수다.
 
-    - code 는 판정이 준 값을 쓰고, 없으면 `_코드매처` 로 추정한다. `매칭금지` 항목(결제 후
+    - code 는 판정이 준 값을 쓰고, 없으면 `_코드매처` 로 추정한다. `코드추정_제외` 항목(결제 후
       제출 서류)은 추정하지 않는다. 서류 이름이 결제 전 확인 항목으로 오매칭되는 것을 막는다.
     - check_items 에 없는 code 는 FK 위반이 되므로 NULL 로 바꾸고 항목 텍스트는 유지한다.
     - 구분은 check_items 값이 우선하고, 없으면 항목의 구분 힌트, 그것도 허용 목록 밖이면 '결제전'.
@@ -279,7 +280,8 @@ def _동기화_준비(body: 할일동기화, 체크항목: dict[str, dict], l3�
     for h in body.해야할일:
         항목 = h.get("항목") or ""
         설명 = h.get("설명")
-        코드 = None if h.get("매칭금지") else (h.get("code") or 매처.매칭(항목))
+        추정제외 = h.get("코드추정_제외") or h.get("매칭금지")  # 구 이름 호환(제거 예정: 다음 릴리스)
+        코드 = None if 추정제외 else (h.get("code") or 매처.매칭(항목))
         마스터 = 체크항목.get(코드) if 코드 else None
         if 코드 and 마스터 is None:
             _log.warning("할일 동기화: code=%r 가 corpus.check_items 에 없어 NULL 로 저장한다", 코드)
@@ -291,8 +293,8 @@ def _동기화_준비(body: 할일동기화, 체크항목: dict[str, dict], l3�
         행들.append({
             "항목": 항목, "설명": 설명, "코드": 코드, "구분": 구분,
             "유형": (마스터.get("유형") or "기타") if 코드 else "기타",
-            "due_date": _due계산(집행예정일, l3조문, 항목, 설명,
-                                마스터.get("오프셋"), 마스터.get("기한근거")),
+            "due_date": _마감일_계산(집행예정일, l3조문, 항목, 설명,
+                                  마스터.get("오프셋"), 마스터.get("기한근거")),
         })
     return 행들
 
@@ -337,15 +339,15 @@ def _동기화_적용(cur, plan_id: int, 계획org, decision_id: int | None,
                  행["설명"], 행["due_date"], 행["유형"]),
             )
 
-    사라진 = [r[0] for r in 기존 if r[1] == "ai" and r[0] not in 남길]
-    if 사라진:
+    삭제대상 = [r[0] for r in 기존 if r[1] == "ai" and r[0] not in 남길]
+    if 삭제대상:
         # task_id 만으로 지우면 호출 경로가 바뀔 때 다른 계획의 행을 지울 수 있어 plan_id 도 조건에 넣는다
         cur.execute('DELETE FROM tenant.plan_tasks WHERE task_id = ANY(%s) AND plan_id = %s',
-                    (사라진, plan_id))
+                    (삭제대상, plan_id))
     return {"생성": 생성, "갱신": 갱신, "보존날짜": 보존날짜}
 
 
-def _실_동기화(plan_id: int, body: 할일동기화, org_id: str | None = None) -> 할일동기화응답:
+def _live_동기화(plan_id: int, body: 할일동기화, org_id: str | None = None) -> 할일동기화응답:
     """판정 결과를 `tenant.plan_tasks` 에 한 트랜잭션으로 반영한다.
 
     중간에 DB 오류가 나면 전부 롤백하고 예외를 전파한다(라우트는 500). 계획이 없거나 다른 기관 것이면 404.
@@ -383,12 +385,12 @@ def 동기화_실행(cur, plan_id: int, body: 할일동기화, org_id: str | Non
     코드매칭수 = sum(1 for 행 in 행들 if 행["코드"])
     return 할일동기화응답(
         생성=건수["생성"], 갱신=건수["갱신"],
-        보존_user=sum(1 for r in 기존 if r[1] == "user"), 보존_날짜수정=건수["보존날짜"],
-        코드매칭=코드매칭수, 코드미상=len(행들) - 코드매칭수,
+        보존_사용자=sum(1 for r in 기존 if r[1] == "user"), 보존_날짜수정=건수["보존날짜"],
+        코드매칭=코드매칭수, 코드미매칭=len(행들) - 코드매칭수,
     )
 
 
-def _실_추가(plan_id: int, body: 할일생성, org_id: str | None = None) -> 할일:
+def _live_추가(plan_id: int, body: 할일생성, org_id: str | None = None) -> 할일:
     조건, org인자 = _org조건(org_id, "p")
     계획 = _질의(f'SELECT p.org_id FROM tenant.expense_plans p '
                 f'WHERE p.plan_id = %s AND {조건}', (plan_id, *org인자))
@@ -407,9 +409,9 @@ def _실_추가(plan_id: int, body: 할일생성, org_id: str | None = None) -> 
     return _할일_조회(행[0][0])
 
 
-def _실_수정(plan_id: int, task_id: int, body: 할일수정, org_id: str | None = None) -> 할일:
+def _live_수정(plan_id: int, task_id: int, body: 할일수정, org_id: str | None = None) -> 할일:
     """할일 상태·날짜·유형을 고친다. 소유 확인은 할일의 org_id 가 아니라 계획(expense_plans.org_id)
-    기준이다. `_실_추가`·`_실_동기화` 와 기준이 같아야 추가는 되는데 수정은 404 인 상황이 생기지 않는다.
+    기준이다. `_live_추가`·`_live_동기화` 와 기준이 같아야 추가는 되는데 수정은 404 인 상황이 생기지 않는다.
     """
     조건, org인자 = _org조건(org_id, "p")
     존재 = _질의(f'SELECT 1 FROM tenant.plan_tasks t '
@@ -439,7 +441,7 @@ def _실_수정(plan_id: int, task_id: int, body: 할일수정, org_id: str | No
     return _할일_조회(task_id)
 
 
-def _실_목록(org_id: str | None) -> list[dict]:
+def _live_목록(org_id: str | None) -> list[dict]:
     if org_id is None:
         행 = _질의(_할일_SELECT + "WHERE t.org_id IS NULL")
     else:

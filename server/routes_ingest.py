@@ -12,6 +12,7 @@
 불변식: 모든 경로는 관리자 토큰(server.auth.관리자_확인)을 먼저 검사한다. DB 는 SUDDOE_INGEST_DSN(롤 suddoe_ingest)
 으로만 쓰고, 값이 없으면 모든 경로가 503 이다. 앱 DSN(suddoe_app)은 corpus 에 SELECT 권한만 있다.
 layer 는 메타데이터로만 정하고 파일명은 보지 않는다. 파일 형식은 내용으로 판별한다.
+이름을 바꾼 응답 필드는 한 릴리스 동안 이전 이름의 읽기 전용 필드(computed_field)로도 내보낸다.
 """
 from __future__ import annotations
 
@@ -29,7 +30,8 @@ import psycopg
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+from pydantic import (BaseModel, ConfigDict, Field, ValidationError, computed_field, field_validator,
+                      model_validator)
 from starlette.datastructures import UploadFile
 
 # 단독 import(테스트) 때도 scripts/ 의 파이프라인 모듈을 찾도록 경로를 건다. main.py 도 같은 경로를 건다.
@@ -76,7 +78,7 @@ class 적재메타(BaseModel):
     @field_validator("문서명")
     @classmethod
     def _문서명_문자(cls, v: str) -> str:
-        # doc_id 가 URL 경로 한 칸이 되고 인용 출처로 화면에 나온다
+        # doc_id 가 URL 경로의 한 세그먼트가 되고 인용 출처로 화면에 나온다
         if re.search(r"[/\\\x00-\x1f\x7f]", v):
             raise ValueError("문서명에 / \\ 나 제어 문자를 쓸 수 없습니다.")
         return v
@@ -99,8 +101,13 @@ class 접수응답(BaseModel):
     doc_id: str
     상태: Literal["parsing"] = "parsing"
     파일형식: str
-    파일정체: str
+    판별결과: str
     안내: str
+
+    @computed_field  # 구 이름 호환(제거 예정: 다음 릴리스)
+    @property
+    def 파일정체(self) -> str:  # 구 이름 호환(제거 예정: 다음 릴리스)
+        return self.판별결과
 
 
 class 문서요약(BaseModel):
@@ -140,19 +147,34 @@ class 문서상태응답(BaseModel):
     파일형식: str | None = None
     parse_quality: str | None = None
     retrieval_scope: str | None = None
-    분해전략: str | None = None
+    분할전략: str | None = None
     조_건수: int = 0
     삭제조_건수: int = 0
     청크_건수: int = 0
     임베딩_누락: int = 0
     참조_건수: int = 0
-    끊긴참조_건수: int = 0
+    미해결참조_건수: int = 0
     경고: list[str] = []
     실패사유: str | None = None
-    대체한_doc_id: str | None = None
+    이전판_doc_id: str | None = None
     샘플: list[조문샘플] = []
     등록일시: datetime | None = None
     갱신일시: datetime | None = None
+
+    @computed_field  # 구 이름 호환(제거 예정: 다음 릴리스)
+    @property
+    def 분해전략(self) -> str | None:  # 구 이름 호환(제거 예정: 다음 릴리스)
+        return self.분할전략
+
+    @computed_field  # 구 이름 호환(제거 예정: 다음 릴리스)
+    @property
+    def 끊긴참조_건수(self) -> int:  # 구 이름 호환(제거 예정: 다음 릴리스)
+        return self.미해결참조_건수
+
+    @computed_field  # 구 이름 호환(제거 예정: 다음 릴리스)
+    @property
+    def 대체한_doc_id(self) -> str | None:  # 구 이름 호환(제거 예정: 다음 릴리스)
+        return self.이전판_doc_id
 
 
 class 활성화요청(BaseModel):
@@ -171,11 +193,16 @@ class 활성화요청(BaseModel):
 class 활성화응답(BaseModel):
     doc_id: str
     상태: str
-    대체한_doc_id: str | None = None
+    이전판_doc_id: str | None = None
     retrieval_scope: str
     이전판_청크_삭제: int
     판정캐시_삭제: int
     경고: list[str] = []
+
+    @computed_field  # 구 이름 호환(제거 예정: 다음 릴리스)
+    @property
+    def 대체한_doc_id(self) -> str | None:  # 구 이름 호환(제거 예정: 다음 릴리스)
+        return self.이전판_doc_id
 
 
 class 삭제응답(BaseModel):
@@ -213,7 +240,7 @@ def _db(dsn: str):
 
 # 업로드
 
-_업로드_문서 = {
+_업로드_스키마 = {
     "requestBody": {"required": True, "content": {"multipart/form-data": {"schema": {
         "type": "object",
         "required": ["파일", "layer", "발행기관", "문서명", "시행일"],
@@ -231,8 +258,8 @@ _업로드_문서 = {
 }
 
 
-@router.post("", response_model=접수응답, status_code=202, openapi_extra=_업로드_문서)
-async def 업로드(요청: Request, 배경: BackgroundTasks, dsn: str = Depends(_적재_dsn)) -> 접수응답:
+@router.post("", response_model=접수응답, status_code=202, openapi_extra=_업로드_스키마)
+async def 업로드(요청: Request, 백그라운드: BackgroundTasks, dsn: str = Depends(_적재_dsn)) -> 접수응답:
     """파일을 저장하고 접수한 뒤 202 를 돌려준다. 파싱·임베딩·저장은 응답 뒤 백그라운드에서 돈다.
 
     본문을 읽기 전에 Content-Length 로 크기를 거른다. 실제 복사도 바이트를 세며 상한을 넘으면 멈춘다.
@@ -273,11 +300,11 @@ async def 업로드(요청: Request, 배경: BackgroundTasks, dsn: str = Depends
             raise HTTPException(400, "빈 파일입니다.")
         if 크기 > corpus_ingest.최대_바이트:
             raise HTTPException(413, "파일이 너무 큽니다 (30MB 이하).")
-        형식, 정체 = await run_in_threadpool(corpus_ingest.파일형식, 임시)
+        형식, 판별결과 = await run_in_threadpool(corpus_ingest.파일형식, 임시)
         if 형식 is None:
-            raise HTTPException(415, f"지원하지 않는 파일입니다 (판별 결과: {정체}). "
+            raise HTTPException(415, f"지원하지 않는 파일입니다 (판별 결과: {판별결과}). "
                                      "PDF·HWP·HWPX·DOCX·법령 XML 만 받습니다. 배포용·암호화 HWP 는 읽을 수 없습니다.")
-        저장경로 = 임시.with_suffix(f".{형식}")      # stage0_extract 는 확장자로 추출기를 고른다
+        저장경로 = 임시.with_suffix(f".{형식}")      # text_extract 는 확장자로 추출기를 고른다
         임시.rename(저장경로)
         임시 = 저장경로
         doc_id = await run_in_threadpool(_접수, dsn, 메타.model_dump(), 원본파일명, 형식, 저장경로)
@@ -285,14 +312,14 @@ async def 업로드(요청: Request, 배경: BackgroundTasks, dsn: str = Depends
         임시.unlink(missing_ok=True)
         raise
 
-    배경.add_task(corpus_ingest.적재_실행, dsn, doc_id)
+    백그라운드.add_task(corpus_ingest.적재_실행, dsn, doc_id)
     _log.info("규정 업로드 접수 doc_id=%s layer=%s 형식=%s 크기=%d", doc_id, 메타.layer, 형식, 크기)
-    return 접수응답(doc_id=doc_id, 파일형식=형식, 파일정체=정체,
+    return 접수응답(doc_id=doc_id, 파일형식=형식, 판별결과=판별결과,
                    안내="파싱 중입니다. GET /admin/documents/{doc_id} 로 상태를 확인하세요.")
 
 
 def _원본_저장(파일: UploadFile, 경로: Path) -> int:
-    """업로드를 1MB 단위로 디스크에 복사하며 바이트를 센다. 상한을 넘으면 그 자리에서 멈춘다."""
+    """업로드를 1MB 단위로 디스크에 복사하며 바이트를 센다. 상한을 넘으면 즉시 멈춘다."""
     경로.parent.mkdir(parents=True, exist_ok=True)
     크기 = 0
     파일.file.seek(0)
@@ -336,10 +363,10 @@ def 활성화(doc_id: str, 본문: 활성화요청 | None = None,
         결과: dict[str, Any] = corpus_ingest.활성화(
             conn, doc_id, 대체_doc_id=본문.대체_doc_id, 신규문서=본문.신규문서,
             중복_허용=본문.중복_허용)
-    # 활성화는 judge_cache 를 비우지만, 이 프로세스가 들고 있는 설정 해시(최대 300초)도 지워야
+    # 활성화는 judge_cache 를 비우지만, 이 프로세스가 들고 있는 데이터 버전 해시(최대 300초)도 지워야
     # 이후 요청이 새 해시로 조회·저장한다.
-    response_cache.설정_해시_무효화()
-    _log.info("규정 활성화 doc_id=%s 대체=%s", doc_id, 결과["대체한_doc_id"])
+    response_cache.데이터버전_해시_무효화()
+    _log.info("규정 활성화 doc_id=%s 이전판=%s", doc_id, 결과.get("이전판_doc_id"))
     return 활성화응답(**결과)
 
 
