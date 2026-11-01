@@ -27,6 +27,7 @@ PMS 원문·실명은 서버로 오지 않는다. 브라우저에서 파싱해 �
 from __future__ import annotations
 
 import concurrent.futures
+import contextvars
 import hashlib
 import json
 import logging
@@ -58,16 +59,8 @@ from server._common import (DSN, MOCK, _sse, _sse응답, _실행, _질의,  # no
 from server.models import (F1, F3항, F4항, F5, 정규화요청,          # noqa: E402
                            판정요청, 프로필, 사업목록응답, 사업정보, 우선순위규칙)
 from server import inquiry                                       # noqa: E402
-from server import (auth, gpu_watchdog, routes_admin_ingest,        # noqa: E402
-                    routes_l3, routes_orgs, routes_plans, routes_tasks)
-
-_워치독 = gpu_watchdog.워치독
-
-
-def _GPU경로() -> bool:
-    """지금 요청이 자체 GPU(vLLM) 로 가는가. GPU 워치독은 vLLM 경로에서만 부른다."""
-    from llm_qwen import 스위치_적용   # noqa: PLC0415 — 지연 import
-    return 스위치_적용() == "vllm"
+from server import (auth, routes_l3, routes_orgs, routes_plans,     # noqa: E402
+                    routes_tasks)
 
 
 # 비용 방어
@@ -101,6 +94,8 @@ class 비용가드:
         self.적중 = 0
         self.차단: dict[str, int] = {}
         self.워밍업시각: str | None = None
+        # AnyIO 워커 스레드가 동시에 부른다. 카운터·캐시 dict 를 바꾸는 곳은 전부 이 락 안에서 한다.
+        self._락 = threading.Lock()
 
     @staticmethod
     def _오늘() -> str:
@@ -124,24 +119,25 @@ class 비용가드:
     # 일일 캡 · IP 시간당 세기
     def 통과(self, ip: str) -> tuple[bool, str]:
         열림, 사유 = self.열려있나()
-        if not 열림:
-            self.차단["개방창"] = self.차단.get("개방창", 0) + 1
-            return False, 사유
-        if self._날짜 != self._오늘():          # 자정 롤오버
-            self._날짜, self.오늘_호출, self._ip = self._오늘(), 0, {}
-        if self.오늘_호출 >= self.일일캡:
-            self.차단["일일캡"] = self.차단.get("일일캡", 0) + 1
-            return False, f"오늘의 판정 한도({self.일일캡}건)를 모두 썼습니다. 내일 다시 시도해 주세요."
-        지금 = time.time()
-        q = self._ip.setdefault(ip, deque())
-        while q and 지금 - q[0] > 3600:
-            q.popleft()
-        if len(q) >= self.IP시간당:
-            self.차단["IP시간당"] = self.차단.get("IP시간당", 0) + 1
-            return False, f"시간당 요청 한도({self.IP시간당}건)를 넘었습니다. 잠시 후 다시 시도해 주세요."
-        q.append(지금)
-        self.오늘_호출 += 1
-        return True, ""
+        with self._락:
+            if not 열림:
+                self.차단["개방창"] = self.차단.get("개방창", 0) + 1
+                return False, 사유
+            if self._날짜 != self._오늘():          # 자정 롤오버
+                self._날짜, self.오늘_호출, self._ip = self._오늘(), 0, {}
+            if self.오늘_호출 >= self.일일캡:
+                self.차단["일일캡"] = self.차단.get("일일캡", 0) + 1
+                return False, f"오늘의 판정 한도({self.일일캡}건)를 모두 썼습니다. 내일 다시 시도해 주세요."
+            지금 = time.time()
+            q = self._ip.setdefault(ip, deque())
+            while q and 지금 - q[0] > 3600:
+                q.popleft()
+            if len(q) >= self.IP시간당:
+                self.차단["IP시간당"] = self.차단.get("IP시간당", 0) + 1
+                return False, f"시간당 요청 한도({self.IP시간당}건)를 넘었습니다. 잠시 후 다시 시도해 주세요."
+            q.append(지금)
+            self.오늘_호출 += 1
+            return True, ""
 
     # 캐시
     @staticmethod
@@ -150,38 +146,47 @@ class 비용가드:
         return hashlib.sha256(raw.encode()).hexdigest()
 
     def 꺼내기(self, k: str):
-        v = self._캐시.get(k)
-        if not v:
-            return None
-        t, 값 = v
-        if time.time() - t > self.캐시TTL:
-            self._캐시.pop(k, None)
-            return None
-        self.적중 += 1
-        # 캐시로 답하면 GPU 를 안 쓴 것이다 — 일일 카운트를 되돌려준다
-        self.오늘_호출 = max(0, self.오늘_호출 - 1)
+        with self._락:
+            v = self._캐시.get(k)
+            if not v:
+                return None
+            t, 값 = v
+            if time.time() - t > self.캐시TTL:
+                self._캐시.pop(k, None)
+                return None
+        self.적중_기록()
         return 값
 
+    def 적중_기록(self) -> None:
+        # 캐시로 답하면 GPU 를 안 쓴 것이다 — 일일 카운트를 되돌려준다
+        with self._락:
+            self.적중 += 1
+            self.오늘_호출 = max(0, self.오늘_호출 - 1)
+
     def 넣기(self, k: str, 값: Any) -> None:
-        if len(self._캐시) >= self.캐시상한:
-            self._캐시.pop(next(iter(self._캐시)))     # FIFO. LRU 까지는 필요 없다
-        self._캐시[k] = (time.time(), 값)
+        with self._락:
+            if len(self._캐시) >= self.캐시상한:     # FIFO. LRU 까지는 필요 없다
+                self._캐시.pop(next(iter(self._캐시), None), None)
+            self._캐시[k] = (time.time(), 값)
 
     def 상태(self) -> dict:
         열림, 사유 = self.열려있나()
-        return {"모드": "mock" if MOCK else "live",
-                "오늘": self._날짜, "오늘_호출": self.오늘_호출, "일일캡": self.일일캡,
-                "IP시간당": self.IP시간당, "추적중인_IP": len(self._ip),
-                "캐시": {"항목": len(self._캐시), "TTL초": self.캐시TTL, "적중": self.적중},
-                "개방": {"열림": 열림, "사유": 사유,
-                        "시작": self.개방시작 or None, "종료": self.개방종료 or None},
-                "차단": self.차단, "워밍업": self.워밍업시각}
+        with self._락:
+            return {"모드": "mock" if MOCK else "live",
+                    "오늘": self._날짜, "오늘_호출": self.오늘_호출, "일일캡": self.일일캡,
+                    "IP시간당": self.IP시간당, "추적중인_IP": len(self._ip),
+                    "캐시": {"항목": len(self._캐시), "TTL초": self.캐시TTL, "적중": self.적중},
+                    "개방": {"열림": 열림, "사유": 사유,
+                            "시작": self.개방시작 or None, "종료": self.개방종료 or None},
+                    "차단": dict(self.차단), "워밍업": self.워밍업시각}
 
 
 가드 = 비용가드()
 
 # SSE 하트비트 주기(초). 실 판정이 블로킹하는 동안 프록시 idle timeout 에 끊기지 않게 한다.
 _하트비트_주기초 = _int환경("SUDDOE_JUDGE_HEARTBEAT_SEC", 12)
+# 판정 한 건의 전체 기한(초). 넘기면 워커를 기다리지 않고 판단불가로 반환한다.
+_판정_기한초 = _int환경("SUDDOE_JUDGE_DEADLINE_SEC", 180)
 
 
 def _ip(req: Request) -> str:
@@ -370,12 +375,12 @@ app.include_router(routes_plans.router)
 app.include_router(routes_tasks.router)
 app.include_router(routes_l3.router)
 app.include_router(routes_orgs.router)         # 기관 목록 — org_id 를 안 싣는다
-app.include_router(gpu_watchdog.router)        # /api/gpu/status · keepalive
-app.include_router(routes_admin_ingest.router)  # /admin/ingest·parse_report
 
-# IDLE_MIN=0 이면 스레드를 만들지 않는다. 목 모드 가드는 gpu_watchdog 안에 있다 —
-# 없으면 목 서버가 30분 뒤 실 팟에 stop 을 쏜다.
-_워치독.시작_루프()
+
+@app.post("/api/gpu/wake", tags=["gpu"])
+def gpu_wake() -> dict:
+    """구버전 프론트 호환용 빈 응답. 자체 GPU 서버를 쓰지 않으므로 할 일이 없다."""
+    return {}
 
 
 def _관리자(token: str | None) -> None:
@@ -553,7 +558,16 @@ def _설정_해시(강제새로: bool = False) -> str:
                              coalesce(array_to_string(허용예시,'~'),'') || '|' ||
                              근거::text || '|' || verified::text,
                              '#' ORDER BY rule_id)), 'empty')
-                         FROM corpus.rules)""")
+                         FROM corpus.rules),
+                        -- 우선순위 규칙·체크항목은 행이 적어 행 전체를 해시한다(칸 단위 수정도 잡는다).
+                        (SELECT md5(coalesce(string_agg(t::text, '#' ORDER BY prec_id), ''))
+                           FROM corpus.precedence_rules t),
+                        (SELECT md5(coalesce(string_agg(t::text, '#' ORDER BY code), ''))
+                           FROM corpus.check_items t),
+                        -- item_alias 는 embedding 컬럼이 커서 행 수·최대 id·최근 생성 시각만 본다.
+                        (SELECT count(*) || ':' || coalesce(max(alias_id), 0) || ':'
+                                || coalesce(max(created_at)::text, '')
+                           FROM corpus.item_alias)""")
     if not 행:
         return "unknown"
     n = 행[0]
@@ -573,9 +587,7 @@ def _판정캐시_꺼내기(k: str, org: str | None) -> Any | None:
         (k, org, _설정_해시()))
     if not 행:
         return None
-    가드.적중 += 1
-    # 캐시로 답하면 GPU 를 안 쓴 것이다 — 일일 카운트를 되돌려준다 (비용가드.꺼내기 와 동일 규칙)
-    가드.오늘_호출 = max(0, 가드.오늘_호출 - 1)
+    가드.적중_기록()
     return 행[0][0]
 
 
@@ -661,10 +673,11 @@ def normalize(req: Request, body: 정규화요청):
 
     # F5 는 판정 후 폐기다. 캐시 열쇠에는 해시로만 들어간다
     # 폼 경로에서는 질문이 None 이다. 폼 값도 열쇠에 넣는다
+    # 추가설명은 용도에 합쳐져 LLM 입력이 되므로 키에 넣는다. 집행예정일·거래처는 정규화에 안 쓰인다.
     k = 비용가드.열쇠("normalize", (body.질문 or "").strip(),
-                     body.품목, body.금액, body.용도, body.사업명,
+                     body.품목, body.금액, body.용도, body.추가설명, body.사업명,
                      body.f5.친족거래, body.f5.전직임직원업체)
-    _org = _주체org(req)
+    _org = auth.검증된_org(req)
     캐시 = _판정캐시_꺼내기(k, _org)
 
     def gen():
@@ -673,13 +686,8 @@ def normalize(req: Request, body: 정규화요청):
             yield _sse("결과", 캐시)
             yield _sse("완료", {"캐시": True})
             return
-        # 첫 진행 이벤트 뒤에 둔다 — 앞에 두면 팟 상태 조회(타임아웃 15초)가 첫
-        # 바이트를 막아 화면이 최대 15초 빈다.
-        if not MOCK and body.질문 and body.질문.strip() and _GPU경로():
-            for 진 in _워치독.기동_진행():
-                yield _sse("진행", 진)
         try:
-            out = dict(_목_정규화) if MOCK else _실_정규화(body)
+            out, 실패 = (dict(_목_정규화), False) if MOCK else _실_정규화(body)
         except Exception as e:                                # noqa: BLE001
             # 모든 실패의 기본값은 판단불가다. 500 을 던지지 않는다
             yield _sse("오류", {"메시지": "정규화에 실패했습니다", "종류": type(e).__name__})
@@ -687,7 +695,8 @@ def normalize(req: Request, body: 정규화요청):
             return
         # 목/실 공통 — 질문원문(합성 문장)을 싣는다. 저장·검색·표시 전용이다
         out.setdefault("질문원문", _합성_질문(body))
-        _판정캐시_넣기(k, out, 종류="normalize", org=_org)
+        if not 실패:                  # 일시적 LLM 오류로 빈 비목후보가 캐시에 남지 않게 한다
+            _판정캐시_넣기(k, out, 종류="normalize", org=_org)
         for 필드 in ("품목", "금액", "금액_추정여부", "용도", "비목후보"):
             if 필드 in out:
                 yield _sse("필드", {필드: out[필드]})
@@ -742,14 +751,17 @@ def judge(req: Request, body: 판정요청, 목: str | None = None):
         raise HTTPException(422, f"비목은 enum 10종 뿐입니다: {비목_ENUM}")
     # 비목과 같은 자리에서 닫는다 — 통과하면 `비목계통()` 이 모르는 표기를 「창업」으로 삼킨다.
     body.사업명 = _사업명_정본(body.사업명)
-    # 토큰이 있으면 본문의 org_id 를 버린다 — 안 하면 org_id=None 으로 돌아 L3 규정이
-    # 안 실리고, 비용가드 열쇠도 org 없이 잡혀 A 기관 판정이 B 기관에 나간다.
-    if (_주 := _주체org(req)) is not None:
-        body.org_id = _주
+    # 본문의 org_id 는 클라이언트가 보낸 검증되지 않은 값이라 버리고, 토큰으로 검증된 org 만
+    # 쓴다(게스트는 None). 본문 값을 믿으면 남의 기관 L3·F 프로필을 읽고 그 기관에 판정 행을 쓴다.
+    body.org_id = auth.검증된_org(req)
 
     k = 비용가드.열쇠("judge", body.org_id, body.사업명, body.확정비목,
                      json.dumps(body.정규화, ensure_ascii=False, sort_keys=True),
-                     body.f5.친족거래, body.f5.전직임직원업체, 목)
+                     body.f5.친족거래, body.f5.전직임직원업체,
+                     json.dumps([a.model_dump() for a in body.답변],
+                                ensure_ascii=False, sort_keys=True),
+                     # ?목= 은 mock 모드에서만 응답을 바꾼다. live 에서 키에 넣으면 캐시를 우회할 수 있다.
+                     *([목] if MOCK else []))
     캐시 = _판정캐시_꺼내기(k, body.org_id)
 
     def gen():
@@ -757,44 +769,22 @@ def judge(req: Request, body: 판정요청, 목: str | None = None):
                           ("룰조회", "비목별 한도·증빙을 확인하는 중"),
                           ("조립", "판정을 작성하는 중")):
             yield _sse("진행", {"단계": 단계, "설명": 설명})
+        실패 = False
         if 캐시 is not None:
-            out = 캐시
-            # 저장 시점에 이미 벗겨낸 뒤에 캐시에 들어간다 — 안전망으로 한 번 더 확인
-            _decision_id = out.pop("decision_id", None)
+            # 캐시 값에는 decision_id 가 없다(넣기 전에 뺀다). 남의 판정 행을 이 계획에 붙이지 않는다.
+            out = {k: v for k, v in 캐시.items() if k != "decision_id"}
+            _decision_id = None
         elif MOCK:
-            out = _목_판정.get(목 or "가능", _목_판정["가능"])
-            _decision_id = out.pop("decision_id", None)
+            out = dict(_목_판정.get(목 or "가능", _목_판정["가능"]))
+            _decision_id = None
             _판정캐시_넣기(k, out, 종류="judge", org=body.org_id)
         else:
-            # 기존 이벤트 이름(`진행`)만 쓴다 — 이벤트 목록·순서는 계약이다.
-            # Qwen 경로면 아예 안 탄다 — 꺼둔 팟을 깨우려 들면 안 된다(`_GPU경로`).
-            if _GPU경로():
-                for 진 in _워치독.기동_진행():
-                    yield _sse("진행", 진)
-            # 별도 스레드에서 돌리고 짧은 주기로 폴링한다 — 대기 중에는 SSE 주석
-            # (`: keep-alive`)만 흘린다. 새 이벤트 이름은 만들지 않는다 — 이벤트
-            # 목록·순서는 계약이다. 무한정 기다리되 하트비트가 판정보다 먼저 포기하지 않는다.
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
-                future = ex.submit(_실_판정, body)
-                while True:
-                    try:
-                        out = future.result(timeout=_하트비트_주기초)
-                        break
-                    except concurrent.futures.TimeoutError:
-                        yield ": keep-alive\n\n"
-                    except Exception as e:                        # noqa: BLE001
-                        # 실패해도 4-way 밖으로 나가지 않는다 — 판정 어휘는 닫혀 있다.
-                        # `_오류` 는 계약 밖 키라 SSE 로는 안 내보내고, 서버 로그에 남긴다.
-                        _log.exception("judge 실패 — 판단불가로 닫음 (plan_id=%s)",
-                                       body.plan_id)
-                        out = {**_목_판정["판단불가"],
-                               "요약": "일시적인 오류로 판정하지 못했습니다. "
-                                       "주관기관 문의가 필요합니다."}
-                        break
+            out, 실패 = yield from _판정_실행(body)
             # decision_id 는 캐시에도 `결과` 응답에도 안 실린다 — 캐시에 박히면
             # 다른 요청이 남의 계획에 그 판정을 저장하려 든다.
             _decision_id = out.pop("decision_id", None)
-            _판정캐시_넣기(k, out, 종류="judge", org=body.org_id)
+            if not 실패:              # 일시적 장애의 판단불가를 캐시에 고정하지 않는다
+                _판정캐시_넣기(k, out, 종류="judge", org=body.org_id)
         yield _sse("판정", {키: out.get(키) for 키 in
                           ("판정", "요약", "신뢰등급", "버전스탬프")})
         yield _sse("해야할일", out.get("해야할일", []))
@@ -808,10 +798,57 @@ def judge(req: Request, body: 판정요청, 목: str | None = None):
         # 실경로의 키집합이 갈린다. 아래 `저장` 이벤트가 `out` 을 그대로 써야 해서
         # 복사본에서만 뺀다.
         yield _sse("결과", {k: v for k, v in out.items() if k != "증빙목록"})
-        yield _sse("저장", _판정_저장_시도(body, out, 캐시 is not None, _decision_id))
+        yield _sse("저장", _판정_저장_시도(body, out, _decision_id,
+                                          캐시적중=캐시 is not None, 실패=실패))
         yield _sse("완료", {"캐시": 캐시 is not None})
 
     return _sse응답(gen())
+
+
+def _판정_실행(body: 판정요청):
+    """`_실_판정` 을 워커 스레드에서 실행하고, 기다리는 동안 SSE keep-alive 주석을 yield 한다.
+
+    `out, 실패 = yield from _판정_실행(body)` 로 쓴다. 예외나 기한 초과(SUDDOE_JUDGE_DEADLINE_SEC)는
+    판단불가 결과와 실패=True 를 돌려준다. 기한을 넘긴 워커는 기다리지 않고 백그라운드에서 끝나게 둔다.
+    새 이벤트 이름은 만들지 않는다 — 이벤트 목록·순서는 계약이다.
+    """
+    ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    # submit 은 컨텍스트 변수를 복사하지 않는다. 미들웨어가 설정한 현재_org 를 워커에 넘긴다.
+    future = ex.submit(contextvars.copy_context().run, _실_판정, body)
+    기한 = time.monotonic() + _판정_기한초
+    try:
+        while True:
+            남은 = 기한 - time.monotonic()
+            if 남은 <= 0:
+                _log.error("judge 기한 초과(%s초) — 판단불가로 반환 (plan_id=%s)",
+                           _판정_기한초, body.plan_id)
+                ex.shutdown(wait=False, cancel_futures=True)
+                return _실패_결과(body), True
+            완료, _ = concurrent.futures.wait([future], timeout=min(_하트비트_주기초, 남은))
+            if not 완료:
+                yield ": keep-alive\n\n"
+                continue
+            try:
+                out = future.result()
+            except Exception:                                 # noqa: BLE001
+                # 실패해도 4-way 밖으로 나가지 않는다. 원인은 서버 로그에만 남긴다.
+                _log.exception("judge 실패 — 판단불가로 반환 (plan_id=%s)", body.plan_id)
+                return _실패_결과(body), True
+            return out, bool(out.pop("_실패", False))
+    finally:
+        ex.shutdown(wait=False)
+
+
+def _실패_결과(body: 판정요청) -> dict:
+    """예외·기한 초과 때의 판단불가 결과. 이 요청의 정규화 값으로만 문의 초안을 만든다."""
+    out = {"판정": "판단불가",
+           "요약": "일시적인 오류로 판정하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+           "해야할일": [], "인용": [], "전제": [], "신뢰등급": None, "버전스탬프": None,
+           "참조사슬": []}
+    초안 = inquiry.문의초안(body.정규화, "판단불가", [], [], body.사업명)
+    if 초안:
+        out["문의초안"] = 초안
+    return out
 
 
 @app.get("/api/profile")
@@ -835,18 +872,6 @@ def profile_put(body: 프로필 = Body(...), org_id: str | None = None) -> dict:
 def admin_cost(x_admin_token: str | None = Header(default=None)) -> dict:
     _관리자(x_admin_token)
     return 가드.상태()
-
-
-@app.get("/admin/gate")
-def admin_gate(x_admin_token: str | None = Header(default=None)) -> dict:
-    """H5 f_axis 차단 로그. 영구 기록은 `tenant.incidents(종류='ROUTING_BLOCK')`."""
-    _관리자(x_admin_token)
-    try:
-        from adapter import 기본어댑터, 슬롯표
-        return {"차단": 기본어댑터.차단로그,
-                "슬롯": {k: {"f_axis": v.f_axis, "설명": v.설명} for k, v in 슬롯표.items()}}
-    except Exception as e:                                    # noqa: BLE001
-        return {"오류": f"adapter 를 못 읽었다: {type(e).__name__}"}
 
 
 @app.get("/admin/queue")
@@ -892,45 +917,6 @@ def admin_queue(x_admin_token: str | None = Header(default=None),
     }
 
 
-@app.post("/admin/gpu/pod")
-def admin_gpu_pod(pod_id: str = Body(..., embed=True),
-                   x_admin_token: str | None = Header(default=None)) -> dict:
-    """`ops.gpu_pod` 의 pod_id·vllm_url 을 채운다 — 사람이 SQL UPDATE 를 손으로
-    치는 자리를 없앤다.
-
-    적재 경로만이다 — 판정 로직(`gpu_watchdog.py`·`adapter.py`)은 손대지 않는다.
-    vllm_url 은 RunPod 프록시 규칙(`{pod_id}-8000.proxy.runpod.net`, 고정 포트 8000)
-    으로 pod_id 하나에서 유도한다.
-    `상태` 컬럼은 건드리지 않는다 — 가동 여부 판정은 `/api/gpu/wake` 몫이다. 이
-    엔드포인트는 어느 팟을 볼지만 알려준다.
-    """
-    _관리자(x_admin_token)
-    pod_id = (pod_id or "").strip()
-    if not pod_id:
-        raise HTTPException(400, "pod_id 가 비어 있다")
-    vllm_url = f"https://{pod_id}-8000.proxy.runpod.net"
-    # `예외전파=True` — `_실행()` 기본값(삼킴)이면 rowcount=-1 뿐이라 무엇이 죽었는지
-    # 안 보인다. 여기서 켜서 진짜 예외를 응답에 싣는다.
-    try:
-        n = _실행(
-            "UPDATE ops.gpu_pod SET pod_id=%s, vllm_url=%s, updated_at=now(), "
-            "updated_by='admin_gpu_pod' WHERE id='default'",
-            (pod_id, vllm_url), 예외전파=True)
-    except Exception as e:                                    # noqa: BLE001
-        raise HTTPException(
-            500, f"ops.gpu_pod 갱신 실패 — {type(e).__name__}: {e}") from e
-    if n <= 0:
-        raise HTTPException(500, "ops.gpu_pod 갱신 실패 — 대상 행이 없다"
-                                  f" (rowcount={n}, id='default' 행이 있는지 확인해라)")
-    # adapter.vllm_url() 은 30초 TTL 캐시다 — 강제갱신 안 하면 최대 30초간 옛 주소를 쓴다
-    try:
-        from adapter import vllm_url as _vllm_url_읽기
-        갱신값 = _vllm_url_읽기(강제갱신=True)
-    except Exception as e:                                    # noqa: BLE001
-        갱신값 = f"갱신 실패 {type(e).__name__} — 다음 호출 시 자연 갱신됨(TTL 30초)"
-    return {"pod_id": pod_id, "vllm_url": vllm_url, "캐시_갱신확인": 갱신값}
-
-
 @app.post("/admin/warmup")
 def admin_warmup(x_admin_token: str | None = Header(default=None)) -> dict:
     """워밍업.
@@ -943,14 +929,6 @@ def admin_warmup(x_admin_token: str | None = Header(default=None)) -> dict:
     # 이다. 파이프라인의 공개 표면만 부른다. 검색+비목확정 둘 다 `_워밍업_전부()`
     # 한 곳에서 데운다.
     결과 = _워밍업_전부()
-    t = time.time()
-    try:
-        from adapter import 호출
-        호출("문장생성", "워밍업", None, 타임아웃=60)
-        결과["vLLM"] = f"{time.time() - t:.1f}초"
-    except Exception as e:                                    # noqa: BLE001
-        결과["vLLM"] = f"미가동 ({type(e).__name__})"
-    _워치독.호출기록()          # 워밍업도 GPU 사용이다. 30분 뒤 죽으면 안 된다
     가드.워밍업시각 = datetime.now(timezone.utc).isoformat()
     return {"워밍업": 결과, "시각": 가드.워밍업시각}
 
@@ -980,12 +958,12 @@ def _http오류(req: Request, exc: HTTPException):
 # 실호출 경로
 
 def _폼_비목후보(품목: str | None, 용도: str, 금액: float | None,
-              사업명: str | None) -> list[dict]:
+              사업명: str | None) -> tuple[list[dict], bool]:
     """폼 값(구조화)에서 비목후보만 뽑는다 — 호출 자리 ①. `_실_정규화` 전용 헬퍼.
 
     응답 모양은 자연어 경로와 동일하다 — `[{"비목", "신뢰도"}]`. `호출자리1_스키마()`
     에서 그대로 떼어 써서 enum 10종이 guided_json 으로 닫힌다.
-    실패는 판정을 죽이지 않는다 — 빈 배열로 물러난다. 비목은 화면 9 에서 사용자가
+    실패는 판정을 죽이지 않는다 — 빈 배열과 실패=True 를 돌려준다(호출부는 캐시하지 않는다).
     확정한다.
     """
     try:
@@ -1017,7 +995,7 @@ def _폼_비목후보(품목: str | None, 용도: str, 금액: float | None,
         # 밖 항목이 멀쩡한 후보를 밀어낸다(스키마 maxItems 도 3이다).
         return [{"비목": c["비목"], "신뢰도": float(c.get("신뢰도") or 0.0)}
                 for c in (후보 or [])
-                if isinstance(c, dict) and c.get("비목") in 비목_ENUM][:3]
+                if isinstance(c, dict) and c.get("비목") in 비목_ENUM][:3], False
     except NameError:
         # 배선 실수(import 누락 등)는 따로 잡는다 — 아래 넓은 except 가 똑같이 빈
         # 배열로 삼키면 「LLM 이 못 골랐다」와 「코드가 안 돈다」가 구분이 안 된다.
@@ -1025,20 +1003,12 @@ def _폼_비목후보(품목: str | None, 용도: str, 금액: float | None,
         raise
     except Exception:                                         # noqa: BLE001
         _log.exception("폼 경로 비목후보 추출 실패 — 빈 후보로 간다")
-        return []
+        return [], True
 
 
-def _실_정규화(body: 정규화요청) -> dict:
-    # `_실_판정()`에만 스위치_적용()을 걸면 `/api/normalize` 가 먼저 오는 첫 요청은
-    # 여전히 vLLM 원본을 탄다. 두 하위 경로가 모두 이 함수를 거치므로 여기서 한 번
-    # 부르면 둘 다 커버된다.
-    from llm_qwen import 스위치_적용
-    백엔드 = 스위치_적용()
+def _실_정규화(body: 정규화요청) -> tuple[dict, bool]:
+    실패 = False
     if body.질문 and body.질문.strip():
-        # GPU 게이트는 vLLM(자체 GPU) 경로에서만 의미가 있다 — Qwen(외부 API) 경로는
-        # 팟 상태와 무관하다.
-        if 백엔드 == "vllm":
-            _워치독.게이트()      # 못 깨우면 raise → 기존 except → 판단불가
         from normalize_run import 정규화
         out, _메타 = 정규화(body.질문, 비목목록=비목_ENUM)
     else:
@@ -1048,9 +1018,9 @@ def _실_정규화(body: 정규화요청) -> dict:
         용도 = body.용도 or ""
         if body.추가설명:
             용도 = f"{용도} ({body.추가설명})".strip()
+        후보, 실패 = _폼_비목후보(body.품목, 용도, body.금액, body.사업명)
         out = {"품목": body.품목, "금액": body.금액, "금액_추정여부": False,
-               "용도": 용도, "비목후보": _폼_비목후보(body.품목, 용도, body.금액,
-                                                body.사업명)}
+               "용도": 용도, "비목후보": 후보}
     out.setdefault("결제수단", None)
     out.setdefault("구매명의", None)
     out.setdefault("신청일", None)
@@ -1064,7 +1034,10 @@ def _실_정규화(body: 정규화요청) -> dict:
     out.pop("_출처", None)
     # check_items 기반 심층질문. LLM 호출 0 (배선일 뿐).
     out["심층질문"] = _심층질문_선별(body.사업명, out.get("비목후보"))
-    return out
+    return out, 실패
+
+
+_S번호_패턴 = re.compile(r"S\d+(?!\d)")
 
 
 def _요약_S번호_풀기(요약: str, 인용들: list) -> str:
@@ -1090,10 +1063,8 @@ def _요약_S번호_풀기(요약: str, 인용들: list) -> str:
             표[str(s번호)] = 이름
     if not 표:
         return 요약
-    # 🔴 정규식 대신 «긴 S번호부터» 단순 치환한다 — S3 가 S30 을 깨뜨리지 않게 길이 역순.
-    for _s in sorted(표, key=len, reverse=True):
-        요약 = 요약.replace(_s, 표[_s])
-    return 요약
+    # 뒤에 숫자가 더 붙지 않는 S번호만 바꾼다 — S1 을 바꾸면서 S10 을 깨뜨리지 않게 한다.
+    return _S번호_패턴.sub(lambda m: 표.get(m.group(0), m.group(0)), 요약)
 
 
 # 「요약이 문장이 아니라 인용 나열뿐」인지 가른다.
@@ -1273,12 +1244,6 @@ def _사용자F값_조립(답변: list) -> dict | None:
 
 
 def _실_판정(body: 판정요청) -> dict:
-    # SUDDOE_LLM=vllm|qwen 스위치. orchestrate 를 import 하기 직전이 유일한 안전지점이다.
-    from llm_qwen import 스위치_적용
-    백엔드 = 스위치_적용()
-    # GPU 게이트는 vLLM(자체 GPU) 전용이다 — Qwen(외부 API) 경로는 팟 상태와 무관하다.
-    if 백엔드 == "vllm":
-        _워치독.게이트()
     import orchestrate
     # `질문원문` 은 계약 필드다 — 없다고 문장을 되짚어 다시 만들면 사용자 확정값이
     # 조용히 죽는다. `_합성_질문()` 문장을 되먹이지 않는다(필드→문장→필드는 정보를 잃는다).
@@ -1342,10 +1307,13 @@ def _실_판정(body: 판정요청) -> dict:
         # 내부 저장용 키다 — `gen()` 이 `결과` 로 내보내기 전에 벗겨내고 `저장`
         # 이벤트에만 따로 실어준다.
         **({"decision_id": r["decision_id"]} if r.get("decision_id") else {}),
+        # 판정 파이프라인의 실패 경로(DB·LLM·검색 장애). 캐시·계획 연결을 막는 내부 키다.
+        "_실패": bool(r.get("실패경로")),
     }
 
 
-def _판정_저장_시도(body: 판정요청, out: dict, 캐시적중: bool, decision_id: int | None) -> dict:
+def _판정_저장_시도(body: 판정요청, out: dict, decision_id: int | None, *,
+                   캐시적중: bool, 실패: bool) -> dict:
     """`judge()` 의 `gen()` 안에서만 부른다 — 판정 스트림의 부수 효과다.
 
     지연 import 다 — `server.persist` 가 없으면 앱 전체가 못 뜨는 걸 막는다.
@@ -1353,13 +1321,10 @@ def _판정_저장_시도(body: 판정요청, out: dict, 캐시적중: bool, dec
     """
     if body.plan_id is None:
         return {"저장": False, "사유": "plan_id 없음"}
-    if 캐시적중:
-        # 캐시로 답한 건 이번 요청에서 새로 만든 판정 행이 없다 — 남의 decision_id 를
-        # 이 plan_id 에 잘못 붙이지 않으려고 저장을 건너뛴다 (비용가드는 저장 경로가 아니다).
-        return {"저장": False, "사유": "캐시 적중 — 새 판정 기록 없음"}
     try:
         from .persist import 판정_저장
-        return 판정_저장(body.plan_id, body, out, body.org_id, decision_id=decision_id)
+        return 판정_저장(body.plan_id, body, out, body.org_id, decision_id=decision_id,
+                     캐시적중=캐시적중, 실패=실패)
     except ImportError:
         return {"저장": False, "사유": "저장 계층 미배선"}
     except Exception as e:                                    # noqa: BLE001
@@ -1492,15 +1457,13 @@ def _selftest() -> int:
 
     _가짜_orch = _types.ModuleType("orchestrate")
     _가짜_orch.판정 = _가짜_판정
-    _원래_orch, _원래_게이트 = _sys.modules.get("orchestrate"), _워치독.게이트
+    _원래_orch = _sys.modules.get("orchestrate")
     _sys.modules["orchestrate"] = _가짜_orch
-    _워치독.게이트 = lambda: None
     try:
         실경로out = _실_판정(판정요청(
             정규화={"_원문": "디자이너가 쓸 맥북 프로 250만원", "비목후보": []},
             사업명="예비창업패키지"))
     finally:
-        _워치독.게이트 = _원래_게이트
         if _원래_orch is not None:
             _sys.modules["orchestrate"] = _원래_orch
         else:
@@ -1554,8 +1517,6 @@ def _selftest() -> int:
     확인("캐시 응답이 첫 응답과 같다", e1["결과"][0] == e2["결과"][0])
     확인("캐시 적중은 일일 호출을 되돌린다",
          가드.상태()["캐시"]["적중"] > 0, str(가드.상태()["캐시"]))
-    확인("/admin/gate 가 f_axis 슬롯표를 준다",
-         "슬롯" in c.get("/admin/gate", headers={"X-Admin-Token": "selftest-token"}).json())
 
     q = c.get("/admin/queue", headers={"X-Admin-Token": "selftest-token"}).json()
     확인("/admin/queue 가 재검수 큐를 준다",
