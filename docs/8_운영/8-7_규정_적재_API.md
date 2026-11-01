@@ -1,0 +1,93 @@
+# 8-7 규정 적재 API (L1·L2)
+
+운영자가 규정 파일을 올리면 서버가 파싱·임베딩·색인까지 마친 뒤 `staged` 로 저장한다. 검토하고 활성화해야
+검색에 들어간다. 코드: `server/routes_ingest.py`(HTTP), `scripts/corpus_ingest.py`(파이프라인).
+스키마·권한: `db/migrations/2026-11-01_corpus_ingest.sql`(운영), `db/init/18_corpus_ingest.sql`(새 로컬 DB).
+
+## 흐름
+
+```
+POST /admin/documents        202, ingest_jobs.상태=parsing
+  백그라운드: 추출 -> 조 분해·품질 판정 -> 청크 -> 임베딩(KURE-v1) -> BM25 -> 참조 -> 저장(staged)
+  실패: 상태 failed + 실패사유. documents·chunks 에는 아무것도 남지 않는다
+GET  /admin/documents/{doc_id}           상태·품질·조 수·경고·조문 샘플
+POST /admin/documents/{doc_id}/activate  staged -> active, 이전 판 -> superseded (한 트랜잭션)
+DELETE /admin/documents/{doc_id}         staged·failed·parsing 폐기
+GET  /admin/documents?status=staged      목록
+```
+
+상태: `parsing` -> `staged` 또는 `failed` -> `active` -> 다음 판이 활성화되면 `superseded`.
+모든 경로는 `X-Admin-Token`(SUDDOE_ADMIN_TOKEN) 이 필요하다. `SUDDOE_INGEST_DSN` 이 없으면 전부 503 이다.
+
+## 운영 적용 (한 번)
+
+1. 마이그레이션 (NCP VM, `deploy/ncp` 에서). 비밀번호는 DSN URL 에 들어가므로 hex 로 만든다.
+   ```bash
+   PW=$(openssl rand -hex 24)
+   docker compose exec -T -e PGCLIENTENCODING=UTF8 db psql -U postgres -d suddoe -X -v ON_ERROR_STOP=1 \
+       -v ingest_password="$PW" -f - < ../../db/migrations/2026-11-01_corpus_ingest.sql
+   ```
+2. `deploy/ncp/.env` 에 `SUDDOE_INGEST_DB_PASSWORD=$PW` 추가, `docker-compose.yml` 의 api environment 에 추가:
+   `SUDDOE_INGEST_DSN: postgresql://suddoe_ingest:${SUDDOE_INGEST_DB_PASSWORD}@db:5432/suddoe`
+3. `server/main.py` 에 `app.include_router(routes_ingest.router)` 가 있는지 확인 후 `docker compose up -d --build api`
+4. 확인: `curl -s https://$SUDDOE_DOMAIN/admin/documents?limit=3 -H "X-Admin-Token: $SUDDOE_ADMIN_TOKEN"` 가 200
+
+롤 `suddoe_ingest` 는 corpus SELECT, 파이프라인이 쓰는 7개 테이블(documents, doc_articles, chunks, chunk_terms,
+chunk_len, refs, ingest_jobs)만 쓰기, term_df REFRESH, judge_cache 삭제 권한을 가진다. 앱 롤 `suddoe_app` 은 그대로다.
+되돌리기 SQL 은 마이그레이션 파일 머리 주석에 있다.
+
+로컬: 새 볼륨이면 `18_corpus_ingest.sql` 이 자동 적용된다(비밀번호 `devpw`). 기존 볼륨이면 위 마이그레이션을
+`-v ingest_password=devpw` 로 실행하고 `.env` 에 `SUDDOE_INGEST_DSN=postgresql://suddoe_ingest:devpw@localhost:5432/suddoe`.
+
+## 사용 예
+
+```bash
+H="X-Admin-Token: $SUDDOE_ADMIN_TOKEN"; API=https://$SUDDOE_DOMAIN
+curl -s -X POST $API/admin/documents -H "$H" -F "파일=@초기창업패키지_세부관리기준_2026.hwpx" \
+     -F layer=L2 -F 발행기관=창업진흥원 -F "문서명=초기창업패키지 세부관리기준(2026년)" \
+     -F 사업명=초기창업패키지 -F 시행일=2026-03-01           # -> {"doc_id": "초기창업패키지 세부관리기준(2026년)_20260301"}
+curl -s "$API/admin/documents/초기창업패키지 세부관리기준(2026년)_20260301" -H "$H"   # curl 은 공백을 %20 으로
+curl -s -X POST "$API/admin/documents/<doc_id>/activate" -H "$H" -H "Content-Type: application/json" \
+     -d '{"대체_doc_id": "초기창업패키지 세부관리기준(2025년)"}'
+```
+
+| 필드 | 필수 | 내용 |
+|---|---|---|
+| 파일 | O | PDF·HWP·HWPX·DOCX·법령 XML, 30MB 이하. 형식은 내용으로 판별(확장자 무시) |
+| layer | O | `L1`(중기부 법령·고시·지침) 또는 `L2`(창진원 사업별 기준). 파일명으로 정하지 않는다 |
+| 발행기관 | O | 기록용 |
+| 문서명 | O | doc_id = `문서명_YYYYMMDD`(시행일). 인용 출처로 화면에 그대로 나온다. `/` 금지 |
+| 사업명 | L2 만 | `corpus.programs` 의 사업명 또는 별칭. L1 에 넣으면 422 |
+| 시행일 | O | `YYYY-MM-DD` |
+| version | | 생략하면 시행일(`2026.3.1`) |
+| 적용대상 | | `공통`(기본) · `창업기업` · `주관기관`. 문서 전체에 한 값. `주관기관` 은 검색 필터에서 빠진다 |
+
+## 활성화 규칙
+
+- 조건: `staged`, `parse_quality='high'`, 조·청크 1건 이상, 임베딩 누락 없음. 아니면 409.
+- 이전 판: 이 API 로 올린 active 문서 중 layer·문서키(괄호·공백 제거한 문서명)·사업명이 같은 것을 자동으로 찾는다.
+  못 찾으면 409 와 `후보` 목록을 돌려준다. 대체할 문서가 있으면 `대체_doc_id`, 처음 올리는 문서면 `{"신규문서": true}`.
+  기존 코퍼스 문서(이 API 이전에 적재된 문서)는 자동 매칭되지 않으므로 처음 한 번은 `대체_doc_id` 를 준다.
+- 이전 판은 `superseded`·`index_target=false` 가 되고 청크를 지운다(조문 doc_articles 는 남긴다). 새 판은
+  이전 판의 retrieval_scope 를 이어받는다. `tenant.judge_cache` 를 비우고 `corpus.term_df` 를 REFRESH 한다.
+- 응답 `경고`: 이전 판을 근거로 가진 corpus.rules 수, 이전 판을 가리키는 다른 문서 참조 수, 신규문서일 때 함께
+  검색될 비슷한 active 문서. 룰 근거와 들어오는 참조는 자동으로 고치지 않는다(재검수 대상).
+- superseded 를 다시 active 로 돌리는 API 는 없다(청크를 지웠다). 필요하면 그 판을 다시 올려 활성화한다.
+
+## 판정 캐시 반영
+
+- DB 판정 캐시(`tenant.judge_cache`): 활성화 트랜잭션에서 전부 지운다.
+- 설정 해시(`server/main.py` `_설정_해시`): 청크 수가 바뀌므로 `SUDDOE_CONFIG_HASH_TTL`(기본 300초) 안에 바뀐다.
+- 게스트 메모리 캐시: 지우는 경로가 없어 `SUDDOE_CACHE_TTL`(기본 900초) 동안 옛 결과가 나갈 수 있다.
+  즉시 반영이 필요하면 `docker compose restart api`.
+
+## 제한·주의
+
+- 텍스트가 200자 미만인 파일(스캔본)과 배포용·암호화 HWP 는 failed 다. L3 업로드와 달리 VLM 판독을 하지 않는다.
+- 품질 low(조 5개 미만, 단락·장 단위 분해, 조번호 비단조, 빈 조 과다)는 활성화할 수 없다. 원본을 고쳐 다시 올린다.
+- 적재는 한 번에 하나씩 돈다. 임베딩이 CPU 를 쓰므로 그동안 판정 응답이 느려질 수 있다.
+  실측(개발 PC): PDF 480KB·48조·54청크 약 75초.
+- 서버가 재시작되면 parsing 중이던 업로드는 parsing 으로 남는다. DELETE 후 다시 올린다.
+- 참조: 새 문서에서 나가는 참조는 active 문서만 대상으로 만든다. `지침 제N조` 는 build_refs 에 고정된
+  통합관리지침 제14차 doc_id 로 해소되므로, 새 통합관리지침을 올리면 해소 대상을 따로 확인한다.
+- 로컬 DB 는 `eval.golden_chunks` 가 이전 판 청크를 참조하면 활성화가 409 다(정답셋 재매칭 필요). 운영 DB 에는 eval 이 없다.
