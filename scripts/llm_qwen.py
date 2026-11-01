@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
-"""Qwen(DashScope 국제판) LLM 어댑터.
+"""판정 파이프라인의 LLM 클라이언트. DashScope 국제판의 OpenAI 호환 API 를 부른다.
 
-`llm_호출` 은 `normalize_run.llm_호출` 과 같은 계약을 따른다. `스위치_적용()` 이 환경변수
-`SUDDOE_LLM`(vllm|qwen) 에 따라 `normalize_run`·`orchestrate` 의 `llm_호출` 을 바꿔 끼운다.
-JSON 강제는 `response_format` 을 쓴다 — vLLM 의 `guided_json` 은 이 엔드포인트에서 무시된다.
+normalize_run(정규화 호출, 폼 경로 비목후보 추출)과 orchestrate(판정 호출)가 쓰는 유일한 LLM 백엔드다.
+공개: llm_호출(프롬프트, 스키마, *, 모델, 온도, 최대토큰, 타임아웃, 재시도, 추론) -> (출력, 메타), 예외 LLM실패.
+환경변수: DASHSCOPE_API_KEY(필수), SUDDOE_QWEN_MODEL, SUDDOE_QWEN_FALLBACK_MODEL.
+스키마를 주면 response_format(json_schema, strict)으로 JSON 출력을 강제한다.
+모든 실패는 LLM실패 로 올린다. 호출자는 이를 판단불가로 반환한다.
 """
 from __future__ import annotations
 
@@ -14,19 +16,18 @@ from typing import Any
 
 from openai import OpenAI
 
-import normalize_run as _nr_모듈
-from normalize_run import LLM실패  # noqa: E402 — 예외 타입만 재사용
 
-# 패치 전 원본 llm_호출. SUDDOE_LLM=vllm 이면 이 객체 그 자체로 되돌린다.
-_원본_vllm_llm_호출 = _nr_모듈.llm_호출
+class LLM실패(Exception):
+    """LLM 호출 또는 응답 파싱 실패. 호출자는 판단불가로 반환한다."""
+
 
 ENDPOINT = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
 기본_모델 = os.environ.get("SUDDOE_QWEN_MODEL", "qwen3.7-plus")
 폴백_모델 = os.environ.get("SUDDOE_QWEN_FALLBACK_MODEL", "qwen3.8-flash")
-# 판정 출력이 3,000 토큰에 바짝 붙으므로 Qwen 경로는 호출자가 뭘 넘기든 최소 이만큼은 준다.
+# 판정 출력이 3,000 토큰 가까이 나오므로 호출자가 더 작게 넘겨도 최소 이만큼은 준다.
 _최소_출력토큰 = 3500
 
-# 공식 문서의 json_schema 지원 목록에 없는 별칭. 배선 금지.
+# DashScope 문서의 json_schema 지원 모델 목록에 없는 별칭이라 출력 형식을 보장할 수 없다. 사용 금지.
 _금지_모델 = {"qwen-plus", "qwen-max", "qwen-turbo", "qwen-flash"}
 
 _client: OpenAI | None = None
@@ -38,18 +39,20 @@ def _client_얻기() -> OpenAI:
         key = os.environ.get("DASHSCOPE_API_KEY")
         if not key:
             raise LLM실패("DASHSCOPE_API_KEY 환경변수가 없다")
-        _client = OpenAI(api_key=key, base_url=ENDPOINT)
+        # SDK 자체 재시도(기본 2회)를 끈다. 재시도는 llm_호출 의 루프 한 곳에서만 한다
+        _client = OpenAI(api_key=key, base_url=ENDPOINT, max_retries=0)
     return _client
 
 
 def _thinking_꺼야하나(모델: str) -> bool:
-    """flash 계열(켜두면 출력 폭주)과 오픈소스 qwen3-* 계열(비스트리밍 호출을 400 으로 거부)은 thinking 을 끈다."""
+    """flash 계열은 추론을 켜면 출력이 지나치게 길어지고, 오픈소스 qwen3-* 계열은 비스트리밍
+    호출에서 추론을 켜면 400 으로 거부한다. 두 계열은 항상 끈다."""
     return "flash" in 모델 or 모델.startswith("qwen3-")
 
 
 def _호출_1회(client: OpenAI, 모델: str, 프롬프트: str, 스키마: dict | None,
            온도: float, 최대토큰: int, 타임아웃: int,
-           사고: bool | None = None) -> tuple[Any, dict]:
+           추론: bool | None) -> tuple[Any, dict]:
     kwargs: dict[str, Any] = {
         "model": 모델,
         "messages": [{"role": "user", "content": 프롬프트}],
@@ -62,8 +65,7 @@ def _호출_1회(client: OpenAI, 모델: str, 프롬프트: str, 스키마: dict
             "type": "json_schema",
             "json_schema": {"name": "판정", "schema": 스키마, "strict": True},
         }
-    # `사고=False` 를 명시하면 모델과 무관하게 thinking 을 끈다(정규화처럼 사고가 필요 없는 호출용).
-    if 사고 is False or _thinking_꺼야하나(모델):
+    if 추론 is False or _thinking_꺼야하나(모델):
         kwargs["extra_body"] = {"enable_thinking": False}
 
     t = time.time()
@@ -78,12 +80,14 @@ def _호출_1회(client: OpenAI, 모델: str, 프롬프트: str, 스키마: dict
                "total_tokens": getattr(usage, "total_tokens", None)},
         "종료이유": r.choices[0].finish_reason,
         "모델": 모델,
+        "최대토큰": 최대토큰,        # 실제로 보낸 max_tokens (_최소_출력토큰 적용 후)
+        # 키 이름은 저장된 decisions.모델 과 비교할 수 있게 유지한다
         "추론content있음": bool(추론content),
         "추론content길이": len(추론content),
     }
     if 스키마 is None:
         return 내용, 메타
-    return json.loads(내용), 메타  # 실패하면 json.JSONDecodeError — 호출자가 잡는다
+    return json.loads(내용), 메타  # 파싱 실패는 json.JSONDecodeError 로 올라가 호출자가 잡는다
 
 
 def llm_호출(프롬프트: str, 스키마: dict | None, *,
@@ -92,51 +96,35 @@ def llm_호출(프롬프트: str, 스키마: dict | None, *,
             최대토큰: int = 1500,
             타임아웃: int = 240,
             재시도: int = 1,
-            사고: bool | None = None,
-            **_무시) -> tuple[Any, dict]:
-    """`normalize_run.llm_호출` 과 같은 계약을 따르는 DashScope 판.
+            추론: bool | None = None) -> tuple[Any, dict]:
+    """프롬프트 하나를 보내고 (출력, 메타) 를 돌려준다.
 
-    `모델` 생략 시 `SUDDOE_QWEN_MODEL`. 재시도를 다 쓰면 `SUDDOE_QWEN_FALLBACK_MODEL` 로 1회 더 시도하되,
-    호출자가 모델을 직접 지정했으면 폴백하지 않는다.
+    출력은 스키마를 주면 파싱한 JSON, 아니면 문자열이다. 메타에는 지연ms·토큰·종료이유·모델·
+    추론content있음/길이가 들어간다.
+    `모델` 을 생략하면 기본 모델로 `재시도`+1 번 시도하고, 모두 실패하면 폴백 모델로 한 번 더
+    시도한다. 모델을 직접 지정하면 폴백하지 않는다. 최악의 지연은 (재시도+2) x 타임아웃이다.
+    `추론=False` 는 모델과 무관하게 thinking 을 끈다(정규화처럼 값을 뽑기만 하는 호출용).
+    모든 실패는 LLM실패 로 올린다.
     """
     쓸_모델 = 모델 or 기본_모델
     if 쓸_모델 in _금지_모델:
-        raise LLM실패(f"'{쓸_모델}' 은 배선 금지 별칭이다 — 문서 미기재/재현성 불확실 "
-                     f"(scratchpad/Q2_Qwen모델선정_국제판.md 참고)")
+        raise LLM실패(f"'{쓸_모델}' 은 사용 금지 모델명이다 — json_schema 지원 목록에 없다")
     최대토큰 = max(최대토큰, _최소_출력토큰)
 
     client = _client_얻기()
     마지막 = None
-    for 회차 in range(재시도 + 1):
+    for _ in range(재시도 + 1):
         try:
-            return _호출_1회(client, 쓸_모델, 프롬프트, 스키마, 온도, 최대토큰, 타임아웃, 사고)
+            return _호출_1회(client, 쓸_모델, 프롬프트, 스키마, 온도, 최대토큰, 타임아웃, 추론)
         except json.JSONDecodeError as e:
             마지막 = f"JSON 파싱 실패: {e}"
-        except Exception as e:  # noqa: BLE001 — SDK/HTTP/타임아웃 전부
+        except Exception as e:  # noqa: BLE001 — SDK·HTTP·타임아웃 오류를 모두 LLM실패 로 바꾼다
             마지막 = f"{type(e).__name__}: {str(e)[:200]}"
 
     if 모델 is None and 폴백_모델 != 쓸_모델 and 폴백_모델 not in _금지_모델:
         try:
-            return _호출_1회(client, 폴백_모델, 프롬프트, 스키마, 온도, 최대토큰, 타임아웃, 사고)
+            return _호출_1회(client, 폴백_모델, 프롬프트, 스키마, 온도, 최대토큰, 타임아웃, 추론)
         except Exception as e:  # noqa: BLE001
             마지막 = f"{마지막} · 폴백({폴백_모델})도 실패: {type(e).__name__}: {str(e)[:200]}"
 
     raise LLM실패(마지막 or "알 수 없는 실패")
-
-
-def 스위치_적용() -> str:
-    """`SUDDOE_LLM`(vllm|qwen, 기본 vllm)에 맞춰 `normalize_run.llm_호출` 과 `orchestrate.llm_호출` 을
-    같은 값으로 맞춘다. 몇 번을 불러도 안전하다. 적용된 백엔드 이름을 돌려준다.
-    """
-    backend = os.environ.get("SUDDOE_LLM", "vllm")
-    if backend == "qwen":
-        새값 = llm_호출
-    elif backend == "vllm":
-        새값 = _원본_vllm_llm_호출
-    else:
-        raise LLM실패(f"SUDDOE_LLM={backend!r} — 'vllm' 또는 'qwen' 만 허용")
-
-    _nr_모듈.llm_호출 = 새값
-    import orchestrate as _orch_모듈  # noqa: PLC0415 — 지연 import
-    _orch_모듈.llm_호출 = 새값
-    return backend

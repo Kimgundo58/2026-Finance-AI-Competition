@@ -1,6 +1,6 @@
 # .dockerignore 는 줄 끝 주석을 모른다 — # 는 줄 맨 앞에서만 주석이다.
 
-# 코퍼스 원본 — 본문은 DB 에 있다. 어휘집 하나만 예외(llm_schema.py 가 import 시점에 읽는다)
+# 코퍼스 원본 — 본문은 DB 에 있다. 어휘집 하나만 예외(llm_schema.py 가 판정 스키마를 만들 때 읽는다)
 2026_Finance_DATA_FOR_RAG/**
 !2026_Finance_DATA_FOR_RAG/_비목_어휘집.json
 
@@ -8,7 +8,7 @@
 법령 PDF/
 _hwp변환/
 
-# 정답셋·평가·개발 도구 (서빙 경로 아님)
+# 스키마·마이그레이션·seed SQL (서빙 경로 아님)
 db/
 
 # 문서·개발 부산물

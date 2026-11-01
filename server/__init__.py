@@ -1,2 +1,2 @@
 # -*- coding: utf-8 -*-
-"""server 패키지. 라우터가 상대 import 를 쓰므로 필요하다."""
+"""FastAPI 백엔드 패키지. 앱 객체는 server.main:app 이고, 라우터 모듈은 상대 import 를 쓴다."""

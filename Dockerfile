@@ -1,9 +1,9 @@
 # syntax=docker/dockerfile:1
 # 써도돼요 API 컨테이너 — FastAPI + KURE-v1(CPU 임베딩).
-# 빌더 단계에서 모델을 이미지에 굽고, 런타임은 HF_HUB_OFFLINE=1 로 네트워크를 막는다.
-# LLM(DashScope / vLLM)은 이 이미지 밖이다.
+# 빌더 단계에서 모델을 이미지에 포함하고, 런타임은 HF_HUB_OFFLINE=1 로 모델 다운로드를 막는다.
+# LLM 은 외부 API(DashScope)로 호출한다.
 
-# ── 1단계 — 의존성 설치 + 모델 굽기 ────────────────────────────────
+# ── 1단계 — 의존성 설치 + 모델 다운로드 ────────────────────────────
 FROM python:3.10-slim AS builder
 
 ENV PIP_NO_CACHE_DIR=1 \
@@ -48,12 +48,13 @@ COPY --from=builder /opt/venv /opt/venv
 COPY --from=builder /opt/hf /opt/hf
 
 WORKDIR /app
-# server/ 는 scripts/ 를 sys.path 에 넣고 import 한다. 둘은 한 덩어리다.
+# server/ 는 scripts/ 를 sys.path 에 넣고 import 하므로 둘 다 복사한다.
+# 비목 어휘집은 판정 스키마를 만들 때 llm_schema.py 가 읽는다.
 COPY server/ /app/server/
 COPY scripts/ /app/scripts/
 COPY 2026_Finance_DATA_FOR_RAG/_비목_어휘집.json /app/2026_Finance_DATA_FOR_RAG/
 
-# import 까지는 빌드에서 증명한다. DB 접속은 하지 않는다.
+# import 가 되는지 빌드에서 확인한다. import 시점에는 DB 에 접속하지 않는다.
 RUN python -c "import server.main; print('import ok')"
 
 RUN useradd -m -u 10001 suddoe \

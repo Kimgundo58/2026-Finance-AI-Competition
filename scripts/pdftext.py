@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
-"""PDF 텍스트 추출 공용 유틸 — 문자중복 레이어와 2단 조판을 자동으로 감지해 처리한다.
+"""PDF 텍스트 추출 공용 모듈 — 문자중복 레이어와 2단·4분면 조판을 자동으로 감지해 처리한다.
 
-문자중복 레이어는 pdfplumber 의 `page.dedupe_chars()` 로 풀고, 2단 조판은 거터(세로 빈 띠)를
-찾아 좌우로 crop 한 뒤 각 단을 pdfplumber 에 다시 맡긴다. "2단인가" 는 문서 단위로 판정하되,
-실제로 자르는 위치는 페이지별로 쓴다 — 표지·목차는 본문과 단 위치가 다르다.
+stage0_extract.extract_pdf 가 쓴다(PDF 텍스트 추출은 반드시 이 모듈을 거친다). 공개 함수:
+extract(path) -> (본문, 중복레이어였나), extract_meta(path) -> (본문, 진단 dict),
+extract_pages(path) -> 페이지별 본문 목록. 문자중복 레이어는 pdfplumber 의 `page.dedupe_chars()` 로
+풀고, 2단 조판은 거터(세로 빈 띠)를 찾아 좌우로 crop 한다. 2단 여부는 문서 단위로 판정하되
+자르는 위치는 페이지별로 쓴다 — 표지·목차는 본문과 단 위치가 다르다.
 """
 from __future__ import annotations
 
@@ -12,7 +14,7 @@ import statistics
 import pdfplumber
 
 DUP_THRESHOLD = 0.35
-NL = chr(10)           # 개행. 리터럴로 쓰면 파일 생성 도구가 치환해 버린다
+NL = chr(10)           # 개행
 
 # 거터 판정 파라미터
 GUTTER_MIN_W = 18      # 이보다 좁은 빈 띠는 자간·표 여백일 수 있다
@@ -158,7 +160,7 @@ def _page_text(page, two_col: float | None, quad: float | None = None) -> str:
 def extract(path, max_pages: int | None = None) -> tuple[str, bool]:
     """(본문, 중복레이어였나) 를 돌려준다.
 
-    다단 조판은 감지되면 조용히 해소한다. 어느 문서가 다단이었는지 알아야 하면
+    다단 조판은 감지되면 별도 표시 없이 해소한다. 어느 문서가 다단이었는지 알아야 하면
     `extract_meta()` 를 쓴다.
     """
     text, meta = extract_meta(path, max_pages)
@@ -167,10 +169,20 @@ def extract(path, max_pages: int | None = None) -> tuple[str, bool]:
 
 def extract_meta(path, max_pages: int | None = None) -> tuple[str, dict]:
     """(본문, {dedupe, gutter, pages}) — 진단용."""
+    texts, meta = _pages_meta(path, max_pages)
+    return NL.join(texts), meta
+
+
+def extract_pages(path, max_pages: int | None = None) -> list[str]:
+    """페이지별 본문 목록. NL 로 이으면 `extract_meta()` 의 본문과 같다."""
+    return _pages_meta(path, max_pages)[0]
+
+
+def _pages_meta(path, max_pages: int | None) -> tuple[list[str], dict]:
     with pdfplumber.open(path) as pdf:
         pages = pdf.pages if max_pages is None else pdf.pages[:max_pages]
         if not pages:
-            return "", {"dedupe": False, "gutter": None, "quad": None, "pages": 0}
+            return [], {"dedupe": False, "gutter": None, "quad": None, "pages": 0}
 
         probe = pages[min(4, len(pages) - 1)].extract_text() or ""
         deduped = dup_ratio(probe) > DUP_THRESHOLD
@@ -178,6 +190,6 @@ def extract_meta(path, max_pages: int | None = None) -> tuple[str, dict]:
 
         gutter = is_two_column(src)
         quad = is_quadrant(src, gutter)
-        text = NL.join(_page_text(p, gutter, quad) for p in src)
-        return text, {"dedupe": deduped, "gutter": gutter, "quad": quad,
-                      "pages": len(pages)}
+        texts = [_page_text(p, gutter, quad) for p in src]
+        return texts, {"dedupe": deduped, "gutter": gutter, "quad": quad,
+                       "pages": len(pages)}

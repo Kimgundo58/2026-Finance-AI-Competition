@@ -1,9 +1,8 @@
--- 프론트 프로토타입 연동을 위한 신설 테이블 4개 + 기존 테이블 ALTER 2건.
--- corpus.chunks / doc_articles / refs 는 건드리지 않는다 — 재파싱·재임베딩·재색인이 필요 없다.
--- 01_schema.sql 뒤에 파일명 순서로 실행된다.
+-- 프론트엔드 화면용 테이블(check_items, evidence_sources, expense_plans, plan_tasks)과 decisions·orgs 컬럼 추가.
+-- 실행 시점: init (01_schema.sql 다음). corpus.chunks / doc_articles / refs 는 건드리지 않는다.
 
 
--- corpus.check_items : "결제 전 확인" 항목의 폐쇄 목록. code 가 재판정 간 진행상황을 잇는 안정 식별자다.
+-- corpus.check_items : 결제 전/후 확인 항목의 허용 목록. code 는 재판정 사이에 진행 상황을 이어 주는 고정 식별자다.
 CREATE TABLE IF NOT EXISTS corpus.check_items (
     code          TEXT PRIMARY KEY,           -- 계약범위확정 / 비교견적준비 / 특수관계확인 ...
     사업명        TEXT,                       -- NULL = 전 사업 공통
@@ -12,7 +11,7 @@ CREATE TABLE IF NOT EXISTS corpus.check_items (
     항목          TEXT NOT NULL,              -- 기본 문안. LLM 이 다듬되 code 는 유지한다
     설명          TEXT,
     기본_오프셋일 INT,                        -- 집행일 기준 며칠 전. 코드가 초기 due_date 를 계산
-    -- 캘린더 배지 유형. 기본값 '기타' 라 코드가 늘어도 조용히 틀리지 않는다.
+    -- 캘린더 배지 유형. 기본값이 '기타' 라 새 코드가 추가돼도 잘못된 유형으로 표시되지 않는다.
     유형          TEXT NOT NULL DEFAULT '기타' CHECK (유형 IN ('기타','계약','비교견적')),
     근거          JSONB,                      -- [{doc_id, 조번호}]
     verified      BOOLEAN NOT NULL DEFAULT false,
@@ -35,8 +34,8 @@ CREATE TABLE IF NOT EXISTS corpus.evidence_sources (
 );
 
 -- 비목 정규화 결과 컬럼. 원문 `해당비목` 은 덮지 않고 컬럼을 더한다.
--- 분류: 정본 | 표기차이 | 지급수수료_세목 | R&D계통 | 주관기관비목 | 비목아님 | 미분류
--- TIPS(R&D계통)는 해당비목_정본 이 NULL 이다 — 매핑하면 조인이 조용히 0행이 된다.
+-- 분류 값: 정본(표준 표기) | 표기차이 | 지급수수료_세목 | R&D계통 | 주관기관비목 | 비목아님 | 미분류
+-- TIPS(R&D계통)는 해당비목_정본 이 NULL 이다. 창업 비목으로 매핑하면 조인 결과가 경고 없이 0행이 된다.
 ALTER TABLE corpus.evidence_sources ADD COLUMN IF NOT EXISTS 해당비목_정본 TEXT[];
 ALTER TABLE corpus.evidence_sources ADD COLUMN IF NOT EXISTS 해당비목_분류 TEXT[];
 
@@ -45,13 +44,13 @@ COMMENT ON TABLE corpus.evidence_sources IS
 
 
 -- tenant.expense_plans : 지출 계획. 프론트 홈·목록·상세·새 계획 화면이 이 테이블에 묶인다.
--- 재판정은 decisions 에 append 하고 latest_decision_id 포인터만 옮긴다 — 덮어쓰면 이력이 사라진다.
+-- 재판정은 decisions 에 행을 추가하고 latest_decision_id 만 바꾼다. 덮어쓰면 이력이 사라진다.
 CREATE TABLE IF NOT EXISTS tenant.expense_plans (
     plan_id     BIGSERIAL PRIMARY KEY,
     org_id      UUID REFERENCES tenant.orgs(org_id) ON DELETE CASCADE,  -- NULL = 게스트
     제목        TEXT,                         -- 목록의 "지출명". 정규화가 문장에서 뽑아 채운다
-    질문원문    TEXT NOT NULL,                -- 목록 검색이 뒤지는 값
-    정규화      JSONB,                        -- ① 단계 출력 전체
+    질문원문    TEXT NOT NULL,                -- 목록 검색 대상
+    정규화      JSONB,                        -- 정규화 단계 출력 전체
     -- 아래 4개는 정렬·필터에 쓰는 값만 JSONB 에서 컬럼으로 승격한 것이다
     확정비목    TEXT,
     금액        NUMERIC,
@@ -71,10 +70,10 @@ COMMENT ON TABLE tenant.expense_plans IS
 
 -- tenant.plan_tasks : 할일 = 체크리스트 + 캘린더. 같은 행을 필터만 다르게 거른다.
 --   체크리스트 = WHERE plan_id = ? (전부) / 캘린더 = WHERE due_date IS NOT NULL (날짜 있는 것만)
--- org_id 를 plan_id 와 별도로 둔다 — plan_id 가 NULL(사용자 직접 일정)이면 plan 경유 RLS 로 격리가 안 된다.
+-- org_id 를 plan_id 와 별도로 둔다. plan_id 가 NULL(사용자 직접 일정)이면 plan 을 거치는 RLS 로는 격리할 수 없다.
 CREATE TABLE IF NOT EXISTS tenant.plan_tasks (
     task_id     BIGSERIAL PRIMARY KEY,
-    org_id      UUID REFERENCES tenant.orgs(org_id) ON DELETE CASCADE,  -- RLS 축
+    org_id      UUID REFERENCES tenant.orgs(org_id) ON DELETE CASCADE,  -- RLS 정책이 보는 컬럼
     plan_id     BIGINT REFERENCES tenant.expense_plans(plan_id) ON DELETE CASCADE,
                                               -- NULL = 계획과 무관한 사용자 일정
     decision_id BIGINT REFERENCES tenant.decisions(decision_id) ON DELETE SET NULL,
@@ -102,7 +101,7 @@ COMMENT ON TABLE tenant.plan_tasks IS
 
 -- 기존 테이블 ALTER 2건 (decisions, orgs)
 
--- 판정을 계획에 종속시킨다. 없으면 어느 계획의 판정인지 알 수 없어 고아 로그가 된다.
+-- 판정을 계획에 연결한다. 없으면 어느 계획의 판정인지 알 수 없다.
 ALTER TABLE tenant.decisions
     ADD COLUMN IF NOT EXISTS plan_id BIGINT
         REFERENCES tenant.expense_plans(plan_id) ON DELETE SET NULL;
@@ -150,32 +149,5 @@ CREATE TRIGGER trg_touch BEFORE UPDATE ON tenant.plan_tasks
     FOR EACH ROW EXECUTE FUNCTION tenant.touch_updated_at();
 
 
--- 권한 회수 및 적재현황 뷰 갱신 (신설 테이블 포함)
+-- 권한 회수 (신설 테이블 포함)
 REVOKE ALL ON ALL TABLES IN SCHEMA corpus, tenant FROM PUBLIC;
-
-CREATE OR REPLACE VIEW corpus.v_적재현황 AS
-SELECT '01. corpus.documents'      AS 테이블, count(*) AS 건수 FROM corpus.documents
-UNION ALL SELECT '02. corpus.doc_articles',     count(*) FROM corpus.doc_articles
-UNION ALL SELECT '03. corpus.chunks',           count(*) FROM corpus.chunks
-UNION ALL SELECT '05. corpus.rules',            count(*) FROM corpus.rules
-UNION ALL SELECT '06. corpus.precedence_rules', count(*) FROM corpus.precedence_rules
-UNION ALL SELECT '07. corpus.refs',             count(*) FROM corpus.refs
-UNION ALL SELECT '08. corpus.chunk_terms',      count(*) FROM corpus.chunk_terms
-UNION ALL SELECT '09. corpus.chunk_len',        count(*) FROM corpus.chunk_len
-UNION ALL SELECT '10. corpus.item_alias',       count(*) FROM corpus.item_alias
-UNION ALL SELECT '11. corpus.xref_mismatch',    count(*) FROM corpus.xref_mismatch
-UNION ALL SELECT '12. corpus.check_items',      count(*) FROM corpus.check_items
-UNION ALL SELECT '13. corpus.evidence_sources', count(*) FROM corpus.evidence_sources
-UNION ALL SELECT '14. tenant.orgs',             count(*) FROM tenant.orgs
-UNION ALL SELECT '15. tenant.l3_documents',     count(*) FROM tenant.l3_documents
-UNION ALL SELECT '16. tenant.l3_articles',      count(*) FROM tenant.l3_articles
-UNION ALL SELECT '17. tenant.accounts',         count(*) FROM tenant.accounts
-UNION ALL SELECT '18. tenant.f_profile',        count(*) FROM tenant.f_profile
-UNION ALL SELECT '19. tenant.f_exec',           count(*) FROM tenant.f_exec
-UNION ALL SELECT '20. tenant.f_personnel',      count(*) FROM tenant.f_personnel
-UNION ALL SELECT '21. tenant.unmapped_premise', count(*) FROM tenant.unmapped_premise
-UNION ALL SELECT '22. tenant.decisions',        count(*) FROM tenant.decisions
-UNION ALL SELECT '23. tenant.expense_plans',    count(*) FROM tenant.expense_plans
-UNION ALL SELECT '24. tenant.plan_tasks',       count(*) FROM tenant.plan_tasks
-UNION ALL SELECT '25. eval.golden_set',         count(*) FROM eval.golden_set
-ORDER BY 1;

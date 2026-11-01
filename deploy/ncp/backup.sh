@@ -14,6 +14,10 @@ KEEP=${KEEP:-14}
 mkdir -p backups
 f="backups/suddoe_$(date +%Y%m%d_%H%M).dump"
 
+# pg_dump 나 무결성 확인이 실패하면 .part 파일이 남는다. 보관 개수 정리는 *.dump 만 보므로
+# 실패가 반복되면 부분 덤프가 디스크에 쌓인다. 종료 시 항상 지운다(mv 성공 후에는 없는 파일이다).
+trap 'rm -f -- "$f.part"' EXIT
+
 docker compose exec -T db pg_dump -U postgres -Fc --no-owner --no-privileges suddoe > "$f.part"
 # 덤프 무결성 확인: 목차(TOC)를 읽을 수 없으면 실패 처리하고 파일을 남기지 않는다
 docker compose exec -T db pg_restore --list < "$f.part" > /dev/null

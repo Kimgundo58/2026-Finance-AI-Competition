@@ -1,7 +1,9 @@
--- Agent 층 스키마 변경을 한 트랜잭션에서 적용한다. 멱등이라 재실행해도 같은 상태가 된다.
--- 실행: docker exec -i suddoe-db psql -U postgres -d suddoe -v ON_ERROR_STOP=1 -f - < db/init/04_agent.sql
--- 세 스키마(tenant·corpus·eval) 표를 줄줄이 잠근다 — 한가할 때 돌린다. lock_timeout 이 없으면 남의
--- idle-in-transaction 에 걸려 DB 가 몇 분씩 멈춘다 (PG 가 못 보는 앱 레벨 교착).
+-- 판정 검증·평가용 스키마 변경: UNIQUE NULLS NOT DISTINCT 제약, decisions 강등코드·경로, incidents,
+-- recheck_queue, programs, item_vocab, eval.runs/run_items/golden_chunks. 한 트랜잭션으로 적용한다.
+-- 실행 시점: init. 멱등이라 다시 실행해도 같은 상태가 된다.
+--   docker exec -i suddoe-db psql -U postgres -d suddoe -v ON_ERROR_STOP=1 -f - < db/init/04_agent.sql
+-- tenant·corpus·eval 의 테이블을 차례로 락한다. lock_timeout 이 없으면 다른 커넥션의
+-- idle-in-transaction 에 막혀 DB 가 몇 분씩 대기할 수 있다.
 \set ON_ERROR_STOP on
 SET lock_timeout = '10s';
 
@@ -9,7 +11,7 @@ BEGIN;
 
 -- 현물 제거 — 현물은 협약 시점 산정 회계 항목이지 집행 승인 대상이 아니다.
 -- 자기부담금 구성비율(현금/현물 하한) 검증은 이 컬럼 삭제로 더는 할 수 없다.
--- 되살리려면 f_profile 에 현물 총액 컬럼 하나만 다시 두면 된다.
+-- 다시 필요하면 f_profile 에 현물 총액 컬럼 하나만 추가하면 된다.
 
 ALTER TABLE tenant.f_profile DROP COLUMN IF EXISTS "정부지원_현물";
 ALTER TABLE tenant.f_profile DROP COLUMN IF EXISTS "자기부담_현물";
@@ -21,9 +23,9 @@ CREATE INDEX IF NOT EXISTS ix_exec_agg ON tenant.f_exec (profile_id, "비목", "
 
 
 -- 제약 3건 — 전부 NULLS NOT DISTINCT (PostgreSQL 15+ 필요).
--- 기본 UNIQUE 는 NULL 을 서로 다른 값으로 봐, 키 일부가 nullable 인 이 세 표는 ON CONFLICT 가 안 걸리고 중복이 쌓인다.
---   rules: 기관id NULL(L1/L2 전역 룰) 중복 적재 / unmapped_premise: 사업명·비목 NULL 이면 결핍 집계가 안 걸림
---   item_alias: 사업명 NULL(전 사업 공통 별칭)이 seed 재실행마다 불어남
+-- 기본 UNIQUE 는 NULL 을 서로 다른 값으로 봐서, 키 일부가 nullable 인 이 세 표는 ON CONFLICT 가 동작하지 않고 중복이 쌓인다.
+--   rules: 기관id NULL(L1/L2 전역 룰) 중복 적재 / unmapped_premise: 사업명·비목이 NULL 이면 집계가 합쳐지지 않음
+--   item_alias: 사업명 NULL(전 사업 공통 별칭)이 seed 재실행마다 늘어남
 
 -- rules."사업명" 을 nullable 로 내린다 — (L1, 기관id=NULL, 사업명=NULL, 비목)으로 "전 사업 공통 L1 룰" 을 표현한다.
 -- 유일성은 uq_rules_key 의 NULLS NOT DISTINCT 가 지킨다 — 비목당 L1 1행.
@@ -59,24 +61,27 @@ ALTER TABLE corpus.item_alias
 -- 강등사유(사람이 읽는 문장)는 이미 있다. 강등코드는 기계가 집계하는 enum 배열이라
 -- 따로 둔다 — 문장을 파싱해 지표를 내면 문구가 바뀔 때마다 지표가 끊긴다.
 -- 경로     : 판정이 지나온 분기 (게이트 A~D · L3단독 · 판단불가 등)
--- 실패단계 : 판단불가로 떨어진 지점. NULL 이면 정상 완주.
+-- 실패단계 : 판단불가로 처리된 단계. NULL 이면 정상 완료.
 
 ALTER TABLE tenant.decisions ADD COLUMN IF NOT EXISTS "강등코드" TEXT[] NOT NULL DEFAULT '{}';
 ALTER TABLE tenant.decisions ADD COLUMN IF NOT EXISTS "경로"     TEXT;
 ALTER TABLE tenant.decisions ADD COLUMN IF NOT EXISTS "실패단계" TEXT;
 
--- 강등코드 22종. 매핑표 밖의 코드는 거부한다 — 오타가 지표를 조용히 갈라놓지 못하게.
--- TASK_* 4종은 `해야할일[].설명` 대조용이고 판정을 바꾸지 않는다. 정본 철자는 `llm_validate.py` 에 있다.
+-- 강등코드 허용 목록. 목록 밖의 코드는 거부해 오타가 지표를 갈라놓지 못하게 한다.
+-- 기준 목록은 scripts/llm_validate.py 의 강등코드_전체 이고, 이 CHECK 는 같은 순서로 맞춘다.
+-- 코드를 추가하면 db/migrations/ 에 CHECK 교체 마이그레이션을 함께 낸다.
+-- TASK_STATE_*/TASK_NUMBER_*/TASK_BASIS_* 는 해야할일 설명 대조용이고 판정을 바꾸지 않는다.
 ALTER TABLE tenant.decisions DROP CONSTRAINT IF EXISTS "decisions_강등코드_check";
 ALTER TABLE tenant.decisions
   ADD CONSTRAINT "decisions_강등코드_check"
   CHECK ("강등코드" <@ ARRAY[
     'INVALID_JUDGMENT','CITE_NOT_IN_MAP','CITE_DB_MISSING','CITE_HANG_MISMATCH',
     'PREMISE_NO_BASIS','PREMISE_BASIS_NOT_IN_MAP','PREMISE_ENUM','PREMISE_UNMAPPED',
+    'PREMISE_DB_MISSING',
     'NO_CITATION','VLM_DOWNGRADE','B_GRADE_DOWNGRADE','UNVERIFIED_RULE',
-    'TASK_CODE_INVALID','L3_ONLY_DOWNGRADE','TENANT_LEAK','DANGLING_WARN',
+    'TASK_CODE_INVALID','TASK_DB_MISSING',
+    'L3_ONLY_DOWNGRADE','TENANT_LEAK','DANGLING_WARN',
     'DOMAIN_WARN','PRECEDENCE_FLIP',
-    -- 해야할일 대조 (llm_validate.py)
     'TASK_STATE_UNSOURCED','TASK_STATE_MISMATCH',
     'TASK_NUMBER_UNSOURCED','TASK_BASIS_NOT_IN_MAP'
   ]::text[]);
@@ -108,14 +113,14 @@ CREATE INDEX IF NOT EXISTS ix_incidents_time ON tenant.incidents ("발생시각"
 -- corpus.rules 를 직접 UPDATE 하지 않는다. 개정 감지는 구판·신판 좌표를 둘 다 들고 있어야 추적이 된다.
 CREATE TABLE IF NOT EXISTS corpus.recheck_queue (
   queue_id   BIGSERIAL PRIMARY KEY,
-  종류       TEXT NOT NULL,   -- A4개정 | A2엄격조항 | A5기관답변 | H4정산리허설
+  종류       TEXT NOT NULL,   -- 저장값 A4개정(개정감지) | A2엄격조항(엄격조항) | A5기관답변(기관답변) | H4정산리허설(정산점검)
   사유코드   TEXT NOT NULL,   -- BASIS_AMENDED | BASIS_RENUMBERED | BASIS_DELETED
                               -- | BASIS_STALE_DOC | STRICTER_L3 | ORG_ANSWER
   대상종류   TEXT NOT NULL,   -- rule | check_item | precedence_rule | item_alias | none
   -- 대상id 를 TEXT 로 두고 FK 를 걸지 않는다 — 대상이 rules(bigint)·check_items(code)·precedence_rules(bigint) 로 갈리고,
   -- rules 재적재 시 rule_id 가 바뀌면 FK 가 큐를 깨뜨린다. 재적재 후에도 살아남는 키는 (사업명, 비목, doc_id, 조번호)다.
-  대상id     TEXT,   -- 소문자 id. 프로젝트 관례(기관id·doc_id)와 맞춘다 —
-                      -- "대상ID" 로 두면 따옴표 없는 참조가 대상id 로 접혀 못 찾는다
+  대상id     TEXT,   -- 소문자 id. 프로젝트 관례(기관id·doc_id)와 맞춘다.
+                      -- "대상ID" 로 두면 따옴표 없는 참조가 소문자 대상id 로 변환되어 컬럼을 찾지 못한다
   사업명     TEXT,
   비목       TEXT,
   doc_id     TEXT,            -- 신판 좌표
@@ -139,8 +144,8 @@ CREATE TABLE IF NOT EXISTS corpus.recheck_queue (
 );
 CREATE INDEX IF NOT EXISTS ix_recheck_open
   ON corpus.recheck_queue ("상태", "발견일" DESC);
--- A4 는 주 1회 배치다. 같은 개정을 반복 적재하면 큐가 쓰레기가 된다.
--- NULLS NOT DISTINCT 라 좌표 일부가 NULL 이어도 중복이 접힌다.
+-- 개정 감지는 주기적으로 반복 실행된다. 같은 개정이 중복 적재되지 않게 UNIQUE 를 둔다.
+-- NULLS NOT DISTINCT 라 좌표 일부가 NULL 이어도 중복으로 판단된다.
 ALTER TABLE corpus.recheck_queue DROP CONSTRAINT IF EXISTS uq_recheck_key;
 ALTER TABLE corpus.recheck_queue
   ADD CONSTRAINT uq_recheck_key
@@ -162,7 +167,7 @@ COMMENT ON COLUMN tenant.l3_documents."출처" IS
 
 -- corpus.check_items."기본_오프셋일" 부호 규약.
 -- due_date = 집행예정일 + 기본_오프셋일 (분기 없는 단일 공식). 결제전 → 음수 이하, 결제후 → 양수 이상, NULL → 기한 없음.
--- 구분으로 분기하지 않는다 — 분기가 프론트·판정 두 군데 생기면 어긋난다. 코드는 seed_check_items.due_date계산() 하나만 쓴다.
+-- 구분으로 분기하지 않는다. 분기가 프론트와 판정 두 곳에 생기면 서로 어긋난다.
 
 COMMENT ON COLUMN corpus.check_items."기본_오프셋일" IS
   '집행예정일 기준 부호 있는 일수. due_date = 집행예정일 + 이 값. '
@@ -195,7 +200,7 @@ CREATE TABLE IF NOT EXISTS corpus.programs (
   CONSTRAINT "programs_비목계통_check" CHECK ("비목계통" IN ('창업','RND'))
 );
 
--- 사업명 정본은 corpus.chunks."사업명"(text[]) 에 있는 8종이다.
+-- 표준 사업명은 corpus.chunks."사업명"(text[]) 의 값과 같다.
 -- 별칭은 폴더명·golden_set.사업명·corpus.rules.사업명 에서만 가져온다.
 -- 우선규범은 corpus.precedence_rules."우선규범" 을 그대로 옮긴다.
 INSERT INTO corpus.programs ("사업명","별칭","전문기관","비목계통","우선규범","트랙범위","비고") VALUES
@@ -221,12 +226,12 @@ ON CONFLICT ("사업명") DO UPDATE SET
   "우선규범" = EXCLUDED."우선규범",
   "트랙범위" = EXCLUDED."트랙범위",
   "비고"     = EXCLUDED."비고";
--- 정부지원상한 은 전 행 NULL 이다 — 확정 근거를 코퍼스에서 못 찾았다. 추측으로 채우지 않는다.
--- 채울 때는 반드시 상한_근거 에 doc_id·조번호를 같이 박는다.
+-- 정부지원상한 은 전 행 NULL 이다. 확정 근거를 코퍼스에서 찾지 못했고 추측으로 채우지 않는다.
+-- 채울 때는 상한_근거 에 doc_id·조번호를 함께 넣는다.
 
 
--- 비목 어휘집. 표A 창업 계통 10종이 정본이다 (corpus.rules · check_items 실측과 일치).
--- 지급수수료 는 하위 12종(기술이전비·멘토링비·사무실임차료 …)이 전부 한 비목으로 접힌다.
+-- 비목 어휘집. 표A 창업 계통 비목이 표준 목록이다 (corpus.rules · check_items 의 비목과 일치).
+-- 지급수수료 는 하위항목(기술이전비·멘토링비·사무실임차료 …)을 모두 한 비목으로 묶는다.
 CREATE TABLE IF NOT EXISTS corpus.item_vocab (
   비목        TEXT PRIMARY KEY,
   계통        TEXT    NOT NULL DEFAULT '창업',
@@ -265,11 +270,11 @@ ON CONFLICT ("비목") DO UPDATE SET
   "하위항목" = EXCLUDED."하위항목",
   "정렬"     = EXCLUDED."정렬",
   "비고"     = EXCLUDED."비고";
--- TIPS(RND 계통) 비목 26종은 넣지 않았다. 결정되면 계통='RND' 로 INSERT 만 하면 된다 — DDL 변경 불필요.
+-- TIPS(RND 계통) 비목은 넣지 않았다. 추가할 때는 계통='RND' 로 INSERT 만 하면 된다(DDL 변경 불필요).
 
 
 -- golden_set."사업명" 의미 분리 → 그 뒤 FK.
--- '공통(지침 제14차)' 류 행은 사업 이름이 아니라 적용범위 표시다 — 가르지 않고 programs FK 를 걸면 깨진다.
+-- '공통(지침 제14차)' 같은 값은 사업 이름이 아니라 적용범위 표시다. 분리하지 않고 programs FK 를 걸면 실패한다.
 -- 원표기를 그대로 "적용범위" 로 옮긴다(정규화하지 않는다). '(지침 제14차)' 는 근거 판본 정보라 버리면 복구가 안 된다.
 
 ALTER TABLE eval.golden_set ADD COLUMN IF NOT EXISTS "적용범위" TEXT;
@@ -290,8 +295,8 @@ ALTER TABLE eval.golden_set
 
 -- eval.runs · eval.run_items · eval.golden_chunks
 
--- eval.runs : 한 번의 평가 실행. 종류로 e2e / retrieval / judge 를 가른다.
--- 지표를 jsonb 로 두는 이유: 종류마다 지표가 다르다(hit@5 vs 일치율 vs 판단불가율). 컬럼으로 박으면 새 지표마다 DDL 이 필요하다.
+-- eval.runs : 한 번의 평가 실행. 종류로 e2e / retrieval / judge 를 구분한다.
+-- 지표를 jsonb 로 두는 이유: 종류마다 지표가 다르다(hit@5, 일치율, 판단불가율). 컬럼으로 두면 새 지표마다 DDL 이 필요하다.
 CREATE TABLE IF NOT EXISTS eval.runs (
   run_id       BIGSERIAL PRIMARY KEY,
   종류         TEXT        NOT NULL,
@@ -308,7 +313,7 @@ CREATE TABLE IF NOT EXISTS eval.runs (
 );
 CREATE INDEX IF NOT EXISTS "ix_runs_종류" ON eval.runs ("종류", "시작" DESC);
 
--- 문항 단위 결과. 실패 문항을 지목할 수 있어야 "무엇을 고칠지" 가 나온다.
+-- 문항 단위 결과. 실패한 문항을 찾아 원인을 분석하는 데 쓴다.
 CREATE TABLE IF NOT EXISTS eval.run_items (
   item_id   BIGSERIAL PRIMARY KEY,
   run_id    BIGINT  NOT NULL REFERENCES eval.runs(run_id) ON DELETE CASCADE,
@@ -322,9 +327,9 @@ CREATE TABLE IF NOT EXISTS eval.run_items (
 CREATE INDEX IF NOT EXISTS ix_run_items_run ON eval.run_items (run_id);
 CREATE INDEX IF NOT EXISTS ix_run_items_miss ON eval.run_items (run_id) WHERE "적중" IS NOT TRUE;
 
--- eval.golden_chunks : 골든셋 정답근거 ↔ 실제 chunk_id 고정 매핑. 원문 부분일치로 매번 되짚지 않게 한 번 박아둔다.
--- (gold_id, 근거순번) 을 PK 로 두면 안 된다 — 조문 하나가 여러 청크로 쪼개져 근거 1건이 청크 N개를 가질 수 있다.
--- 역추적 실패 행은 chunk_id 가 NULL 이다. 대리키 + UNIQUE NULLS NOT DISTINCT 로 둘 다 담는다.
+-- eval.golden_chunks : 골든셋 정답근거와 chunk_id 의 고정 매핑. 매번 원문 부분일치로 재구성하지 않도록 저장한다.
+-- (gold_id, 근거순번) 을 PK 로 두면 안 된다. 조문 하나가 여러 청크로 나뉘어 근거 1건이 청크 N개에 대응할 수 있다.
+-- 매칭에 실패한 행은 chunk_id 가 NULL 이다. 대리키 + UNIQUE NULLS NOT DISTINCT 로 둘 다 담는다.
 CREATE TABLE IF NOT EXISTS eval.golden_chunks (
   gc_id       BIGSERIAL PRIMARY KEY,
   gold_id     BIGINT NOT NULL REFERENCES eval.golden_set(gold_id) ON DELETE CASCADE,

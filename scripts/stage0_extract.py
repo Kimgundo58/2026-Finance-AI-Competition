@@ -1,24 +1,25 @@
 # -*- coding: utf-8 -*-
-"""Stage 0-a~d : 포맷별 원문 추출.
+"""규정 원본 파일에서 텍스트(또는 법령 XML 의 조문 구조)를 추출한다.
 
-XML  → 조문 구조 그대로 (품질 최상)
-PDF  → pdfplumber
-HWP  → hwp_extract.py 재사용 (OLE v5) · HWPML(XML) 은 lxml
-HWPX → hwpx_extract.py (zip). 확장자가 아니라 내용물로 갈라 보낸다
-DOCX → docx_extract.py (zip, python-docx). hwpx 와 같은 sniff() 로 내용물 재검증
-TXT  → 그대로
+l3_parse(L3 업로드)와 코퍼스 적재가 부른다. 공개 함수: extract(path) ->
+('articles', [조문 dict]) 또는 ('text', (본문, {문자오프셋: 페이지번호})), 빈_추출_글자수_임계치.
+형식은 확장자가 아니라 파일 앞 바이트로 판정한다: %PDF → pdftext, OLE → HWP v5,
+ZIP → HWPX/DOCX(내용물로 구분), <?xml → 법령 XML 또는 HWPML, 그 밖의 .txt → 평문.
+불변식: 모든 형식의 출력은 extract() 한 곳에서 서러게이트 정리를 거친다.
 """
 from __future__ import annotations
-import logging, os, re, sys, zlib, struct
+
+import logging
+import os
+import re
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
+_로그 = logging.getLogger(__name__)
 
 
 # ── XML (L1 법령·행정규칙) ────────────────────────────────────────
 # 행정규칙(AdmRulService)은 <조문단위> 구조가 없고 <조문내용> 평문이 조 단위로
-# 나열된다. 법령 파서를 그대로 돌리면 빈 리스트가 나오므로 루트 태그를 보고 갈라 보낸다.
+# 나열된다. 법령 파서를 그대로 돌리면 빈 리스트가 나오므로 루트 태그를 보고 나눠 처리한다.
 _RE_ADM_JO = re.compile(r"^제\s*(\d+)\s*조(?:\s*의\s*(\d+))?\s*(?:\(([^)]*)\))?")
 _RE_ADM_HEAD = re.compile(r"^제\s*\d+\s*[장절관편]\b")
 
@@ -96,13 +97,26 @@ def extract_xml(path: Path) -> list[dict]:
     return out
 
 
+def _xml_루트(path: Path) -> str:
+    """XML 루트 태그 이름. 법령 XML 과 HWPML 을 나누는 데만 쓴다."""
+    from lxml import etree
+
+    # 첫 start 이벤트에서 멈춘다. 파서가 연 파일은 close() 로 바로 닫는다(Windows 에서 파일 잠금이 남지 않게).
+    it = etree.iterparse(str(path), events=("start",))
+    try:
+        for _, el in it:
+            return el.tag
+        return ""
+    finally:
+        close = getattr(it, "close", None)
+        if close:
+            close()
+
+
 # ── PDF ──────────────────────────────────────────────────────────
-_RE_JO_COUNT = re.compile(r"제\s*\d+\s*조\s*\(")
-
-
 def _pdf_pypdf(path: Path) -> tuple[str, dict[int, int]]:
-    """빠른 경로. 단일 컬럼 문서면 이걸로 충분하다."""
-    import logging, warnings
+    """pypdf 경로. pdftext 가 예외를 낼 때만 쓰는 폴백이다."""
+    import warnings
     from pypdf import PdfReader
 
     logging.getLogger("pypdf").setLevel(logging.CRITICAL)
@@ -120,33 +134,31 @@ def _pdf_pypdf(path: Path) -> tuple[str, dict[int, int]]:
     return "\n".join(parts), offsets
 
 
-def _pdf_plumber(path: Path) -> tuple[str, dict[int, int]]:
-    """느린 경로. 다단 레이아웃 등 pypdf 가 실패할 때만."""
-    import pdfplumber
+def _pdf_pdftext(path: Path) -> tuple[str, dict[int, int]]:
+    """pdftext 경로. 문자중복 레이어와 2단·4분면 조판을 해소한 페이지별 본문을 쓴다."""
+    import pdftext
 
     parts, offsets, pos = [], {}, 0
-    with pdfplumber.open(str(path)) as pdf:
-        for i, page in enumerate(pdf.pages, 1):
-            t = page.extract_text() or ""
-            offsets[pos] = i
-            parts.append(t)
-            pos += len(t) + 1
+    for i, t in enumerate(pdftext.extract_pages(str(path)), 1):
+        offsets[pos] = i
+        parts.append(t)
+        pos += len(t) + 1
     return "\n".join(parts), offsets
 
 
 def extract_pdf(path: Path) -> tuple[str, dict[int, int]]:
     """PDF → 평문 + {문자오프셋: 페이지번호}.
 
-    pdfplumber 를 기본으로 쓴다. pypdf 는 실패 시 대체 경로일 뿐이다 —
-    한국어 PDF 에서 쉼표·괄호·숫자를 문장 끝으로 밀어내 조문 헤더를 깨뜨린다.
+    pdftext(pdfplumber 기반)를 기본으로 쓴다. pypdf 는 pdftext 가 예외를 낼 때만
+    쓰는 폴백이다 — 한국어 PDF 에서 쉼표·괄호·숫자를 문장 끝으로 밀어내 조문 헤더를 깨뜨린다.
     """
     try:
-        return _pdf_plumber(path)
+        return _pdf_pdftext(path)
     except Exception:
         return _pdf_pypdf(path)
 
 
-# ── HWP ──────────────────────────────────────────────────────────
+# ── HWP (OLE) ────────────────────────────────────────────────────
 def _find_soffice() -> str | None:
     """LibreOffice `soffice` 실행 파일 경로. 없으면 None(호출부가 폴백한다)."""
     import shutil as _sh
@@ -165,13 +177,13 @@ def _find_soffice() -> str | None:
     return None
 
 
-def _libreoffice_docx(path: Path) -> Path | None:
-    """구형 `.hwp`(OLE) 를 LibreOffice+H2Orestart 로 `.docx` 변환한다. 실패하면 `None`.
+def _libreoffice_docx(path: Path) -> str | None:
+    """구형 `.hwp`(OLE) 를 LibreOffice+H2Orestart 로 `.docx` 변환해 본문을 돌려준다. 실패하면 `None`.
 
-    `hwp_extract.py` 는 PARA_TEXT 레코드만 훑어 표 구조가 없다. LibreOffice 로
-    docx 를 거치면 `docx_extract._walk_table()` 의 표 걷기를 그대로 태울 수 있다.
-    실패는 예외로 올리지 않고 `None` 을 돌려준다 — 호출부(`extract_hwp`)가 기존
-    `hwp_extract` 경로로 폴백한다.
+    `hwp_extract.py` 는 PARA_TEXT 레코드만 읽어 표 구조가 없다. LibreOffice 로
+    docx 를 거치면 `docx_extract._walk_table()` 의 표 처리를 그대로 쓸 수 있다.
+    실패는 예외로 올리지 않고 `None` 을 돌려준다 — 호출부(`_extract_hwp_ole`)가
+    `hwp_extract` 경로로 폴백한다. 변환본은 임시 디렉터리 안에서 읽고 함께 지운다.
 
     ASCII 임시 파일명으로 복사한 뒤 변환한다 — 한글 파일명은 H2Orestart(Java)
     인코딩 문제로 깨진다.
@@ -198,19 +210,41 @@ def _libreoffice_docx(path: Path) -> Path | None:
                     path.name, proc.returncode, (proc.stderr or b"")[:300],
                 )
                 return None
-            # tmp 디렉터리가 with 종료 시 지워지므로, 그 전에 영속 위치로 옮겨 돌려준다.
-            keep_dir = Path(tempfile.mkdtemp(prefix="hwp2docx_out_"))
-            keep = keep_dir / out.name
-            shutil.copy(out, keep)
-            return keep
+            try:
+                return _route_zip_office(out)
+            except Exception as e:
+                _로그.warning("LibreOffice 변환본 파싱 실패(%s) — 기존 경로로 폴백: %s", path.name, e)
+                return None
     except Exception as e:
         _로그.warning("LibreOffice 변환 예외(%s): %s", path.name, e)
         return None
 
 
+def _extract_hwp_ole(path: Path) -> str:
+    """OLE 복합문서 → 본문. 배포용/암호화 HWP 는 HwpProtectedError.
+
+    배포용/암호화 문서는 `hwp_extract.extract()` 가 예외 없이 뷰어 안내문뿐인 빈 본문을
+    내므로, 파싱 후 글자수로 재구성하지 않고 정체 판정 단계에서 먼저 막는다.
+    """
+    from hwpx_extract import sniff, HwpProtectedError
+
+    kind = sniff(path)
+    if kind.startswith("HWP-DRM"):
+        raise HwpProtectedError(f"{kind} ({path.name})")
+
+    # hwp_extract 는 표 구조가 없으므로 LibreOffice 변환을 먼저 시도하고,
+    # 실패하면(미설치·변환 오류·재파싱 실패) hwp_extract 로 폴백한다.
+    변환본문 = _libreoffice_docx(path)
+    if 변환본문 is not None:
+        return 변환본문
+
+    from hwp_extract import extract
+
+    return extract(str(path))
+
+
 def _extract_hwpml(path: Path) -> str:
-    """확장자는 .hwp 지만 실제 내용이 HWPML(XML) 인 파일.
-    (예: 국가법령정보센터에서 내려받은 서울대 규정)"""
+    """내용이 HWPML(XML) 인 파일(예: 국가법령정보센터에서 내려받은 .hwp 규정)."""
     from lxml import etree
 
     tree = etree.parse(str(path))
@@ -223,109 +257,24 @@ def _extract_hwpml(path: Path) -> str:
     return "\n".join(lines)
 
 
+# ── ZIP (HWPX / DOCX) ────────────────────────────────────────────
 def _route_zip_office(path: Path) -> str:
-    """PK(zip) 로 시작하는 hwpx/docx 후보 — 확장자가 아니라 `sniff()` 로 실제 파서를 고른다.
+    """zip 파일을 `sniff()` 로 확인해 hwpx 또는 docx 파서로 보낸다.
 
-    hwpx 확장자에 docx 가, docx 확장자에 hwpx 가 들어와도 내용물대로 보낸다
-    (둘 다 zip 이라 PK 매직만으로는 못 가른다). 그 밖(XLSX·PPTX·ODF·정체불명)은
-    `hwpx_extract` 의 NotHwpxError 로 정체를 담아 실패한다 — `docx_extract` 도
-    같은 `sniff()` 를 쓰므로 어느 쪽에서 걸려도 정체 메시지는 같다.
+    둘 다 zip 이라 매직 바이트만으로는 구분하지 못한다. 그 밖(XLSX·PPTX·ODF·정체불명)은
+    `hwpx_extract` 의 NotHwpxError 로 실제 정체를 담아 실패한다.
     """
     from hwpx_extract import sniff
 
     kind = sniff(path)
     if kind.startswith("DOCX"):
-        from docx_extract import extract as extract_docx
+        from docx_extract import extract as docx_추출
 
-        return extract_docx(path)
+        return docx_추출(path)
 
-    from hwpx_extract import extract as extract_hwpx
+    from hwpx_extract import extract as hwpx_추출
 
-    return extract_hwpx(path)
-
-
-def extract_hwp(path: Path) -> str:
-    """`.hwp` / `.hwpx` 공용. 확장자를 믿지 않고 앞 바이트로 갈라 보낸다.
-
-      PK              → zip → 내용물로 hwpx/docx 를 가른다(`_route_zip_office`)
-      D0 CF 11 E0     → OLE  → 배포용/암호화면 HwpProtectedError, 아니면 hwp_extract
-      <?xml           → HWPML
-      그 밖           → 그대로 hwp_extract 로 보내 그쪽 예외를 살린다
-
-    배포용/암호화 문서는 `hwp_extract.extract()` 가 예외 없이 성공 반환해도 뷰어
-    안내문뿐인 빈 본문을 낸다. 그래서 파싱 후 글자수로 되짚지 않고, 정체 판정
-    단계에서 미리 막는다.
-    """
-    head = path.open("rb").read(16)
-    if head.startswith(b"PK"):
-        return _route_zip_office(path)
-    if head.lstrip()[:5] == b"<?xml":
-        return _extract_hwpml(path)
-
-    from hwpx_extract import sniff, HwpProtectedError
-
-    kind = sniff(path)
-    if kind.startswith("HWP-DRM"):
-        raise HwpProtectedError(f"{kind} ({path.name})")
-
-    # 구형 .hwp(OLE) 는 표 구조가 없다(hwp_extract 는 PARA_TEXT 만 훑는다) —
-    # LibreOffice+H2Orestart 로 .docx 를 거쳐 docx_extract 의 표 걷기를 태운다.
-    # 실패하면(LibreOffice 미설치·변환 오류·재파싱 실패) 기존 경로로 폴백한다.
-    변환됨 = _libreoffice_docx(path)
-    if 변환됨:
-        try:
-            return extract_docx(변환됨)
-        except Exception as e:
-            _로그.warning("LibreOffice 변환본 파싱 실패(%s) — 기존 경로로 폴백: %s", path.name, e)
-
-    from hwp_extract import extract
-
-    return extract(str(path))
-
-
-def extract_docx(path: Path) -> str:
-    """`.docx` 진입점. 확장자를 믿지 않고 내용으로 재검증한다.
-
-    zip 이 아니면(오래된 `.doc` OLE2 등) 파서가 없다 — `docx_extract` 자신의
-    `sniff()` 가 정체를 담아 NotDocxError 로 실패시킨다. `.doc` 전용 파서는
-    따로 만들지 않는다.
-    """
-    head = path.open("rb").read(4)
-    if head.startswith(b"PK"):
-        return _route_zip_office(path)
-
-    from docx_extract import extract as extract_docx_impl
-
-    return extract_docx_impl(path)
-
-
-# ── 빈 추출 게이트 ───────────────────────────────────────────────────
-# 배포용(DRM) 문서는 추출해도 뷰어 안내문 100자 안팎만 나온다. 정상 문서와
-# 겹치지 않도록 200자를 컷오프로 둔다.
-빈_추출_글자수_임계치 = 200
-
-
-def 추출_품질_점검(text: str) -> dict:
-    """추출된 본문이 「성공했지만 사실상 비었다」인지 값으로 돌려준다 — 던지지 않는다.
-
-    정체가 이미 밝혀진 실패(hwpx/docx 위장, hwp 배포용/암호화)는 `extract_*()` 단계에서
-    이미 예외로 막는다. 이 함수는 그다음 층 — 정체 판정을 통과했는데도 원인 불명으로 짧게
-    나온 추출을 호출부가 「판단불가」로 접을 수 있게 값을 준다.
-
-    조수(=0)만으로 판단불가를 트리거하지 않는다 — 조가 원래 없는 정상 문서(목록·현황표류)도
-    (430~25,359자, 조 0개 전부 정상). 글자수 임계치만 하드 게이트로 쓰고 조수는
-    참고 값으로 같이 돌려준다 — 규정류만 받아야 하는 호출부(예: L3 업로드)는
-    이 값을 보고 그쪽 기준(조 0개 거부 등)을 따로 적용해라.
-    """
-    글자수 = len(text)
-    조수 = len(re.findall(r"제\s*\d+\s*조", text))
-    판단불가 = 글자수 < 빈_추출_글자수_임계치
-    return {
-        "글자수": 글자수,
-        "조수": 조수,
-        "판단불가": 판단불가,
-        "사유": f"본문 {글자수}자 — 임계치 {빈_추출_글자수_임계치}자 미만" if 판단불가 else "",
-    }
+    return hwpx_추출(path)
 
 
 # ── TXT ──────────────────────────────────────────────────────────
@@ -339,9 +288,13 @@ def extract_txt(path: Path) -> str:
     return raw.decode("utf-8", errors="replace")
 
 
-# ── 디스패처 ─────────────────────────────────────────────────────
-_로그 = logging.getLogger(__name__)
+# ── 빈 추출 게이트 ───────────────────────────────────────────────────
+# 배포용(DRM) 문서는 추출해도 뷰어 안내문 100자 안팎만 나온다. 정상 문서와
+# 겹치지 않도록 200자를 컷오프로 둔다.
+빈_추출_글자수_임계치 = 200
 
+
+# ── 서러게이트 정리 ──────────────────────────────────────────────────
 _대리_시작, _대리_끝 = 0xD800, 0xDFFF
 _상위_끝, _하위_시작 = 0xDBFF, 0xDC00
 _치환문자 = chr(0xFFFD)
@@ -350,14 +303,13 @@ _치환문자 = chr(0xFFFD)
 def 서러게이트_정리(text: str, 라벨: str = "") -> str:
     """UTF-16 대리(surrogate) 쌍을 합치고, 못 합친 고아는 U+FFFD 로 치환한다.
 
-    결합되지 않은 대리 쌍은 파이썬 문자열에 «대리 코드 2개» 로 남아 UTF-8
-    인코딩이 불가능하다 — 그대로 DB 로 가면 psycopg 가 UnicodeEncodeError 로 죽는다.
+    결합되지 않은 대리 쌍은 파이썬 문자열에 대리 코드 2개로 남아 UTF-8
+    인코딩이 불가능하다 — 그대로 DB 로 가면 psycopg 가 UnicodeEncodeError 를 낸다.
 
-    고아는 조용히 지우지 않는다. 삭제가 아니라 U+FFFD 치환이고, 몇 개를
-    어떻게 했는지 로그에 남긴다.
+    고아는 지우지 않고 U+FFFD 로 치환해 자리를 남기며, 몇 개를 처리했는지 로그에 남긴다.
 
-    정규식을 안 쓴다 — 패턴에 대리 문자를 적어 두려면 이 소스 파일 자체가 그
-    문자를 품어야 하는데, 그러면 UTF-8 로 저장이 안 된다.
+    정규식을 쓰지 않는다 — 패턴에 대리 문자를 적으려면 이 소스 파일이 그 문자를
+    포함해야 하는데, 그러면 UTF-8 로 저장할 수 없다.
     """
     if not text:
         return text
@@ -385,28 +337,49 @@ def 서러게이트_정리(text: str, 라벨: str = "") -> str:
     return "".join(나온)
 
 
-def extract(path: Path):
-    """반환: ('articles', list) 또는 ('text', (str, page_offsets))
+# ── 디스패처 ─────────────────────────────────────────────────────
+def _형식(path: Path) -> str:
+    """파일 앞 바이트로 형식을 판정한다. 판정할 수 없고 .txt 도 아니면 ValueError."""
+    with path.open("rb") as f:
+        head = f.read(16)
+    if head.startswith(b"%PDF"):
+        return "pdf"
+    if head.startswith(b"\xd0\xcf\x11\xe0"):
+        return "hwp"
+    if head.startswith(b"PK"):
+        return "zip"
+    if head.lstrip(b"\xef\xbb\xbf \t\r\n")[:5] == b"<?xml":
+        return "hwpml" if _xml_루트(path) == "HWPML" else "xml"
+    if path.suffix.lower() == ".txt":
+        return "txt"
+    raise ValueError(f"지원하지 않는 형식: {path.suffix.lower()}")
 
-    모든 포맷이 이 한 곳으로 나간다. 서러게이트 정리도 여기 한 번만 둔다 —
-    포맷별 추출기마다 흩어 두면 새 포맷이 하나 늘 때 조용히 빠진다.
+
+# 평문을 내는 형식별 추출기. 페이지 오프셋은 PDF 만 있다.
+_텍스트_추출기 = {
+    "hwp": _extract_hwp_ole,
+    "zip": _route_zip_office,
+    "hwpml": _extract_hwpml,
+    "txt": extract_txt,
+}
+
+
+def extract(path: Path):
+    """반환: ('articles', list) 또는 ('text', (str, page_offsets)).
+
+    모든 형식이 이 한 곳으로 나간다. 서러게이트 정리도 여기 한 번만 둔다 —
+    형식별 추출기마다 흩어 두면 새 형식이 하나 늘 때 빠뜨리기 쉽다.
     """
-    ext = path.suffix.lower()
     라벨 = path.name
-    if ext == ".xml":
+    형식 = _형식(path)
+    if 형식 == "xml":
         arts = extract_xml(path)
-        for a in arts:                       # 조문 구조 경로도 같은 위험을 진다
+        for a in arts:                       # 조문 구조 경로도 같은 위험이 있다
             a["본문"] = 서러게이트_정리(a["본문"], 라벨)
             if a.get("조제목"):
                 a["조제목"] = 서러게이트_정리(a["조제목"], 라벨)
         return "articles", arts
-    if ext == ".pdf":
+    if 형식 == "pdf":
         본문, offs = extract_pdf(path)
         return "text", (서러게이트_정리(본문, 라벨), offs)
-    if ext in (".hwp", ".hwpx"):
-        return "text", (서러게이트_정리(extract_hwp(path), 라벨), {})
-    if ext == ".docx":
-        return "text", (서러게이트_정리(extract_docx(path), 라벨), {})
-    if ext == ".txt":
-        return "text", (서러게이트_정리(extract_txt(path), 라벨), {})
-    raise ValueError(f"지원하지 않는 형식: {ext}")
+    return "text", (서러게이트_정리(_텍스트_추출기[형식](path), 라벨), {})

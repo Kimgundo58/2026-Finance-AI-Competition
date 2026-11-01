@@ -1,49 +1,32 @@
 # -*- coding: utf-8 -*-
-"""참조 그래프 추출 → `_refs.json`.
+"""코퍼스 조문 사이의 참조(인용·준용·별표·위임)를 뽑아 `_refs.json` 을 만든다(오프라인 적재용).
 
-사용자 문서가 다른 규정을 인용할 때, 가리키는 곳을 따라가 실제 조항까지 참조를 해소한다.
-한 행 = 엣지 하나. 그래프 DB 는 쓰지 않는다 — 깊이 3, 재귀 CTE 로 밀리초다.
-스키마: db/init/01_schema.sql 의 `refs` 테이블.
+입력은 2026_Finance_DATA_FOR_RAG/_stage0_articles.json(조문 분해 결과), 출력은 corpus.refs
+(db/init/01_schema.sql)에 적재할 엣지 목록이다. 해소 상태: resolved(대상 조가 코퍼스에 있음),
+shifted(구판 조번호를 조제목으로 재매칭), dangling(대상이 코퍼스에 없음). 지침_조제목 은
+지침 개정판별 조번호 기준표다. `dst_doc_id` 는 DB 를 못 읽으면 파일 경로로 남으므로 적재 전에
+corpus.documents.doc_id 로 맞춰야 한다.
 
-해소 상태 3종
-    resolved  대상이 규정 모음에 있고 조번호도 맞는다
-    shifted   조번호가 구판이라 조제목으로 재매칭했다
-    dangling  대상이 규정 모음에 없다 → 업로드 시점에 알린다
-
-실행:
-    python scripts/build_refs.py                  전체
-    python scripts/build_refs.py --src 창진원      일부만
-    python scripts/build_refs.py --show 예비창업    결과 확인
-
-`dst_doc_id` 는 파일 경로·약칭·정상 doc_id 세 갈래가 섞인 채로 들어간다 — 여기서
-`doc_id` 로 정규화하지 않는다. 이 스크립트를 돌려 적재했다면 반드시 이어서 실행할 것:
-    PYTHONIOENCODING=utf-8 python scripts/normalize_refs.py --apply
-멱등이고, 매칭 실패는 목록으로 보고한다.
+실행: python scripts/build_refs.py [--src 창진원] [--show 예비창업]
 """
 from __future__ import annotations
 
 import argparse
 import io
 import json
-import os
 import re
 import sys
-from collections import Counter, defaultdict
+from collections import Counter
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _lib import db  # noqa: E402
-import pdftext  # noqa: E402  문자중복 레이어 + 2단 조판 자동 처리
-from stage0_articles import split_articles  # noqa: E402  섹션분리 + 3단 대체 경로
-from scope import 범위밖_조                   # noqa: E402  모두의창업 제3편 로컬트랙 컷
-
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace", line_buffering=True)
+from _lib import db
+from scope import 범위밖_조                   # 모두의창업 제3편 로컬트랙은 범위 밖
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "2026_Finance_DATA_FOR_RAG" / "_refs.json"
 
 # ── 참조 문형 ────────────────────────────────────────────────────────────
-# 다단 레이아웃 대비: 공백을 전부 없앤 사본에서 매칭한다(build_precedence.py 와 같은 수법).
+# 다단 레이아웃 대비: 공백을 전부 없앤 사본에서 매칭한다.
 PATTERNS = [
     # "지침 제33조부터 제42조까지"  → 범위 참조
     ("범위", re.compile(r"(지침|요령|관리기준|기준|법|시행령|시행규칙)제(\d+)조(?:의(\d+))?부터제(\d+)조(?:의(\d+))?까지")),
@@ -57,7 +40,7 @@ PATTERNS = [
     ("미규정위임", re.compile(r"정하지아니한사항")),
 ]
 
-# 지침 조번호 → 조제목 (제14차 현행). shifted 판정의 기준표.
+# 지침 개정판별 조번호 → 조제목 (제14차가 현행). shifted 판정의 기준표.
 지침_조제목 = {
     "제12차": {"33": "창업기업등 사업비 비목", "34": "재료비", "35": "외주용역비",
                "36": "기계장치", "42": "광고선전비"},
@@ -72,9 +55,9 @@ PATTERNS = [
 # 법령 문서는 자기 안에서 약칭을 정의한다. 법제처 편집 관례라 예외가 거의 없다:
 #     제1조(목적) 이 요령은 「중소기업창업 지원법」(이하 "법"이라 한다) 제12조에 따른…
 #     제2조 … 「중소기업창업 지원법 시행령」(이하 "영"이라 한다) 제38조제3항…
-# 이 정의를 걷어 약칭을 정식 규범명으로 해소한다.
+# 이 정의를 모아 약칭을 정식 규범명으로 해소한다.
 #
-# `RE_약칭`(위)은 이 괄호를 지우는 정규식이다 — 약칭은 지우기 전에 걷어야 한다.
+# `RE_약칭`(아래)은 이 괄호를 지우는 정규식이다 — 약칭은 지우기 전에 모아야 한다.
 RE_약칭정의 = re.compile(
     r"[「『]([^」』\n]{4,60})[」』]\s*[」』]?\s*[(（]\s*이하\s*"
     r"['\"‘’“”]?([가-힣]{1,12})['\"‘’“”]?\s*(?:이라|라)\s*(?:한다|함)")
@@ -91,13 +74,13 @@ def 수집_약칭(전체본문: str) -> dict[str, str]:
         정식, 약 = m.group(1).strip(), m.group(2).strip()
         if 약 in 약칭_제외 or len(약) < 1:
             continue
-        # 먼저 나온 정의가 이긴다.
+        # 먼저 나온 정의가 우선한다.
         표.setdefault(약, 정식)
     return 표
 
 
 def 경계_ok(t: str, imap: list[int], m) -> bool:
-    """매치 앞이 한글이면 긴 규범명의 꼬리를 잘라 먹은 것이므로 버린다.
+    """매치 앞이 한글이면 긴 규범명의 꼬리만 매칭한 것이므로 버린다.
 
     공백을 지운 사본에서는 앞뒤가 붙어 판별이 안 되므로 원문 좌표(imap)로 되돌려 본다.
     """
@@ -114,7 +97,7 @@ def squash(t: str) -> tuple[str, list[int]]:
     return "".join(buf), idx
 
 
-# 규범명 정규화. 대조를 위해 약칭 괄호·파일명 접두·판본 꼬리표를 걷어낸다.
+# 규범명 정규화. 대조를 위해 약칭 괄호·파일명 접두·판본 꼬리표를 제거한다.
 #   약칭 괄호  「중소기업창업 지원사업 운영요령(이하 "운영요령"이라 한다)」
 #   파일명 구분자  L1_중소기업창업_지원사업_통합관리지침_제14차개정_20251223
 #   판본 꼬리표    …_제14차개정_20251223 · (제2024-101호)(20241206)
@@ -128,7 +111,7 @@ def norm_규범(s: str) -> str:
     s = RE_판본꼬리.sub("", s)
     s = re.sub(r"[(（][^)）]*[)）]", "", s)          # 남은 괄호 주석(호수·시행일)
     s = re.sub(r"[(（][^)）]*$", "", s)             # 닫히지 않은 꼬리 (조판으로 잘린 경우)
-    # 공백·언더스코어·가운뎃점. 가운뎃점은 코드포인트가 갈린다 —
+    # 공백·언더스코어·가운뎃점. 가운뎃점은 코드포인트가 여러 가지다 —
     # 인용은 `·`(U+00B7), 법령 제명은 `ㆍ`(U+318D) 다. 눈으로는 같아 보인다.
     s = re.sub(r"[\s_·ㆍ‧․∙⋅•\-—]", "", s)
     return s.strip("「」『』‘’\"'.,")
@@ -139,14 +122,13 @@ def load_corpus_names() -> dict[str, str]:
 
     값은 파일 경로가 아니라 doc_id 여야 한다 — 파일 경로를 넣으면 `documents.doc_id`
     와 조인이 안 돼 참조 확장이 끊긴다. DB 를 읽어 실제 `doc_id` 를 쓴다. DB 가 없으면
-    경로로 되돌아가되 경고한다 — 그 산출물은 적재 후 `normalize_refs.py --apply` 를
-    반드시 태워야 한다.
+    파일 경로로 폴백하고 경고한다 — 그 산출물은 적재 전에 doc_id 로 맞춰야 한다.
     """
     names: dict[str, str] = {}
     try:
         with db.connect(connect_timeout=5) as conn:
             for (doc_id,) in conn.execute("SELECT doc_id FROM corpus.documents").fetchall():
-                # doc_id 는 `L1_<제명>_<날짜>` 또는 제명 그대로다. 둘 다 제명으로 접어 등록한다.
+                # doc_id 는 `L1_<제명>_<날짜>` 또는 제명 그대로다. 둘 다 제명으로 변환해 등록한다.
                 몸통 = doc_id[3:] if doc_id.startswith("L1_") else doc_id
                 if len(몸통) > 9 and 몸통[-8:].isdigit() and 몸통[-9] == "_":
                     몸통 = 몸통[:-9]
@@ -154,8 +136,8 @@ def load_corpus_names() -> dict[str, str]:
                 names.setdefault(norm_규범(doc_id), doc_id)
         return names
     except Exception as e:
-        print(f"⚠️ documents 를 못 읽어 파일 경로로 대체한다 ({type(e).__name__}). "
-              f"적재 후 반드시 `python scripts/normalize_refs.py --apply` 를 돌릴 것.")
+        print(f"경고: documents 를 못 읽어 파일 경로로 폴백한다 ({type(e).__name__}). "
+              f"적재 전에 dst_doc_id 를 corpus.documents.doc_id 로 맞춰야 한다.")
 
     src = ROOT / "법령 PDF" / "_law_sources.json"
     if src.exists():
@@ -182,15 +164,15 @@ def load_corpus_names() -> dict[str, str]:
     # 원문 오기 — 그런 이름의 규범은 없다
     "중소기업기술개발지원사업관리지침": "중소기업기술개발지원사업운영요령",
     "중소기업지원사업운영요령": "중소기업창업지원사업운영요령",
-    # 조판 사고 — 다른 컬럼 글자가 끼어들었다
+    # 조판 오류 — 다른 컬럼 글자가 끼어들었다
     "공공기관의운영에관한비율법률": "공공기관의운영에관한법률",
 }
 
 
 def _계열(s: str) -> str:
-    """법 / 시행령 / 시행규칙 중 무엇인가. 부분일치가 계열을 넘나드는 걸 막는 열쇠다.
+    """법 / 시행령 / 시행규칙 중 무엇인가. 부분일치가 계열을 넘나들지 않게 비교 기준으로 쓴다.
 
-    본법이 수집되지 않았다고 시행령·시행규칙으로 조용히 대체하지 않는다 —
+    본법이 수집되지 않았다고 시행령·시행규칙으로 경고 없이 대체하지 않는다 —
     그러면 엉뚱한 조문이 근거로 인용되고 수집 결손이 안 보인다.
     """
     for 접미 in ("시행규칙", "시행령", "시행규정"):
@@ -223,7 +205,7 @@ def resolve_규범(name: str, corpus: dict[str, str]) -> tuple[str, str | None]:
 
 # 기본 문형이 이미 잡는 토큰. 여기 있는 것은 동적 패턴에서 빼야 엣지가 두 번 안 생긴다.
 기본토큰 = {"지침", "요령", "관리기준", "기준", "법", "시행령", "시행규칙"}
-# 앞이 한글이면 잘라먹은 것으로 보고 버릴 토큰 (`경계_ok`). 「부가가치세법」→「법」 사고 방지.
+# 앞이 한글이면 긴 규범명의 꼬리로 보고 버릴 토큰 (`경계_ok`). 「부가가치세법」을 「법」으로 오매칭하지 않게 한다.
 경계검사_토큰 = {"법", "시행령", "시행규칙", "영"}
 
 
@@ -278,7 +260,7 @@ def scan(text: str, doc_id: str, corpus: dict[str, str],
         a, b = imap[m.start()], imap[m.end() - 1] + 1
         return re.sub(r"\s+", " ", t[a:b])
 
-    # 범위 문형을 먼저 태운다. "법 제28조부터 제31조까지" 는 조 문형에도
+    # 범위 문형을 먼저 매칭한다. "법 제28조부터 제31조까지" 는 조 문형에도
     # "법 제28조" 로 걸려서, 순서를 안 잡으면 같은 참조가 엣지 두 개가 된다.
     문형 = PATTERNS + (동적 or [])
     문형 = [x for x in 문형 if x[0].endswith("범위")] + [x for x in 문형 if not x[0].endswith("범위")]
@@ -293,7 +275,7 @@ def scan(text: str, doc_id: str, corpus: dict[str, str],
             if kind.endswith("범위"):
                 범위span.append((m.start(), m.end()))
             elif kind.endswith("조") and any(a <= m.start() < b for a, b in 범위span):
-                continue                      # 범위 참조가 이미 먹은 자리
+                continue                      # 범위 참조가 이미 차지한 자리
             raw = 원문(m)
             key = (kind, raw)
             if key in seen:
@@ -307,7 +289,7 @@ def scan(text: str, doc_id: str, corpus: dict[str, str],
             if kind == "규범":
                 st, path = resolve_규범(m.group(1), corpus)
                 # 약칭을 「」 안에 넣어 쓰는 문서가 있다. 정식 제명으로는 규정 모음에 없지만
-                # 그 문서가 스스로 정의해 뒀다 — 한 번 더 물어본다.
+                # 그 문서가 스스로 정의해 뒀다 — 약칭표로 한 번 더 해소한다.
                 if st == "dangling" and (약칭표 or {}).get(m.group(1).strip()):
                     정식 = 약칭표[m.group(1).strip()]
                     st2, path2 = resolve_규범(정식, corpus)
@@ -323,7 +305,7 @@ def scan(text: str, doc_id: str, corpus: dict[str, str],
                 # 어느 조인지 지목하지 않아 dst 가 비어 있다. 이건 결손이 아니라
                 # 법령의 정상 문형이다 — 소비자는 `관계='미규정위임'` 으로 걸러 쓴다.
                 e.update(관계="미규정위임", 해소상태="dangling",
-                         보정근거="상위 규범으로 위임(조 미지정). 게이팅(파이프라인 §6.2)의 근거")
+                         보정근거="상위 규범으로 위임(조 미지정). L3 게이팅의 근거")
             else:  # 조 / 범위 / 약칭조 / 약칭범위
                 target = m.group(1)
                 조 = m.group(2)
@@ -364,6 +346,7 @@ def scan(text: str, doc_id: str, corpus: dict[str, str],
 
 
 def main() -> None:
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace", line_buffering=True)
     ap = argparse.ArgumentParser()
     ap.add_argument("--src", default="")
     ap.add_argument("--show", default="")
@@ -373,15 +356,15 @@ def main() -> None:
     print(f"코퍼스 규범명 {len(corpus)}건 로드")
     for must in ("중소기업창업지원사업운영요령", "중소기업창업지원법"):
         if must not in corpus:
-            print(f"  ! 경고: 코퍼스에 '{must}' 가 없다 — 해소가 dangling 으로 샌다")
+            print(f"  경고: 코퍼스에 '{must}' 가 없다 — 이 규범 참조는 dangling 이 된다")
 
-    # 입력은 PDF 가 아니라 Stage 0 산출물이다 — 법령 XML 포함, 이중 파싱 없음.
+    # 입력은 PDF 가 아니라 조문 분해 결과다 — 법령 XML 포함, 이중 파싱 없음.
     S0 = ROOT / "2026_Finance_DATA_FOR_RAG" / "_stage0_articles.json"
     if not S0.exists():
-        sys.exit(f"Stage 0 산출물이 없다: {S0}\n  먼저 `python scripts/stage0_run.py` 를 돌릴 것")
+        sys.exit(f"조문 분해 결과가 없다: {S0}")
     stage0 = json.loads(S0.read_text(encoding="utf-8"))
 
-    all_edges, per_doc, skipped, deduped = [], {}, [], []
+    all_edges, per_doc, skipped = [], {}, []
     strat_count = Counter()
     약칭_문서수, 약칭_누적 = 0, Counter()
     items = [(k, v) for k, v in stage0.items() if not args.src or args.src in k]
@@ -397,8 +380,8 @@ def main() -> None:
         # 폐지 조문은 참조 원천이 아니다 — 효력이 없으므로 따라가면 안 된다.
         # 범위 밖(모두의창업 제3편 로컬트랙)은 위임 계통이 달라 참조도 수집하지 않는다.
         밖 = 범위밖_조(stem, arts)
-        # 약칭표는 문서 전체에서 한 번 걷는다 — 정의(제1·2조)와 쓰이는 곳(중간 조)이
-        # 갈려 있어 조 단위로 걸으면 못 만난다. 삭제·범위밖 조도 정의 원천으로는 읽는다.
+        # 약칭표는 문서 전체에서 한 번 모은다 — 정의(제1·2조)와 쓰이는 곳(중간 조)이
+        # 떨어져 있어 조 단위로 모으면 못 만난다. 삭제·범위밖 조도 정의 원천으로는 읽는다.
         약칭표 = 수집_약칭(" ".join(a.get("본문") or "" for a in arts))
         동적 = _동적패턴(약칭표)
         if 약칭표:
@@ -435,10 +418,9 @@ def main() -> None:
         },
         "관계": dict(rel),
         "주의": ("dangling 은 '코퍼스에 없다'는 뜻이고, 그 자체가 판정 불가 신호다. "
-                 "업로드 시점 A1 화면에 노출해 사용자가 해당 문서를 올리게 유도한다."),
+                 "업로드 시점에 사용자에게 알려 해당 문서를 올리게 유도한다."),
         "edges": all_edges,
         "건너뜀": skipped,
-        "문자중복_해소": deduped,
         "조분해_전략": dict(strat_count),
         "src_조번호_채움": sum(1 for e in all_edges if e.get("src_조번호") != "문서전체"),
         "약칭": {

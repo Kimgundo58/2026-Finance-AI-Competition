@@ -44,7 +44,6 @@
 | 메서드 | 경로 | 요청 | 응답(2xx) |
 |---|---|---|---|
 | GET | `/admin/cost` | — | dict |
-| GET | `/admin/gate` | — | dict |
 | GET | `/admin/queue` | — | dict |
 | POST | `/admin/warmup` | — | dict |
 | GET | `/api/health` | — | dict |
@@ -69,12 +68,6 @@
 OpenAPI `parameters` 실측. `기본값` 이 있으면 안 보내도 된다.
 
 **`GET /admin/cost`**
-
-| 이름 | 위치 | 타입 | 필수 | 기본값 | 설명 |
-|---|---|---|:--:|---|---|
-| `x-admin-token` | header | str \| null |  | — |  |
-
-**`GET /admin/gate`**
 
 | 이름 | 위치 | 타입 | 필수 | 기본값 | 설명 |
 |---|---|---|:--:|---|---|
@@ -521,7 +514,7 @@ pydantic 기본 `{"detail":[...]}` 는 서버가 걷어냈다. 렌더러는 한 
 | `경로` | text |  | — |
 | `실패단계` | text |  | — |
 
-- CHECK `decisions_강등코드_check` — `(("강등코드" <@ ARRAY['INVALID_JUDGMENT'::text, 'CITE_NOT_IN_MAP'::text, 'CITE_DB_MISSING'::text, 'CITE_HANG_MISMATCH'::text, 'PREMISE_NO_BASIS'::text, 'PREMISE_BASIS_NOT_IN_MAP'::text, 'PREMISE_ENUM'::text, 'PREMISE_UNMAPPED'::text, 'NO_CITATION'::text, 'VLM_DOWNGRADE'::text, 'B_GRADE_DOWNGRADE'::text, 'UNVERIFIED_RULE'::text, 'TASK_CODE_INVALID'::text, 'L3_ONLY_DOWNGRADE'::text, 'TENANT_LEAK'::text, 'DANGLING_WARN'::text, 'DOMAIN_WARN'::text, 'PRECEDENCE_FLIP'::text, 'TASK_STATE_UNSOURCED'::text, 'TASK_STATE_MISMATCH'::text, 'TASK_NUMBER_UNSOURCED'::text, 'TASK_BASIS_NOT_IN_MAP'::text]))`
+- CHECK `decisions_강등코드_check` — `(("강등코드" <@ ARRAY['INVALID_JUDGMENT'::text, 'CITE_NOT_IN_MAP'::text, 'CITE_DB_MISSING'::text, 'CITE_HANG_MISMATCH'::text, 'PREMISE_NO_BASIS'::text, 'PREMISE_BASIS_NOT_IN_MAP'::text, 'PREMISE_ENUM'::text, 'PREMISE_UNMAPPED'::text, 'PREMISE_DB_MISSING'::text, 'NO_CITATION'::text, 'VLM_DOWNGRADE'::text, 'B_GRADE_DOWNGRADE'::text, 'UNVERIFIED_RULE'::text, 'TASK_CODE_INVALID'::text, 'TASK_DB_MISSING'::text, 'L3_ONLY_DOWNGRADE'::text, 'TENANT_LEAK'::text, 'DANGLING_WARN'::text, 'DOMAIN_WARN'::text, 'PRECEDENCE_FLIP'::text, 'TASK_STATE_UNSOURCED'::text, 'TASK_STATE_MISMATCH'::text, 'TASK_NUMBER_UNSOURCED'::text, 'TASK_BASIS_NOT_IN_MAP'::text]))`
 - CHECK `decisions_신뢰등급_check` — `((("신뢰등급" = ANY (ARRAY['A'::text, 'B'::text])) OR ("신뢰등급" IS NULL)))`
 - CHECK `decisions_판정_check` — `((("판정" = ANY (ARRAY['가능'::text, '조건부'::text, '불가'::text, '판단불가'::text])) OR ("판정" IS NULL)))`
 

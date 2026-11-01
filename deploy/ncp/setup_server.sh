@@ -6,7 +6,7 @@
 #   - 일일 백업 cron 등록
 #
 # 전제: deploy/ncp 가 GitHub 원격 저장소(main)에 push 되어 있어야 한다.
-# 주의: NCP 이미지에서 아직 실행해 보지 않았다. Ubuntu 22.04/24.04 패키지 이름 기준이다.
+# 대상: Ubuntu 22.04/24.04 (NCP 서버 이미지). 패키지 이름이 다른 배포판에서는 수정이 필요하다.
 set -euo pipefail
 
 REPO=${REPO:-https://github.com/Kimgundo58/2026-Finance-AI-Competition.git}
@@ -46,4 +46,5 @@ setup complete. next steps:
      scp suddoe.dump source_rowcounts.txt root@<PUBLIC_IP>:$DIR/deploy/ncp/backups/
   3. cd $DIR/deploy/ncp && ./restore.sh backups/suddoe.dump backups/source_rowcounts.txt
   4. docker compose up -d --build
+  5. db/migrations/README.md 의 필수 마이그레이션 중 덤프 이후 것을 적용
 EOF

@@ -1,22 +1,22 @@
--- 판정 캐시를 DB 로 옮긴다. 프로세스 메모리 dict 는 Cloud Run 재배포·재기동에 통째로 날아간다 —
--- 캐시가 프로세스보다 오래 살아야 GPU 가 꺼져 있어도 미리 구운 답을 낼 수 있다.
+-- 판정·정규화 응답 캐시 tenant.judge_cache. 실행 시점: init. 멱등이다.
+-- 프로세스 메모리 캐시는 재시작하면 사라지므로 기관(org) 요청의 캐시는 DB 에 둔다.
 --
--- 키를 굵게 잡지 않는다 — (사업명,비목) 나 (품목+비목+사업명) 처럼 묶으면 같은 키 아래 정답 판정이
--- 갈리는 문항들이 섞인다. 굵은 키는 적중률이 낮은 게 문제가 아니라 캐시가 오답을 확신 있게 낸다는
--- 게 문제다 — 판단불가는 안전한 실패지만 캐시가 만든 오답이 제일 나쁘다. key 는 main.py::비용가드.열쇠()
--- 그대로 쓴다 — org_id + 사업명 + 확정비목 + 정규화 산출 전체(JSON) + f5 두 필드 + 목, 전부를 sha256 한 값이다.
--- 반복 질문만 맞고 히트율은 낮다 — 그게 목적이다. 범용 적중률을 올리는 캐시가 아니다.
+-- 캐시 키를 넓게 잡지 않는다. (사업명, 비목) 이나 (품목, 비목, 사업명) 으로 묶으면 같은 키 아래
+-- 정답 판정이 다른 문항이 섞인다. 범위가 넓은 키는 적중률보다 캐시가 오답을 그대로 반환하는 것이 문제다.
+-- 판단불가는 안전한 실패지만 캐시가 만든 오답은 가장 나쁜 결과다.
+-- key 는 server/response_cache.캐시키() 가 만든 sha256 이다. org_id, 사업명, 확정비목, 정규화 결과 전체(JSON),
+-- 사용자 입력 필드, 기관 L3 문서 지문(response_cache.l3_지문, 판정만)이 해시 입력에 들어간다.
+-- 같은 질문이 반복될 때만 적중하는 것이 의도다.
 --
--- 게스트(org 없음)는 이 캐시를 안 쓴다 — RLS 정책은 org_id = current_org() 인데 어느 한쪽이라도
--- NULL 이면 NULL=NULL 이 TRUE 가 아니라 NULL 이라 통과 못 한다. org_id 를 NOT NULL 로 두고
--- 서버도 org 없는 요청은 캐시 조회·저장을 건너뛴다.
+-- 게스트(org 없음)는 이 캐시를 쓰지 않는다(서버 프로세스 메모리 캐시를 쓴다). RLS 정책이
+-- org_id = current_org() 라 한쪽이 NULL 이면 비교 결과가 NULL 이 되어 통과하지 못한다.
 --
--- 설정_해시 가 없으면 캐시가 낡은 답을 낸다 — 룰 재검수·코퍼스 재적재를 캐시는 모른다.
--- (청크수·임베딩수·refs수·문서수·최대chunk_id·룰수·검수룰수) 를 해시해 조회 시점 값과 다르면 미스로 취급한다
--- (행을 지우진 않는다 — expires_at TTL 이 걷는다).
+-- 설정_해시 는 룰 재검수·코퍼스 재적재를 캐시가 알아채기 위한 값이다(response_cache._설정_해시). 코퍼스·룰 상태를
+-- 해시한 값이 조회 시점 값과 다르면 미스로 처리한다. 행은 지우지 않고 expires_at 이 지나면 무시된다.
+-- 규정 적재 API 의 활성화는 이 테이블을 전부 지운다(18_corpus_ingest.sql 의 ingest_cache_purge).
 
-CREATE TABLE tenant.judge_cache (
-    key         TEXT PRIMARY KEY,        -- 비용가드.열쇠() 의 sha256 (정규화 산출 전체 포함)
+CREATE TABLE IF NOT EXISTS tenant.judge_cache (
+    key         TEXT PRIMARY KEY,        -- 캐시 키(sha256)
     org_id      UUID NOT NULL REFERENCES tenant.orgs(org_id) ON DELETE CASCADE,
     종류        TEXT NOT NULL CHECK (종류 IN ('normalize', 'judge')),
     value       JSONB NOT NULL,
@@ -25,30 +25,24 @@ CREATE TABLE tenant.judge_cache (
     expires_at  TIMESTAMPTZ NOT NULL
 );
 
-CREATE INDEX ix_judge_cache_expires ON tenant.judge_cache (expires_at);
-CREATE INDEX ix_judge_cache_org     ON tenant.judge_cache (org_id, 종류);
+CREATE INDEX IF NOT EXISTS ix_judge_cache_expires ON tenant.judge_cache (expires_at);
+CREATE INDEX IF NOT EXISTS ix_judge_cache_org     ON tenant.judge_cache (org_id, 종류);
 
 ALTER TABLE tenant.judge_cache ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS org_isolation ON tenant.judge_cache;
 CREATE POLICY org_isolation ON tenant.judge_cache USING (org_id = tenant.current_org());
 
--- `10_rls_guc.sql`(로컬)·`10b_cloudsql_grant.sql`(운영) 의 ALTER DEFAULT PRIVILEGES 가
--- 이미 걸려 있어 새 테이블도 자동 상속받지만, 이 파일 하나만 따로 재생(replay)하는
--- 경우를 대비해 명시로 한 번 더 준다 — 멱등이라 다시 쳐도 안전하다.
+-- 10b_app_grants.sql 의 ALTER DEFAULT PRIVILEGES 로 새 테이블도 권한을 받지만,
+-- 이 파일만 따로 실행하는 경우를 위해 명시적으로 한 번 더 부여한다(멱등).
 GRANT SELECT, INSERT, UPDATE, DELETE ON tenant.judge_cache TO suddoe_app;
 
--- 검증 (친 뒤 반드시 이걸로 확인)
---
---   ① 새 트랜잭션·새 연결로 되읽기:
+-- 검증 (적용 후 suddoe_app 으로 확인한다. postgres 는 RLS 를 우회해 차이가 보이지 않는다)
+--   1. 쓰기 후 새 커넥션에서 읽기:
 --        select set_config('app.org_id','<실재 org_id>', true);
 --        insert into tenant.judge_cache(key,org_id,종류,value,설정_해시,expires_at)
 --          values ('t1','<같은 org_id>','judge','{"x":1}','h1', now()+interval '1 min');
---        -- 새 psql 세션으로 다시 붙어서:
+--        -- 새 psql 세션에서:
 --        select set_config('app.org_id','<같은 org_id>', true);
---        select value from tenant.judge_cache where key='t1';        → {"x":1} 이 나와야 한다
---
---   ② 비특권 롤(suddoe_app)로 위 왕복을 그대로 반복 — postgres(superuser)는
---      bypassrls 라 이 자리가 안 보인다.
---
---   ③ 다른 org 로 GUC 를 세우고 같은 key 를 SELECT → 0행이어야 한다.
---
---   ④ 정리: delete from tenant.judge_cache where key='t1';
+--        select value from tenant.judge_cache where key='t1';        -> {"x":1}
+--   2. 다른 org 로 GUC 를 설정하고 같은 key 를 SELECT -> 0행
+--   3. 정리: delete from tenant.judge_cache where key='t1';
