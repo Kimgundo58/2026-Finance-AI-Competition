@@ -3,9 +3,9 @@
 
 `retrieve.sparse()` 가 `토큰화()` 를 import 해 쿼리를 토큰화한다. 색인 입력은 `chunks.text` 가 아니라
 `[컨텍스트 헤더] + text` 로, 임베딩 입력과 같아야 dense 와 BM25 가 같은 텍스트를 본다.
-`보충()` 은 `chunk_len` 에 없는 청크만 색인한다(멱등). import 시점 부수 효과는 없다.
+`증분_색인()` 은 `chunk_len` 에 없는 청크만 색인한다(멱등). import 시점 부수 효과는 없다.
 
-실행: PYTHONIOENCODING=utf-8 python scripts/stage2_bm25.py --보충 [--dry-run]
+실행: PYTHONIOENCODING=utf-8 python scripts/bm25_index.py --증분 [--dry-run]
 """
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ def 토큰화(texts: list[str]) -> list[list[str]]:
 _RE_장 = re.compile(r"제\s*(\d+)\s*장\s*([^\n<>]{0,20})")
 
 
-def _장맵(articles: list[dict]) -> dict[str, str]:
+def _장_매핑(articles: list[dict]) -> dict[str, str]:
     """조번호 -> 그 조가 속한 장 제목. 장 표제는 앞 조 본문 끝에 붙어 있으므로 다음 조부터 적용한다."""
     out, state = {}, ""
     for a in articles:
@@ -62,11 +62,11 @@ def _헤더(layer, 사업, doc_id, 장, 조번호, 조제목) -> str:
     """`[layer | 사업 | 문서명 | 장 | 조번호(조제목)]` 형식의 컨텍스트 헤더."""
     문서 = re.sub(r"^(붙임\d*\.\s*|첨부\s*)", "", doc_id).strip()
     조 = f"{조번호}({조제목})" if 조제목 else str(조번호)
-    칸 = [layer, "·".join(사업) if 사업 else "공통", 문서[:60], 장 or "-", 조]
-    return "[" + " | ".join(칸) + "]"
+    필드 = [layer, "·".join(사업) if 사업 else "공통", 문서[:60], 장 or "-", 조]
+    return "[" + " | ".join(필드) + "]"
 
 
-def 보충(dry_run: bool = False) -> None:
+def 증분_색인(dry_run: bool = False) -> None:
     """`corpus.chunk_len` 에 없는 청크만 토큰화해 BM25 세 테이블에 추가한다.
 
     문서 재적재는 `corpus.chunks` 만 갱신하므로 BM25 색인에 누락이 생긴다. staged 청크는 건너뛴다
@@ -87,7 +87,7 @@ def 보충(dry_run: bool = False) -> None:
         missing = conn.execute(SQL_누락).fetchall()
         print(f"chunk_len 누락 {len(missing):,}건")
         if not missing:
-            print("보충할 것 없음.")
+            print("색인할 청크 없음.")
             return
 
         문서별 = Counter(r[1] for r in missing)
@@ -99,15 +99,15 @@ def 보충(dry_run: bool = False) -> None:
             return
 
         # 장 제목은 문서의 조 전체를 순서대로 봐야 정해지므로 문서당 한 번만 계산한다.
-        장맵_캐시: dict[str, dict[str, str]] = {}
+        장_매핑_캐시: dict[str, dict[str, str]] = {}
         texts: list[str] = []
         for chunk_id, doc_id, layer, 사업, 조번호, 조제목, text in missing:
-            if doc_id not in 장맵_캐시:
+            if doc_id not in 장_매핑_캐시:
                 arts = [{"조번호": r[0], "본문": r[1]} for r in conn.execute(
                     "SELECT 조번호, 본문 FROM corpus.doc_articles WHERE doc_id=%s ORDER BY article_id",
                     (doc_id,)).fetchall()]
-                장맵_캐시[doc_id] = _장맵(arts)
-            장 = 장맵_캐시[doc_id].get(조번호, "")
+                장_매핑_캐시[doc_id] = _장_매핑(arts)
+            장 = 장_매핑_캐시[doc_id].get(조번호, "")
             h = _헤더(layer, 사업, doc_id, 장, 조번호, 조제목)
             texts.append(f"{h}\n{text}")
 
@@ -135,22 +135,22 @@ def 보충(dry_run: bool = False) -> None:
                    (SELECT count(*) FROM corpus.chunk_len),
                    (SELECT count(*) FROM corpus.term_df)
         """).fetchone()
-        print(f"보충 {len(missing):,}건 · 신규 포스팅 {posting:,} · "
+        print(f"증분 색인 {len(missing):,}건 · 신규 포스팅 {posting:,} · "
               f"누계 chunk_terms {n_t:,} · chunk_len {n_l:,} · 어휘 {n_df:,}")
 
 
 def main() -> None:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
     ap = argparse.ArgumentParser()
-    ap.add_argument("--보충", action="store_true",
+    ap.add_argument("--증분", action="store_true",
                      help="chunk_len 에 없는 청크만 색인한다 (문서 재적재 후 BM25 갱신용)")
     ap.add_argument("--dry-run", action="store_true",
-                     help="--보충 전용 — 대상 건수만 보고 DB 를 쓰지 않는다")
+                     help="--증분 전용 — 대상 건수만 보고 DB 를 쓰지 않는다")
     a = ap.parse_args()
 
-    if not a.보충:
-        ap.error("전체 재구축은 지원하지 않는다. --보충 으로 누락된 청크만 색인한다")
-    보충(dry_run=a.dry_run)
+    if not a.증분:
+        ap.error("전체 재구축은 지원하지 않는다. --증분 으로 누락된 청크만 색인한다")
+    증분_색인(dry_run=a.dry_run)
 
 
 if __name__ == "__main__":

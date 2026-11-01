@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-"""HWPX(OWPML) 본문 텍스트 추출기와 파일 정체 판정(sniff) (zipfile + xml.etree 만 사용).
+"""HWPX(OWPML) 본문 텍스트 추출기와 파일 형식 판별(sniff) (zipfile + xml.etree 만 사용).
 
-stage0_extract 와 docx_extract 가 쓴다. 공개 함수: extract(path) -> str, sniff(path) -> 정체 문자열,
+text_extract 와 docx_extract 가 쓴다. 공개 함수: extract(path) -> str, sniff(path) -> 판별 결과 문자열,
 예외 NotHwpxError·HwpProtectedError. hwpx 는 zip 이고 본문은 `Contents/section*.xml`, 문단은 `hp:p`,
 글자는 `hp:run/hp:t`, 표는 `hp:tbl/hp:tr/hp:tc/hp:subList/hp:p` 로 중첩된다.
-불변식: 뒷단 조문 분해가 줄 단위라 문단 하나·표 셀 하나를 각각 한 줄로 낸다. hwpx 가 아니면
+불변식: 후속 조문 분할 단계가 줄 단위라 문단 하나·표 셀 하나를 각각 한 줄로 낸다. hwpx 가 아니면
 빈 문자열 대신 NotHwpxError 로, 배포용/암호화 HWP 는 HwpProtectedError 로 실패한다.
 """
 from __future__ import annotations
@@ -41,19 +41,19 @@ _RE_SECTION = re.compile(r"^Contents/section(\d+)\.xml$", re.I)
 
 
 class NotHwpxError(ValueError):
-    """파일이 hwpx 가 아니다. 메시지에 실제 정체를 담는다."""
+    """파일이 hwpx 가 아니다. 메시지에 판별 결과를 담는다."""
 
 
 class HwpProtectedError(ValueError):
     """hwp/hwpx 형식은 맞지만 배포용(DRM)·암호화라 본문을 못 읽는다.
 
     `hwp_extract.extract()` 는 이런 파일에서도 예외 없이 성공 반환하는데,
-    실제로 뽑히는 건 뷰어 안내문 몇 글자뿐이다. 겉보기엔 성공한 조 0개짜리
+    실제로 추출되는 건 뷰어 안내문 몇 글자뿐이다. 겉보기엔 성공한 조 0개짜리
     규정이라 위험하다.
     """
 
 
-# ── 정체 판정 ──────────────────────────────────────────────────────
+# ── 형식 판별 ──────────────────────────────────────────────────────
 def _hwp_ole_kind(path: Path) -> str | None:
     """OLE2 파일이 진짜 HWP v5 인지, 배포용/암호화라 본문이 막혀 있는지 확인한다.
 
@@ -75,23 +75,23 @@ def _hwp_ole_kind(path: Path) -> str | None:
         if not header.startswith(b"HWP Document File"):
             return None
         if len(header) < 40:
-            return "HWP-DRM: 손상된 FileHeader (속성 플래그 없음) — 본문 추출 불가"
+            return "HWP-PROTECTED: 손상된 FileHeader (속성 플래그 없음) — 본문 추출 불가"
         (flags,) = struct.unpack("<I", header[36:40])
         if flags & (1 << 1):
-            return "HWP-DRM: 암호화 문서(비밀번호 보호) — 본문 추출 불가"
+            return "HWP-PROTECTED: 암호화 문서(비밀번호 보호) — 본문 추출 불가"
         if flags & (1 << 2):
-            return "HWP-DRM: 배포용 문서(뷰어 전용) — 본문 추출 불가"
+            return "HWP-PROTECTED: 배포용 문서(뷰어 전용) — 본문 추출 불가"
         return "OLE2 (HWP v5)"
     finally:
         ole.close()
 
 
 def sniff(path: str | Path) -> str:
-    """파일의 실제 정체를 문자열로 돌려준다. 'hwpx' 면 진짜다.
+    """파일의 실제 형식을 판별해 문자열로 돌려준다. 'hwpx' 면 진짜다.
 
     zip 이면 내용물로, zip 이 아니면 매직 바이트로 판정한다.
     OLE2 이면서 진짜 HWP 인 경우 배포용/암호화 여부까지 연다(`_hwp_ole_kind`) —
-    「본문이 없다」는 파싱 실패가 아니라 정체라 여기서 잡는 게 맞다.
+    '본문이 없다'는 파싱 실패가 아니라 파일 형식의 속성이라 여기서 판별한다.
     """
     p = Path(path)
     if not zipfile.is_zipfile(p):
@@ -102,7 +102,7 @@ def sniff(path: str | Path) -> str:
             return "PDF"
         if head.lstrip().startswith(b"<?xml"):
             return "XML (HWPML 등)"
-        return "zip 아님 (정체 불명)"
+        return "zip 아님 (알 수 없는 형식)"
     with zipfile.ZipFile(p) as z:
         names = set(z.namelist())
         mimetype = z.read("mimetype").decode("ascii", "replace").strip() if "mimetype" in names else ""
@@ -169,7 +169,7 @@ def _walk_any(node: ET.Element, lines: list[str], buf: list[str], flush) -> None
     elif node.tag in _INLINE:
         buf.append(_INLINE[node.tag])
     else:
-        # 도형·글상자·각주 등 — 안에 subList 가 있으면 그 문단들을 살린다
+        # 도형·글상자·각주 등 — 안에 subList 가 있으면 그 문단들을 추출한다
         subs = node.findall(f".//{_SUBLIST}")
         if subs:
             flush()
@@ -203,7 +203,7 @@ def extract(path: str | Path) -> str:
     p = Path(path)
     kind = sniff(p)
     if kind != "hwpx":
-        raise NotHwpxError(f"hwpx 아님 — 실제 정체: {kind} ({p.name})")
+        raise NotHwpxError(f"hwpx 아님 — 판별 결과: {kind} ({p.name})")
     lines: list[str] = []
     with zipfile.ZipFile(p) as z:
         sections = _section_names(z)

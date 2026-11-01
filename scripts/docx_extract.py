@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """DOCX(OOXML WordprocessingML) 본문 텍스트 추출기 (python-docx).
 
-stage0_extract 가 zip 형식 중 docx 로 판정된 파일(LibreOffice 로 변환한 HWP 포함)에 쓴다.
+text_extract 가 zip 형식 중 docx 로 판별된 파일(LibreOffice 로 변환한 HWP 포함)에 쓴다.
 공개 함수: extract(path) -> str. 문단 하나 = 한 줄, 표 셀 하나 = 한 줄이다. 본문 문단과 표는
 `Document.iter_inner_content()` 로 등장 순서대로 순회한다 — 따로 읽으면 조문 순서가 깨진다.
-정체 판정은 `hwpx_extract.sniff()` 를 쓰고, docx 가 아니면 NotDocxError 로 실제 정체를 담아 실패한다.
+형식 판별은 `hwpx_extract.sniff()` 를 쓰고, docx 가 아니면 NotDocxError 에 판별 결과를 담아 실패한다.
 """
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from hwpx_extract import sniff
 
 
 class NotDocxError(ValueError):
-    """파일이 docx 가 아니다. 메시지에 실제 정체를 담는다."""
+    """파일이 docx 가 아니다. 메시지에 판별 결과를 담는다."""
 
 
 def _walk_blocks(blocks, lines: list[str]) -> None:
@@ -49,7 +49,7 @@ def extract(path: str | Path) -> str:
     p = Path(path)
     kind = sniff(p)
     if not kind.startswith("DOCX"):
-        raise NotDocxError(f"docx 아님 — 실제 정체: {kind} ({p.name})")
+        raise NotDocxError(f"docx 아님 — 판별 결과: {kind} ({p.name})")
 
     from docx import Document
 
