@@ -6,7 +6,7 @@
 --
 -- tenant.accounts 정책은 org_id = current_org() 하나뿐인데, 로그인 시점에는 org 를 아직 모른다.
 -- 비특권 롤에서는 조회가 0행이 되고 로그인이 403 이 된다. 로컬 postgres 는 superuser 라 이 문제가 보이지 않는다.
--- 정책을 SELECT true 로 넓히면 이메일과 기관 명부 전체가 읽힌다. 대신 SECURITY DEFINER 함수 하나로
+-- 정책을 SELECT true 로 넓히면 이메일과 계정 목록 전체가 읽힌다. 대신 SECURITY DEFINER 함수 하나로
 -- 노출 범위를 「이메일 1건 → 그 1건의 org」로 제한한다. RLS 정책은 바꾸지 않는다.
 
 
@@ -14,18 +14,18 @@
 -- 먼저 커밋된 뒤 검사가 실패해, 함수만 운영에 남는 결과가 된다.
 --
 -- 확인하는 것: SECURITY DEFINER 는 소유자 권한으로 실행되는데, FORCE ROW LEVEL SECURITY 가 켜져 있으면
--- 소유자도 정책에 걸려 0행이 나온다. 증상이 「명부가 비었다」(로그인 403)와 같다.
+-- 소유자도 정책에 걸려 0행이 나온다. 증상이 「계정 목록이 비었다」(로그인 403)와 같다.
 -- 로컬 소유자 postgres 는 superuser 라 FORCE 와 무관하게 우회하므로 로컬에서는 차이가 보이지 않는다.
 --
 -- 이 검사는 적용 시점에만 실행된다. 나중에 FORCE 를 켜면 여기서 잡지 못한다.
 DO $$
 DECLARE
     _force  boolean;
-    _t소유  name;
-    _f소유  name;
+    _테이블소유자  name;
+    _함수소유자  name;
 BEGIN
     SELECT relforcerowsecurity, pg_get_userbyid(relowner)
-      INTO _force, _t소유
+      INTO _force, _테이블소유자
       FROM pg_class WHERE oid = 'tenant.accounts'::regclass;
 
     IF _force THEN
@@ -36,13 +36,13 @@ BEGIN
 
     -- 재적용일 때만 확인한다. 첫 적용에는 함수가 없어 NULL 이다.
     -- to_regprocedure 를 쓴다. ::regprocedure 는 함수가 없으면 예외를 던진다.
-    SELECT pg_get_userbyid(proowner) INTO _f소유
+    SELECT pg_get_userbyid(proowner) INTO _함수소유자
       FROM pg_proc WHERE oid = to_regprocedure('tenant.계정찾기(text)');
 
-    IF _f소유 IS NOT NULL AND _f소유 IS DISTINCT FROM _t소유 THEN
+    IF _함수소유자 IS NOT NULL AND _함수소유자 IS DISTINCT FROM _테이블소유자 THEN
         RAISE EXCEPTION
             '함수 소유자(%)와 테이블 소유자(%)가 다르다. 정의자가 accounts 를 읽지 못하면 '
-            '함수는 0행을 반환하고 증상은 「명부가 비었다」와 같다.', _f소유, _t소유;
+            '함수는 0행을 반환하고 증상은 「계정 목록이 비었다」와 같다.', _함수소유자, _테이블소유자;
     END IF;
 END
 $$;
@@ -76,7 +76,7 @@ COMMENT ON FUNCTION tenant.계정찾기(text) IS
 
 
 -- 실행 권한. CREATE FUNCTION 은 기본으로 PUBLIC 에 EXECUTE 를 준다. SECURITY DEFINER 함수에 이 권한이
--- 남으면 누구나 명부를 조회할 수 있으므로 PUBLIC 에서 먼저 회수한다. REVOKE 를 GRANT 뒤에 두면 방금 준 권한까지 회수된다.
+-- 남으면 누구나 계정 목록을 조회할 수 있으므로 PUBLIC 에서 먼저 회수한다. REVOKE 를 GRANT 뒤에 두면 방금 준 권한까지 회수된다.
 REVOKE ALL ON FUNCTION tenant.계정찾기(text) FROM PUBLIC;
 
 DO $$
@@ -92,21 +92,21 @@ $$;
 -- 소유자가 다른 함수는 데이터를 노출하지 않고 0행만 반환하므로 여기서 실패시킨다.
 DO $$
 DECLARE
-    _t소유 name;
-    _f소유 name;
+    _테이블소유자 name;
+    _함수소유자 name;
 BEGIN
-    SELECT pg_get_userbyid(relowner) INTO _t소유
+    SELECT pg_get_userbyid(relowner) INTO _테이블소유자
       FROM pg_class WHERE oid = 'tenant.accounts'::regclass;
-    SELECT pg_get_userbyid(proowner) INTO _f소유
+    SELECT pg_get_userbyid(proowner) INTO _함수소유자
       FROM pg_proc WHERE oid = 'tenant.계정찾기(text)'::regprocedure;
 
-    IF _f소유 IS DISTINCT FROM _t소유 THEN
+    IF _함수소유자 IS DISTINCT FROM _테이블소유자 THEN
         RAISE EXCEPTION
             '함수 소유자(%)와 테이블 소유자(%)가 다르다. 이 함수는 0행만 반환한다. '
-            'ALTER FUNCTION tenant.계정찾기(text) OWNER TO % 로 맞춘다.', _f소유, _t소유, _t소유;
+            'ALTER FUNCTION tenant.계정찾기(text) OWNER TO % 로 맞춘다.', _함수소유자, _테이블소유자, _테이블소유자;
     END IF;
 
-    RAISE NOTICE '사전 검사 통과: 소유자=%, FORCE RLS=off', _t소유;
+    RAISE NOTICE '사전 검사 통과: 소유자=%, FORCE RLS=off', _테이블소유자;
 END
 $$;
 

@@ -2,7 +2,7 @@
 -- 실행 시점: init. 전부 멱등이다.
 
 
--- plan_tasks.유형 — 캘린더 일정 유형 배지. 판정 4-way, plan_tasks.상태 와 다른 축이다.
+-- plan_tasks.유형 — 캘린더 일정 유형 배지. 판정(4종), plan_tasks.상태 와 다른 값이다.
 ALTER TABLE tenant.plan_tasks
     ADD COLUMN IF NOT EXISTS "유형" TEXT NOT NULL DEFAULT '기타';
 
@@ -15,7 +15,7 @@ EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
 COMMENT ON COLUMN tenant.plan_tasks."유형" IS
-    '캘린더 배지용 표시 축. 판정 4-way 와도 plan_tasks.상태 와도 무관하다.';
+    '캘린더 배지용 표시 값. 판정(4종)과도 plan_tasks.상태 와도 무관하다.';
 
 
 -- expense_plans.추가설명 — 폼이 못 담는 예외 맥락을 적는 자유 텍스트 칸.
@@ -41,8 +41,8 @@ EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
 COMMENT ON COLUMN corpus.check_items."유형" IS
-    '캘린더 배지용 표시 축. plan_tasks."유형" 이 여기를 따라간다 — 마스터가 늘어도
-    조용히 안 틀리려고 코드 분류표 대신 여기서 관리한다.';
+    '캘린더 배지용 표시 값. plan_tasks."유형" 이 이 값을 따른다 — 항목이 추가돼도 분류가 어긋나지 않도록 '
+    '코드 분류표 대신 여기서 관리한다.';
 
 -- 백필. ADD COLUMN DEFAULT '기타' 는 기존 행을 모두 '기타' 로 채운다. WHERE 절로 멱등하게 만든다.
 UPDATE corpus.check_items SET "유형" = '비교견적'
@@ -57,9 +57,13 @@ BEGIN
     ALTER TABLE tenant.l3_documents DROP CONSTRAINT IF EXISTS l3_documents_파싱품질_check;
     ALTER TABLE tenant.l3_documents
         ADD CONSTRAINT l3_documents_파싱품질_check
-        CHECK ("파싱품질" IN ('대기','pass','warn','fail'));
+        CHECK ("파싱품질" IN ('pending','pass','warn','fail'));
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
+
+COMMENT ON COLUMN tenant.l3_documents."파싱품질" IS
+    'pending = 업로드만 접수됐고 파싱 평가 전. pass/warn/fail 은 평가를 마친 뒤에만 쓴다 — '
+    '접수 시점에 warn 을 넣으면 "평가 결과 의심" 과 "아직 평가 안 함" 이 같은 값이 되어 구분할 수 없다.';
 
 
 -- 의도적으로 하지 않은 것:

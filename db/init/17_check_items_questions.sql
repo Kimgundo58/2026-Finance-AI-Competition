@@ -7,7 +7,7 @@
 ALTER TABLE corpus.check_items ADD COLUMN IF NOT EXISTS "질문문"        TEXT;
 ALTER TABLE corpus.check_items ADD COLUMN IF NOT EXISTS "선택지"        JSONB;
 ALTER TABLE corpus.check_items ADD COLUMN IF NOT EXISTS "질문유형"      TEXT;
-ALTER TABLE corpus.check_items ADD COLUMN IF NOT EXISTS "필요f필드"     TEXT[];
+ALTER TABLE corpus.check_items ADD COLUMN IF NOT EXISTS "필요프로필필드" TEXT[];
 ALTER TABLE corpus.check_items ADD COLUMN IF NOT EXISTS "기한근거"      TEXT;
 ALTER TABLE corpus.check_items ADD COLUMN IF NOT EXISTS "기한근거_상세" TEXT;
 
@@ -15,6 +15,12 @@ ALTER TABLE corpus.check_items ADD COLUMN IF NOT EXISTS "기한근거_상세" TE
 ALTER TABLE eval.golden_set ADD COLUMN IF NOT EXISTS "대상"     TEXT;
 ALTER TABLE eval.golden_set ADD COLUMN IF NOT EXISTS "평가범위" TEXT;
 ALTER TABLE eval.golden_set ADD COLUMN IF NOT EXISTS "채점모드" TEXT;
+
+COMMENT ON COLUMN eval.golden_set."채점모드" IS
+    '전체 | 가능오판만 | 판정만. 문항을 만들 때 기록한 채점 범위 표시다. 평가 코드는 이 값으로 분기하지 않는다.';
+COMMENT ON COLUMN eval.golden_set."평가범위" IS
+    '핵심 | 유효 | 범위밖(사유). 주관기관 대상 문항은 검색 필터(적용대상 IN (창업기업, 공통)) 때문에 '
+    '구조적으로 검색되지 않으므로 범위밖으로 표시한다.';
 
 
 -- 적재 현황 확인용 뷰. 모든 테이블이 생긴 뒤 만들어야 하므로 마지막 init 파일에 둔다.
@@ -41,9 +47,9 @@ UNION ALL SELECT '17. tenant.org_programs',     count(*) FROM tenant.org_program
 UNION ALL SELECT '18. tenant.accounts',         count(*) FROM tenant.accounts
 UNION ALL SELECT '19. tenant.l3_documents',     count(*) FROM tenant.l3_documents
 UNION ALL SELECT '20. tenant.l3_articles',      count(*) FROM tenant.l3_articles
-UNION ALL SELECT '21. tenant.f_profile',        count(*) FROM tenant.f_profile
-UNION ALL SELECT '22. tenant.f_exec',           count(*) FROM tenant.f_exec
-UNION ALL SELECT '23. tenant.f_personnel',      count(*) FROM tenant.f_personnel
+UNION ALL SELECT '21. tenant.profile_agreements',   count(*) FROM tenant.profile_agreements
+UNION ALL SELECT '22. tenant.profile_expenditures', count(*) FROM tenant.profile_expenditures
+UNION ALL SELECT '23. tenant.profile_personnel',    count(*) FROM tenant.profile_personnel
 UNION ALL SELECT '24. tenant.expense_plans',    count(*) FROM tenant.expense_plans
 UNION ALL SELECT '25. tenant.plan_tasks',       count(*) FROM tenant.plan_tasks
 UNION ALL SELECT '26. tenant.decisions',        count(*) FROM tenant.decisions

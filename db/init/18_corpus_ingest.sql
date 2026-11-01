@@ -3,7 +3,7 @@
 -- 운영 DB 는 db/migrations/2026-11-01_corpus_ingest.sql 로 적용한다. 내용은 같고 비밀번호만 다르다.
 -- 여기서는 로컬 전용 비밀번호 'devpw' 를 쓴다(10a_rls_guc.sql 의 suddoe_app 과 같은 관례).
 -- 로컬 접속: SUDDOE_INGEST_DSN=postgresql://suddoe_ingest:devpw@localhost:5432/suddoe
--- init 스크립트는 빈 볼륨에서만 돈다. 이미 띄운 로컬 DB 에는 마이그레이션 파일을 -v ingest_password=devpw 로 실행한다.
+-- init 스크립트는 빈 볼륨에서만 실행된다. 이미 띄운 로컬 DB 에는 마이그레이션 파일을 -v ingest_password=devpw 로 실행한다.
 -- 앞선 파일이 만든 corpus.programs(04), tenant.judge_cache(13) 가 있어야 한다.
 
 -- 1. 상태 값. staged 는 적재 직후 상태이고 검색 필터(status='active')에 걸리지 않는다.
@@ -28,9 +28,9 @@ CREATE TABLE IF NOT EXISTS corpus.ingest_jobs (
     상태          TEXT NOT NULL DEFAULT 'parsing' CHECK (상태 IN ('parsing','done','failed')),
     실패사유      TEXT,
     경고          JSONB NOT NULL DEFAULT '[]'::jsonb,
-    분해전략      TEXT,
+    분할전략      TEXT,
     조_건수       INT,
-    대체한_doc_id TEXT,                             -- 활성화 때 superseded 로 바꾼 이전 판
+    이전판_doc_id TEXT,                             -- 활성화 때 superseded 로 바꾼 이전 판
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT ingest_jobs_사업명_check CHECK ((layer = 'L2') = (사업명 IS NOT NULL))
