@@ -168,7 +168,9 @@ def 트랜잭션(org_id: str | None = None) -> Iterator[Any]:
             yield cur
         conn.commit()
     except BaseException:
-        conn.rollback()
+        # 연결이 이미 끊긴 경우 rollback() 이 새 예외를 내 원래 예외를 가린다. 원래 예외를 올린다.
+        with contextlib.suppress(Exception):
+            conn.rollback()
         raise
     finally:
         conn.close()

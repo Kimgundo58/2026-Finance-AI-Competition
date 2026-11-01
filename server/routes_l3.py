@@ -168,11 +168,9 @@ def _실_업로드(본문: bytes, 파일명: str, 확장: str, org_id: str) -> L
     """tenant.l3_documents 행을 만들고 원본을 저장한 뒤 상태='파싱대기' 응답을 만든다.
 
     파서는 여기서 부르지 않는다. 저장 경로는 scripts/l3_parse 의 `원본경로()` 규칙을 그대로
-    쓴다(파서가 같은 경로에서 읽는다). 파일 저장이 실패하면 방금 만든 행을 지우고 500.
+    쓴다(파서가 같은 경로에서 읽는다). 파서 모듈을 불러오지 못하거나 파일 저장이 실패하면 방금 만든
+    행을 지우고 500.
     """
-    # 지연 import: mock 모드와 서버 기동 시에는 파서 의존성을 읽지 않는다
-    from l3_parse import L3_저장소, 원본경로        # scripts/ — sys.path 는 main.py 가 잡는다
-
     추출방식 = _확장_추출방식.get(확장, "native")
     행 = _질의(
         """INSERT INTO tenant.l3_documents
@@ -185,11 +183,13 @@ def _실_업로드(본문: bytes, 파일명: str, 확장: str, org_id: str) -> L
         raise HTTPException(400, "업로드를 저장하지 못했습니다 (org_id를 확인해 주세요).")
     doc_id = str(행[0][0])
 
-    # 경로가 doc_id 에서 나오므로 INSERT 다음에 쓴다
+    # 경로가 doc_id 에서 나오므로 INSERT 다음에 쓴다. 지연 import: mock 모드와 서버 기동 시에는
+    # 파서 의존성을 읽지 않는다. import 실패도 저장 실패와 같이 행을 지운다.
     try:
+        from l3_parse import L3_저장소, 원본경로    # scripts/ — sys.path 는 main.py 가 잡는다
         L3_저장소.mkdir(parents=True, exist_ok=True)
         원본경로(doc_id, 확장).write_bytes(본문)
-    except OSError as e:
+    except (OSError, ImportError) as e:
         _실행("DELETE FROM tenant.l3_documents WHERE doc_id = %s", (doc_id,))
         raise HTTPException(500, f"원본을 저장하지 못했습니다 ({type(e).__name__}).") from e
 

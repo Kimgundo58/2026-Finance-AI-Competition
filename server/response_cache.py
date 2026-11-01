@@ -3,7 +3,7 @@
 
 /api/normalize·/api/judge 가 캐시키() 로 키를 만들고 꺼내기(k, org)·넣기(k, 값, 종류=, org=) 를 부른다.
 게스트(org 없음)는 프로세스 메모리(FIFO, 재시작하면 사라진다), 인증된 org 는 tenant.judge_cache 를 쓴다.
-DB 행은 _설정_해시()(코퍼스·룰·우선순위 규칙·체크항목·별칭 버전)가 같을 때만 적중한다.
+두 캐시 모두 _설정_해시()(코퍼스·룰·우선순위 규칙·체크항목·별칭 버전)가 저장 때와 같을 때만 적중한다.
 환경변수: SUDDOE_CACHE_TTL(기본 900초), SUDDOE_CACHE_MAX(메모리 항목 수, 기본 512), SUDDOE_CONFIG_HASH_TTL(기본 300초).
 """
 from __future__ import annotations
@@ -14,14 +14,15 @@ import threading
 import time
 from typing import Any
 
-from server._common import _int환경, _jsonb, _실행, _질의, ttl_캐시
+from server._common import MOCK, _int환경, _jsonb, _실행, _질의, ttl_캐시
 from server.rate_limit import 제한
 
 _TTL초 = _int환경("SUDDOE_CACHE_TTL", 900)
 _상한 = _int환경("SUDDOE_CACHE_MAX", 512)
 
-# 게스트용 메모리 캐시와 적중 수. AnyIO 워커 스레드가 동시에 바꾸므로 _락 안에서만 다룬다.
-_메모리: dict[str, tuple[float, Any]] = {}
+# 게스트용 메모리 캐시(키 -> (저장 시각, 설정 해시, 값))와 적중 수. AnyIO 워커 스레드가 동시에 바꾸므로
+# _락 안에서만 다룬다.
+_메모리: dict[str, tuple[float, str, Any]] = {}
 _적중 = 0
 _락 = threading.Lock()
 
@@ -33,6 +34,20 @@ def 캐시키(*조각: Any) -> str:
     """
     raw = json.dumps(조각, ensure_ascii=False, sort_keys=True, default=str)
     return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def l3_지문(org: str | None) -> str:
+    """기관 L3 문서 집합과 파싱 상태의 해시. 판정 캐시키에 넣는다. 게스트·mock·DB 오류면 빈 문자열.
+
+    L3 파싱이 커밋되면 파싱품질이 '대기' 에서 바뀌므로 지문이 바뀐다. 요청 시작 때 계산하므로,
+    파싱 커밋 전에 시작해 옛 L3 로 판정한 요청은 옛 지문 키로 저장되어 이후 요청에 적중하지 않는다.
+    """
+    if org is None or MOCK:
+        return ""
+    행 = _질의('SELECT md5(coalesce(string_agg(doc_id::text || \':\' || coalesce("파싱품질", \'\') '
+              '|| \':\' || coalesce(status, \'\'), \'#\' ORDER BY doc_id), \'\')) '
+              'FROM tenant.l3_documents WHERE org_id = %s', (org,))
+    return 행[0][0] if 행 else ""
 
 
 def 꺼내기(k: str, org: str | None) -> Any | None:
@@ -49,10 +64,11 @@ def 꺼내기(k: str, org: str | None) -> Any | None:
 def 넣기(k: str, 값: Any, *, 종류: str, org: str | None) -> None:
     """응답을 저장한다. DB 쓰기 실패는 삼킨다(캐시는 판정 결과에 영향을 주지 않는다)."""
     if org is None:
+        해시 = _게스트_해시()
         with _락:
             if len(_메모리) >= _상한:          # FIFO. LRU 까지는 필요 없다
                 _메모리.pop(next(iter(_메모리), None), None)
-            _메모리[k] = (time.time(), 값)
+            _메모리[k] = (time.time(), 해시, 값)
         return
     _실행(
         'INSERT INTO tenant.judge_cache (key, org_id, 종류, value, 설정_해시, expires_at) '
@@ -69,13 +85,20 @@ def 상태() -> dict:
         return {"항목": len(_메모리), "TTL초": _TTL초, "적중": _적중}
 
 
+def _게스트_해시() -> str:
+    """게스트 캐시용 설정 해시. mock 모드는 DB 가 없으므로 비교하지 않는다(빈 문자열)."""
+    return "" if MOCK else _설정_해시()
+
+
 def _메모리_꺼내기(k: str) -> Any | None:
+    # 규정 활성화·룰 수정으로 설정 해시가 바뀌면 TTL 이 남았어도 버린다(DB 캐시와 같은 기준).
+    해시 = _게스트_해시()
     with _락:
         v = _메모리.get(k)
         if not v:
             return None
-        t, 값 = v
-        if time.time() - t > _TTL초:
+        t, 저장해시, 값 = v
+        if time.time() - t > _TTL초 or 저장해시 != 해시:
             _메모리.pop(k, None)
             return None
         return 값
@@ -123,7 +146,9 @@ _설정_해시_SQL = """SELECT (SELECT count(*) FROM corpus.chunks),
                         -- item_alias 는 embedding 컬럼이 커서 행 수·최대 id·최근 생성 시각만 본다.
                         (SELECT count(*) || ':' || coalesce(max(alias_id), 0) || ':'
                                 || coalesce(max(created_at)::text, '')
-                           FROM corpus.item_alias)"""
+                           FROM corpus.item_alias),
+                        -- staged 문서를 활성화하면 청크 수는 그대로이고 상태만 바뀐다
+                        (SELECT count(*) FROM corpus.chunks WHERE status = 'active')"""
 
 
 @ttl_캐시("SUDDOE_CONFIG_HASH_TTL", 300)

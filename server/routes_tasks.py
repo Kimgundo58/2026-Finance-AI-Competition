@@ -348,28 +348,35 @@ def _동기화_적용(cur, plan_id: int, 계획org, decision_id: int | None,
 def _실_동기화(plan_id: int, body: 할일동기화, org_id: str | None = None) -> 할일동기화응답:
     """판정 결과를 `tenant.plan_tasks` 에 한 트랜잭션으로 반영한다.
 
-    커넥션 하나로 계획·기존 행·check_items·L3 조문을 읽고 쓴다. 중간에 DB 오류가 나면
-    전부 롤백하고 예외를 전파한다(라우트는 500, persist 는 저장 실패로 처리한다).
-    계획이 없거나 다른 기관 것이면 404.
+    중간에 DB 오류가 나면 전부 롤백하고 예외를 전파한다(라우트는 500). 계획이 없거나 다른 기관 것이면 404.
+    """
+    with 트랜잭션(org_id) as cur:
+        return 동기화_실행(cur, plan_id, body, org_id)
+
+
+def 동기화_실행(cur, plan_id: int, body: 할일동기화, org_id: str | None) -> 할일동기화응답:
+    """동기화 본체. 호출자의 트랜잭션(cur) 안에서 계획·기존 행·check_items·L3 조문을 읽고 쓴다.
+
+    persist 는 판정-계획 연결과 같은 트랜잭션에서 이 함수를 불러, 할일 동기화가 실패하면 연결도 함께
+    롤백되게 한다. 계획이 없거나 다른 기관 것이면 HTTPException(404).
     """
     조건, org인자 = _org조건(org_id, "p")
-    with 트랜잭션() as cur:
-        cur.execute(f'SELECT p.org_id, p."집행예정일" FROM tenant.expense_plans p '
-                    f'WHERE p.plan_id = %s AND {조건}', (plan_id, *org인자))
-        계획 = cur.fetchone()
-        if not 계획:
-            raise HTTPException(404, f"지출계획 {plan_id} 을(를) 찾을 수 없습니다")
-        계획org, 집행예정일 = 계획
+    cur.execute(f'SELECT p.org_id, p."집행예정일" FROM tenant.expense_plans p '
+                f'WHERE p.plan_id = %s AND {조건}', (plan_id, *org인자))
+    계획 = cur.fetchone()
+    if not 계획:
+        raise HTTPException(404, f"지출계획 {plan_id} 을(를) 찾을 수 없습니다")
+    계획org, 집행예정일 = 계획
 
-        cur.execute('SELECT task_id, 출처, 코드, 항목, 날짜_사용자수정 '
-                    'FROM tenant.plan_tasks WHERE plan_id = %s', (plan_id,))
-        기존 = cur.fetchall()
-        체크항목 = _체크항목_표(cur)
-        l3조문 = (l3_deadline.조문_조회(cur, 계획org)
-                 if 집행예정일 is not None and 계획org else [])
+    cur.execute('SELECT task_id, 출처, 코드, 항목, 날짜_사용자수정 '
+                'FROM tenant.plan_tasks WHERE plan_id = %s', (plan_id,))
+    기존 = cur.fetchall()
+    체크항목 = _체크항목_표(cur)
+    l3조문 = (l3_deadline.조문_조회(cur, 계획org)
+             if 집행예정일 is not None and 계획org else [])
 
-        행들 = _동기화_준비(body, 체크항목, l3조문, 집행예정일)
-        건수 = _동기화_적용(cur, plan_id, 계획org, body.decision_id, 행들, 기존)
+    행들 = _동기화_준비(body, 체크항목, l3조문, 집행예정일)
+    건수 = _동기화_적용(cur, plan_id, 계획org, body.decision_id, 행들, 기존)
 
     코드매칭수 = sum(1 for 행 in 행들 if 행["코드"])
     return 할일동기화응답(

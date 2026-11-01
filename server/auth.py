@@ -129,6 +129,15 @@ def _pyjwt():
         raise HTTPException(503, "pyjwt 미설치 — 토큰을 검증할 수 없다 (pip install 'pyjwt[crypto]')")
 
 
+def 데모_사용가능() -> bool:
+    """데모 토큰을 발급할 수 있는가. live 모드에서 SUDDOE_DEMO_SECRET 이 없으면 False.
+
+    POST /api/demo/session 은 임시 기관을 만들기 전에 이것으로 먼저 확인한다. 발급 단계에서야
+    503 을 내면 쓸모없는 데모 기관 행이 남는다.
+    """
+    return _비밀("SUDDOE_DEMO_SECRET") is not None
+
+
 def 데모토큰_발급(org_id: str) -> tuple[str, int]:
     """데모 세션용 단기 토큰을 서버 비밀로 서명해 (토큰, 수명초) 를 반환한다.
 

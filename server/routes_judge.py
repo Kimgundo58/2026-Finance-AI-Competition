@@ -49,7 +49,7 @@ def judge(req: Request, body: 판정요청, 목: str | None = None):
     body.확정비목 = _비목_표준화(body.확정비목)
     if body.확정비목 and body.확정비목 not in 비목_ENUM:
         raise HTTPException(422, f"비목은 enum 10종 뿐입니다: {비목_ENUM}")
-    # 모르는 사업명을 통과시키면 비목계통() 이 '창업' 으로 잘못 분류한다.
+    # 모르는 사업명을 통과시키면 rule_lookup 이 사업 계통을 알 수 없어 룰 없이 판정한다.
     body.사업명 = _사업명_표준화(body.사업명)
     # 본문의 org_id 는 클라이언트가 보낸 검증되지 않은 값이라 버리고, 토큰으로 검증된 org 만
     # 쓴다(게스트는 None). 본문 값을 믿으면 남의 기관 L3·F 프로필을 읽고 그 기관에 판정 행을 쓴다.
@@ -60,6 +60,9 @@ def judge(req: Request, body: 판정요청, 목: str | None = None):
         json.dumps(body.정규화, ensure_ascii=False, sort_keys=True),
         body.f5.친족거래, body.f5.전직임직원업체,
         json.dumps([a.model_dump() for a in body.답변], ensure_ascii=False, sort_keys=True),
+        # L3 를 새로 올리거나 파싱이 끝나면 키가 바뀐다. 파싱 커밋 직전에 시작한 판정이 옛 L3 결과를
+        # 캐시에 남겨도 이후 요청에는 적중하지 않는다(routes_l3 의 캐시 삭제와 함께 쓴다).
+        response_cache.l3_지문(body.org_id),
         # ?목= 은 mock 모드에서만 응답을 바꾼다. live 에서 키에 넣으면 캐시를 우회할 수 있다.
         *([목] if MOCK else []))
     캐시 = response_cache.꺼내기(k, body.org_id)
@@ -145,7 +148,12 @@ def _실패_결과(body: 판정요청) -> dict:
            "요약": "일시적인 오류로 판정하지 못했습니다. 잠시 후 다시 시도해 주세요.",
            "해야할일": [], "인용": [], "전제": [], "신뢰등급": None, "버전스탬프": None,
            "참조사슬": []}
-    초안 = inquiry.문의초안(body.정규화, "판단불가", [], [], body.사업명)
+    try:
+        초안 = inquiry.문의초안(body.정규화, "판단불가", [], [], body.사업명)
+    except Exception:                                         # noqa: BLE001
+        # 실패 경로의 실패다. 초안 없이라도 판단불가 결과는 반드시 돌려준다.
+        _log.exception("실패 결과의 문의 초안을 만들지 못했다 (plan_id=%s)", body.plan_id)
+        초안 = None
     if 초안:
         out["문의초안"] = 초안
     return out
