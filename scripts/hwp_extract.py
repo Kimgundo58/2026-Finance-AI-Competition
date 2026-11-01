@@ -1,5 +1,10 @@
 # -*- coding: utf-8 -*-
-"""HWP v5 본문 텍스트 추출기 (olefile + zlib만 사용)."""
+"""HWP v5(OLE) 본문 텍스트 추출기 (olefile + zlib 만 사용).
+
+stage0_extract 가 OLE 형식 HWP 에서 LibreOffice 변환이 실패했을 때 폴백으로 쓴다.
+공개 함수: extract(path) -> str. BodyText 섹션의 PARA_TEXT 레코드만 읽으므로 표 구조는 없다.
+배포용/암호화 문서 판정은 hwpx_extract.sniff() 가 먼저 한다.
+"""
 import olefile, zlib, struct, sys, io
 
 HWPTAG_BEGIN = 0x10

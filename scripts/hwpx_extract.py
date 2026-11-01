@@ -1,22 +1,11 @@
 # -*- coding: utf-8 -*-
-"""HWPX(OWPML) 본문 텍스트 추출기 (zipfile + xml.etree 만 사용).
+"""HWPX(OWPML) 본문 텍스트 추출기와 파일 정체 판정(sniff) (zipfile + xml.etree 만 사용).
 
-hwpx = zip. 본문은 `Contents/section*.xml`, 문단은 `hp:p`, 글자는 `hp:run/hp:t`,
-표는 `hp:tbl/hp:tr/hp:tc/hp:subList/hp:p` 로 중첩된다.
-
-시그니처·반환형은 `hwp_extract.extract(path) -> str` 과 같다.
-
-경계 규칙 — 뒷단 조문 재조립이 줄 단위로 돌기 때문에 문단 하나 = 한 줄, 표 셀
-하나 = 한 줄(셀 안에 문단이 여럿이면 각각 한 줄)로 맞춘다. `hp:lineBreak` 는
-줄바꿈, `hp:tab` 은 탭, `hp:fwSpace` 는 공백으로 살린다.
-
-확장자 위장 방어 — 확장자가 .hwpx 여도 zip 을 열어 내용물로 판정한다. hwpx 가
-아니면 조용히 빈 문자열을 돌려주지 않고 `NotHwpxError` 로 실패한다.
-
-`sniff()` 는 hwpx(zip) 뿐 아니라 OLE2 HWP v5 의 배포용/암호화 여부도 판정한다
-(`HwpProtectedError`) — 배포용 문서는 `hwp_extract.extract()` 가 예외 없이 성공
-반환하지만 실제로 뽑히는 건 뷰어 안내문 몇 글자뿐이라, 조 0개짜리 규정이 조용히
-판정에 들어가는 걸 막는다.
+stage0_extract 와 docx_extract 가 쓴다. 공개 함수: extract(path) -> str, sniff(path) -> 정체 문자열,
+예외 NotHwpxError·HwpProtectedError. hwpx 는 zip 이고 본문은 `Contents/section*.xml`, 문단은 `hp:p`,
+글자는 `hp:run/hp:t`, 표는 `hp:tbl/hp:tr/hp:tc/hp:subList/hp:p` 로 중첩된다.
+불변식: 뒷단 조문 분해가 줄 단위라 문단 하나·표 셀 하나를 각각 한 줄로 낸다. hwpx 가 아니면
+빈 문자열 대신 NotHwpxError 로, 배포용/암호화 HWP 는 HwpProtectedError 로 실패한다.
 """
 from __future__ import annotations
 
@@ -138,7 +127,7 @@ def _section_names(z: zipfile.ZipFile) -> list[str]:
     return [n for _, n in sorted(hits)]
 
 
-# ── 본문 걷기 ──────────────────────────────────────────────────────
+# ── 본문 순회 ──────────────────────────────────────────────────────
 def _t_text(t: ET.Element) -> str:
     """hp:t — 텍스트와 그 안의 인라인 제어(lineBreak·tab·fwSpace) 를 순서대로."""
     out = [t.text or ""]
@@ -149,7 +138,7 @@ def _t_text(t: ET.Element) -> str:
 
 
 def _walk_para(p: ET.Element, lines: list[str]) -> None:
-    """hp:p 하나 → 줄 목록에 추가. 문단 안에 표가 끼면 표 앞뒤 텍스트를 갈라 낸다."""
+    """hp:p 하나 → 줄 목록에 추가. 문단 안에 표가 끼면 표 앞뒤 텍스트를 나눠 낸다."""
     buf: list[str] = []
 
     def flush():
@@ -203,7 +192,7 @@ def _walk_table(tbl: ET.Element, lines: list[str]) -> None:
 def _section_text(xml_bytes: bytes) -> list[str]:
     root = ET.fromstring(xml_bytes)
     lines: list[str] = []
-    for p in root.findall(_P):               # 최상위 문단만. 표 안 문단은 표 걷기가 처리
+    for p in root.findall(_P):               # 최상위 문단만. 표 안 문단은 _walk_table 이 처리
         _walk_para(p, lines)
     return lines
 

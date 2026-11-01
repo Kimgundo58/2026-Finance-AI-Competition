@@ -1,42 +1,41 @@
 # -*- coding: utf-8 -*-
-"""L3 (주관기관 규정) 로드 — 검색하지 않고 통째로 읽는다.
+"""L3(주관기관 규정) 조문을 검색 없이 기관 단위로 통째로 읽고, 비목별 L3 룰을 뽑는다.
 
-    l3_load.로드(cur, org_id, 사업명) -> [{"article_id","조번호","조제목","본문"}]
-    l3_load.l3룰(cur, org_id, 비목)   -> dict | None
+판정 파이프라인(orchestrate)이 프롬프트용 조문(로드)과 rule_lookup 의 L3 룰(l3룰)을 얻을 때 부른다.
+공개 함수: 로드(cur, org_id, 비목=None) -> [{article_id, 조번호, 조제목, 본문}],
+l3룰(cur, org_id, 비목) -> dict | None, 사업비관련장(장), 상위참조(cur, 본문). 읽는 테이블:
+tenant.l3_articles·l3_documents(RLS), corpus.item_vocab·documents·doc_articles.
+불변식: L3 는 검색하지 않는다(corpus.chunks 와 다른 테이블). 분류하지 못한 조문을 '가능' 으로 추정하지 않는다.
 
-L3 조항은 30~80개뿐이라 대형 벡터 검색 풀(L1·L2)과 같은 링에 올리면 밀려서
-안 뽑힌다. `tenant.l3_articles` 는 벡터 컬럼이 없는 별도 테이블이고 판정 검색
-(`corpus.chunks`, layer IN ('L1','L2'))과 물리적으로 다른 경로다 — 멀티테넌시
-누수를 프롬프트 규율이 아니라 스키마로 막는다.
-
-L3 룰을 `corpus.rules` 가 아니라 `tenant.l3_articles` 에서 읽는 이유: `corpus.rules`
-에는 RLS 가 없고, `seed_rules.py` 의 `TRUNCATE` 재적재가 기관 데이터를 지운다.
-`tenant.l3_articles` 는 RLS 축이 있고 org 별로 격리된다.
-
-실행:  PYTHONIOENCODING=utf-8 python scripts/l3_load.py --org <org_id|기관명>
+실행: PYTHONIOENCODING=utf-8 python scripts/l3_load.py --org <org_id>
 """
 from __future__ import annotations
 
 import argparse
 import io
-import os
+import logging
 import re
 import sys
 import uuid
 from decimal import Decimal
 from typing import Any
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _lib import db                                                   # noqa: E402
+from _lib import db
 
-DSN = db.DSN
+_log = logging.getLogger(__name__)
+
+# L3 조항은 기관당 수십 개라 L1·L2 와 같은 검색 후보 풀에 넣으면 순위에서 밀려 뽑히지 않는다.
+# 그래서 벡터 컬럼이 없는 tenant.l3_articles 를 기관 단위로 통째로 읽는다. 판정 검색
+# (corpus.chunks, layer IN ('L1','L2'))과 테이블이 달라 기관 간 누수를 스키마로 막는다.
+# L3 룰을 corpus.rules 에서 읽지 않는 이유: corpus.rules 에는 RLS 가 없고 TRUNCATE 재적재가
+# 기관 데이터를 지운다. tenant.l3_articles 는 RLS 정책으로 org 별로 격리된다.
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# 1. 장(章) 필터 — "사업비 집행 관련 장만"
+# 1. 장(章) 필터 — 사업비 집행 관련 장만
 # ════════════════════════════════════════════════════════════════════════════
 # 기관마다 장 이름이 다르므로 목록을 못 박지 않고 키워드 규칙으로 판정한다.
-# 제외가 포함을 이긴다 — L3 를 덜 읽으면 상위를 보게 되고(need_upper=True)
+# 제외가 포함보다 우선한다. L3 를 덜 읽으면 상위를 보게 되고(need_upper=True)
 # 그건 안전한 실패다. 반대로 인사·복무 조문이 컨텍스트에 섞이면 소형 모델이
 # 엉뚱한 조를 인용한다.
 _장_포함 = re.compile(
@@ -50,8 +49,8 @@ _장_제외 = re.compile(
 def 사업비관련장(장: str | None) -> bool:
     """이 장을 판정 컨텍스트에 넣는가.
 
-    `장 IS NULL` 은 넣는다 — 파서가 장을 못 잡은 것이지 무관하다는 증거가 아니다.
-    빼면 "규정에 없다"(=미규정)로 잘못 갈려 상위만 보고 L3 제약을 놓친다.
+    `장 IS NULL` 은 넣는다. 파서가 장을 못 잡은 것이지 무관하다는 증거가 아니다.
+    빼면 미규정으로 잘못 분류되어 상위만 보고 L3 제약을 놓친다.
     """
     if 장 is None or not 장.strip():
         return True
@@ -61,12 +60,11 @@ def 사업비관련장(장: str | None) -> bool:
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# 2. 비목 어휘 — `corpus.item_vocab` 이 기준 문서, 상수는 대체 경로
+# 2. 비목 어휘 — corpus.item_vocab 이 기준, 상수는 폴백
 # ════════════════════════════════════════════════════════════════════════════
-# DB 조회만 하면 안 된다 — `TRUNCATE rules` 재적재로 참조 테이블이 잠깐 비는
-# 순간이 있고, 그때 비목이 0종이면 L3 룰이 전건 무음 None 이 된다. 대체 경로가
-# 그 순간을 메운다.
-_비목_대체경로: dict[str, tuple[str, ...]] = {
+# DB 조회만 하면 안 된다. rules 재적재 중에는 참조 테이블이 잠깐 비고, 그때 비목이
+# 0종이면 L3 룰이 전부 경고 없이 None 이 된다. 이 기본 별칭 표가 그 순간을 메운다.
+_비목_기본별칭: dict[str, tuple[str, ...]] = {
     "재료비": ("재료 및 원료비", "원재료비", "재료"),
     "외주용역비": ("외주 용역비", "용역비", "외주"),
     "기계장치": ("기계장치비", "공구기구비", "비품비", "공구", "기구", "비품",
@@ -84,7 +82,7 @@ _비목_대체경로: dict[str, tuple[str, ...]] = {
 
 
 def 비목어휘(cur) -> dict[str, tuple[str, ...]]:
-    """{정본비목: (별칭...)}. `item_vocab` 이 없거나 비면 대체 경로를 쓰고 경고한다."""
+    """{표준 비목명: (별칭...)}. item_vocab 이 없거나 비면 기본 별칭 표로 폴백하고 경고한다."""
     try:
         rows = cur.execute(
             "SELECT 비목, coalesce(별칭,'{}') , coalesce(하위항목,'{}') "
@@ -92,12 +90,12 @@ def 비목어휘(cur) -> dict[str, tuple[str, ...]]:
     except Exception:
         rows = []
     if not rows:
-        print("   ⚠️ corpus.item_vocab 조회 실패/0행 — 폴백 어휘 10종을 쓴다", file=sys.stderr)
-        return {k: v for k, v in _비목_대체경로.items()}
+        _log.warning("corpus.item_vocab 조회 실패 또는 0행 — 기본 별칭 표로 폴백한다")
+        return {k: v for k, v in _비목_기본별칭.items()}
     vocab: dict[str, tuple[str, ...]] = {}
     for 비목, 별칭, 하위 in rows:
-        vocab[비목] = tuple(list(별칭) + list(하위) + list(_비목_대체경로.get(비목, ())))
-    for k, v in _비목_대체경로.items():          # 용어 사전에 없는 비목은 대체 경로로 메운다
+        vocab[비목] = tuple(list(별칭) + list(하위) + list(_비목_기본별칭.get(비목, ())))
+    for k, v in _비목_기본별칭.items():          # 용어 사전에 없는 비목은 기본 별칭으로 채운다
         vocab.setdefault(k, v)
     return vocab
 
@@ -106,13 +104,12 @@ def 비목추정(조제목: str | None, 본문: str, vocab: dict[str, tuple[str,
            *, 제목만: bool = False) -> str | None:
     """조문 하나가 어느 비목의 규정인가.
 
-    한국 규정문은 비목을 조 제목에 그대로 쓴다 — 제목이 1순위, 본문은 보조다.
-    긴 표기부터 맞춰야 '기계장치' 가 '기계장치비' 를 먼저 삼키지 않는다.
+    한국 규정문은 비목을 조 제목에 그대로 쓴다. 제목이 1순위, 본문은 보조다.
+    긴 표기부터 맞춰야 '기계장치' 가 '기계장치비' 를 먼저 가져가지 않는다.
     못 고르면 None. 억지로 고르지 않는다 — 틀린 비목은 없는 것보다 나쁘다.
 
-    `제목만=True` 는 본문 적중의 오탐을 걸러내려는 것 — 본문에 비목명이 스쳐도
-    그 조문이 실제로는 다른 주제(예: 자산관리)일 수 있다. `l3룰()` 이 제목 패스를
-    먼저 돌려 이 오탐을 걸러낸다.
+    `제목만=True` 는 본문 적중의 오탐을 거른다. 본문에 비목명이 지나가도 실제 주제는
+    다를 수 있다(예: 자산관리). `l3룰()` 이 제목 패스를 먼저 돌린다.
     """
     후보: list[tuple[int, str]] = []
     for 비목, 별칭들 in vocab.items():
@@ -134,10 +131,10 @@ def 비목추정(조제목: str | None, 본문: str, vocab: dict[str, tuple[str,
 # ════════════════════════════════════════════════════════════════════════════
 # 3. 조문 → 룰 추출
 # ════════════════════════════════════════════════════════════════════════════
-# 이건 파서가 아니라 분류기다. 값을 지어내지 않는다.
+# 파서가 아니라 분류기다. 값을 지어내지 않는다.
 # 분류 순서가 곧 안전 순서다: 참조만 → 불가 → 조건부 → 가능 → (포기).
-# '가능' 이 마지막인 이유 — 어느 패턴에도 안 걸린 조문을 '가능' 으로 떨어뜨리면
-# L3 단독 "가능" 이 만들어진다. 분류 실패는 None 을 돌려 미규정과 같은 취급
+# '가능' 이 마지막인 이유: 어느 패턴에도 안 걸린 조문을 '가능' 으로 분류하면
+# L3 단독 '가능' 이 만들어진다. 분류 실패는 None 을 돌려 미규정과 같은 취급
 # (need_upper=True)으로 보낸다.
 
 _불가 = re.compile(
@@ -148,7 +145,7 @@ _조건부 = re.compile(
     r"초과할\s*수\s*없|하여야\s*한다|받아야\s*한다|제출하여야|다만|경우에\s*한(하|정)")
 _가능 = re.compile(r"할\s*수\s*있다|집행할\s*수\s*있다|인정한다|가능하다|계상할\s*수\s*있다")
 
-# "…에 따른다 / 준용한다 / 의한다" 로만 끝나는 조문 = 게이팅 (2) 참조만
+# "…에 따른다 / 준용한다 / 의한다" 로만 끝나는 조문 = l3_게이팅 의 '참조만' 분기
 _참조서술 = re.compile(r"(따른다|준용한다|의한다|따라\s*집행한다|정하는\s*바에\s*따)")
 
 # 상위 규범 인용.  「법령명」 제N조  /  지침 제N조  /  관리기준 제N조
@@ -157,7 +154,6 @@ _참조표기 = re.compile(
     r"(?P<약칭>지침|운영요령|관리기준|세부관리기준|통합관리지침)?\s*"
     r"제\s*(?P<조>\d+)\s*조(?:\s*의\s*(?P<의>\d+))?")
 
-_금액 = re.compile(r"(?P<수>[\d,]+(?:\.\d+)?)\s*(?P<단위>억원|천만원|백만원|만원|원)")
 _비율 = re.compile(r"(?P<수>\d+(?:\.\d+)?)\s*(?:%|퍼센트|백분율)")
 
 _단위배수 = {"억원": 100_000_000, "천만원": 10_000_000, "백만원": 1_000_000,
@@ -171,7 +167,7 @@ def _문장들(본문: str) -> list[str]:
 def _참조만인가(본문: str) -> bool:
     """모든 실질 문장이 '상위에 따른다' 뿐인가.
 
-    한 문장이라도 자체 제약(불가/조건/가능)을 담고 있으면 참조만이 아니다 —
+    한 문장이라도 자체 제약(불가/조건/가능)을 담고 있으면 참조만이 아니다.
     그때는 L3 가 실제로 무언가를 정한 것이고, 게이팅 결론이 달라진다.
     """
     실질 = [s for s in _문장들(본문)
@@ -190,7 +186,7 @@ def _참조만인가(본문: str) -> bool:
 def _한도추출(본문: str) -> tuple[str | None, Decimal | None, str | None]:
     """금액/비율 한도. 확실할 때만 채우고 아니면 전부 None.
 
-    "1인 1일 30만원" 처럼 대상 수식이 붙은 것만 잡는다. 본문에 떠도는 숫자
+    "1인 1일 30만원" 처럼 대상 수식이 붙은 것만 잡는다. 본문의 다른 숫자
     ("제38조", "2년 이내")를 한도로 오인하면 금액 비교가 통째로 틀린다.
     """
     m = re.search(r"(?P<대상>1인\s*1일|1인당|1인|월|연간|건당|총액의)?\s*"
@@ -220,7 +216,7 @@ def _추출(본문: str) -> dict[str, Any] | None:
     elif _가능.search(본문):
         허용 = "가능"
     else:
-        return None                      # '가능' 으로 떨어뜨리지 않는다
+        return None                      # '가능' 으로 분류하지 않는다
 
     유형, 값, 단위 = _한도추출(본문)
     사전승인 = bool(re.search(r"사전\s*(승인|심의|검토|보고)|승인을\s*(받|얻)", 본문))
@@ -237,8 +233,7 @@ def _추출(본문: str) -> dict[str, Any] | None:
         "허용": 허용,
         "참조만": 참조만,
         "사전승인": 사전승인,
-        # 리스트 계약 — `corpus.rules.사전승인_조건` 이 TEXT[] 라 L3 도 맞춘다.
-        # 지금은 늘 0개 또는 1개(첫 매칭 문장만 쓰므로).
+        # corpus.rules.사전승인_조건 이 TEXT[] 라 L3 도 리스트로 맞춘다(첫 매칭 문장 하나).
         "사전승인_조건": [조건] if 조건 else [],
         "한도_유형": 유형, "한도_값": 값, "한도_단위": 단위,
         "증빙": sorted(set(증빙)),
@@ -246,7 +241,7 @@ def _추출(본문: str) -> dict[str, Any] | None:
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# 4. 상위 참조 해소 — 게이팅 (2) 의 seed_refs
+# 4. 상위 참조 해소 — '참조만' 분기의 seed_refs
 # ════════════════════════════════════════════════════════════════════════════
 _약칭_문서 = {
     "지침": "통합관리지침", "통합관리지침": "통합관리지침",
@@ -256,7 +251,7 @@ _약칭_문서 = {
 
 
 def _상위문서해소(cur, 법령: str | None, 약칭: str | None) -> str | None:
-    """참조 표기 → `corpus.documents.doc_id`. 못 찾으면 None(=끊긴 참조)."""
+    """참조 표기 → `corpus.documents.doc_id`. 못 찾으면 None(끊긴 참조)."""
     키 = None
     if 법령:
         키 = 법령
@@ -265,7 +260,7 @@ def _상위문서해소(cur, 법령: str | None, 약칭: str | None) -> str | No
     if not 키:
         return None
     # doc_id 는 밑줄로 이어지고 인용 표기는 공백이다. 양쪽에서 구분자를 다
-    # 지우고 맞춰야 붙는다 — 안 그러면 전건 끊긴 참조가 되어 seed_refs 가 빈다.
+    # 지우고 맞춰야 붙는다 — 안 그러면 전부 끊긴 참조가 되어 seed_refs 가 빈다.
     핵심 = re.sub(r"[\s_·\-()]+", "", 키)
     for 패턴 in (f"%{핵심}%", f"%{핵심[:10]}%"):
         row = cur.execute(
@@ -280,13 +275,14 @@ def _상위문서해소(cur, 법령: str | None, 약칭: str | None) -> str | No
 
 
 def 상위참조(cur, 본문: str) -> list[dict[str, Any]]:
-    """조문이 인용한 상위 규범을 (해소 여부와 함께) 뽑는다.
+    """조문이 인용한 상위 규범을 해소 여부와 함께 뽑는다.
 
-    조 번호가 지정된 참조만 낸다 — 조 없는 인용을 문서 통째로 펴면 근로기준법
-    같은 큰 문서가 통째로 딸려온다. `_참조표기` 가 `제N조` 를 강제한다.
+    반환: [{표기, doc_id(해소 시), 조번호, 해소, 보정}]. '보정' 은 출력 모양을 유지하려고
+    두는 키로 항상 None 이다. 조 번호가 지정된 참조만 낸다 — 조 없는 인용을 문서 전체로
+    펼치면 근로기준법 같은 큰 문서가 통째로 딸려온다. `_참조표기` 가 `제N조` 를 강제한다.
     """
     out: list[dict[str, Any]] = []
-    본 = set()
+    처리한_표기 = set()
     for m in _참조표기.finditer(본문):
         조번호숫자 = str(int(m.group("조")))
         조 = f"제{조번호숫자}조" + (f"의{int(m.group('의'))}" if m.group("의") else "")
@@ -295,32 +291,30 @@ def 상위참조(cur, 본문: str) -> list[dict[str, Any]]:
             continue                       # "제3조" 처럼 자기 규정 내부 참조 — 상위 아님
         표기 = (f"「{법령}」 " if 법령 else "") + (약칭 or "") + f" {조}"
         표기 = re.sub(r"\s+", " ", 표기).strip()
-        if 표기 in 본:
+        if 표기 in 처리한_표기:
             continue
-        본.add(표기)
+        처리한_표기.add(표기)
         doc_id = _상위문서해소(cur, 법령, 약칭)
-        해소, 보정 = False, None
+        해소 = False
         if doc_id:
             해소 = bool(cur.execute(
                 "SELECT 1 FROM corpus.doc_articles "
                 " WHERE doc_id=%s AND 조번호=%s AND NOT coalesce(삭제,false)",
                 (doc_id, 조)).fetchone())
         out.append({"표기": 표기, "doc_id": doc_id if 해소 else None,
-                    "조번호": 조, "해소": 해소, "보정": 보정})
+                    "조번호": 조, "해소": 해소, "보정": None})
     return out
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# 5. 동결 인터페이스
+# 5. 공개 함수 (판정 파이프라인이 호출)
 # ════════════════════════════════════════════════════════════════════════════
 def _org정규화(org_id) -> str | None:
-    """org_id 를 UUID 로 확정한다. 아니면 None(= 게스트 · L3 없음).
+    """org_id 를 UUID 문자열로 확정한다. 아니면 None(게스트, L3 없음).
 
-    이게 없으면 잘못된 org_id 가 판정 전체를 무너뜨린다 — `org_id` 는
-    `WHERE a.org_id = %s` 로 UUID 컬럼에 바로 들어가는데, 잘못된 문자열이 오면
-    Postgres 트랜잭션이 통째로 abort 되어 같은 커서로 하는 이후 모든 조회가
-    줄줄이 실패한다. 잘못된 org_id 는 "L3 가 없다"(= 상위를 본다)로 닫는다 —
-    판정을 죽이지 않는다.
+    잘못된 문자열이 UUID 컬럼 비교에 들어가면 Postgres 트랜잭션이 abort 되어 같은 커서의
+    이후 조회가 모두 실패한다. 잘못된 org_id 는 "L3 가 없다"(상위를 본다)로 처리하고
+    판정은 계속한다.
     """
     if org_id is None:
         return None
@@ -330,13 +324,12 @@ def _org정규화(org_id) -> str | None:
     try:
         return str(uuid.UUID(s))
     except (ValueError, AttributeError, TypeError):
-        # 무음으로 삼키지 않는다 — 게스트(None)와 잘못된 값은 다른 사건이다
-        print(f"   ⚠️ org_id 가 UUID 가 아니다 — L3 없이 진행한다: {org_id!r}",
-              file=sys.stderr)
+        # 게스트(None)와 잘못된 값은 다른 경우라 경고를 남긴다
+        _log.warning("org_id 가 UUID 가 아니다 — L3 없이 진행한다: %r", org_id)
         return None
 
 
-def _org_컨텍스트(cur, org_id: str) -> None:
+def _rls_org_설정(cur, org_id: str) -> None:
     """RLS 정책이 읽는 GUC app.org_id 를 트랜잭션 범위로 설정한다.
 
     앱은 RLS 가 적용되는 비특권 롤(suddoe_app)로 접속하므로 이 값이 없으면 0행이다.
@@ -345,64 +338,51 @@ def _org_컨텍스트(cur, org_id: str) -> None:
     cur.execute("SELECT set_config('app.org_id', %s, true)", (str(org_id),))
 
 
-def 로드(cur, org_id: str, 사업명: str | None = None,
-       비목: str | None = None) -> list[dict[str, Any]]:
-    """현재 기관의 L3 조문을 검색 없이 통째로 돌려준다.
+def _조문들(cur, org_id: str) -> list[dict[str, Any]]:
+    """기관의 active L3 문서에서 사업비 관련 장의 조문을 조번호 순으로 읽는다."""
+    # set_config(..., true) 는 트랜잭션 범위다. autocommit 커넥션에서 따로 실행하면
+    # 다음 SELECT 전에 GUC 가 사라져 RLS 정책이 0행을 돌려준다. 같은 트랜잭션
+    # (autocommit 이면 BEGIN/COMMIT, 아니면 SAVEPOINT) 안에서 함께 실행한다.
+    with cur.connection.transaction():
+        _rls_org_설정(cur, org_id)
+        rows = cur.execute(
+            "SELECT a.article_id, a.조번호, a.조제목, a.본문, a.장, "
+            "       d.doc_id, d.원본파일명, d.출처, d.extraction, d.파싱품질 "
+            "  FROM tenant.l3_articles a "
+            "  JOIN tenant.l3_documents d ON d.doc_id = a.doc_id "
+            " WHERE a.org_id = %s AND d.org_id = %s AND d.status='active' "
+            " ORDER BY a.조번호_int NULLS LAST, a.조번호", (org_id, org_id)).fetchall()
+    keys = ("article_id", "조번호", "조제목", "본문", "장",
+            "doc_id", "원본파일명", "출처", "extraction", "파싱품질")
+    return [dict(zip(keys, r)) for r in rows if 사업비관련장(r[4])]
 
-    사업비 관련 장만. `status='active'` 문서만 — `superseded` 를 같이 실으면
-    구판 조문이 컨텍스트에 섞여 개정 전 한도를 인용한다.
 
-    비목 재정렬 — `SUDDOE_L3_비목순` 이 켜져 있으면 `비목` 에 걸리는 조를 앞으로
-    옮긴다. 떨어뜨리지 않는다, 순서만 바꾼다 — 조제목이 아예 없는 org 도 있어서
-    제목 적중만 믿고 좁히면 그 org 의 룰이 통째로 사라질 수 있다. 기본값이 off
-    인 이유는 이 재정렬이 판정에 들어가는 조 순서를 바꾸므로 판정 결과가
-    달라질 수 있어서다.
+def 로드(cur, org_id: str, 비목: str | None = None) -> list[dict[str, Any]]:
+    """현재 기관의 L3 조문을 검색 없이 전부 돌려준다. org_id 가 없거나 잘못되면 [].
+
+    사업비 관련 장, status='active' 문서만 읽는다 — superseded 문서를 함께 넣으면
+    구판 조문이 컨텍스트에 섞여 개정 전 한도를 인용한다. `비목` 은 호출 호환용
+    인자로 지금은 결과에 영향을 주지 않는다.
     """
     org_id = _org정규화(org_id)
     if org_id is None:
         return []
-    조문 = [{k: a[k] for k in ("article_id", "조번호", "조제목", "본문")}
-           for a in _조문들(cur, org_id)]
-    return _비목순_재정렬(cur, 조문, 비목)
-
-
-def _비목순_재정렬(cur, 조문: list[dict[str, Any]],
-               비목: str | None) -> list[dict[str, Any]]:
-    """비목에 걸리는 조를 앞으로. 한 건도 안 버린다 (위 docstring 참조).
-
-    안정 정렬이라 그룹 안의 순서(조번호 순)는 그대로다. 스위치가 꺼져 있거나
-    비목이 없으면 입력 리스트를 그대로 돌려준다.
-    """
-    if (os.environ.get("SUDDOE_L3_ITEM_ORDER") or os.environ.get("SUDDOE_L3_비목순", "off")) != "on" or not 비목 or not 조문:
-        return 조문
-    try:
-        vocab = 비목어휘(cur)
-    except Exception:                                    # noqa: BLE001
-        return 조문            # 어휘를 못 읽으면 재정렬을 포기한다. 판정은 안 죽인다
-    걸림 = [a for a in 조문
-           if 비목추정(a.get("조제목"), a.get("본문") or "", vocab) == 비목]
-    if not 걸림:
-        return 조문
-    _id = {id(a) for a in 걸림}
-    return 걸림 + [a for a in 조문 if id(a) not in _id]
+    return [{k: a[k] for k in ("article_id", "조번호", "조제목", "본문")}
+            for a in _조문들(cur, org_id)]
 
 
 def l3룰(cur, org_id: str, 비목: str) -> dict[str, Any] | None:
-    """현재 기관 L3 에 이 비목 규정이 있는가.
+    """현재 기관 L3 에 이 비목 규정이 있으면 룰 dict, 없으면 None.
 
-    반환 dict 는 `rule_lookup.l3_게이팅()` 이 그대로 먹는다:
-      `참조만` True            → (2) 상위 필요 + seed_refs
-      `허용` 이 불가/조건부     → (3) L3 로 닫힌다
-      `허용` 이 가능           → (4) 상위 확인 강제
-    None 은 (1) 미규정 = 상위 필요.
+    `rule_lookup.l3_게이팅()` 이 반환값을 그대로 읽는다:
+      `참조만` True           → 상위 필요 + seed_refs
+      `허용` 이 불가/조건부    → L3 로 결정
+      `허용` 이 가능          → 상위 확인 강제
+    None 은 미규정(상위 필요)이다. 조문은 있는데 분류가 안 되는 경우도 None 이다 —
+    '가능' 으로 추정하지 않는다. 진단은 `미분류(cur, org_id)` 로 따로 본다.
 
-    조문은 있는데 분류가 안 되는 경우도 None 이다 — '가능' 으로 추정하지 않는다.
-    진단은 `미분류(cur, org_id)` 로 따로 본다.
-
-    여러 조가 같은 비목에 걸리면 전부 싣는다. 판정 우선순위는 그대로 둔다 —
-    제목 적중을 본문 적중보다 앞에 모아 그중 첫 번째를 기준선으로 쓴다
-    (`_룰조립()`). 2개 이상이면 `_룰조립_다중()` 이 나머지의 근거·사전승인_조건·
-    증빙만 더한다(판정 자체는 안 바꾼다).
+    여러 조가 같은 비목에 걸리면 모두 반영한다. 제목 적중을 본문 적중보다 앞에 모으고
+    그중 첫 번째의 판정 값을 쓴다(`_룰조립()`).
     """
     org_id = _org정규화(org_id)
     if org_id is None or not 비목:
@@ -410,8 +390,7 @@ def l3룰(cur, org_id: str, 비목: str) -> dict[str, Any] | None:
     vocab = 비목어휘(cur)
     조문 = _조문들(cur, org_id)
     # 제목 패스 결과를 먼저 모으고, 본문 패스는 제목 패스가 못 잡은 조문에 한해
-    # 이어서 모은다 — 둘 다 항상 돈다. matches[0]이 늘 제목 적중이라 판정
-    # 우선순위(아래 `_룰조립_다중` 참조)가 바뀌지 않는다.
+    # 이어서 모은다. matches[0] 이 늘 제목 적중이라 판정 우선순위가 바뀌지 않는다.
     matches: list[tuple[dict, dict]] = []
     seen: set[int] = set()
     for 제목만 in (True, False):
@@ -427,96 +406,63 @@ def l3룰(cur, org_id: str, 비목: str) -> dict[str, Any] | None:
             seen.add(a["article_id"])
     if not matches:
         return None
-    if len(matches) == 1:
-        a, 조각 = matches[0]
-        return _룰조립(cur, a, 비목, 조각)
-    return _룰조립_다중(cur, 비목, matches)
+    return _룰조립(cur, 비목, matches)
 
 
-def _조문들(cur, org_id: str) -> list[dict[str, Any]]:
-    # set_config(..., true) 는 트랜잭션 범위다. autocommit 커넥션에서 따로 실행하면
-    # 다음 SELECT 전에 GUC 가 사라져 RLS 정책이 0행을 돌려준다. 같은 트랜잭션
-    # (autocommit 이면 BEGIN/COMMIT, 아니면 SAVEPOINT) 안에서 함께 실행한다.
-    with cur.connection.transaction():
-        _org_컨텍스트(cur, org_id)
-        rows = cur.execute(
-            "SELECT a.article_id, a.조번호, a.조제목, a.본문, a.장, "
-            "       d.doc_id, d.원본파일명, d.출처, d.extraction, d.파싱품질 "
-            "  FROM tenant.l3_articles a "
-            "  JOIN tenant.l3_documents d ON d.doc_id = a.doc_id "
-            " WHERE a.org_id = %s AND d.org_id = %s AND d.status='active' "
-            " ORDER BY a.조번호_int NULLS LAST, a.조번호", (org_id, org_id)).fetchall()
-    keys = ("article_id", "조번호", "조제목", "본문", "장",
-            "doc_id", "원본파일명", "출처", "extraction", "파싱품질")
-    return [dict(zip(keys, r)) for r in rows if 사업비관련장(r[4])]
+def _룰조립(cur, 비목: str, matches: list[tuple[dict, dict]]) -> dict[str, Any]:
+    """매칭된 조문들을 L3 룰 하나로 합친다. 반환 모양은 `rule_lookup._l3정규화()` 가 읽는다.
 
-
-def _룰조립(cur, a: dict, 비목: str, 조각: dict) -> dict[str, Any]:
-    refs = 상위참조(cur, a["본문"])
-    return {
-        "layer": "L3",
-        "org_id": None,                      # 호출자가 이미 안다. 넣으면 프롬프트로 샌다
-        "비목": 비목,
-        **조각,
-        "금지예시": [], "허용예시": [],
-        # 인용은 `tenant.l3_articles.article_id` 로 건다. `corpus.doc_articles` 가
-        # 아니다 — 인용 검증이 L1·L2 는 chunk_id, L3 는 article_id 로 갈라 확인한다.
-        "근거": [{"article_id": a["article_id"], "doc_id": str(a["doc_id"]),
-                 "조번호": a["조번호"], "조제목": a["조제목"], "layer": "L3"}],
-        "seed_refs": [r for r in refs if r["해소"]],
-        "dangling": [r["표기"] for r in refs if not r["해소"]],
-        # 기계가 뽑은 룰이다. 사람이 검수한 적 없다 — `verified=false` 면 이 룰
-        # 단독으로 "가능" 판정이 안 나간다.
-        "verified": False,
-        "검수자": None,
-        "출처": a["출처"],
-        "extraction": a["extraction"],
-        "원본파일명": a["원본파일명"],
-    }
-
-
-def _룰조립_다중(cur, 비목: str, matches: list[tuple[dict, dict]]) -> dict[str, Any]:
-    """같은 비목에 조가 여럿 걸릴 때의 병합.
-
-    판정(허용·참조만·사전승인·한도)은 바꾸지 않는다 — 스칼라 값을 여러 조에서
-    골라 새로 계산하면 그 자체가 새 판정 로직이 되어 버린다. 첫 매치
-    (`_룰조립()`)를 그대로 기준선으로 쓰고, 나머지 매치에서는 목록형 부가정보
-    (근거·사전승인_조건·증빙·seed_refs·dangling)만 더한다.
-
-    `_룰조립()` (단일 조)과 필드 모양이 같아야 `_l3정규화()`·호출부가 안 깨진다.
+    판정 값(허용·참조만·사전승인·한도)은 첫 매치에서만 가져온다 — 여러 조에서 스칼라를
+    새로 계산하면 그 자체가 새 판정 로직이 된다. 근거·seed_refs·dangling·사전승인_조건·
+    증빙 같은 목록만 모든 매치에서 모은다.
     """
-    base = _룰조립(cur, matches[0][0], 비목, matches[0][1])
-    if len(matches) == 1:
-        return base
-
-    근거 = list(base["근거"])
-    seed_refs = list(base["seed_refs"])
-    dangling = list(base["dangling"])
-    사전승인_조건 = list(base["사전승인_조건"])
-    증빙 = list(base["증빙"])
-
-    for a, 조각 in matches[1:]:
+    첫조문, 첫조각 = matches[0]
+    근거: list[dict] = []
+    seed_refs: list[dict] = []
+    dangling: list[str] = []
+    사전승인_조건: list[str] = []
+    증빙: list[str] = []
+    for a, 조각 in matches:
         refs = 상위참조(cur, a["본문"])
+        # 인용은 tenant.l3_articles.article_id 로 건다. 인용 검증이 L1·L2 는 chunk_id,
+        # L3 는 article_id 로 나눠 확인한다.
         근거.append({"article_id": a["article_id"], "doc_id": str(a["doc_id"]),
                      "조번호": a["조번호"], "조제목": a["조제목"], "layer": "L3"})
         seed_refs.extend(r for r in refs if r["해소"])
         dangling.extend(r["표기"] for r in refs if not r["해소"])
         사전승인_조건.extend(조각.get("사전승인_조건") or [])
         증빙.extend(조각.get("증빙") or [])
-
-    base["근거"] = 근거
-    base["seed_refs"] = list({(r.get("doc_id"), r.get("조번호")): r for r in seed_refs}.values())
-    base["dangling"] = sorted(set(dangling))
-    base["사전승인_조건"] = list(dict.fromkeys(사전승인_조건))   # 순서 보존 중복제거
-    base["증빙"] = sorted(set(증빙))
-    return base
+    if len(matches) > 1:
+        # 여러 조에서 모은 목록만 중복을 제거한다. 단일 매치는 상위참조 순서를 그대로 둔다.
+        seed_refs = list({(r.get("doc_id"), r.get("조번호")): r for r in seed_refs}.values())
+        dangling = sorted(set(dangling))
+        사전승인_조건 = list(dict.fromkeys(사전승인_조건))   # 순서 보존 중복 제거
+    return {
+        "layer": "L3",
+        "org_id": None,                      # 호출자가 이미 안다. 넣으면 프롬프트에 노출된다
+        "비목": 비목,
+        **첫조각,
+        "사전승인_조건": 사전승인_조건,
+        "증빙": sorted(set(증빙)),
+        "금지예시": [], "허용예시": [],
+        "근거": 근거,
+        "seed_refs": seed_refs,
+        "dangling": dangling,
+        # 기계가 뽑은 룰이고 사람이 검수하지 않았다. verified=false 면 이 룰
+        # 단독으로 '가능' 판정이 나가지 않는다.
+        "verified": False,
+        "검수자": None,
+        "출처": 첫조문["출처"],
+        "extraction": 첫조문["extraction"],
+        "원본파일명": 첫조문["원본파일명"],
+    }
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# 6. 진단 — 무음 결손을 보이게 한다
+# 6. 진단 (CLI) — 드러나지 않는 누락을 보이게 한다
 # ════════════════════════════════════════════════════════════════════════════
 def 미분류(cur, org_id: str) -> list[dict[str, Any]]:
-    """비목은 잡혔는데 `_추출` 이 포기한 조문. 파서 개선의 1순위 재료다."""
+    """비목은 잡혔는데 `_추출` 이 포기한 조문. 분류 규칙을 고칠 때 먼저 볼 목록이다."""
     if _org정규화(org_id) is None:
         return []
     vocab = 비목어휘(cur)
@@ -539,69 +485,28 @@ def 문서요약(cur, org_id: str) -> list[dict[str, Any]]:
     return [dict(zip(keys, r)) for r in rows]
 
 
-class 기관모호(ValueError):
-    """부분 이름이 여러 기관에 걸린다. 후보를 담는다."""
-
-    def __init__(self, 기관: str, 후보: list[tuple[str, str]]):
-        self.기관, self.후보 = 기관, 후보
-        super().__init__(f"'{기관}' 이 {len(후보)}곳에 걸린다")
-
-
-def org해소(cur, 기관: str) -> tuple[str, str] | None:
-    """org_id 또는 기관명으로 기관을 찾는다 (CLI 편의).
-
-    부분 일치가 여러 곳에 걸리면 하나를 임의로 고르지 않는다 — 에러도 경고도
-    없이 엉뚱한 기관의 L3 규정이 로드되는 게 가장 나쁘다. 그래서 세 단을 갈랐다:
-      ① org_id 또는 기관명 완전 일치 — 하나뿐이다. 그대로 돌려준다
-      ② 부분 일치가 딱 하나 — 그것이다
-      ③ 부분 일치가 여럿 — 고르지 않고 `기관모호` 로 던진다. 사용자가 좁혀야 한다
-    """
-    row = cur.execute(
-        "SELECT org_id, 기관명 FROM tenant.orgs "
-        " WHERE org_id::text = %s OR 기관명 = %s",
-        (기관, 기관)).fetchone()
-    if row:
-        return (str(row[0]), row[1])
-
-    후보 = cur.execute(
-        "SELECT org_id, 기관명 FROM tenant.orgs WHERE 기관명 ILIKE %s "
-        ' ORDER BY "기관명" LIMIT 21', (f"%{기관}%",)).fetchall()
-    if not 후보:
-        return None
-    if len(후보) == 1:
-        return (str(후보[0][0]), 후보[0][1])
-    raise 기관모호(기관, [(str(r[0]), r[1]) for r in 후보])
-
-
 def main() -> None:
     if (sys.stdout.encoding or "").lower().replace("-", "") != "utf8":
         sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-    ap = argparse.ArgumentParser(description="L3 로드 점검")
-    ap.add_argument("--org", required=True, help="org_id 또는 기관명 일부")
-    ap.add_argument("--사업명", default=None)
+    ap = argparse.ArgumentParser(
+        description="L3 로드 점검. 문서 요약까지 보려면 SUDDOE_DSN 이 테이블 소유자 롤이어야 한다.")
+    ap.add_argument("--org", required=True, help="org_id (UUID)")
     a = ap.parse_args()
+    org_id = _org정규화(a.org)
+    if org_id is None:
+        sys.exit(f"org_id 가 UUID 가 아니다: {a.org}")
 
     with db.connect() as conn, conn.cursor() as cur:
-        try:
-            찾음 = org해소(cur, a.org)
-        except 기관모호 as e:
-            # 하나를 골라주지 않는다. 고르면 사용자는 찾았다고 믿는다.
-            print(f"🔴 '{e.기관}' 이 {len(e.후보)}곳에 걸린다 — 더 좁혀라")
-            for oid, 이름 in e.후보[:20]:
-                print(f"     {이름}   {oid}")
-            if len(e.후보) > 20:
-                print("     … (20곳까지만 보인다)")
-            sys.exit(1)
-        if not 찾음:
-            print(f"🔴 기관을 못 찾았다: {a.org}")
-            sys.exit(1)
-        org_id, 기관명 = 찾음
-        print(f"기관 {기관명}  ({org_id})")
+        기관 = cur.execute("SELECT 기관명 FROM tenant.orgs WHERE org_id = %s",
+                         (org_id,)).fetchone()
+        if not 기관:
+            sys.exit(f"기관을 찾지 못했다: {org_id}")
+        print(f"기관 {기관[0]}  ({org_id})")
         for d in 문서요약(cur, org_id):
             print(f"   문서 {d['원본파일명']}  {d['version']}  {d['status']} "
                   f"· 출처={d['출처']} · {d['extraction']} · dangling {d['dangling수']}")
 
-        조문 = 로드(cur, org_id, a.사업명)
+        조문 = 로드(cur, org_id)
         전체 = cur.execute(
             "SELECT count(*) FROM tenant.l3_articles WHERE org_id=%s", (org_id,)).fetchone()[0]
         print(f"\n로드 {len(조문)}조 (전체 {전체}조 · 장 필터로 {전체-len(조문)}조 제외)")
@@ -615,15 +520,15 @@ def main() -> None:
                 print(f"   {비목:<24} —  (미규정 → need_upper=True)")
             else:
                 한도 = (f" · 한도 {r['한도_값']}{r['한도_단위']}" if r["한도_값"] else "")
-                갈래 = "참조만" if r["참조만"] else r["허용"]
-                # 근거 전부를 콤마로 나열한다 — 근거[0] 만 찍으면 다중매치가 안 보인다.
+                분류 = "참조만" if r["참조만"] else r["허용"]
+                # 근거 전부를 나열한다 — 근거[0] 만 찍으면 여러 조가 매칭된 경우가 안 보인다.
                 조번호들 = ",".join(g["조번호"] for g in r["근거"])
-                print(f"   {비목:<24} {갈래}{한도} · {조번호들}"
+                print(f"   {비목:<24} {분류}{한도} · {조번호들}"
                       + (f" · seed_refs {len(r['seed_refs'])}" if r["seed_refs"] else "")
-                      + (f" · 🔴dangling {r['dangling']}" if r["dangling"] else ""))
+                      + (f" · dangling {r['dangling']}" if r["dangling"] else ""))
 
         미 = 미분류(cur, org_id)
-        print(f"\n미분류 조문: {len(미)}" + ("  ⚠️ 파서 개선 대상" if 미 else ""))
+        print(f"\n미분류 조문: {len(미)}" + ("  (분류 규칙 개선 대상)" if 미 else ""))
         for m in 미:
             print("   ", m)
 

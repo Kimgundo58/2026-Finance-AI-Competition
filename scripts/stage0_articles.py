@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
-"""Stage 0-d : 평문을 조(條) 단위로 재조립하고 검증 통과 조건 V1~V6 을 적용한다.
+"""추출한 평문을 조(條) 단위로 나누고 분해 품질을 검증한다.
 
-전략은 jo_titled → outline_numbered → jo_bare/jang → roman_chapter → paragraph 순으로 시도한다.
+l3_parse(L3 업로드)와 코퍼스 적재가 stage0_extract 다음 단계로 부른다. 공개 함수:
+split_articles(text, page_offsets) -> (조 리스트, 전략 이름), validate(arts, strategy) -> {ok, quality, flags},
+is_deleted(art), sanitize(t). 전략은 jo_titled → outline_numbered → jo_bare → jang →
+roman_chapter → paragraph 순으로 시도한다. 불변식: 조 0개면 validate 의 ok 가 False 다.
 """
 from __future__ import annotations
 import re
-
-import table_splice  # noqa: E402  오염된 [참고N]/[붙임N] 표 섹션을 _tables.json 으로 갈아끼운다
 
 # 1순위: 제N조(제목) — 법령·지침·규정·규칙
 RE_JO = re.compile(r"제\s*(\d+)\s*조(?:\s*의\s*(\d+))?\s*\(([^)\n]{1,50})\)")
@@ -173,7 +174,7 @@ def _outline_headings(body: str) -> list[re.Match]:
     out, last = [], 0
     for m in RE_OUTLINE.finditer(body):
         n = int(m.group(1))
-        if last < n <= last + 3:   # 결번 허용 3 — 조판 사고로 표제 하나를 놓쳐도 회복한다
+        if last < n <= last + 3:   # 결번 허용 3 — 조판 오류로 표제 하나를 놓쳐도 회복한다
             out.append(m)
             last = n
     return out
@@ -207,18 +208,13 @@ def _roman_chapters(text: str, page_offsets: dict[int, int]) -> list[dict]:
 _단락_최소 = 100
 
 
-def split_articles(text: str, page_offsets: dict[int, int] | None = None,
-                    doc_id: str | None = None) -> tuple[list[dict], str]:
-    """반환: (조 리스트, 사용한 전략 이름)
-
-    `doc_id` 를 주면 [참고N]/[붙임N] 조 중 오염된 것만 `_tables.json` 표로 갈아끼운다
-    (`table_splice.붙임_교체()`). 안 주면 원문 그대로다.
-    """
+def split_articles(text: str, page_offsets: dict[int, int] | None = None
+                   ) -> tuple[list[dict], str]:
+    """반환: (조 리스트, 사용한 전략 이름)"""
     text = _clean(text)
     page_offsets = dict(sorted((page_offsets or {}).items()))
 
     본칙, 부칙, 붙임들, base = _cut_sections(text)
-    붙임들 = table_splice.붙임_교체(doc_id, 붙임들)
 
     # ── 1순위: 제N조(제목) ──────────────────────────────────────
     ms = [m for m in RE_JO.finditer(본칙) if not _is_citation(본칙, m.start(), m.end())]
@@ -256,7 +252,7 @@ def split_articles(text: str, page_offsets: dict[int, int] | None = None,
         if arts:
             return arts, "jang"
 
-    # ── 2.5순위: 로마숫자 장 — 앞 전략이 하나도 성립하지 않았을 때만 시도한다 ──
+    # ── 2.5순위: 로마숫자 장. 앞 전략이 하나도 성립하지 않았을 때만 시도한다 ──
     romans = _roman_chapters(text, page_offsets)
     if romans:
         return romans, "roman_chapter"
@@ -369,7 +365,7 @@ def _build(text, ms, page_offsets, titled: bool, base: int = 0) -> list[dict]:
     return arts
 
 
-# ── 검증 통과 조건 V1~V6 ───────────────────────────────────────────
+# ── 검증 (V1 조번호 단조, V2 조 개수, V3 빈 조 비율) ─────────────────────
 # 폐지된 조·별표·서식. 법령 XML 은 지우지 않고 자리만 남긴다.
 #   `제11조 삭제 <2003.8.26>` · `[별표 2의2] 삭제 <2021.3.16>` · `[별지 제9호서식] 삭제 <1996.3.30>`
 # 조 형태만 잡으면 별표·서식 폐지분이 빈 조로 남아 V3 를 오염시킨다.
@@ -380,12 +376,12 @@ RE_DELETED = re.compile(
 
 
 def is_deleted(art: dict) -> bool:
-    """폐지 조문인가. 빈 조(추출 실패)와 구분한다 — 폐지 조는 판정 인덱스에 넣지 않는다."""
+    """폐지 조문인가. 빈 조(추출 실패)와 구분한다 — 폐지 조는 검색 대상에 넣지 않는다."""
     return bool(RE_DELETED.match((art.get("본문") or "").strip()))
 
 
 def validate(arts: list[dict], strategy: str) -> dict:
-    """반환: {ok, quality, flags[]}"""
+    """반환: {ok, quality, flags[]}. ok 는 조가 하나라도 있는가이고, flags 는 l3_parse 가 warn 판정에 쓴다."""
     flags = []
 
     # V2 조 개수
@@ -429,15 +425,3 @@ def validate(arts: list[dict], strategy: str) -> dict:
     ok = len(arts) > 0
     return {"ok": ok, "quality": quality, "flags": flags}
 
-
-# ── 크로스 레퍼런스 추출 (V6) ───────────────────────────────────
-RE_XREF = re.compile(r"지침\s*제\s*(\d+)\s*조(?:\s*부터\s*제\s*(\d+)\s*조)?")
-
-
-def find_xrefs(text: str) -> list[dict]:
-    out = []
-    for m in RE_XREF.finditer(text):
-        out.append({"참조문자열": m.group(0).strip(),
-                    "시작조": int(m.group(1)),
-                    "종료조": int(m.group(2)) if m.group(2) else None})
-    return out

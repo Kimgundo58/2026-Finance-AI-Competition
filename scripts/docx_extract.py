@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
-"""DOCX(OOXML WordprocessingML) 본문 텍스트 추출기 (python-docx 1.2.0).
+"""DOCX(OOXML WordprocessingML) 본문 텍스트 추출기 (python-docx).
 
-시그니처·반환형은 `hwp_extract.extract(path) -> str` · `hwpx_extract.extract(path) -> str` 과 같다.
-정체 판정은 `hwpx_extract.sniff()` 를 그대로 쓴다 — docx 도 zip 이라 판정 로직이 같다.
-문단 하나 = 한 줄, 표 셀 하나 = 한 줄. 본문 문단과 표는 `Document.iter_inner_content()` 로
-순회한다 — 따로 읽으면 등장 순서가 섞여 조문 순서가 깨진다. `.docx` 여도 zip 을 열어
-`word/document.xml` 존재로 재검증하고, 아니면 `NotDocxError` 로 실제 정체를 담아 실패한다.
+stage0_extract 가 zip 형식 중 docx 로 판정된 파일(LibreOffice 로 변환한 HWP 포함)에 쓴다.
+공개 함수: extract(path) -> str. 문단 하나 = 한 줄, 표 셀 하나 = 한 줄이다. 본문 문단과 표는
+`Document.iter_inner_content()` 로 등장 순서대로 순회한다 — 따로 읽으면 조문 순서가 깨진다.
+정체 판정은 `hwpx_extract.sniff()` 를 쓰고, docx 가 아니면 NotDocxError 로 실제 정체를 담아 실패한다.
 """
 from __future__ import annotations
 
@@ -13,7 +12,7 @@ import io
 import sys
 from pathlib import Path
 
-from hwpx_extract import sniff, NotHwpxError  # noqa: F401  (sniff 재사용)
+from hwpx_extract import sniff
 
 
 class NotDocxError(ValueError):
