@@ -166,7 +166,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/server__models__________1"
+         "$ref": "#/components/schemas/server__models__________3"
         }
        }
       }
@@ -205,7 +205,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/server__models________8"
+         "$ref": "#/components/schemas/server__models________10"
         }
        }
       }
@@ -263,7 +263,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/server__models________8"
+         "$ref": "#/components/schemas/server__models________10"
         }
        }
       }
@@ -667,7 +667,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/server__models__________2"
+         "$ref": "#/components/schemas/server__models__________4"
         }
        }
       }
@@ -934,7 +934,7 @@
      "기관·데모"
     ],
     "summary": "데모세션",
-    "description": "데모 세션(체험용 임시 기관). 계정 없이 요청마다 임시 기관을 새로 만들고 데모 토큰을 발급한다.\n\n고정 데모 기관 하나를 쓰면 여러 사용자의 지출계획이 서로 보인다. 그래서 요청마다 기관을\n새로 만들고, 보존 기간이 지난 기관은 `_낡은데모정리()` 가 지운다.\n토큰을 발급할 수 없는 설정(live 모드에 SUDDOE_DEMO_SECRET 없음)이면 DB 에 쓰기 전에 503 이다.",
+    "description": "데모 세션(체험용 임시 기관). 계정 없이 요청마다 임시 기관을 새로 만들고 데모 토큰을 발급한다.\n\n고정 데모 기관 하나를 쓰면 여러 사용자의 지출계획이 서로 보인다. 그래서 요청마다 기관을\n새로 만들고, 보존 기간이 지난 기관은 `_만료데모_정리()` 가 지운다.\n토큰을 발급할 수 없는 설정(live 모드에 SUDDOE_DEMO_SECRET 없음)이면 DB 에 쓰기 전에 503 이다.",
     "operationId": "데모세션_api_demo_session_post",
     "responses": {
      "200": {
@@ -1010,7 +1010,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/server__models__________4"
+         "$ref": "#/components/schemas/server__models__________6"
         }
        }
       }
@@ -1058,11 +1058,11 @@
   "/api/judge": {
    "post": {
     "summary": "Judge",
-    "description": "mock 모드에서는 ?목=가능|조건부|불가|판단불가 로 네 판정의 고정 응답을 받는다.\n\n판단불가는 오류가 아니라 정상 응답이다. 저장은 부수 효과라 실패해도 스트림은 완료까지 간다.",
+    "description": "mock 모드에서는 ?mock=가능|조건부|불가|판단불가 로 네 판정의 고정 응답을 받는다.\n\n판단불가는 오류가 아니라 정상 응답이다. 저장은 부수 효과라 실패해도 스트림은 완료까지 간다.",
     "operationId": "judge_api_judge_post",
     "parameters": [
      {
-      "name": "목",
+      "name": "mock",
       "in": "query",
       "required": false,
       "schema": {
@@ -1074,7 +1074,7 @@
          "type": "null"
         }
        ],
-       "title": "목"
+       "title": "Mock"
       }
      }
     ],
@@ -1083,7 +1083,7 @@
      "content": {
       "application/json": {
        "schema": {
-        "$ref": "#/components/schemas/server__models________5"
+        "$ref": "#/components/schemas/server__models________6"
        }
       }
      }
@@ -1136,7 +1136,7 @@
      "content": {
       "application/json": {
        "schema": {
-        "$ref": "#/components/schemas/___-Input"
+        "$ref": "#/components/schemas/___"
        }
       }
      },
@@ -1168,10 +1168,10 @@
     }
    }
   },
-  "/admin/cost": {
+  "/admin/status": {
    "get": {
-    "summary": "Admin Cost",
-    "operationId": "admin_cost_admin_cost_get",
+    "summary": "Admin Status",
+    "operationId": "admin_status_admin_status_get",
     "parameters": [
      {
       "name": "x-admin-token",
@@ -1198,7 +1198,7 @@
         "schema": {
          "type": "object",
          "additionalProperties": true,
-         "title": "Response Admin Cost Admin Cost Get"
+         "title": "Response Admin Status Admin Status Get"
         }
        }
       }
@@ -1855,166 +1855,6 @@
     ],
     "title": "Body_업로드_api_l3_upload_post"
    },
-   "F1": {
-    "properties": {
-     "정부지원_현금": {
-      "type": "number",
-      "title": "정부지원 현금",
-      "default": 0
-     },
-     "자기부담_현금": {
-      "type": "number",
-      "title": "자기부담 현금",
-      "default": 0
-     },
-     "협약시작일": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "협약시작일"
-     },
-     "협약종료일": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "협약종료일"
-     }
-    },
-    "type": "object",
-    "title": "F1"
-   },
-   "F3_": {
-    "properties": {
-     "비목": {
-      "type": "string",
-      "title": "비목"
-     },
-     "재원": {
-      "type": "string",
-      "enum": [
-       "정부지원",
-       "자기부담"
-      ],
-      "title": "재원"
-     },
-     "거래처": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "거래처"
-     },
-     "인력역할": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "인력역할"
-     },
-     "귀속월": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "귀속월"
-     },
-     "금액": {
-      "type": "number",
-      "title": "금액",
-      "default": 0
-     }
-    },
-    "type": "object",
-    "required": [
-     "비목",
-     "재원"
-    ],
-    "title": "F3항"
-   },
-   "F4_": {
-    "properties": {
-     "역할": {
-      "type": "string",
-      "title": "역할"
-     },
-     "고용형태": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "고용형태"
-     },
-     "타사업참여율": {
-      "type": "number",
-      "title": "타사업참여율",
-      "default": 0
-     },
-     "소속기관유형": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "소속기관유형"
-     },
-     "겸직": {
-      "type": "boolean",
-      "title": "겸직",
-      "default": false
-     }
-    },
-    "type": "object",
-    "required": [
-     "역할"
-    ],
-    "title": "F4항"
-   },
-   "F5": {
-    "properties": {
-     "친족거래": {
-      "type": "boolean",
-      "title": "친족거래",
-      "default": false
-     },
-     "전직임직원업체": {
-      "type": "boolean",
-      "title": "전직임직원업체",
-      "default": false
-     }
-    },
-    "type": "object",
-    "title": "F5",
-    "description": "특수관계 거래 여부. 판정 요청에만 쓰고 저장하지 않는다."
-   },
    "HTTPValidationError": {
     "properties": {
      "detail": {
@@ -2076,7 +1916,7 @@
        {
         "type": "string",
         "enum": [
-         "대기",
+         "pending",
          "pass",
          "warn",
          "fail"
@@ -2138,13 +1978,13 @@
       ],
       "title": "조 건수"
      },
-     "dangling": {
+     "미해결참조": {
       "items": {
        "additionalProperties": true,
        "type": "object"
       },
       "type": "array",
-      "title": "Dangling"
+      "title": "미해결참조"
      },
      "메시지": {
       "anyOf": [
@@ -2162,7 +2002,7 @@
        {
         "type": "string",
         "enum": [
-         "대기",
+         "pending",
          "pass",
          "warn",
          "fail"
@@ -2173,13 +2013,23 @@
        }
       ],
       "title": "파싱품질"
+     },
+     "dangling": {
+      "items": {
+       "additionalProperties": true,
+       "type": "object"
+      },
+      "type": "array",
+      "title": "Dangling",
+      "readOnly": true
      }
     },
     "type": "object",
     "required": [
      "doc_id",
      "파일명",
-     "확장자"
+     "확장자",
+     "dangling"
     ],
     "title": "L3업로드응답"
    },
@@ -2263,7 +2113,7 @@
       "title": "출처",
       "default": "ai"
      },
-     "코드": {
+     "code": {
       "anyOf": [
        {
         "type": "string"
@@ -2272,7 +2122,7 @@
         "type": "null"
        }
       ],
-      "title": "코드"
+      "title": "Code"
      },
      "구분": {
       "type": "string",
@@ -2345,64 +2195,50 @@
        }
       ],
       "title": "계획제목"
+     },
+     "코드": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "코드",
+      "readOnly": true
      }
     },
     "type": "object",
     "required": [
      "task_id",
-     "항목"
+     "항목",
+     "코드"
     ],
     "title": "할일"
    },
-   "___-Input": {
+   "___": {
     "properties": {
-     "f1": {
-      "$ref": "#/components/schemas/F1"
+     "협약": {
+      "$ref": "#/components/schemas/server__models________7"
      },
-     "f3": {
+     "집행내역": {
       "items": {
-       "$ref": "#/components/schemas/F3_"
+       "$ref": "#/components/schemas/server__models__________1"
       },
       "type": "array",
-      "title": "F3"
+      "title": "집행내역"
      },
-     "f4": {
+     "참여인력": {
       "items": {
-       "$ref": "#/components/schemas/F4_"
+       "$ref": "#/components/schemas/server__models__________2"
       },
       "type": "array",
-      "title": "F4"
+      "title": "참여인력"
      }
     },
     "type": "object",
     "title": "프로필"
-   },
-   "___-Output": {
-    "properties": {
-     "slug": {
-      "type": "string",
-      "title": "Slug",
-      "description": "HMAC 기반 공개 식별자. org_id 가 아니며 org_id 로 되돌릴 수 없다"
-     },
-     "기관명": {
-      "type": "string",
-      "title": "기관명"
-     },
-     "사업명": {
-      "items": {
-       "type": "string"
-      },
-      "type": "array",
-      "title": "사업명"
-     }
-    },
-    "type": "object",
-    "required": [
-     "slug",
-     "기관명",
-     "사업명"
-    ],
-    "title": "기관항"
    },
    "_____-Output": {
     "properties": {
@@ -2414,7 +2250,7 @@
       "type": "string",
       "title": "상태"
      },
-     "대체한_doc_id": {
+     "이전판_doc_id": {
       "anyOf": [
        {
         "type": "string"
@@ -2423,7 +2259,7 @@
         "type": "null"
        }
       ],
-      "title": "대체한 Doc Id"
+      "title": "이전판 Doc Id"
      },
      "retrieval_scope": {
       "type": "string",
@@ -2444,6 +2280,18 @@
       "type": "array",
       "title": "경고",
       "default": []
+     },
+     "대체한_doc_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "대체한 Doc Id",
+      "readOnly": true
      }
     },
     "type": "object",
@@ -2452,7 +2300,8 @@
      "상태",
      "retrieval_scope",
      "이전판_청크_삭제",
-     "판정캐시_삭제"
+     "판정캐시_삭제",
+     "대체한_doc_id"
     ],
     "title": "활성화응답"
    },
@@ -2468,9 +2317,9 @@
       "title": "갱신",
       "default": 0
      },
-     "보존_user": {
+     "보존_사용자": {
       "type": "integer",
-      "title": "보존 User",
+      "title": "보존 사용자",
       "default": 0
      },
      "보존_날짜수정": {
@@ -2483,13 +2332,27 @@
       "title": "코드매칭",
       "default": 0
      },
+     "코드미매칭": {
+      "type": "integer",
+      "title": "코드미매칭",
+      "default": 0
+     },
+     "보존_user": {
+      "type": "integer",
+      "title": "보존 User",
+      "readOnly": true
+     },
      "코드미상": {
       "type": "integer",
       "title": "코드미상",
-      "default": 0
+      "readOnly": true
      }
     },
     "type": "object",
+    "required": [
+     "보존_user",
+     "코드미상"
+    ],
     "title": "할일동기화응답"
    },
    "server__models________1": {
@@ -2602,339 +2465,7 @@
     ],
     "title": "계획생성"
    },
-   "server__models________2": {
-    "properties": {
-     "항목": {
-      "type": "string",
-      "title": "항목"
-     },
-     "설명": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "설명"
-     },
-     "구분": {
-      "type": "string",
-      "enum": [
-       "결제전",
-       "결제후",
-       "집행"
-      ],
-      "title": "구분",
-      "default": "결제전"
-     },
-     "due_date": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Due Date"
-     },
-     "유형": {
-      "type": "string",
-      "enum": [
-       "기타",
-       "계약",
-       "비교견적"
-      ],
-      "title": "유형",
-      "default": "기타"
-     }
-    },
-    "type": "object",
-    "required": [
-     "항목"
-    ],
-    "title": "할일생성",
-    "description": "사용자가 직접 추가하는 할일. 출처는 서버가 'user' 로 고정한다(재판정해도 바뀌지 않는다)."
-   },
-   "server__models________3": {
-    "properties": {
-     "상태": {
-      "anyOf": [
-       {
-        "type": "string",
-        "enum": [
-         "준비필요",
-         "집행예정",
-         "완료"
-        ]
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "상태"
-     },
-     "due_date": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Due Date"
-     },
-     "유형": {
-      "anyOf": [
-       {
-        "type": "string",
-        "enum": [
-         "기타",
-         "계약",
-         "비교견적"
-        ]
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "유형"
-     }
-    },
-    "type": "object",
-    "title": "할일수정",
-    "description": "할일 상태 변경·날짜 지정. 보낸 필드만 바뀐다."
-   },
-   "server__models________4": {
-    "properties": {
-     "code": {
-      "type": "string",
-      "title": "Code"
-     },
-     "값": {
-      "title": "값"
-     }
-    },
-    "type": "object",
-    "required": [
-     "code",
-     "값"
-    ],
-    "title": "답변항목",
-    "description": "/api/judge 가 받는 심층질문 답 한 건."
-   },
-   "server__models________5": {
-    "properties": {
-     "정규화": {
-      "additionalProperties": true,
-      "type": "object",
-      "title": "정규화"
-     },
-     "확정비목": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "확정비목"
-     },
-     "사업명": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "사업명"
-     },
-     "org_id": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Org Id"
-     },
-     "plan_id": {
-      "anyOf": [
-       {
-        "type": "integer"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Plan Id"
-     },
-     "f5": {
-      "$ref": "#/components/schemas/F5"
-     },
-     "답변": {
-      "items": {
-       "$ref": "#/components/schemas/server__models________4"
-      },
-      "type": "array",
-      "title": "답변"
-     }
-    },
-    "type": "object",
-    "title": "판정요청"
-   },
-   "server__models________6": {
-    "properties": {
-     "전체": {
-      "type": "integer",
-      "title": "전체",
-      "default": 0
-     },
-     "확인필요": {
-      "type": "integer",
-      "title": "확인필요",
-      "default": 0
-     },
-     "위험": {
-      "type": "integer",
-      "title": "위험",
-      "default": 0
-     },
-     "특이사항없음": {
-      "type": "integer",
-      "title": "특이사항없음",
-      "default": 0
-     },
-     "점검전": {
-      "type": "integer",
-      "title": "점검전",
-      "default": 0
-     },
-     "금액합계": {
-      "type": "number",
-      "title": "금액합계",
-      "default": 0
-     }
-    },
-    "type": "object",
-    "title": "계획통계",
-    "description": "홈 화면 통계 카드 값. 목록 응답에 포함해 보낸다(통계 전용 API 없음).\n\n전체 = 확인필요 + 위험 + 특이사항없음 + 점검전."
-   },
-   "server__models________7": {
-    "properties": {
-     "plan_id": {
-      "type": "integer",
-      "title": "Plan Id"
-     },
-     "제목": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "제목"
-     },
-     "확정비목": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "확정비목"
-     },
-     "금액": {
-      "anyOf": [
-       {
-        "type": "number"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "금액"
-     },
-     "판정": {
-      "anyOf": [
-       {
-        "type": "string",
-        "enum": [
-         "가능",
-         "조건부",
-         "불가",
-         "판단불가"
-        ]
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "판정"
-     },
-     "집행예정일": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "집행예정일"
-     },
-     "updated_at": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Updated At"
-     },
-     "사업명": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "사업명"
-     },
-     "상태": {
-      "type": "string",
-      "enum": [
-       "draft",
-       "judged"
-      ],
-      "title": "상태",
-      "default": "draft"
-     }
-    },
-    "type": "object",
-    "required": [
-     "plan_id"
-    ],
-    "title": "계획요약",
-    "description": "계획 목록 표의 한 행."
-   },
-   "server__models________8": {
+   "server__models________10": {
     "properties": {
      "plan_id": {
       "type": "integer",
@@ -3129,7 +2660,7 @@
     ],
     "title": "계획상세"
    },
-   "server__models________9": {
+   "server__models________11": {
     "properties": {
      "사업명": {
       "type": "string",
@@ -3142,7 +2673,7 @@
       "type": "array",
       "title": "별칭"
      },
-     "비목계통": {
+     "비목체계": {
       "anyOf": [
        {
         "type": "string"
@@ -3151,7 +2682,7 @@
         "type": "null"
        }
       ],
-      "title": "비목계통"
+      "title": "비목체계"
      },
      "트랙범위": {
       "anyOf": [
@@ -3166,17 +2697,417 @@
      },
      "우선순위규칙목록": {
       "items": {
-       "$ref": "#/components/schemas/server__models__________3"
+       "$ref": "#/components/schemas/server__models__________5"
       },
       "type": "array",
       "title": "우선순위규칙목록"
+     },
+     "비목계통": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "비목계통",
+      "readOnly": true
      }
     },
     "type": "object",
     "required": [
-     "사업명"
+     "사업명",
+     "비목계통"
     ],
     "title": "사업정보"
+   },
+   "server__models________2": {
+    "properties": {
+     "항목": {
+      "type": "string",
+      "title": "항목"
+     },
+     "설명": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "설명"
+     },
+     "구분": {
+      "type": "string",
+      "enum": [
+       "결제전",
+       "결제후",
+       "집행"
+      ],
+      "title": "구분",
+      "default": "결제전"
+     },
+     "due_date": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Due Date"
+     },
+     "유형": {
+      "type": "string",
+      "enum": [
+       "기타",
+       "계약",
+       "비교견적"
+      ],
+      "title": "유형",
+      "default": "기타"
+     }
+    },
+    "type": "object",
+    "required": [
+     "항목"
+    ],
+    "title": "할일생성",
+    "description": "사용자가 직접 추가하는 할일. 출처는 서버가 'user' 로 고정한다(재판정해도 바뀌지 않는다)."
+   },
+   "server__models________3": {
+    "properties": {
+     "상태": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "준비필요",
+         "집행예정",
+         "완료"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "상태"
+     },
+     "due_date": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Due Date"
+     },
+     "유형": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "기타",
+         "계약",
+         "비교견적"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "유형"
+     }
+    },
+    "type": "object",
+    "title": "할일수정",
+    "description": "할일 상태 변경·날짜 지정. 보낸 필드만 바뀐다."
+   },
+   "server__models________4": {
+    "properties": {
+     "친족거래": {
+      "type": "boolean",
+      "title": "친족거래",
+      "default": false
+     },
+     "전직임직원업체": {
+      "type": "boolean",
+      "title": "전직임직원업체",
+      "default": false
+     }
+    },
+    "type": "object",
+    "title": "특수관계",
+    "description": "특수관계 거래 여부. 판정 요청에만 쓰고 저장하지 않는다."
+   },
+   "server__models________5": {
+    "properties": {
+     "code": {
+      "type": "string",
+      "title": "Code"
+     },
+     "값": {
+      "title": "값"
+     }
+    },
+    "type": "object",
+    "required": [
+     "code",
+     "값"
+    ],
+    "title": "답변항목",
+    "description": "/api/judge 가 받는 심층질문 답 한 건."
+   },
+   "server__models________6": {
+    "properties": {
+     "정규화": {
+      "additionalProperties": true,
+      "type": "object",
+      "title": "정규화"
+     },
+     "확정비목": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "확정비목"
+     },
+     "사업명": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "사업명"
+     },
+     "org_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Org Id"
+     },
+     "plan_id": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Plan Id"
+     },
+     "특수관계": {
+      "$ref": "#/components/schemas/server__models________4"
+     },
+     "답변": {
+      "items": {
+       "$ref": "#/components/schemas/server__models________5"
+      },
+      "type": "array",
+      "title": "답변"
+     }
+    },
+    "type": "object",
+    "title": "판정요청"
+   },
+   "server__models________7": {
+    "properties": {
+     "정부지원_현금": {
+      "type": "number",
+      "title": "정부지원 현금",
+      "default": 0
+     },
+     "자기부담_현금": {
+      "type": "number",
+      "title": "자기부담 현금",
+      "default": 0
+     },
+     "협약시작일": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "협약시작일"
+     },
+     "협약종료일": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "협약종료일"
+     }
+    },
+    "type": "object",
+    "title": "협약정보"
+   },
+   "server__models________8": {
+    "properties": {
+     "전체": {
+      "type": "integer",
+      "title": "전체",
+      "default": 0
+     },
+     "확인필요": {
+      "type": "integer",
+      "title": "확인필요",
+      "default": 0
+     },
+     "위험": {
+      "type": "integer",
+      "title": "위험",
+      "default": 0
+     },
+     "특이사항없음": {
+      "type": "integer",
+      "title": "특이사항없음",
+      "default": 0
+     },
+     "점검전": {
+      "type": "integer",
+      "title": "점검전",
+      "default": 0
+     },
+     "금액합계": {
+      "type": "number",
+      "title": "금액합계",
+      "default": 0
+     }
+    },
+    "type": "object",
+    "title": "계획통계",
+    "description": "홈 화면 통계 카드 값. 목록 응답에 포함해 보낸다(통계 전용 API 없음).\n\n전체 = 확인필요 + 위험 + 특이사항없음 + 점검전."
+   },
+   "server__models________9": {
+    "properties": {
+     "plan_id": {
+      "type": "integer",
+      "title": "Plan Id"
+     },
+     "제목": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "제목"
+     },
+     "확정비목": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "확정비목"
+     },
+     "금액": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "금액"
+     },
+     "판정": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "가능",
+         "조건부",
+         "불가",
+         "판단불가"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "판정"
+     },
+     "집행예정일": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "집행예정일"
+     },
+     "updated_at": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Updated At"
+     },
+     "사업명": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "사업명"
+     },
+     "상태": {
+      "type": "string",
+      "enum": [
+       "draft",
+       "judged"
+      ],
+      "title": "상태",
+      "default": "draft"
+     }
+    },
+    "type": "object",
+    "required": [
+     "plan_id"
+    ],
+    "title": "계획요약",
+    "description": "계획 목록 표의 한 행."
    },
    "server__models_________1": {
     "properties": {
@@ -3295,8 +3226,8 @@
       ],
       "title": "사업명"
      },
-     "f5": {
-      "$ref": "#/components/schemas/F5"
+     "특수관계": {
+      "$ref": "#/components/schemas/server__models________4"
      }
     },
     "type": "object",
@@ -3304,8 +3235,113 @@
    },
    "server__models__________1": {
     "properties": {
+     "비목": {
+      "type": "string",
+      "title": "비목"
+     },
+     "재원": {
+      "type": "string",
+      "enum": [
+       "정부지원",
+       "자기부담"
+      ],
+      "title": "재원"
+     },
+     "거래처": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "거래처"
+     },
+     "인력역할": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "인력역할"
+     },
+     "귀속월": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "귀속월"
+     },
+     "금액": {
+      "type": "number",
+      "title": "금액",
+      "default": 0
+     }
+    },
+    "type": "object",
+    "required": [
+     "비목",
+     "재원"
+    ],
+    "title": "집행내역항목"
+   },
+   "server__models__________2": {
+    "properties": {
+     "역할": {
+      "type": "string",
+      "title": "역할"
+     },
+     "고용형태": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "고용형태"
+     },
+     "타사업참여율": {
+      "type": "number",
+      "title": "타사업참여율",
+      "default": 0
+     },
+     "소속기관유형": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "소속기관유형"
+     },
+     "겸직": {
+      "type": "boolean",
+      "title": "겸직",
+      "default": false
+     }
+    },
+    "type": "object",
+    "required": [
+     "역할"
+    ],
+    "title": "참여인력항목"
+   },
+   "server__models__________3": {
+    "properties": {
      "통계": {
-      "$ref": "#/components/schemas/server__models________6"
+      "$ref": "#/components/schemas/server__models________8"
      },
      "건수": {
       "type": "integer",
@@ -3324,7 +3360,7 @@
      },
      "항목": {
       "items": {
-       "$ref": "#/components/schemas/server__models________7"
+       "$ref": "#/components/schemas/server__models________9"
       },
       "type": "array",
       "title": "항목"
@@ -3333,7 +3369,7 @@
     "type": "object",
     "title": "계획목록응답"
    },
-   "server__models__________2": {
+   "server__models__________4": {
     "properties": {
      "건수": {
       "type": "integer",
@@ -3351,15 +3387,15 @@
     "type": "object",
     "title": "할일목록응답"
    },
-   "server__models__________3": {
+   "server__models__________5": {
     "properties": {
      "우선계층": {
       "type": "string",
       "title": "우선계층"
      },
-     "열위계층": {
+     "후순위계층": {
       "type": "string",
-      "title": "열위계층"
+      "title": "후순위계층"
      },
      "범위": {
       "anyOf": [
@@ -3393,21 +3429,27 @@
        }
       ],
       "title": "해석"
+     },
+     "열위계층": {
+      "type": "string",
+      "title": "열위계층",
+      "readOnly": true
      }
     },
     "type": "object",
     "required": [
      "우선계층",
+     "후순위계층",
      "열위계층"
     ],
     "title": "우선순위규칙",
     "description": "corpus.precedence_rules 한 행. L1/L2/L3 중 어느 계층이 우선하는지."
    },
-   "server__models__________4": {
+   "server__models__________6": {
     "properties": {
      "사업": {
       "items": {
-       "$ref": "#/components/schemas/server__models________9"
+       "$ref": "#/components/schemas/server__models________11"
       },
       "type": "array",
       "title": "사업"
@@ -3472,21 +3514,27 @@
       "type": "string",
       "title": "파일형식"
      },
-     "파일정체": {
+     "판별결과": {
       "type": "string",
-      "title": "파일정체"
+      "title": "판별결과"
      },
      "안내": {
       "type": "string",
       "title": "안내"
+     },
+     "파일정체": {
+      "type": "string",
+      "title": "파일정체",
+      "readOnly": true
      }
     },
     "type": "object",
     "required": [
      "doc_id",
      "파일형식",
-     "파일정체",
-     "안내"
+     "판별결과",
+     "안내",
+     "파일정체"
     ],
     "title": "접수응답"
    },
@@ -3816,7 +3864,7 @@
       ],
       "title": "Retrieval Scope"
      },
-     "분해전략": {
+     "분할전략": {
       "anyOf": [
        {
         "type": "string"
@@ -3825,7 +3873,7 @@
         "type": "null"
        }
       ],
-      "title": "분해전략"
+      "title": "분할전략"
      },
      "조_건수": {
       "type": "integer",
@@ -3852,9 +3900,9 @@
       "title": "참조 건수",
       "default": 0
      },
-     "끊긴참조_건수": {
+     "미해결참조_건수": {
       "type": "integer",
-      "title": "끊긴참조 건수",
+      "title": "미해결참조 건수",
       "default": 0
      },
      "경고": {
@@ -3876,7 +3924,7 @@
       ],
       "title": "실패사유"
      },
-     "대체한_doc_id": {
+     "이전판_doc_id": {
       "anyOf": [
        {
         "type": "string"
@@ -3885,7 +3933,7 @@
         "type": "null"
        }
       ],
-      "title": "대체한 Doc Id"
+      "title": "이전판 Doc Id"
      },
      "샘플": {
       "items": {
@@ -3918,19 +3966,78 @@
        }
       ],
       "title": "갱신일시"
+     },
+     "분해전략": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "분해전략",
+      "readOnly": true
+     },
+     "끊긴참조_건수": {
+      "type": "integer",
+      "title": "끊긴참조 건수",
+      "readOnly": true
+     },
+     "대체한_doc_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "대체한 Doc Id",
+      "readOnly": true
      }
     },
     "type": "object",
     "required": [
-     "doc_id"
+     "doc_id",
+     "분해전략",
+     "끊긴참조_건수",
+     "대체한_doc_id"
     ],
     "title": "문서상태응답"
    },
+   "server__routes_orgs______": {
+    "properties": {
+     "slug": {
+      "type": "string",
+      "title": "Slug",
+      "description": "HMAC 기반 공개 식별자. org_id 가 아니며 org_id 로 되돌릴 수 없다"
+     },
+     "기관명": {
+      "type": "string",
+      "title": "기관명"
+     },
+     "사업명": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "사업명"
+     }
+    },
+    "type": "object",
+    "required": [
+     "slug",
+     "기관명",
+     "사업명"
+    ],
+    "title": "기관항목"
+   },
    "server__routes_orgs__________1": {
     "properties": {
-     "총건수": {
+     "건수": {
       "type": "integer",
-      "title": "총건수"
+      "title": "건수"
      },
      "페이지": {
       "type": "integer",
@@ -3942,18 +4049,24 @@
      },
      "항목": {
       "items": {
-       "$ref": "#/components/schemas/___-Output"
+       "$ref": "#/components/schemas/server__routes_orgs______"
       },
       "type": "array",
       "title": "항목"
+     },
+     "총건수": {
+      "type": "integer",
+      "title": "총건수",
+      "readOnly": true
      }
     },
     "type": "object",
     "required": [
-     "총건수",
+     "건수",
      "페이지",
      "크기",
-     "항목"
+     "항목",
+     "총건수"
     ],
     "title": "기관목록응답"
    },
