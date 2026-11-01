@@ -153,8 +153,11 @@ def _is_citation(text: str, start: int, end: int | None = None) -> bool:
 
     앞의 규범어 접두(`지침 제65조…` · `「…법」제43조`)와 닫는 괄호 뒤 조사(`제65조(…)에`) 두 방향을 본다.
     "줄머리가 아니면 인용" 규칙은 쓰지 않는다 — 조 헤딩을 놓치는 쪽이 훨씬 나쁘다.
+    접두는 같은 줄 안에서만 본다. 문서 제목 줄이 `…사업비 관리 지침` 으로 끝나고 다음 줄이
+    `제1조(목적)` 이면, 줄을 넘겨 보면 제목 끝의 `지침` 을 접두로 읽어 제1조를 인용으로 버린다.
     """
-    if RE_CITE_PREFIX.search(text[max(0, start - 14):start]):
+    앞 = text[max(0, start - 14):start].rsplit("\n", 1)[-1]
+    if RE_CITE_PREFIX.search(앞):
         return True
     if end is not None and RE_CITE_SUFFIX.match(text[end:end + 3]):
         return True
@@ -208,6 +211,17 @@ def _roman_chapters(text: str, page_offsets: dict[int, int]) -> list[dict]:
 _단락_최소 = 100
 
 
+def _짧은_조문구조(본칙: str, ms: list[re.Match]) -> bool:
+    """조가 5개 미만인 짧은 규정(기관 사업비 지침 등)도 조 구조로 인정할 수 있는가.
+
+    `제N조(제목)` 이 2개 이상이고, 모두 줄머리에 있고, 번호가 제1조부터 빠짐없이 이어질 때만 인정한다.
+    인용만 몇 개 있는 문서를 조 구조로 잘못 읽지 않도록 5개 기준보다 조건을 좁힌다.
+    """
+    if len(ms) < 2 or [m.group(1) for m in ms] != [str(i) for i in range(1, len(ms) + 1)]:
+        return False
+    return all(not 본칙[max(0, m.start() - 20):m.start()].rsplit("\n", 1)[-1].strip() for m in ms)
+
+
 def split_articles(text: str, page_offsets: dict[int, int] | None = None
                    ) -> tuple[list[dict], str]:
     """반환: (조 리스트, 사용한 전략 이름)"""
@@ -218,7 +232,7 @@ def split_articles(text: str, page_offsets: dict[int, int] | None = None
 
     # ── 1순위: 제N조(제목) ──────────────────────────────────────
     ms = [m for m in RE_JO.finditer(본칙) if not _is_citation(본칙, m.start(), m.end())]
-    if len(ms) >= 5:
+    if len(ms) >= 5 or _짧은_조문구조(본칙, ms):
         arts = _build(본칙, ms, page_offsets, titled=True, base=base)
         return arts + _tail(부칙, 붙임들), "jo_titled"
 
