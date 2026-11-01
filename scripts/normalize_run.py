@@ -1,62 +1,25 @@
 # -*- coding: utf-8 -*-
-"""(1) 입력 정규화 호출 자리.
+"""정규화 호출: 자연어 질문 한 줄을 판정 파이프라인 입력 JSON 으로 바꾼다.
 
-자연어 질문 한 줄을 판정 파이프라인이 먹는 JSON `{품목, 금액, 금액_추정여부, 용도, 비목후보[], 누락필드}` 로 만든다.
-LLM 클라이언트는 `llm_qwen` 하나다. `--dry` 는 LLM 없이 규칙만으로 정규화한다 — 배관 검증 전용.
-
-실행:
-    PYTHONIOENCODING=utf-8 python scripts/normalize_run.py --q "맥북 250만원 디자이너용"
-    PYTHONIOENCODING=utf-8 python scripts/normalize_run.py --golden --dry
+판정 파이프라인 1단계(orchestrate)와 /api/normalize(server/main)가 부른다. 모든 LLM 프롬프트는 scripts/ 에 둔다.
+공개: 정규화(질문, *, dry, 비목목록, 타임아웃) -> (dict, 메타), 비목후보_추출(품목, 용도, 금액, 사업명) -> (list, 실패),
+      별칭_힌트(문장), 규칙_정규화(질문). 출력 {품목, 금액, 금액_추정여부, 용도, 비목후보[], 누락필드}. 읽는 테이블: corpus.item_alias.
+정규화 의 LLM 실패는 LLM실패 로 올린다. 호출자가 판단불가로 반환한다.
 """
 from __future__ import annotations
 
-import argparse
-import json
-import os
+import logging
 import re
-import sys
 import time
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _lib import db  # noqa: E402
-from llm_qwen import LLM실패, llm_호출  # noqa: E402
-from llm_schema import 비목_enum, 비목_정의  # noqa: E402
+from _lib import db
+from llm_qwen import LLM실패, llm_호출
+from llm_schema import 비목_enum, 정규화_스키마
 
+_log = logging.getLogger(__name__)
 
-# ════════════════════════════════════════════════════════════════════════════
-# 호출 자리 ① 스키마
-# ════════════════════════════════════════════════════════════════════════════
-def 호출자리1_스키마(비목목록: list[str] | None = None) -> dict:
-    """정규화 출력 스키마. `비목후보.비목` 만 용어 사전 enum 으로 닫는다.
-
-    품목·용도는 자유 문자열이다 — 닫을 수 있는 폐쇄 목록이 없고, `비목확정()` 이
-    `item_alias` 정확조회 → 벡터 유사도로 받아내는 구조라 원문 표기가 오히려 재료다.
-    """
-    비목 = 비목목록 if 비목목록 is not None else 비목_enum()
-    return {
-        "type": "object", "additionalProperties": False,
-        "required": ["품목", "금액", "금액_추정여부", "용도", "비목후보", "누락필드"],
-        "properties": {
-            "품목": {"type": "string", "minLength": 1, "maxLength": 60},
-            # 금액이 없으면 되묻지 않고 null 로 둔다. 화면 4 에서 확인받는다 (§3-5)
-            "금액": {"type": ["number", "null"], "minimum": 0},
-            "금액_추정여부": {"type": "boolean"},
-            "용도": {"type": "string", "maxLength": 200},
-            "비목후보": {
-                "type": "array", "minItems": 0, "maxItems": 3,
-                "items": {"type": "object", "additionalProperties": False,
-                          "required": ["비목", "신뢰도"],
-                          "properties": {"비목": {"type": "string", "enum": 비목},
-                                         "신뢰도": {"type": "number",
-                                                  "minimum": 0, "maximum": 1}}},
-            },
-            "누락필드": {"type": "array", "maxItems": 6, "items": {"type": "string"}},
-        },
-    }
-
-
-# corpus.item_alias 의 (상품명, 비목) 행. 정규화 호출마다 전체를 다시 읽지 않도록 10분 TTL 로 둔다.
-# 조회 실패는 캐시하지 않는다 — 다음 호출이 다시 시도한다.
+# corpus.item_alias 의 (상품명, 비목) 행. 정규화 호출마다 전체를 다시 읽지 않도록 10분 TTL 로 캐시한다.
+# 조회 실패는 캐시하지 않는다. 다음 호출이 다시 시도한다.
 _별칭_TTL초 = 600
 _별칭_캐시: tuple[float, list] | None = None
 
@@ -69,18 +32,17 @@ def _별칭_행() -> list | None:
         with db.connect(autocommit=True, connect_timeout=3) as conn:
             행 = conn.execute('SELECT "상품명", "비목" FROM corpus.item_alias').fetchall()
     except Exception as e:                              # noqa: BLE001
-        print(f"item_alias 조회 실패({type(e).__name__}) — 별칭 힌트 없이 간다", file=sys.stderr)
+        _log.warning("item_alias 조회 실패(%s): 별칭 힌트 없이 진행한다", type(e).__name__)
         return None
     _별칭_캐시 = (time.time(), 행)
     return 행
 
 
-def _별칭_힌트(질문: str) -> str:
-    """질문에 실제로 등장한 상품명을 `corpus.item_alias` 에서 찾아 비목과 함께 보여준다.
+def 별칭_힌트(질문: str) -> str:
+    """질문에 실제로 나온 상품명을 `corpus.item_alias` 에서 찾아 비목과 함께 보여주는 프롬프트 조각.
 
-    질문에 나온 것만 싣는다 — 전체를 넣으면 프롬프트가 커지고 관계없는 별칭이
-    오히려 다른 비목으로 유도한다. 조회일 뿐이다 — 못 찾으면 빈 문자열이고,
-    DB 가 죽어도 정규화를 죽이지 않는다.
+    질문에 나온 것만 넣는다. 전체를 넣으면 프롬프트가 커지고 관계없는 별칭이 다른 비목으로 유도한다.
+    찾지 못하거나 DB 조회가 실패하면 빈 문자열을 돌려준다. 정규화를 실패시키지 않는다.
     """
     q = (질문 or "").replace(" ", "")
     if not q:
@@ -99,24 +61,8 @@ def _별칭_힌트(질문: str) -> str:
     머리 = "질문에 나온 품목 중 이미 등록된 것 (참고, 이대로 강제하지는 않는다)"
     return chr(10) * 2 + 머리 + chr(10) + 줄
 
-def _비목_블록(enum: list[str], 질문: str = "") -> str:
-    """`비목 목록:` 자리에 들어갈 이름 + 정의 여러 줄.
 
-    이름만 나열하면 모델이 뜻을 모른 채 고른다 — 정의를 같이 준다. 정의가 없는
-    비목은 이름만 낸다(지어내지 않는다). 정의 파일이 없으면 이름을 쉼표로 이은
-    한 줄로 폴백한다.
-    """
-    정의 = 비목_정의()
-    if not 정의:
-        return ", ".join(enum) + _별칭_힌트(질문)
-    빠짐 = [b for b in enum if b not in 정의]
-    if 빠짐:
-        print(f"⚠️ 비목 정의 없음 {len(빠짐)}종 {빠짐} — 이름만 넣는다", file=sys.stderr)
-    본문 = "\n".join(f"- {b} — {정의[b]}" if b in 정의 else f"- {b}" for b in enum)
-    return 본문 + _별칭_힌트(질문)
-
-
-# ── 프롬프트. B0 과 달리 캐시 프리픽스가 아니므로 비목 목록을 안에 넣어도 된다 ──
+# 정규화 프롬프트. 바이트가 바뀌면 판정이 바뀌므로 평가 없이 고치지 않는다.
 _지시 = """다음 문장은 창업지원금으로 무언가를 사거나 지출하려는 사람의 질문이다.
 판정에 필요한 사실만 뽑아 JSON 으로 정규화하라.
 
@@ -139,80 +85,39 @@ _지시 = """다음 문장은 창업지원금으로 무언가를 사거나 지�
 질문: {질문}"""
 
 
-# ════════════════════════════════════════════════════════════════════════════
-# 프롬프트 변형 — 정규화 지연을 줄이는 실험 자리. `enable_thinking=false` 는
-# 쓰지 않는다(`--reasoning-parser qwen3` 를 끄는 효과가 있고 guided_json ×
-# thinking 무한루프 조건을 되살릴 위험이 있다) — 프롬프트로만 유도한다.
-# ════════════════════════════════════════════════════════════════════════════
-_지시_짧게 = ("\n\n생각은 짧게 한다 — 위 다섯 항목을 확인하는 데 필요한 만큼만 사고하고, "
-           "여러 경우의 수를 길게 따지지 않는다. 결론이 서면 바로 JSON 을 출력하라.")
-
-# 예시의 비목은 형태만 보여준다 — 골든셋 표본과 겹치지 않게 새로 지었다.
-# 중괄호를 두 겹으로 쓴다 — 이 문자열이 `_지시_조립()` 을 거쳐 `.format()` 을
-# 한 번 더 타므로, 홑겹이면 예시의 JSON 리터럴을 포맷 자리표시자로 오인한다.
-_지시_예시 = ('예시\n질문: 시제품에 쓸 방수 커넥터 40만원 사도 되나요?\n'
-             '출력: {{"품목":"방수 커넥터","금액":400000,"금액_추정여부":false,'
-             '"용도":"시제품 제작","비목후보":[{{"비목":"재료비","신뢰도":0.9}}],'
-             '"누락필드":[]}}')
-
-_변형들: dict[str, str] = {
-    "N0": "기준선 — 원문 그대로",
-    "N1": "끝에 「생각은 짧게」 지시 한 문단 추가",
-    "N2": "질문 앞에 1-shot 예시(사고 과정 없이 최종 JSON 만) 추가 — 출력 형태를 먼저 보여준다",
-    "N3": "N1 + N2 병합",
-}
-
-
-def _지시_조립(변형: str = "N0") -> str:
-    """변형별 지시문. `_지시` 원문은 그대로 두고 여기서만 이어붙인다."""
-    if 변형 not in _변형들:
-        raise ValueError(f"모르는 정규화 프롬프트 변형: {변형} (알려진 것: {list(_변형들)})")
-    본문 = _지시
-    if 변형 in ("N2", "N3"):
-        본문 = 본문.replace("질문: {질문}", _지시_예시 + "\n\n질문: {질문}")
-    if 변형 in ("N1", "N3"):
-        본문 = 본문 + _지시_짧게
-    return 본문
-
-
-# ── dry 규칙 정규화 — 배관 검증 전용 ────────────────────────────────────────
+# dry 규칙 정규화: LLM 없이 연결 확인(스모크 테스트)용
 _RE_금액 = re.compile(
     r"(?:(\d[\d,]*)\s*(억|천만|백만|만)?\s*원)|(?:(\d[\d,]*)\s*(억|천만|백만|만))")
 _배수 = {"억": 100_000_000, "천만": 10_000_000, "백만": 1_000_000, "만": 10_000, None: 1}
 _불용 = re.compile(r"(구매|구입|결제|지출|사도|써도|사용|가능|되나요|될까요|하려|합니다|"
                    r"인데|인가요|해도|되는지|괜찮|처리|집행)")
 
-
-# 수량 어절 — 어절 통째로 수량일 때만 버린다. 부분 치환하면 '200만원짜리' 가
-# '짜리' 로, '1인' 이 '인' 으로 남아 품목이 더 더러워진다.
+# 어절 전체가 수량일 때만 버린다. 부분 치환하면 '200만원짜리' 가 '짜리' 로, '1인' 이 '인' 으로 남는다.
 _RE_수량어절 = re.compile(
     r"^\d[\d,]*\s*(?:억|천만|백만|만|천)?\s*(?:원|개|인|일|회|명|건|년|월|시간|%|퍼센트)?\s*"
     r"(?:짜리|정도|가량|쯤|이내|이상|이하|초과|미만)?$")
-# 조사 — 어절 끝에서만 뗀다. 가운데를 건드리면 '재료비' 가 '재료' 가 된다
+# 조사는 어절 끝에서만 뗀다. 가운데를 건드리면 '재료비' 가 '재료' 가 된다
 _조사 = re.compile(r"(?:으로|로|를|을|이|가|은|는|에서|에|의|도|만|와|과|랑)$")
-_비목표기_캐시 = None
-
 _구두점 = re.compile(r"^[\"'(\[]+|[,.\"')\]·]+$")
+_비목표기_캐시: dict[str, str] | None = None
 
 
 def _어절정리(w: str) -> str:
     """앞뒤 구두점을 떼고 끝의 조사 1개를 뗀다.
 
-    조사를 떼고 남는 게 한 글자면 떼지 않는다 — '회의' 의 '의' 를 조사로 보면
-    '회' 가 되어 비목확정이 엉뚱한 걸 집는다.
+    조사를 떼고 남는 게 한 글자면 떼지 않는다. '회의' 의 '의' 를 조사로 보면 '회' 가 되어 비목확정이
+    엉뚱한 항목을 고른다.
     """
     w = _구두점.sub("", w)
     벗 = _조사.sub("", w)
     return w if len(벗) < 2 else 벗
 
 
+def 비목표기(k: str) -> str | None:
+    """비목 표기 변형 -> 표준 표기. 표준 표기는 `_비목_어휘집.json` 의 enum 이다.
 
-
-def 비목표기(k: str):
-    """표기 변형 -> 기준 문서 비목. 용어 사전 10종이 기준 문서이다 (`_비목_어휘집.json`).
-
-    질문은 `특허권 등 무형자산 취득비` 처럼 띄어 쓰고 용어 사전은 붙여 쓴다.
-    공백·가운뎃점을 접어 둘 다 같은 키가 되게 한다.
+    질문은 `특허권 등 무형자산 취득비` 처럼 띄어 쓰고 어휘집은 붙여 쓴다. 공백·가운뎃점을 지운 표기도
+    같은 비목으로 연결한다. 모르는 표기는 None.
     """
     global _비목표기_캐시
     if _비목표기_캐시 is None:
@@ -229,9 +134,9 @@ def 비목표기(k: str):
 
 
 def 규칙_정규화(질문: str) -> dict:
-    """LLM 없이 뽑는다. `dry=True` 전용 — 판정 품질 측정에 쓰면 안 된다.
+    """LLM 없이 규칙으로 정규화한다. `정규화(dry=True)` 전용이다.
 
-    이걸로 잰 숫자는 정규화 품질이 아니라 배관이 뚫렸는지만 말한다.
+    결과는 파이프라인 연결 확인용이다. 판정 품질 측정에 쓰지 않는다.
     """
     금액, 추정 = None, False
     m = _RE_금액.search(질문.replace(" ", ""))
@@ -241,12 +146,10 @@ def 규칙_정규화(질문: str) -> dict:
         if 수:
             금액 = int(수) * _배수.get(단위, 1)
             추정 = bool(re.search(r"(약|정도|가량|쯤)", 질문))
-    # 품목: 첫 명사구 근사 — 금액·수량·비목명·조사·서술어를 떼고 앞 2어절
-    # 금액과 비목명을 품목에 남기면 안 된다 — `rule_lookup.비목확정()` 이 품목
-    # 문자열을 통째로 매칭하므로 섞이면 매칭이 깨진다. 비목명은 버리지 않고
-    # `비목후보` 로 올린다. `특허권 등 무형자산 취득비` 처럼 띄어 쓴 비목이
-    # 있어 4어절까지 이어 붙여 긴 것부터 본다 — 짧은 것부터 보면 '수수료' 가
-    # 먼저 걸려 앞말을 잘라 먹는다.
+    # 품목은 금액·수량·비목명·조사·서술어를 뗀 앞 2어절이다. rule_lookup.비목확정 이 품목 문자열 전체로
+    # 매칭하므로 금액이나 비목명이 섞이면 안 된다. 비목명은 버리지 않고 비목후보로 옮긴다.
+    # 띄어 쓴 비목명이 있어 4어절까지 이어 긴 것부터 본다. 짧은 것부터 보면 '수수료' 가 먼저 매칭되어
+    # 앞 어절을 잘라낸다.
     머리 = re.split(r"[?？.\n]", 질문.strip())[0]
     토큰 = [_어절정리(w) for w in 머리.split() if not _불용.search(w)]
     토큰 = [w for w in 토큰 if w and not _RE_수량어절.match(w)]
@@ -254,10 +157,10 @@ def 규칙_정규화(질문: str) -> dict:
     후보비목, 어절, i = [], [], 0
     while i < len(토큰):
         for n in (4, 3, 2, 1):
-            정본 = 비목표기(" ".join(토큰[i:i + n])) if i + n <= len(토큰) else None
-            if 정본:
-                if 정본 not in 후보비목:
-                    후보비목.append(정본)
+            표준 = 비목표기(" ".join(토큰[i:i + n])) if i + n <= len(토큰) else None
+            if 표준:
+                if 표준 not in 후보비목:
+                    후보비목.append(표준)
                 i += n
                 break
         else:
@@ -270,61 +173,65 @@ def 규칙_정규화(질문: str) -> dict:
 
 
 def 정규화(질문: str, *, dry: bool = False, 비목목록: list[str] | None = None,
-         타임아웃: int = 240, 변형: str = "N0") -> tuple[dict, dict]:
-    """(정규화 JSON, 메타). 실패는 예외로 올린다 — 부르는 쪽이 판단불가로 닫는다.
+         타임아웃: int = 240) -> tuple[dict, dict]:
+    """질문 한 줄을 정규화해 (정규화 JSON, 메타) 를 돌려준다.
 
-    `변형` : 프롬프트 실험 — `_변형들` 참고. 기본 N0 는 `_지시` 원문 그대로다.
-
-    `타임아웃` 기본값은 `llm_호출()`·`adapter.py` 의 기본값과 맞춘다 — 이 함수를
-    부르는 쪽이 `타임아웃` 을 안 넘기면 여기 기본값으로 조용히 잘리므로, 자리마다
-    기본값이 다르면 그 차이가 곧 버그가 된다. RunPod 프록시의 실측 천장은 약
-    125초라 그 위는 스트리밍(`SUDDOE_LLM_STREAM`)이 있어야 넘어간다.
+    LLM 호출 1회. 실패나 스키마 밖 출력은 LLM실패 로 올린다. `dry=True` 는 LLM 없이 규칙_정규화 를 쓴다.
+    `비목목록` 을 주지 않으면 어휘집의 비목 enum 을 쓴다.
     """
     if dry:
         return 규칙_정규화(질문), {"지연ms": 0, "모델": "규칙(dry)", "토큰": {}}
-    스키마 = 호출자리1_스키마(비목목록)
-    프롬프트 = _지시_조립(변형).format(
-        비목=_비목_블록(스키마["properties"]["비목후보"]["items"]
-                     ["properties"]["비목"]["enum"], 질문), 질문=질문)
-    # 400 이 아니라 2000 이다 — Qwen3 는 thinking 이 기본이라 `<think>...</think>`
-    # 가 출력 토큰을 먹는다. 서버가 사고를 못 갈라낸 응답에서 토큰이 모자라면
-    # `content` 가 `finish_reason='length'` 로 중간에 잘린다. 잘려도 예외는 안
-    # 나고 `LLM실패` 로 올라가 판단불가가 된다 — 「모델이 모른다」가 아니라
-    # 「자리를 안 줬다」다.
-    # 사고=False — 정규화는 문장에서 값을 뽑는 추출이라 사고가 필요 없다.
-    출력, 메타 = llm_호출(프롬프트, 스키마, 사고=False, 최대토큰=2000, 타임아웃=타임아웃)
-    # guided_json 이 걸려 있어도 서버가 무시했을 때를 대비해 최소 형태만 확인한다
+    스키마 = 정규화_스키마(비목목록)
+    비목들 = 스키마["properties"]["비목후보"]["items"]["properties"]["비목"]["enum"]
+    프롬프트 = _지시.format(비목=", ".join(비목들) + 별칭_힌트(질문), 질문=질문)
+    # 값을 뽑기만 하는 호출이라 추론을 끈다. 출력 토큰이 모자라면 finish_reason='length' 로 잘린 JSON 이
+    # 파싱에 실패하고 LLM실패 가 된다
+    출력, 메타 = llm_호출(프롬프트, 스키마, 추론=False, 최대토큰=2000, 타임아웃=타임아웃)
+    # strict 스키마를 쓰지만 서버가 형식을 지키지 않는 경우에 대비해 최소 형태만 확인한다
     if not isinstance(출력, dict) or "품목" not in 출력:
-        raise LLM실패(f"슬롯① 출력이 스키마 밖: {str(출력)[:200]}")
+        raise LLM실패(f"정규화 출력이 스키마 밖: {str(출력)[:200]}")
     출력.setdefault("비목후보", [])
     출력.setdefault("누락필드", [])
     출력["_출처"] = "llm"
     return 출력, 메타
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--q", help="질문 한 줄")
-    ap.add_argument("--golden", action="store_true", help="골든셋 전량")
-    ap.add_argument("--dry", action="store_true", help="LLM 없이 규칙으로")
-    ap.add_argument("--변형", default="N0",
-                    help="F2 프롬프트 변형. N0=기준선 · N1~N3 (normalize_run._변형들)")
-    a = ap.parse_args()
-
-    if a.golden:
-        with db.connect() as conn:
-            rows = conn.execute("SELECT gold_id, 질문 FROM eval.golden_set "
-                                "ORDER BY gold_id").fetchall()
-        for gid, q in rows:
-            out, _ = 정규화(q, dry=a.dry, 변형=a.변형)
-            print(f"{gid:3} {json.dumps(out, ensure_ascii=False)}")
-        return
-    if not a.q:
-        ap.error("--q 또는 --golden")
-    out, 메타 = 정규화(a.q, dry=a.dry, 변형=a.변형)
-    print(json.dumps(out, ensure_ascii=False, indent=2))
-    print(f"\n{메타}")
+# 폼 경로 프롬프트에 들어가는 비목 순서. server/_common.비목_ENUM 과 같은 순서여야 프롬프트가 같다.
+_폼_비목순서: tuple[str, ...] = ("재료비", "외주용역비", "기계장치", "인건비", "지급수수료",
+                             "여비", "교육훈련비", "광고선전비", "특허권등무형자산취득비", "창업활동비")
 
 
-if __name__ == "__main__":
-    main()
+def 비목후보_추출(품목: str | None, 용도: str, 금액: float | None, 사업명: str | None, *,
+              비목목록: list[str] | None = None) -> tuple[list[dict], bool]:
+    """폼 입력(품목·용도·금액)에서 비목후보만 뽑는다. /api/normalize 의 폼 경로가 부른다.
+
+    반환은 ([{"비목", "신뢰도"}] 최대 3건, 실패). 자연어 정규화의 비목후보와 같은 모양이다.
+    LLM 실패나 응답 이상은 ([], True) 로 돌려준다. 판정을 막지 않고, 비목은 사용자가 비목 확정 화면에서 고른다.
+    `비목목록` 을 주지 않으면 _폼_비목순서 를 쓴다. 이 순서가 그대로 프롬프트에 들어간다.
+    """
+    비목들 = list(비목목록) if 비목목록 is not None else list(_폼_비목순서)
+    try:
+        스키마 = {"type": "object", "additionalProperties": False,
+                 "required": ["비목후보"],
+                 "properties": {"비목후보": 정규화_스키마(비목들)["properties"]["비목후보"]}}
+        금액문 = f"{int(금액):,}원" if 금액 is not None else "미상"
+        프롬프트 = (
+            "창업지원금으로 아래 지출을 하려 한다. 어느 비목으로 집행되는지 "
+            "목록 안에서만 고르라.\n"
+            # '비우거나' 라는 표현은 쓰지 않는다. 모델이 쉬운 쪽(빈 배열)을 고르기 쉬워진다
+            "확신이 없으면 **둘을 나란히 낮은 신뢰도로** 둔다. 억지로 하나를 고르지 마라 — "
+            "갈리면 코드가 두 경로를 모두 판정한다.\n"
+            "판정을 하지 마라. 가능·불가를 여기서 말하지 않는다.\n\n"
+            f"품목: {품목}\n금액: {금액문}\n용도: {용도 or '(적지 않음)'}\n"
+            + (f"사업명: {사업명}\n" if 사업명 else "")
+            + f"\n비목 목록: {', '.join(비목들)}"
+            + 별칭_힌트(f"{품목 or ''} {용도 or ''}"))
+        출력, _메타 = llm_호출(프롬프트, 스키마, 추론=False, 최대토큰=200, 타임아웃=60)
+        후보 = 출력.get("비목후보") if isinstance(출력, dict) else None
+        # enum 밖 항목을 먼저 버리고 3건으로 자른다. 순서가 반대면 앞자리의 enum 밖 항목이 유효한 후보를 밀어낸다
+        return [{"비목": c["비목"], "신뢰도": float(c.get("신뢰도") or 0.0)}
+                for c in (후보 or [])
+                if isinstance(c, dict) and c.get("비목") in 비목들][:3], False
+    except Exception:                                         # noqa: BLE001
+        _log.exception("폼 경로 비목후보 추출 실패: 빈 후보로 폴백한다")
+        return [], True
