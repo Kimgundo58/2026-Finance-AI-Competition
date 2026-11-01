@@ -301,14 +301,14 @@ def main() -> None:
                 else:
                     빈 += 1
             print()
-            print(f"[dangling] 70문항 중 발화 {len(있음)}건 / 없음 {빈}건 "
+            print(f"[dangling] {len(데이터)}문항 중 발화 {len(있음)}건 / 없음 {빈}건 "
                   f"(사업필터={'켬' if a.사업필터 else '끔'})")
             for gid, d in 있음[:10]:
                 print(f"    gold_id={gid:3}  {len(d)}건  {d[:3]}")
             if len(있음) > 10:
                 print(f"    ... 외 {len(있음)-10}문항")
 
-        if a.c7:
+        if a.c7 and any(사업키(d[4]) for d in 데이터):
             # 필터 on/off 를 같은 임베딩으로 짝지어 잰다 — 따로 두 번 돌리면 CPU 부하
             # 차이가 섞여 어느 쪽이 원인인지 못 가린다. 공통 문항은 사업명이 NULL 이라
             # 필터가 no-op — 분모에서 뺀다.
@@ -340,8 +340,9 @@ def main() -> None:
 
         if a.사업필터:
             지정 = [(r, d) for r, d in zip(r_res, 데이터) if 사업키(d[4])]
-            print(f"\n사업 지정 문항만 {len(지정)}건  "
-                  f"RRF hit@5 {지표([r for r, _ in 지정], [5])['hit@5']:.1f}%")
+            if 지정:
+                print(f"\n사업 지정 문항만 {len(지정)}건  "
+                      f"RRF hit@5 {지표([r for r, _ in 지정], [5])['hit@5']:.1f}%")
 
         if a.overlap:
             겹침.sort()
@@ -392,10 +393,14 @@ def main() -> None:
             print(f"\n[기록] eval.runs run_id={run_id} (종류=retrieval)")
 
         if a.폐포:
+            해소 = [row for row in 참조확장res if row[2]]
+
             def cov(idx):
-                맞 = sum(1 for row in 참조확장res if set(row[idx]) & row[2])
-                return 맞 / len(참조확장res) * 100
-            분모 = sum(1 for row in 참조확장res if row[2])
+                if not 해소:
+                    return 0.0
+                맞 = sum(1 for row in 해소 if set(row[idx]) & row[2])
+                return 맞 / len(해소) * 100
+            분모 = len(해소)
             print(f"\n[폐포] 조 단위 커버리지 (정답 조를 역추적한 {분모}/{len(참조확장res)}문항 기준)")
             print(f"  top-5 만        {cov(0):5.1f}%")
             print(f"  top-5 + 폐포    {cov(1):5.1f}%")

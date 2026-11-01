@@ -13,16 +13,12 @@
 from __future__ import annotations
 
 import argparse
-import io
 import json
 import os
 import sys
 import time
 from collections import Counter
 from pathlib import Path
-
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace",
-                              line_buffering=True)
 
 ROOT = Path(__file__).resolve().parent.parent
 JSONL = ROOT / "scripts" / "_work" / "_stage2_chunks.jsonl"
@@ -248,6 +244,7 @@ def verify() -> None:
 
 
 def main() -> None:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
     ap = argparse.ArgumentParser()
     ap.add_argument("--verify", action="store_true", help="bm25s 와 top-20 겹침률만")
     ap.add_argument("--보충", action="store_true",

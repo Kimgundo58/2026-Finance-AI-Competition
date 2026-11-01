@@ -77,6 +77,7 @@ SELECT DISTINCT ON (p.ref_id)
        p.dst_doc_id, p.dst_조번호, p.해소상태, p.보정근거,
        a.article_id, a.조제목, sa.조제목
   FROM 폐포 p
+  JOIN corpus.documents dd ON dd.doc_id = p.dst_doc_id AND dd.status = 'active'
   JOIN corpus.doc_articles a  ON a.doc_id = p.dst_doc_id AND a.조번호 = p.dst_조번호
   LEFT JOIN corpus.doc_articles sa ON sa.doc_id = p.src_doc_id AND sa.조번호 = p.src_조번호
  ORDER BY p.ref_id
@@ -99,7 +100,6 @@ W_DENSE, W_SPARSE, RRF_K = 0.9, 0.1, 60
 # ── 임베딩 모델 상주 ─────────────────────────────────────────────────────────
 _모델 = None
 _토큰화 = None
-_stdout보관 = None
 
 
 _모델_잠금 = threading.Lock()
@@ -123,20 +123,11 @@ def 모델():
 
 
 def 토큰화(texts: list[str]) -> list[list[str]]:
-    """BM25 토큰화는 `stage2_bm25.토큰화` 를 그대로 쓴다 — 색인과 쿼리가 같은 토큰화를 써야 한다.
-
-    `stage2_bm25` 는 import 시점에 `sys.stdout` 을 다시 감싸므로, 이 모듈을 import 하는
-    쪽이 그 부작용을 맞지 않도록 되돌린다. 새 래퍼는 참조를 붙잡아 둔다 — 버리면 GC 가
-    `__del__` 에서 원래 버퍼를 닫아버린다.
-    """
-    global _토큰화, _stdout보관
+    """BM25 토큰화는 `stage2_bm25.토큰화` 를 그대로 쓴다 — 색인과 쿼리가 같은 토큰화를 써야 한다."""
+    global _토큰화
     if _토큰화 is None:
         paths.ensure_on_path()
-        원래 = sys.stdout
         from stage2_bm25 import 토큰화 as _t
-        if sys.stdout is not 원래:
-            _stdout보관 = sys.stdout          # GC 방지. 버리면 원래 버퍼가 닫힌다
-            sys.stdout = 원래
         _토큰화 = _t
     return _토큰화(texts)
 
