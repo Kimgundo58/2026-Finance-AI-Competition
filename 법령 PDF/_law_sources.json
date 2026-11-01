@@ -12,7 +12,7 @@
     "D-34470"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "국가를 당사자로 하는 계약에 관한 법률 시행령",
    "via": "제26조제1항제5호가목",
@@ -20,7 +20,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "1인창조기업육성에관한법률": {
   "name": "1인 창조기업 육성에 관한 법률",
@@ -35,7 +35,7 @@
     "M05"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "중기부": [
     "12"
    ]
@@ -56,7 +56,7 @@
     "D-011474"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "1인 창조기업 육성에 관한 법률",
    "via": "제2조제1호",
@@ -64,7 +64,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "가족관계의등록등에관한법률": {
   "name": "가족관계의 등록 등에 관한 법률",
@@ -79,7 +79,7 @@
     "M32"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "중기부": [
     "9"
    ]
@@ -104,7 +104,7 @@
     "M13"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "중기부": [
     "2",
     "24",
@@ -129,7 +129,7 @@
     "M68"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "중기부": [
     "19"
    ]
@@ -160,7 +160,7 @@
     "M24"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "index": true,
   "index_reason": "직접참조"
  },
@@ -177,7 +177,7 @@
     "D-006184"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "건설산업기본법",
    "via": "제9조제2항",
@@ -185,7 +185,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "건설산업기본법시행령": {
   "name": "건설산업기본법 시행령",
@@ -200,7 +200,7 @@
     "D-002115"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "건설산업기본법",
    "via": "제6조제2항제6호",
@@ -208,7 +208,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "경찰청국가연구개발사업연구관리전문기관지정": {
   "name": "경찰청 국가연구개발사업 연구관리 전문기관 지정",
@@ -221,7 +221,7 @@
   "refs": {
    "창진원": []
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "국가연구개발혁신법",
    "via": "제22조제1항",
@@ -248,7 +248,7 @@
     "L18"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "index": true,
   "index_reason": "직접참조"
  },
@@ -263,7 +263,7 @@
   "refs": {
    "창진원": []
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "고등교육법",
    "via": "제4조제1항",
@@ -275,7 +275,7 @@
    ]
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "고용노동분야국고보조사업관리규정": {
   "name": "고용노동분야 국고보조사업 관리규정",
@@ -290,7 +290,7 @@
     "D-51459"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "보조금 관리에 관한 법률",
    "via": "제17조제3항",
@@ -307,9 +307,9 @@
   "ministry": "고용노동부",
   "sources": [],
   "refs": {},
-  "cited": {},
+  "cited_articles": {},
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "고용정책기본법": {
   "name": "고용정책 기본법",
@@ -324,7 +324,7 @@
     "M51"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "중기부": [
     "15-5"
    ]
@@ -345,7 +345,7 @@
     "D-006291"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "고용정책 기본법",
    "via": "제9조의2제6항",
@@ -353,7 +353,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "고용정책기본법시행령": {
   "name": "고용정책 기본법 시행령",
@@ -368,7 +368,7 @@
     "D-002250"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "고용정책 기본법",
    "via": "제10조제2항제10호",
@@ -376,7 +376,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "공공기관의운영에관한법률": {
   "name": "공공기관의 운영에 관한 법률",
@@ -391,7 +391,7 @@
     "M28"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "중기부": [
     "5"
    ]
@@ -412,7 +412,7 @@
     "D-010413"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "공공기관의 운영에 관한 법률",
    "via": "제4조제3항",
@@ -420,7 +420,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "공공기록물관리에관한법률시행규칙": {
   "name": "공공기록물 관리에 관한 법률 시행규칙",
@@ -435,7 +435,7 @@
     "D-006294"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "공공기록물 관리에 관한 법률 시행령",
    "via": "제23조제4항",
@@ -443,7 +443,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "공공기록물관리에관한법률시행령": {
   "name": "공공기록물 관리에 관한 법률 시행령",
@@ -458,7 +458,7 @@
     "M67"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "중기부": [
     "26"
    ]
@@ -483,7 +483,7 @@
     "M03"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "중기부": [
     "2",
     "8",
@@ -513,7 +513,7 @@
     "M65"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "중기부": [
     "4"
    ]
@@ -544,7 +544,7 @@
     "L08"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "창진원": [
     "별표1",
     "별표2",
@@ -567,7 +567,7 @@
     "L19"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "index": true,
   "index_reason": "직접참조"
  },
@@ -582,7 +582,7 @@
   "refs": {
    "창진원": []
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "공무원 인재개발법",
    "via": "제4조제1항",
@@ -594,7 +594,7 @@
    ]
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "공직자의이해충돌방지법": {
   "name": "공직자의 이해충돌 방지법",
@@ -609,7 +609,7 @@
     "M25"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "중기부": [
     "2"
    ]
@@ -630,7 +630,7 @@
     "D-014214"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "공직자의 이해충돌 방지법",
    "via": "제2조제3호라목",
@@ -638,7 +638,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "공직자의이해충돌방지법의시행에관한선거관리위원회규칙": {
   "name": "공직자의 이해충돌 방지법의 시행에 관한 선거관리위원회 규칙",
@@ -653,7 +653,7 @@
     "D-014303"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "공직자의 이해충돌 방지법",
    "via": "제5조제1항제16호",
@@ -661,7 +661,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "공직자의이해충돌방지법의시행에관한헌법재판소규칙": {
   "name": "공직자의 이해충돌 방지법의 시행에 관한 헌법재판소규칙",
@@ -676,7 +676,7 @@
     "D-014355"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "공직자의 이해충돌 방지법",
    "via": "제2조제6호사목",
@@ -684,7 +684,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "과학기술정보통신부국고보조금관리에관한규정": {
   "name": "과학기술정보통신부 국고보조금 관리에 관한 규정",
@@ -699,7 +699,7 @@
     "D-51484"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "보조금 관리에 관한 법률",
    "via": "제17조제3항",
@@ -722,7 +722,7 @@
     "D-56962"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "보조금 관리에 관한 법률",
    "via": "제17조제3항",
@@ -749,7 +749,7 @@
     "M22"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "중기부": [
     "7"
    ]
@@ -770,7 +770,7 @@
     "D-27952"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "중소기업제품 구매촉진 및 판로지원에 관한 법률",
    "via": "제4조제2항",
@@ -778,7 +778,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "국가를당사자로하는계약에관한법률시행규칙": {
   "name": "국가를 당사자로 하는 계약에 관한 법률 시행규칙",
@@ -795,7 +795,7 @@
     "D-006590"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "국가를 당사자로 하는 계약에 관한 법률 시행령",
    "via": "제12조제1항제4호",
@@ -807,7 +807,7 @@
    ]
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "국가를당사자로하는계약에관한법률시행령": {
   "name": "국가를 당사자로 하는 계약에 관한 법률 시행령",
@@ -826,7 +826,7 @@
     "M66"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "중기부": [
     "26",
     "35",
@@ -858,7 +858,7 @@
     "D-41120"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "국가를 당사자로 하는 계약에 관한 법률 시행령",
    "via": "제36조제12호",
@@ -866,7 +866,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "국가보훈부국고보조금관리지침": {
   "name": "국가보훈부 국고보조금 관리지침",
@@ -881,7 +881,7 @@
     "D-81041"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "보조금 관리에 관한 법률",
    "via": "제17조제3항",
@@ -904,7 +904,7 @@
     "R10"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "국가연구개발혁신법",
    "via": "제13조제4항",
@@ -924,9 +924,9 @@
   "ministry": "과학기술정보통신부",
   "sources": [],
   "refs": {},
-  "cited": {},
+  "cited_articles": {},
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "국가연구개발시설·장비의관리등에관한표준지침": {
   "name": "국가연구개발 시설·장비의 관리 등에 관한 표준지침",
@@ -935,9 +935,9 @@
   "ministry": "과학기술정보통신부",
   "sources": [],
   "refs": {},
-  "cited": {},
+  "cited_articles": {},
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "국가연구개발혁신법": {
   "name": "국가연구개발혁신법",
@@ -956,7 +956,7 @@
     "M17"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "창진원": [
     "13",
     "22",
@@ -982,7 +982,7 @@
     "D-013980"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "국가연구개발혁신법 시행령",
    "via": "제9조제2항",
@@ -994,7 +994,7 @@
    ]
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "국가연구개발혁신법시행령": {
   "name": "국가연구개발혁신법 시행령",
@@ -1013,7 +1013,7 @@
     "D-013933"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "창진원": [
     "49"
    ]
@@ -1043,7 +1043,7 @@
     "D-77882"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "보조금 관리에 관한 법률",
    "via": "제17조제3항",
@@ -1066,7 +1066,7 @@
     "D-20842"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "보조금 관리에 관한 법률 시행령",
    "via": "제17조의3제7항",
@@ -1089,7 +1089,7 @@
     "M18"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "중기부": [
     "6",
     "11",
@@ -1117,7 +1117,7 @@
     "D-010374"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "국가재정법",
    "via": "제7조제11항",
@@ -1125,7 +1125,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "국고금관리법시행규칙": {
   "name": "국고금 관리법 시행규칙",
@@ -1140,7 +1140,7 @@
     "M70"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "index": true,
   "index_reason": "직접참조"
  },
@@ -1161,7 +1161,7 @@
     "M76"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "창진원": [
     "32"
    ],
@@ -1185,7 +1185,7 @@
     "M52"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "중기부": [
     "7"
    ]
@@ -1206,7 +1206,7 @@
     "D-006699"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "국민기초생활 보장법",
    "via": "제13조제2항",
@@ -1229,7 +1229,7 @@
     "D-002820"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "국민기초생활 보장법",
    "via": "제2조제10호",
@@ -1252,7 +1252,7 @@
     "L06"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "index": true,
   "index_reason": "직접참조"
  },
@@ -1267,7 +1267,7 @@
   "refs": {
    "창진원": []
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "국민연금법",
    "via": "제10조제1항",
@@ -1279,7 +1279,7 @@
    ]
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "국민연금법시행령": {
   "name": "국민연금법 시행령",
@@ -1292,7 +1292,7 @@
   "refs": {
    "창진원": []
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "국민연금법",
    "via": "제3조제1항제1호",
@@ -1304,7 +1304,7 @@
    ]
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "국민평생직업능력개발법": {
   "name": "국민 평생 직업능력 개발법",
@@ -1319,7 +1319,7 @@
     "M50"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "중기부": [
     "6"
    ]
@@ -1340,7 +1340,7 @@
     "D-006865"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "국민 평생 직업능력 개발법",
    "via": "제19조제5항",
@@ -1348,7 +1348,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "국민평생직업능력개발법시행령": {
   "name": "국민 평생 직업능력 개발법 시행령",
@@ -1363,7 +1363,7 @@
     "D-003069"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "국민 평생 직업능력 개발법",
    "via": "제2조제3호가목",
@@ -1371,7 +1371,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "국세기본법": {
   "name": "국세기본법",
@@ -1390,7 +1390,7 @@
     "M37"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "창진원": [
     "39"
    ],
@@ -1416,7 +1416,7 @@
     "M69"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "중기부": [
     "19-3"
    ]
@@ -1449,7 +1449,7 @@
     "D-002884"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "국세기본법",
    "via": "제2조제20호가목",
@@ -1461,7 +1461,7 @@
    ]
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "국세징수법": {
   "name": "국세징수법",
@@ -1480,7 +1480,7 @@
     "M38"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "창진원": [
     "105"
    ],
@@ -1506,7 +1506,7 @@
     "D-006742"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "국세징수법 시행령",
    "via": "제6조",
@@ -1519,7 +1519,7 @@
    ]
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "국세징수법시행령": {
   "name": "국세징수법 시행령",
@@ -1536,7 +1536,7 @@
     "D-002891"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "국세징수법",
    "via": "제10조제1항",
@@ -1548,7 +1548,7 @@
    ]
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "국유재산법": {
   "name": "국유재산법",
@@ -1563,7 +1563,7 @@
     "M57"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "index": true,
   "index_reason": "직접참조"
  },
@@ -1580,7 +1580,7 @@
     "D-006758"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "국유재산법",
    "via": "제18조제1항제3호",
@@ -1588,7 +1588,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "국유재산법시행령": {
   "name": "국유재산법 시행령",
@@ -1603,7 +1603,7 @@
     "D-002907"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "국유재산법",
    "via": "제2조제6호",
@@ -1611,7 +1611,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "국토교통보조사업관리규정": {
   "name": "국토교통 보조사업 관리규정",
@@ -1626,7 +1626,7 @@
     "D-50965"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "보조금 관리에 관한 법률",
    "via": "제17조제3항",
@@ -1653,7 +1653,7 @@
     "M09"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "index": true,
   "index_reason": "직접참조"
  },
@@ -1672,7 +1672,7 @@
     "D-006859"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "근로기준법",
    "via": "제26조제3호",
@@ -1684,7 +1684,7 @@
    ]
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "근로기준법시행령": {
   "name": "근로기준법 시행령",
@@ -1701,7 +1701,7 @@
     "D-003058"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "근로기준법",
    "via": "제11조제2항",
@@ -1713,7 +1713,7 @@
    ]
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "근로자퇴직급여보장법": {
   "name": "근로자퇴직급여 보장법",
@@ -1732,7 +1732,7 @@
     "M10"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "index": true,
   "index_reason": "직접참조"
  },
@@ -1751,7 +1751,7 @@
     "D-010043"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "근로자퇴직급여 보장법",
    "via": "제16조제1항제1호",
@@ -1763,7 +1763,7 @@
    ]
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "근로자퇴직급여보장법시행령": {
   "name": "근로자퇴직급여 보장법 시행령",
@@ -1780,7 +1780,7 @@
     "D-010035"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "근로자퇴직급여 보장법",
    "via": "제7조제2항",
@@ -1792,7 +1792,7 @@
    ]
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "금융실명거래및비밀보장에관한법률": {
   "name": "금융실명거래 및 비밀보장에 관한 법률",
@@ -1807,7 +1807,7 @@
     "M33"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "중기부": [
     "2",
     "4",
@@ -1830,7 +1830,7 @@
     "D-006871"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "금융실명거래 및 비밀보장에 관한 법률",
    "via": "제2조제2호",
@@ -1838,7 +1838,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "금융실명거래및비밀보장에관한법률시행령": {
   "name": "금융실명거래 및 비밀보장에 관한 법률 시행령",
@@ -1853,7 +1853,7 @@
     "D-003086"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "금융실명거래 및 비밀보장에 관한 법률",
    "via": "제2조제1호하목",
@@ -1861,7 +1861,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "금융실명거래및비밀보장에관한법률에서위임한서식관련규정": {
   "name": "금융실명거래 및 비밀보장에 관한 법률에서 위임한 서식관련 규정",
@@ -1876,7 +1876,7 @@
     "D-36094"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "금융실명거래 및 비밀보장에 관한 법률",
    "via": "제4조제2항",
@@ -1884,7 +1884,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "기술의이전및사업화촉진에관한법률": {
   "name": "기술의 이전 및 사업화 촉진에 관한 법률",
@@ -1903,7 +1903,7 @@
     "M07"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "창진원": [
     "35"
    ],
@@ -1929,7 +1929,7 @@
     "D-010838"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "기술의 이전 및 사업화 촉진에 관한 법률",
    "via": "제35조의2제2항제2호",
@@ -1941,7 +1941,7 @@
    ]
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "기술의이전및사업화촉진에관한법률시행령": {
   "name": "기술의 이전 및 사업화 촉진에 관한 법률 시행령",
@@ -1958,7 +1958,7 @@
     "D-003118"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "기술의 이전 및 사업화 촉진에 관한 법률",
    "via": "제2조제1호라목",
@@ -1970,7 +1970,7 @@
    ]
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "기초연금법": {
   "name": "기초연금법",
@@ -1985,7 +1985,7 @@
     "M54"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "index": true,
   "index_reason": "직접참조"
  },
@@ -2002,7 +2002,7 @@
     "D-012097"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "기초연금법",
    "via": "제2조제4호",
@@ -2025,7 +2025,7 @@
     "D-012095"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "기초연금법",
    "via": "제3조제3항",
@@ -2048,7 +2048,7 @@
     "D-51853"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "보조금 관리에 관한 법률",
    "via": "제17조제3항",
@@ -2065,9 +2065,9 @@
   "ministry": "중소벤처기업부",
   "sources": [],
   "refs": {},
-  "cited": {},
+  "cited_articles": {},
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "문화산업진흥기본법": {
   "name": "문화산업진흥 기본법",
@@ -2082,7 +2082,7 @@
     "M60"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "중기부": [
     "2"
    ]
@@ -2103,7 +2103,7 @@
     "D-007161"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "문화산업진흥 기본법",
    "via": "제10조의3제1항",
@@ -2111,7 +2111,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "문화산업진흥기본법시행령": {
   "name": "문화산업진흥 기본법 시행령",
@@ -2126,7 +2126,7 @@
     "D-009138"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "문화산업진흥 기본법",
    "via": "제2조제10호",
@@ -2134,7 +2134,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "민법": {
   "name": "민법",
@@ -2153,7 +2153,7 @@
     "M11"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "창진원": [
     "397",
     "767",
@@ -2184,7 +2184,7 @@
     "D-003534"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "민법",
    "via": "제312조의2",
@@ -2196,7 +2196,7 @@
    ]
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "법무부국고보조금관리규정": {
   "name": "법무부 국고보조금 관리 규정",
@@ -2211,7 +2211,7 @@
     "D-79239"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "보조금 관리에 관한 법률",
    "via": "제17조제3항",
@@ -2232,7 +2232,7 @@
   "refs": {
    "창진원": []
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "법인세법 시행령",
    "via": "제3조제1항제11호",
@@ -2244,7 +2244,7 @@
    ]
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "법인세법시행령": {
   "name": "법인세법 시행령",
@@ -2259,7 +2259,7 @@
     "L36"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "창진원": [
     "158"
    ]
@@ -2274,9 +2274,9 @@
   "ministry": "중소벤처기업부",
   "sources": [],
   "refs": {},
-  "cited": {},
+  "cited_articles": {},
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "보건복지부소관국고보조금관리규정": {
   "name": "보건복지부소관 국고보조금 관리규정",
@@ -2291,7 +2291,7 @@
     "D-51730"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "보조금 관리에 관한 법률",
    "via": "제17조제3항",
@@ -2318,7 +2318,7 @@
     "M02"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "창진원": [
     "31-2"
    ],
@@ -2369,7 +2369,7 @@
     "M64"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "중기부": [
     "6",
     "6-3",
@@ -2414,7 +2414,7 @@
     "M78"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "index": true,
   "index_reason": "직접참조"
  },
@@ -2431,7 +2431,7 @@
     "M81"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "index": true,
   "index_reason": "직접참조"
  },
@@ -2448,7 +2448,7 @@
     "M80"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "index": true,
   "index_reason": "직접참조"
  },
@@ -2465,7 +2465,7 @@
     "M79"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "index": true,
   "index_reason": "직접참조"
  },
@@ -2482,7 +2482,7 @@
     "M39"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "중기부": [
     "8",
     "32"
@@ -2504,7 +2504,7 @@
     "D-007289"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "부가가치세법",
    "via": "제21조제2항제3호",
@@ -2512,7 +2512,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "부가가치세법시행령": {
   "name": "부가가치세법 시행령",
@@ -2527,7 +2527,7 @@
     "D-003666"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "부가가치세법",
    "via": "제2조제1호",
@@ -2535,7 +2535,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "부동산등기규칙": {
   "name": "부동산등기규칙",
@@ -2550,7 +2550,7 @@
     "D-005868"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "부동산등기법",
    "via": "제2조제1호",
@@ -2558,7 +2558,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "부동산등기법": {
   "name": "부동산등기법",
@@ -2573,7 +2573,7 @@
     "M34"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "중기부": [
     "2"
    ]
@@ -2598,7 +2598,7 @@
     "M06"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "중기부": [
     "2"
    ]
@@ -2623,7 +2623,7 @@
     "D-012661"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "창진원": [
     "별표1"
    ]
@@ -2655,7 +2655,7 @@
     "D-012688"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "부정청탁 및 금품등 수수의 금지에 관한 법률",
    "via": "제7조제4항제4호",
@@ -2667,7 +2667,7 @@
    ]
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "부패방지및국민권익위원회의설치와운영에관한법률": {
   "name": "부패방지 및 국민권익위원회의 설치와 운영에 관한 법률",
@@ -2682,7 +2682,7 @@
     "M19"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "중기부": [
     "62",
     "62-3",
@@ -2710,7 +2710,7 @@
     "D-009258"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "부패방지 및 국민권익위원회의 설치와 운영에 관한 법률",
    "via": "제17조제2호",
@@ -2718,7 +2718,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "부패방지및국민권익위원회의설치와운영에관한법률의시행에관한중앙선거관리위원회규칙": {
   "name": "부패방지 및 국민권익위원회의 설치와 운영에 관한 법률의 시행에 관한 중앙선거관리위원회 규칙",
@@ -2733,7 +2733,7 @@
     "D-010920"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "부패방지 및 국민권익위원회의 설치와 운영에 관한 법률",
    "via": "제76조",
@@ -2741,7 +2741,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "부패방지및국민권익위원회의설치와운영에관한법률의시행에관한헌법재판소규칙": {
   "name": "부패방지 및 국민권익위원회의 설치와 운영에 관한 법률의 시행에 관한 헌법재판소 규칙",
@@ -2756,7 +2756,7 @@
     "D-010765"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "부패방지 및 국민권익위원회의 설치와 운영에 관한 법률",
    "via": "제85조제2항",
@@ -2764,7 +2764,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "사회보장기본법": {
   "name": "사회보장기본법",
@@ -2779,7 +2779,7 @@
     "M31"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "중기부": [
     "37"
    ]
@@ -2800,7 +2800,7 @@
     "D-014198"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "사회보장기본법",
    "via": "제43조제2항",
@@ -2808,7 +2808,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "사회보장기본법시행령": {
   "name": "사회보장기본법 시행령",
@@ -2823,7 +2823,7 @@
     "D-003754"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "사회보장기본법",
    "via": "제16조제3항",
@@ -2831,7 +2831,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "사회복지사업법": {
   "name": "사회복지사업법",
@@ -2846,7 +2846,7 @@
     "M48"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "중기부": [
     "6-2"
    ]
@@ -2867,7 +2867,7 @@
     "D-007339"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "사회복지사업법",
    "via": "제10조제2항",
@@ -2890,7 +2890,7 @@
     "D-003759"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "사회복지사업법",
    "via": "제2조제1호고목",
@@ -2913,7 +2913,7 @@
     "M46"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "중기부": [
     "28"
    ]
@@ -2934,7 +2934,7 @@
     "D-011543"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "사회서비스 이용 및 이용권 관리에 관한 법률",
    "via": "제6조제2항제1호",
@@ -2957,7 +2957,7 @@
     "D-011539"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "사회서비스 이용 및 이용권 관리에 관한 법률",
    "via": "제5조제3항",
@@ -2980,7 +2980,7 @@
     "D-89635"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "보조금 관리에 관한 법률",
    "via": "제17조제3항",
@@ -2995,11 +2995,9 @@
   "file": "L1_산업교육진흥및산학연협력촉진에관한법률_20250621.xml",
   "norm_type": "법령",
   "ministry": "교육부",
-  "sources": [
-   "범위밖"
-  ],
+  "sources": [],
   "refs": {},
-  "cited": {},
+  "cited_articles": {},
   "note": "위임 아님. 고등교육법 제15조제2항·국가연구개발혁신법 시행령 제36조·기술이전법이 인용법령으로만 참조. 대학 산학협력단 근거법이라 L3(주관기관) 맥락에서는 유효할 수 있음",
   "index": false,
   "index_reason": "위임 아님 — 인용법령 경유"
@@ -3009,11 +3007,9 @@
   "file": "L1_산업교육진흥및산학연협력촉진에관한법률시행규칙_20260327.xml",
   "norm_type": "법령",
   "ministry": "교육부",
-  "sources": [
-   "범위밖"
-  ],
+  "sources": [],
   "refs": {},
-  "cited": {},
+  "cited_articles": {},
   "note": "위 법률의 하위. 2026-08-24 누락 감사에서 추가 수집",
   "index": false,
   "index_reason": "위임 아님 — 인용법령 경유"
@@ -3023,11 +3019,9 @@
   "file": "L1_산업교육진흥및산학연협력촉진에관한법률시행령_20260324.xml",
   "norm_type": "법령",
   "ministry": "교육부",
-  "sources": [
-   "범위밖"
-  ],
+  "sources": [],
   "refs": {},
-  "cited": {},
+  "cited_articles": {},
   "note": "위 법률의 하위. 같은 사유",
   "index": false,
   "index_reason": "위임 아님 — 인용법령 경유"
@@ -3037,12 +3031,10 @@
   "file": "L1_산업기술혁신사업공통운영요령_20241230.xml",
   "norm_type": "행정규칙",
   "ministry": "산업통상부",
-  "sources": [
-   "범위밖"
-  ],
+  "sources": [],
   "refs": {},
-  "cited": {},
-  "note": "산업기술혁신촉진법의 위임행정규칙이나 그 법률은 코퍼스에 없음. 어느 시드에서도 위임되지 않음",
+  "cited_articles": {},
+  "note": "산업기술혁신촉진법의 위임행정규칙이나 그 법률은 코퍼스에 없음. 어느 시작 문서에서도 위임되지 않음",
   "index": false,
   "index_reason": "위임 아님 — 인용법령 경유"
  },
@@ -3063,7 +3055,7 @@
     "M08"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "창진원": [
     "129"
    ],
@@ -3089,7 +3081,7 @@
     "D-007364"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "산업안전보건법",
    "via": "제2조제2호",
@@ -3101,7 +3093,7 @@
    ]
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "산업안전보건법시행령": {
   "name": "산업안전보건법 시행령",
@@ -3118,7 +3110,7 @@
     "D-003786"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "산업안전보건법",
    "via": "제3조",
@@ -3130,7 +3122,7 @@
    ]
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "산업집적활성화및공장설립에관한법률": {
   "name": "산업집적활성화 및 공장설립에 관한 법률",
@@ -3145,7 +3137,7 @@
     "M61"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "index": true,
   "index_reason": "직접참조"
  },
@@ -3162,7 +3154,7 @@
     "D-006335"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "산업집적활성화 및 공장설립에 관한 법률",
    "via": "제6조의3제3항",
@@ -3170,7 +3162,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "산업집적활성화및공장설립에관한법률시행령": {
   "name": "산업집적활성화 및 공장설립에 관한 법률 시행령",
@@ -3185,7 +3177,7 @@
     "D-002351"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "산업집적활성화 및 공장설립에 관한 법률",
    "via": "제2조제11호",
@@ -3193,7 +3185,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "산업통상자원부국고보조금통합관리지침": {
   "name": "산업통상자원부 국고보조금 통합관리지침",
@@ -3208,7 +3200,7 @@
     "D-55454"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "보조금 관리에 관한 법률",
    "via": "제17조제3항",
@@ -3231,7 +3223,7 @@
     "L25"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "index": true,
   "index_reason": "직접참조"
  },
@@ -3246,7 +3238,7 @@
   "refs": {
    "창진원": []
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "상법",
    "via": "제33조제4항",
@@ -3258,7 +3250,7 @@
    ]
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "상법의전자선하증권규정의시행에관한규정": {
   "name": "상법의 전자선하증권 규정의 시행에 관한 규정",
@@ -3271,7 +3263,7 @@
   "refs": {
    "창진원": []
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "상법",
    "via": "제862조제5항",
@@ -3283,7 +3275,7 @@
    ]
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "새만금개발청국고보조금관리지침": {
   "name": "새만금개발청 국고보조금 관리지침",
@@ -3298,7 +3290,7 @@
     "D-90638"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "보조금 관리에 관한 법률",
    "via": "제17조제3항",
@@ -3321,7 +3313,7 @@
     "D-73227"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "보조금 관리에 관한 법률",
    "via": "제17조제3항",
@@ -3344,7 +3336,7 @@
     "M40"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "중기부": [
     "163"
    ]
@@ -3367,7 +3359,7 @@
     "D-007507"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "소득세법 시행령",
    "via": "제4조제2항",
@@ -3379,7 +3371,7 @@
    ]
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "소득세법시행령": {
   "name": "소득세법 시행령",
@@ -3398,7 +3390,7 @@
     "D-003956"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "소득세법",
    "via": "제1조의2제2항",
@@ -3421,7 +3413,7 @@
     "L24"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "창진원": [
     "17"
    ]
@@ -3440,7 +3432,7 @@
   "refs": {
    "창진원": []
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "소상공인 보호 및 지원에 관한 법률",
    "via": "제16조의2제2항",
@@ -3452,7 +3444,7 @@
    ]
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "소상공인보호및지원에관한법률시행령": {
   "name": "소상공인 보호 및 지원에 관한 법률 시행령",
@@ -3465,7 +3457,7 @@
   "refs": {
    "창진원": []
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "소상공인 보호 및 지원에 관한 법률",
    "via": "제2조제3호",
@@ -3477,7 +3469,7 @@
    ]
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "식품의약품안전처소관국고보조금관리규정": {
   "name": "식품의약품안전처 소관 국고보조금 관리규정",
@@ -3492,7 +3484,7 @@
     "D-62441"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "보조금 관리에 관한 법률",
    "via": "제17조제3항",
@@ -3513,7 +3505,7 @@
   "refs": {
    "창진원": []
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "국가연구개발혁신법",
    "via": "제22조제1항",
@@ -3544,7 +3536,7 @@
     "M82"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "index": true,
   "index_reason": "직접참조"
  },
@@ -3561,7 +3553,7 @@
     "M35"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "중기부": [
     "2",
     "25",
@@ -3584,7 +3576,7 @@
     "D-007643"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "신용정보의 이용 및 보호에 관한 법률",
    "via": "제4조제5항",
@@ -3592,7 +3584,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "신용정보의이용및보호에관한법률시행령": {
   "name": "신용정보의 이용 및 보호에 관한 법률 시행령",
@@ -3607,7 +3599,7 @@
     "D-004105"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "신용정보의 이용 및 보호에 관한 법률",
    "via": "제2조제11호",
@@ -3615,7 +3607,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "아이돌봄지원법": {
   "name": "아이돌봄 지원법",
@@ -3630,7 +3622,7 @@
     "M49"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "중기부": [
     "25"
    ]
@@ -3651,7 +3643,7 @@
     "D-011676"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "아이돌봄 지원법",
    "via": "제5조제2항제4호",
@@ -3674,7 +3666,7 @@
     "D-011667"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "아이돌봄 지원법",
    "via": "제7조제1항제2호",
@@ -3697,7 +3689,7 @@
     "M27"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "index": true,
   "index_reason": "직접참조"
  },
@@ -3714,7 +3706,7 @@
     "D-007717"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "여신전문금융업법",
    "via": "제4조제2호",
@@ -3722,7 +3714,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "여신전문금융업법시행령": {
   "name": "여신전문금융업법 시행령",
@@ -3737,7 +3729,7 @@
     "D-004186"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "여신전문금융업법",
    "via": "제2조제10호",
@@ -3745,7 +3737,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "연구실안전환경조성에관한법률": {
   "name": "연구실 안전환경 조성에 관한 법률",
@@ -3760,7 +3752,7 @@
     "L39"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "index": true,
   "index_reason": "직접참조"
  },
@@ -3775,7 +3767,7 @@
   "refs": {
    "창진원": []
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "연구실 안전환경 조성에 관한 법률",
    "via": "제2조제13호",
@@ -3787,7 +3779,7 @@
    ]
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "연구실안전환경조성에관한법률시행령": {
   "name": "연구실 안전환경 조성에 관한 법률 시행령",
@@ -3800,7 +3792,7 @@
   "refs": {
    "창진원": []
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "연구실 안전환경 조성에 관한 법률",
    "via": "제3조",
@@ -3812,7 +3804,7 @@
    ]
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "영유아보육법": {
   "name": "영유아보육법",
@@ -3827,7 +3819,7 @@
     "M47"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "index": true,
   "index_reason": "직접참조"
  },
@@ -3844,7 +3836,7 @@
     "D-007739"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "영유아보육법",
    "via": "제9조제3항",
@@ -3867,7 +3859,7 @@
     "D-004216"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "영유아보육법",
    "via": "제6조제4항",
@@ -3888,7 +3880,7 @@
   "refs": {
    "창진원": []
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "주식회사 등의 외부감사에 관한 법률 시행령",
    "via": "제5조제3항제2호아목",
@@ -3900,7 +3892,7 @@
    ]
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "유아교육정보시스템및교육정보시스템의운영등에관한규칙": {
   "name": "유아교육정보시스템 및 교육정보시스템의 운영 등에 관한 규칙",
@@ -3915,7 +3907,7 @@
     "D-010046"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "초ㆍ중등교육법",
    "via": "제30조의4제3항",
@@ -3923,7 +3915,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "은행업감독업무시행세칙": {
   "name": "은행업감독업무시행세칙",
@@ -3932,9 +3924,9 @@
   "ministry": "금융감독원",
   "sources": [],
   "refs": {},
-  "cited": {},
+  "cited_articles": {},
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "인공지능발전과신뢰기반조성등에관한기본법": {
   "name": "인공지능 발전과 신뢰 기반 조성 등에 관한 기본법",
@@ -3949,7 +3941,7 @@
     "L14"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "index": true,
   "index_reason": "직접참조"
  },
@@ -3964,7 +3956,7 @@
   "refs": {
    "창진원": []
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "인공지능 발전과 신뢰 기반 조성 등에 관한 기본법",
    "via": "제3조제5항",
@@ -3976,7 +3968,7 @@
    ]
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "장애인복지법": {
   "name": "장애인복지법",
@@ -3991,7 +3983,7 @@
     "M53"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "중기부": [
     "49"
    ]
@@ -4012,7 +4004,7 @@
     "D-007972"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "장애인복지법",
    "via": "제25조의2제2항",
@@ -4035,7 +4027,7 @@
     "D-004628"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "장애인복지법",
    "via": "제2조제2항",
@@ -4058,7 +4050,7 @@
     "D-2031043"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "재난 및 안전관리 기본법",
    "via": "제3조제9호",
@@ -4066,7 +4058,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "재난및안전관리기본법": {
   "name": "재난 및 안전관리 기본법",
@@ -4081,7 +4073,7 @@
     "M12"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "중기부": [
     "3"
    ]
@@ -4102,7 +4094,7 @@
     "D-009717"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "재난 및 안전관리 기본법",
    "via": "제10조의4제1항",
@@ -4110,7 +4102,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "재난및안전관리기본법시행령": {
   "name": "재난 및 안전관리 기본법 시행령",
@@ -4125,7 +4117,7 @@
     "D-009708"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "재난 및 안전관리 기본법",
    "via": "제3조제1호나목",
@@ -4133,7 +4125,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "재외동포청보조금관리에관한규정": {
   "name": "재외동포청 보조금 관리에 관한 규정",
@@ -4148,7 +4140,7 @@
     "D-88293"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "보조금 관리에 관한 법률",
    "via": "제17조제3항",
@@ -4173,7 +4165,7 @@
     "D-53586"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "중소기업창업 지원법",
    "via": "제43조제5항",
@@ -4185,7 +4177,7 @@
    ]
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "전자문서및전자거래기본법": {
   "name": "전자문서 및 전자거래 기본법",
@@ -4200,7 +4192,7 @@
     "L35"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "index": true,
   "index_reason": "직접참조"
  },
@@ -4215,7 +4207,7 @@
   "refs": {
    "창진원": []
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "전자문서 및 전자거래 기본법",
    "via": "제18조의4제4항",
@@ -4227,7 +4219,7 @@
    ]
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "전자문서및전자거래기본법시행령": {
   "name": "전자문서 및 전자거래 기본법 시행령",
@@ -4240,7 +4232,7 @@
   "refs": {
    "창진원": []
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "전자문서 및 전자거래 기본법",
    "via": "제13조제4항",
@@ -4252,7 +4244,7 @@
    ]
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "전자서명법": {
   "name": "전자서명법",
@@ -4267,7 +4259,7 @@
     "M16"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "중기부": [
     "2"
    ]
@@ -4288,7 +4280,7 @@
     "D-008089"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "전자서명법",
    "via": "제13조제1항",
@@ -4296,7 +4288,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "전자서명법시행령": {
   "name": "전자서명법 시행령",
@@ -4311,7 +4303,7 @@
     "D-004758"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "전자서명법",
    "via": "제9조제3항",
@@ -4319,7 +4311,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "전자조달의이용및촉진에관한법률": {
   "name": "전자조달의 이용 및 촉진에 관한 법률",
@@ -4334,7 +4326,7 @@
     "M23"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "중기부": [
     "2"
    ]
@@ -4355,7 +4347,7 @@
     "D-011913"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "전자조달의 이용 및 촉진에 관한 법률 시행령",
    "via": "제4조제4항",
@@ -4363,7 +4355,7 @@
    "depth": 2
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "전자조달의이용및촉진에관한법률시행령": {
   "name": "전자조달의 이용 및 촉진에 관한 법률 시행령",
@@ -4378,7 +4370,7 @@
     "D-011912"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "전자조달의 이용 및 촉진에 관한 법률",
    "via": "제2조제1호",
@@ -4386,7 +4378,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "조달청연구개발사업전문기관지정고시": {
   "name": "조달청 연구개발사업 전문기관 지정 고시",
@@ -4399,7 +4391,7 @@
   "refs": {
    "창진원": []
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "국가연구개발혁신법",
    "via": "제22조제1항",
@@ -4426,7 +4418,7 @@
     "M41"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "중기부": [
     "100-2"
    ]
@@ -4447,7 +4439,7 @@
     "D-008218"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "조세특례제한법",
    "via": "제30조의4제5항",
@@ -4455,7 +4447,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "조세특례제한법시행령": {
   "name": "조세특례제한법 시행령",
@@ -4470,7 +4462,7 @@
     "D-004920"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "조세특례제한법",
    "via": "제2조제1항제10호의3가목",
@@ -4478,7 +4470,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "주민등록법": {
   "name": "주민등록법",
@@ -4493,7 +4485,7 @@
     "M36"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "중기부": [
     "28"
    ]
@@ -4514,7 +4506,7 @@
     "D-008230"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "주민등록법",
    "via": "제16조의2제2항",
@@ -4522,7 +4514,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "주민등록법시행령": {
   "name": "주민등록법 시행령",
@@ -4537,7 +4529,7 @@
     "D-004936"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "주민등록법",
    "via": "제3조제2항",
@@ -4545,7 +4537,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "주식회사등의외부감사에관한법률": {
   "name": "주식회사 등의 외부감사에 관한 법률",
@@ -4560,7 +4552,7 @@
     "M44"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "중기부": [
     "2",
     "9"
@@ -4584,7 +4576,7 @@
     "D-008234"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "주식회사 등의 외부감사에 관한 법률 시행령",
    "via": "제7조제2항",
@@ -4596,7 +4588,7 @@
    ]
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "주식회사등의외부감사에관한법률시행령": {
   "name": "주식회사 등의 외부감사에 관한 법률 시행령",
@@ -4615,7 +4607,7 @@
     "D-004940"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "창진원": [
     "5"
    ]
@@ -4642,7 +4634,7 @@
     "M04"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "중기부": [
     "2",
     "20-2"
@@ -4664,7 +4656,7 @@
     "D-004958"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "중소기업기본법",
    "via": "제2조제1항제1호가목",
@@ -4672,7 +4664,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "중소기업기술개발지원사업운영요령": {
   "name": "중소기업기술개발 지원사업 운영요령",
@@ -4687,7 +4679,7 @@
     "R09"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "창진원": [
     "48"
    ]
@@ -4708,7 +4700,7 @@
     "L31"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "창진원": [
     "9"
    ]
@@ -4727,7 +4719,7 @@
   "refs": {
    "창진원": []
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "중소기업 기술혁신 촉진법",
    "via": "제14조제3항",
@@ -4739,7 +4731,7 @@
    ]
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "중소기업기술혁신촉진법시행령": {
   "name": "중소기업 기술혁신 촉진법 시행령",
@@ -4754,7 +4746,7 @@
     "L32"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "창진원": [
     "19"
    ]
@@ -4778,9 +4770,9 @@
   "ministry": "중소벤처기업부",
   "sources": [],
   "refs": {},
-  "cited": {},
+  "cited_articles": {},
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "중소기업자간경쟁제품및공사용자재직접구매대상품목지정내역": {
   "name": "중소기업자간 경쟁제품 및 공사용자재 직접구매 대상 품목 지정 내역",
@@ -4795,7 +4787,7 @@
     "D-36574"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "중소기업제품 구매촉진 및 판로지원에 관한 법률",
    "via": "제4조제2항",
@@ -4803,7 +4795,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "중소기업제품구매촉진및판로지원에관한법률": {
   "name": "중소기업제품 구매촉진 및 판로지원에 관한 법률",
@@ -4818,7 +4810,7 @@
     "M26"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "중기부": [
     "4"
    ]
@@ -4839,7 +4831,7 @@
     "D-011103"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "중소기업제품 구매촉진 및 판로지원에 관한 법률",
    "via": "제7조의2제2항",
@@ -4847,7 +4839,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "중소기업제품구매촉진및판로지원에관한법률시행령": {
   "name": "중소기업제품 구매촉진 및 판로지원에 관한 법률 시행령",
@@ -4862,7 +4854,7 @@
     "D-011101"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "중소기업제품 구매촉진 및 판로지원에 관한 법률",
    "via": "제2조제2호다목",
@@ -4870,7 +4862,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "중소기업창업지원법": {
   "name": "중소기업창업 지원법",
@@ -4889,7 +4881,7 @@
     "M01"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "창진원": [
     "2",
     "12",
@@ -4932,7 +4924,7 @@
     "D-008263"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "중소기업창업 지원법",
    "via": "제45조제4항",
@@ -4944,7 +4936,7 @@
    ]
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "중소기업창업지원법시행령": {
   "name": "중소기업창업 지원법 시행령",
@@ -4963,7 +4955,7 @@
     "M63"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "창진원": [
     "2",
     "4"
@@ -5004,7 +4996,7 @@
     "M74"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "창진원": [
     "5",
     "10",
@@ -5073,7 +5065,7 @@
     "D-24740"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "중소기업창업 지원법",
    "via": "제59조",
@@ -5085,7 +5077,7 @@
    ]
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "중소벤처기업부보조사업관리규정": {
   "name": "중소벤처기업부 보조사업 관리규정",
@@ -5104,7 +5096,7 @@
     "M75"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "중기부": [
     "3",
     "4",
@@ -5152,7 +5144,7 @@
     "M29"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "중기부": [
     "2",
     "3"
@@ -5174,7 +5166,7 @@
     "D-008314"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "지방공기업법",
    "via": "제58조의2제3항",
@@ -5182,7 +5174,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "지방공기업법시행령": {
   "name": "지방공기업법 시행령",
@@ -5197,7 +5189,7 @@
     "D-005042"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "지방공기업법",
    "via": "제2조제1항",
@@ -5205,7 +5197,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "지방교부세법": {
   "name": "지방교부세법",
@@ -5220,7 +5212,7 @@
     "M59"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "index": true,
   "index_reason": "직접참조"
  },
@@ -5237,7 +5229,7 @@
     "D-008323"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "지방교부세법",
    "via": "제7조제2항",
@@ -5245,7 +5237,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "지방교부세법시행령": {
   "name": "지방교부세법 시행령",
@@ -5260,7 +5252,7 @@
     "D-005057"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "지방교부세법",
    "via": "제9조제7항",
@@ -5268,7 +5260,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "지방세기본법": {
   "name": "지방세기본법",
@@ -5283,7 +5275,7 @@
     "M43"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "중기부": [
     "86"
    ]
@@ -5304,7 +5296,7 @@
     "D-011312"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "지방세기본법",
    "via": "제2조제1항제28호",
@@ -5312,7 +5304,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "지방세기본법시행령": {
   "name": "지방세기본법 시행령",
@@ -5327,7 +5319,7 @@
     "D-011277"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "지방세기본법",
    "via": "제2조제1항제34호가목",
@@ -5335,7 +5327,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "지방세징수법": {
   "name": "지방세징수법",
@@ -5354,7 +5346,7 @@
     "M42"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "창진원": [
     "105"
    ],
@@ -5380,7 +5372,7 @@
     "D-012839"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "지방세징수법 시행령",
    "via": "제8조제1항",
@@ -5393,7 +5385,7 @@
    ]
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "지방세징수법시행령": {
   "name": "지방세징수법 시행령",
@@ -5410,7 +5402,7 @@
     "D-012834"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "지방세징수법",
    "via": "제5조제1항",
@@ -5422,7 +5414,7 @@
    ]
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "지방재정법": {
   "name": "지방재정법",
@@ -5437,7 +5429,7 @@
     "M30"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "중기부": [
     "96-2"
    ]
@@ -5458,7 +5450,7 @@
     "D-005098"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "지방재정법",
    "via": "제5조제3항",
@@ -5466,7 +5458,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "지방재정법시행령제33조제1항본문에따른지방자치단체경비부담의기준등에관한규칙": {
   "name": "지방재정법 시행령 제33조제1항 본문에 따른 지방자치단체 경비부담의 기준 등에 관한 규칙",
@@ -5481,7 +5473,7 @@
     "D-008344"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "지방재정법 시행령",
    "via": "제33조제1항",
@@ -5489,7 +5481,7 @@
    "depth": 2
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "지방행정제재ㆍ부과금의징수등에관한법률": {
   "name": "지방행정제재ㆍ부과금의 징수 등에 관한 법률",
@@ -5504,7 +5496,7 @@
     "M56"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "index": true,
   "index_reason": "직접참조"
  },
@@ -5521,7 +5513,7 @@
     "D-012130"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "지방행정제재ㆍ부과금의 징수 등에 관한 법률",
    "via": "제2조제1호의2",
@@ -5529,7 +5521,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "지방행정제재ㆍ부과금의징수등에관한법률시행령": {
   "name": "지방행정제재ㆍ부과금의 징수 등에 관한 법률 시행령",
@@ -5544,7 +5536,7 @@
     "D-012048"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "지방행정제재ㆍ부과금의 징수 등에 관한 법률",
    "via": "제6조제1항",
@@ -5552,7 +5544,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "지식재산처국가연구개발사업전문기관지정고시": {
   "name": "지식재산처 국가연구개발사업 전문기관 지정 고시",
@@ -5565,7 +5557,7 @@
   "refs": {
    "창진원": []
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "국가연구개발혁신법",
    "via": "제22조제1항",
@@ -5592,7 +5584,7 @@
     "D-74097"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "보조금 관리에 관한 법률",
    "via": "제17조제3항",
@@ -5615,7 +5607,7 @@
     "D-73894"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "보조금 관리에 관한 법률",
    "via": "제17조제3항",
@@ -5636,7 +5628,7 @@
   "refs": {
    "창진원": []
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "국가연구개발혁신법",
    "via": "제22조제1항",
@@ -5661,7 +5653,7 @@
   "refs": {
    "창진원": []
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "중소기업창업 지원법 시행령",
    "via": "제2조제5항",
@@ -5673,7 +5665,7 @@
    ]
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "창업보육센터운영요령": {
   "name": "창업보육센터 운영요령",
@@ -5688,7 +5680,7 @@
     "D-31398"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "중소기업창업 지원법 시행령",
    "via": "제38조제4항",
@@ -5696,7 +5688,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "청년기본법": {
   "name": "청년기본법",
@@ -5711,7 +5703,7 @@
     "M62"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "index": true,
   "index_reason": "직접참조"
  },
@@ -5728,7 +5720,7 @@
     "D-013822"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "청년기본법",
    "via": "제7조",
@@ -5736,7 +5728,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "초ㆍ중등교육법": {
   "name": "초ㆍ중등교육법",
@@ -5751,7 +5743,7 @@
     "M45"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "중기부": [
     "30-4"
    ]
@@ -5772,7 +5764,7 @@
     "D-012258"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "초ㆍ중등교육법",
    "via": "제25조제1항",
@@ -5780,7 +5772,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "초ㆍ중등교육법시행령": {
   "name": "초ㆍ중등교육법 시행령",
@@ -5795,7 +5787,7 @@
     "D-005238"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "초ㆍ중등교육법",
    "via": "제4조제1항",
@@ -5803,7 +5795,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "최저임금법": {
   "name": "최저임금법",
@@ -5818,7 +5810,7 @@
     "L17"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "index": true,
   "index_reason": "직접참조"
  },
@@ -5833,7 +5825,7 @@
   "refs": {
    "창진원": []
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "최저임금법",
    "via": "제6조제4항제1호",
@@ -5845,7 +5837,7 @@
    ]
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "최저임금법시행령": {
   "name": "최저임금법 시행령",
@@ -5858,7 +5850,7 @@
   "refs": {
    "창진원": []
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "최저임금법",
    "via": "제5조제2항",
@@ -5870,7 +5862,7 @@
    ]
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "출입국관리법": {
   "name": "출입국관리법",
@@ -5885,7 +5877,7 @@
     "L05"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "index": true,
   "index_reason": "직접참조"
  },
@@ -5900,7 +5892,7 @@
   "refs": {
    "창진원": []
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "출입국관리법 시행령",
    "via": "제1조의2제1항제2호",
@@ -5912,7 +5904,7 @@
    ]
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "출입국관리법시행령": {
   "name": "출입국관리법 시행령",
@@ -5927,7 +5919,7 @@
     "L04"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "창진원": [
     "23"
    ]
@@ -5957,7 +5949,7 @@
     "D-35650"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "보조금 관리에 관한 법률",
    "via": "제17조제3항",
@@ -5978,7 +5970,7 @@
   "refs": {
    "창진원": []
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "특정 금융거래정보의 보고 및 이용 등에 관한 법률",
    "via": "제5조의2제1항제2호나목",
@@ -5990,7 +5982,7 @@
    ]
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "특정금융거래정보의보고및이용등에관한법률": {
   "name": "특정 금융거래정보의 보고 및 이용 등에 관한 법률",
@@ -6005,7 +5997,7 @@
     "L29"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "창진원": [
     "5-2"
    ]
@@ -6024,7 +6016,7 @@
   "refs": {
    "창진원": []
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "특정 금융거래정보의 보고 및 이용 등에 관한 법률",
    "via": "제2조제1호거목",
@@ -6036,7 +6028,7 @@
    ]
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "특정범죄신고자등보호법": {
   "name": "특정범죄신고자 등 보호법",
@@ -6051,7 +6043,7 @@
     "M20"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "index": true,
   "index_reason": "직접참조"
  },
@@ -6068,7 +6060,7 @@
     "D-008553"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "특정범죄신고자등보호법시행령",
    "via": "제20조",
@@ -6076,7 +6068,7 @@
    "depth": 2
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "특정범죄신고자등보호법시행령": {
   "name": "특정범죄신고자등보호법시행령",
@@ -6091,7 +6083,7 @@
     "D-005327"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "특정범죄신고자 등 보호법",
    "via": "제6조제10항",
@@ -6099,7 +6091,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "한국재정정보원법": {
   "name": "한국재정정보원법",
@@ -6114,7 +6106,7 @@
     "M58"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "index": true,
   "index_reason": "직접참조"
  },
@@ -6131,7 +6123,7 @@
     "D-012549"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "한국재정정보원법",
    "via": "제11조제2항",
@@ -6139,7 +6131,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "한국표준산업분류": {
   "name": "한국표준산업분류",
@@ -6152,7 +6144,7 @@
   "refs": {
    "창진원": []
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "중소기업창업 지원법 시행령",
    "via": "제2조제4항",
@@ -6164,7 +6156,7 @@
    ]
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "한부모가족지원법": {
   "name": "한부모가족지원법",
@@ -6179,7 +6171,7 @@
     "M55"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "중기부": [
     "12"
    ]
@@ -6200,7 +6192,7 @@
     "D-007138"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "한부모가족지원법",
    "via": "제4조제1호마목",
@@ -6223,7 +6215,7 @@
     "D-003477"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "한부모가족지원법",
    "via": "제5조의2제3항",
@@ -6246,7 +6238,7 @@
     "D-57517"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "보조금 관리에 관한 법률",
    "via": "제17조제3항",
@@ -6273,7 +6265,7 @@
     "M15"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "창진원": [
     "21"
    ],
@@ -6299,7 +6291,7 @@
     "D-008720"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "행정절차법 시행령",
    "via": "제11조제6호",
@@ -6312,7 +6304,7 @@
    ]
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "행정절차법시행령": {
   "name": "행정절차법 시행령",
@@ -6329,7 +6321,7 @@
     "D-005625"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "행정절차법",
    "via": "제3조제2항제9호",
@@ -6341,7 +6333,7 @@
    ]
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "혁신도전형연구개발사업군의지정및분류기준등에관한고시": {
   "name": "혁신도전형 연구개발사업군의 지정 및 분류 기준 등에 관한 고시",
@@ -6356,7 +6348,7 @@
     "D-91680"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "delegation": {
    "from": "국가를 당사자로 하는 계약에 관한 법률 시행령",
    "via": "제26조제1항제5호자목",
@@ -6364,7 +6356,7 @@
    "depth": 1
   },
   "index": true,
-  "index_reason": "위임 사슬"
+  "index_reason": "하위법령 위임"
  },
  "형법": {
   "name": "형법",
@@ -6383,7 +6375,7 @@
     "M21"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "중기부": [
     "129",
     "130",
@@ -6407,7 +6399,7 @@
     "M14"
    ]
   },
-  "cited": {
+  "cited_articles": {
    "중기부": [
     "234"
    ]
@@ -6428,7 +6420,7 @@
     "M83"
    ]
   },
-  "cited": {},
+  "cited_articles": {},
   "index": true,
   "index_reason": "직접참조"
  }

@@ -102,7 +102,8 @@ def _rls_org_설정(conn_or_cur, org: str | None) -> None:
 # 문장마다 새 커넥션을 연다. autocommit 을 켜면 트랜잭션 한정 GUC 가 다음 문장에서 사라져
 # RLS 정책에 의해 0행이 되므로 끄고 쓴다.
 
-def _문장머리(sql: str) -> str:
+def _SQL_요약(sql: str) -> str:
+    """로그용 SQL 요약. 공백을 하나로 줄이고 앞 80자만 남긴다."""
     return " ".join(sql.split())[:80]
 
 
@@ -111,7 +112,7 @@ def _실패기록(sql: str, e: Exception) -> None:
     # mock 모드는 DB 가 없는 것이 정상이라 DEBUG 로 낮춘다.
     로그.log(logging.DEBUG if MOCK else logging.WARNING,
             "DB 문장 실패 sqlstate=%s 예외=%s 문장=%s",
-            getattr(e, "sqlstate", None), type(e).__name__, _문장머리(sql))
+            getattr(e, "sqlstate", None), type(e).__name__, _SQL_요약(sql))
 
 
 def _질의(sql: str, 인자: tuple = (), *, 예외전파: bool = False) -> list[tuple]:
@@ -197,12 +198,31 @@ def _jsonb(v):
 
 # ── 요청 유틸 ───────────────────────────────────────────────────────
 
-def _int환경(키: str, 기본: int) -> int:
-    """정수 환경변수. 없거나 정수가 아니면 기본값."""
+def _환경값(키: str, 기본: str | None = None, *, 구이름: str | None = None) -> str | None:
+    """환경변수 값. 새 이름(키)을 먼저 읽고, 없으면 구이름을 읽고, 둘 다 없으면 기본값."""
+    값 = os.environ.get(키)
+    if 값 is None and 구이름:
+        값 = os.environ.get(구이름)          # 구 이름 호환(제거 예정: 다음 릴리스)
+    return 기본 if 값 is None else 값
+
+
+def _정수_환경변수(키: str, 기본: int, *, 구이름: str | None = None) -> int:
+    """정수 환경변수. 없거나 정수가 아니면 기본값. 구이름은 이름을 바꾼 변수의 이전 이름이다."""
     try:
-        return int(os.environ.get(키, 기본))
+        return int(_환경값(키, str(기본), 구이름=구이름))
     except ValueError:
         return 기본
+
+
+def 구키_추가(d: dict, 대응: dict[str, str]) -> dict:
+    """응답 dict 에 새 키 값을 이전 키 이름으로도 복사한다. 대응은 {새 키: 이전 키}.
+
+    응답 키 이름을 바꾼 뒤 한 릴리스 동안 프론트가 두 이름을 모두 받을 수 있게 하는 용도다.
+    """
+    for 새키, 구키 in 대응.items():
+        if 새키 in d and 구키 not in d:
+            d[구키] = d[새키]               # 구 이름 호환(제거 예정: 다음 릴리스)
+    return d
 
 
 def 클라이언트_ip(req: Request) -> str:
@@ -215,41 +235,42 @@ def 클라이언트_ip(req: Request) -> str:
     return (xff.split(",")[0].strip() if xff else None) or (req.client.host if req.client else "?")
 
 
-def ttl_캐시(ttl_env: str, 기본초: int, 빈값캐시: bool = False) -> Callable:
+def ttl_캐시(ttl_env: str, 기본초: int, 빈값캐시: bool = False, *,
+            구이름: str | None = None) -> Callable:
     """시간 기반 캐시 데코레이터. 인자 조합별로 결과를 TTL 동안 재사용한다.
 
-    TTL 은 데코레이트 시점에 환경변수 ttl_env(없으면 기본초)에서 읽는다. 빈 값(falsy)은
-    기본적으로 저장하지 않는다. DB 오류가 빈 결과로 돌아오는 _질의() 결과를 TTL 동안 들고
-    있지 않기 위해서다. 예외도 저장하지 않는다. 인자 조합이 적은 함수에만 쓴다(크기 제한 없음).
-    감싼 함수의 .무효화() 로 저장된 결과를 모두 지운다.
+    TTL 은 데코레이트 시점에 환경변수 ttl_env(없으면 구이름, 그것도 없으면 기본초)에서 읽는다.
+    빈 값(falsy)은 기본적으로 저장하지 않는다. DB 오류가 빈 결과로 돌아오는 _질의() 결과를 TTL
+    동안 들고 있지 않기 위해서다. 예외도 저장하지 않는다. 인자 조합이 적은 함수에만 쓴다(크기
+    제한 없음). 래퍼 함수의 .무효화() 로 캐시된 결과를 모두 지운다.
     """
-    ttl = _int환경(ttl_env, 기본초)
+    ttl = _정수_환경변수(ttl_env, 기본초, 구이름=구이름)
 
-    def 장식(함수: Callable) -> Callable:
+    def 데코레이터(함수: Callable) -> Callable:
         잠금 = threading.Lock()
-        저장: dict[Any, tuple[float, Any]] = {}
+        캐시저장소: dict[Any, tuple[float, Any]] = {}
 
         @functools.wraps(함수)
-        def 감싼(*args, **kwargs):
+        def 래퍼(*args, **kwargs):
             키 = (args, tuple(sorted(kwargs.items())))
             with 잠금:
-                항목 = 저장.get(키)
+                항목 = 캐시저장소.get(키)
             if 항목 is not None and time.monotonic() - 항목[0] < ttl:
                 return 항목[1]
             값 = 함수(*args, **kwargs)
             if 값 or 빈값캐시:
                 with 잠금:
-                    저장[키] = (time.monotonic(), 값)
+                    캐시저장소[키] = (time.monotonic(), 값)
             return 값
 
         def 무효화() -> None:
             with 잠금:
-                저장.clear()
+                캐시저장소.clear()
 
-        감싼.무효화 = 무효화
-        return 감싼
+        래퍼.무효화 = 무효화
+        return 래퍼
 
-    return 장식
+    return 데코레이터
 
 
 # ── SSE ─────────────────────────────────────────────────────────────

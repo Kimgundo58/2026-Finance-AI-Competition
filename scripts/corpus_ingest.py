@@ -3,9 +3,9 @@
 
 호출자: server/routes_ingest.py. 업로드는 접수() 뒤 백그라운드 작업으로 적재_실행() 을, 관리 요청은
 활성화()·삭제()·문서_상태()·문서_목록() 을 부른다. FastAPI 는 import 하지 않는다.
-흐름: 텍스트 추출(stage0_extract, PDF 는 pdftext) -> 조 분해·품질 판정(stage0_articles) -> 조별 적용대상 태깅
--> 청크 분할 -> KURE-v1 임베딩(retrieve.모델) -> 참조(build_refs.scan) -> 한 트랜잭션으로 저장.
-BM25 색인 행(stage2_bm25 토큰화)은 활성화 트랜잭션에서 넣는다.
+흐름: 텍스트 추출(text_extract, PDF 는 pdftext) -> 조문 분할·품질 판정(article_split) -> 조별 적용대상 태깅
+-> 청크 분할 -> KURE-v1 임베딩(retrieve.임베딩_모델) -> 참조(build_refs.scan) -> 한 트랜잭션으로 저장.
+BM25 색인 행(bm25_index 토큰화)은 활성화 트랜잭션에서 넣는다.
 쓰는 테이블: corpus.ingest_jobs, documents, doc_articles, chunks, refs, chunk_len·chunk_terms·term_df(활성화 때),
 tenant.judge_cache(활성화 때 삭제). 접속은 호출자가 넘기는 DSN(SUDDOE_INGEST_DSN, 롤 suddoe_ingest) 만 쓴다.
 불변식: 추출 실패·조 0건은 failed 이고 staged 가 되지 않는다. staged 문서는 검색 필터(status='active')에
@@ -33,13 +33,13 @@ _log = logging.getLogger("suddoe.corpus_ingest")
 # 기존 L1·L2 행이 모두 이 값이다. llm_validate 가 인용 메타데이터로 함께 읽는다.
 DOMAIN = "창업지원사업"
 
-# 청크 분할 기준. 임베딩 모델(retrieve.모델)의 max_seq_length 가 1024 토큰이라, 컨텍스트 헤더(약 50토큰)를
+# 청크 분할 기준. 임베딩 모델(retrieve.임베딩_모델)의 max_seq_length 가 1024 토큰이라, 컨텍스트 헤더(약 50토큰)를
 # 붙여도 넘지 않도록 본문은 900토큰에서 자른다. 50자 미만 조각은 같은 조의 앞 조각에 붙인다.
 청크_최대토큰 = 900
 임베딩_최대토큰 = 1024
 청크_최소글자 = 50
 
-_적재_잠금 = threading.Lock()       # 임베딩은 CPU 를 오래 쓴다. 적재 작업은 한 번에 하나만 돈다
+_적재_잠금 = threading.Lock()       # 임베딩은 CPU 를 오래 쓴다. 적재 작업은 한 번에 하나만 실행한다
 _토크나이저 = None
 
 
@@ -97,25 +97,25 @@ def doc_id_생성(문서명: str, 시행일: date) -> str:
 def 파일형식(경로: Path) -> tuple[str | None, str]:
     """파일 내용으로 형식을 판별한다. 확장자는 믿지 않는다. (허용 형식 또는 None, 판별 결과 설명)
 
-    zip·OLE 판별은 stage0_extract 가 쓰는 hwpx_extract.sniff 에 맡긴다. 배포용·암호화 HWP 는
+    zip·OLE 판별은 text_extract 가 쓰는 hwpx_extract.sniff 에 맡긴다. 배포용·암호화 HWP 는
     본문을 추출할 수 없어 None 이다. XML 은 HWPML 이면 hwp, 아니면 법령 XML 로 본다.
     """
     from hwpx_extract import sniff
 
-    정체 = sniff(경로)
-    if 정체 == "PDF":
-        return "pdf", 정체
-    if 정체 == "hwpx":
-        return "hwpx", 정체
-    if 정체 == "OLE2 (HWP v5)":
-        return "hwp", 정체
-    if 정체.startswith("DOCX"):
-        return "docx", 정체
+    판별결과 = sniff(경로)
+    if 판별결과 == "PDF":
+        return "pdf", 판별결과
+    if 판별결과 == "hwpx":
+        return "hwpx", 판별결과
+    if 판별결과 == "OLE2 (HWP v5)":
+        return "hwp", 판별결과
+    if 판별결과.startswith("DOCX"):
+        return "docx", 판별결과
     with 경로.open("rb") as f:
-        머리 = f.read(4096).lstrip(b"\xef\xbb\xbf \t\r\n")
-    if 머리.startswith(b"<?xml"):
-        return ("hwp" if b"<HWPML" in 머리 else "xml"), "XML"
-    return None, 정체
+        앞바이트 = f.read(4096).lstrip(b"\xef\xbb\xbf \t\r\n")
+    if 앞바이트.startswith(b"<?xml"):
+        return ("hwp" if b"<HWPML" in 앞바이트 else "xml"), "XML"
+    return None, 판별결과
 
 
 def 사업명_확인(cur, 사업명: str) -> str:
@@ -171,12 +171,12 @@ def 적재_실행(dsn: str, doc_id: str) -> None:
                 작업 = _작업_읽기(conn, doc_id)
             if 작업 is None or 작업["상태"] != "parsing":
                 return                    # 파싱 중에 삭제된 업로드
-            적재본 = _준비(작업)
+            적재데이터 = _준비(작업)
             with psycopg.connect(dsn, connect_timeout=10) as conn:
-                저장됨 = _저장(conn, 작업, 적재본)
+                저장됨 = _저장(conn, 작업, 적재데이터)
             if 저장됨:
                 _log.info("규정 적재 staged doc_id=%s 조=%d 청크=%d",
-                          doc_id, len(적재본["조문"]), len(적재본["청크"]))
+                          doc_id, len(적재데이터["조문"]), len(적재데이터["청크"]))
             else:
                 _log.info("파싱 중에 삭제된 업로드라 저장하지 않았다 doc_id=%s", doc_id)
         except _적재실패 as e:
@@ -219,23 +219,23 @@ def _실패_기록(dsn: str, doc_id: str, 사유: str, 저장경로: str | None 
 
 
 def _준비(작업: dict) -> dict:
-    """DB 에 쓰기 전의 계산 전부: 추출, 조 분해, 품질 판정, 적용대상 태깅, 청크, 임베딩.
+    """DB 에 쓰기 전의 계산 전부: 추출, 조문 분할, 품질 판정, 적용대상 태깅, 청크, 임베딩.
 
     반환: {조문, 전략, 추출방식, 품질, 경고, 청크}. staged 로 둘 수 없으면 _적재실패.
     """
-    from stage0_articles import is_deleted, validate
+    from article_split import is_deleted, validate
 
     doc_id, layer = 작업["doc_id"], 작업["layer"]
     조문, 전략, 추출방식 = _조문_추출(Path(작업["저장경로"]))
     v = validate(조문, 전략)
     if not v["ok"]:
-        raise _적재실패(f"조문을 하나도 찾지 못했습니다 (분해 전략 {전략}).")
+        raise _적재실패(f"조문을 하나도 찾지 못했습니다 (분할 전략 {전략}).")
 
-    # 품질 기준은 기존 코퍼스와 같다: validate 가 low 로 보는 문서(단락·장 단위 분해, 조 5개 미만)는 low.
-    # 조번호 비단조(V1)·빈 조 과다(V3)도 low 로 둔다. 조 경계나 본문 추출을 믿을 수 없다는 신호다.
+    # 품질 기준은 기존 코퍼스와 같다: validate 가 low 로 보는 문서(단락·장 단위 분할, 조 5개 미만)는 low.
+    # 조번호 역전·빈 조 과다도 low 로 둔다. 조 경계나 본문 추출을 믿을 수 없다는 신호다.
     # low 문서는 검색 필터(parse_quality='high')에 걸리지 않고, 활성화도 거부된다.
     품질 = ("low" if v["quality"] == "low"
-            or any(f.startswith(("V1:", "V3:")) for f in v["flags"]) else "high")
+            or any(f.startswith(("조번호역전:", "빈조과다:")) for f in v["flags"]) else "high")
     경고 = list(v["flags"])
     # 범위 판정은 운영자가 입력한 문서명이 아니라 표준 사업명으로 한다. 별칭으로 올려도 같은 구간이 빠진다.
     조문, 범위밖_수 = _범위밖_제거(f"{작업['사업명'] or ''} {doc_id}", 조문)
@@ -249,7 +249,7 @@ def _준비(작업: dict) -> dict:
     사업 = [작업["사업명"]] if 작업["사업명"] else None
     청크, 표_제외 = _청크_만들기(조문, layer=layer, 사업=사업, doc_id=doc_id)
     if 표_제외:
-        경고.append(f"박스표 부속 {표_제외}건은 청크에서 제외 (조문으로는 저장)")
+        경고.append(f"괘선표 첨부 {표_제외}건은 청크에서 제외 (조문으로는 저장)")
     if not 청크:
         raise _적재실패("검색에 넣을 청크가 없습니다 (모든 조가 삭제 조문·표이거나 적용대상을 정하지 못했습니다).")
 
@@ -264,14 +264,15 @@ def _준비(작업: dict) -> dict:
 
 
 def _조문_추출(경로: Path) -> tuple[list[dict], str, str]:
-    """원본 -> (조 목록, 분해 전략, documents.extraction 값). 텍스트가 거의 없으면 _적재실패.
+    """원본 -> (조 목록, 분할 전략, documents.extraction 값). 텍스트가 거의 없으면 _적재실패.
 
-    PDF 는 stage0_extract.extract 대신 pdftext.extract_meta 로 읽는다. 기존 L1·L2 적재와 같은 경로이고,
-    글자가 두 번씩 찍힌 텍스트 레이어와 2단 조판을 풀어 준다. stage0_extract.extract_pdf 는 둘 다
-    풀지 않아 조 헤더가 깨진다. 이 경로는 페이지 오프셋이 없어 페이지는 NULL 이다(기존 행과 같다).
+    PDF 는 text_extract.extract 대신 pdftext.extract_meta 로 직접 읽는다. 기존 L1·L2 적재와 같은 경로이고,
+    글자가 두 번씩 찍힌 텍스트 레이어와 2단 조판을 처리하며, 문자중복 레이어였는지(dedupe)를
+    documents.extraction 에 남긴다. text_extract.extract_pdf 는 pdftext 가 예외를 내면 pypdf 로 폴백하는데,
+    pypdf 는 조 헤더를 깨뜨린다. 이 경로는 페이지 오프셋이 없어 페이지는 NULL 이다(기존 행과 같다).
     """
-    from stage0_articles import sanitize, split_articles
-    from stage0_extract import extract, 빈_추출_글자수_임계치
+    from article_split import sanitize, split_articles
+    from text_extract import extract, 빈_추출_글자수_임계치
 
     try:
         if 경로.suffix.lower() == ".pdf":
@@ -285,11 +286,11 @@ def _조문_추출(경로: Path) -> tuple[list[dict], str, str]:
     except Exception as e:                                           # noqa: BLE001
         raise _적재실패(f"텍스트를 추출하지 못했습니다 ({type(e).__name__}: {e})") from e
     if 종류 == "articles":
-        # 법령 XML 은 조문 구조가 이미 있다. 정렬·단조성 검사용 조번호_int 만 채운다.
+        # 법령 XML 은 조문 구조가 이미 있다. 정렬·조번호 역전 검사용 조순번만 채운다.
         for a in payload:
             a["본문"] = sanitize(a["본문"])
             m = re.match(r"제(\d+)조", a["조번호"])
-            a["조번호_int"] = int(m.group(1)) if m else None
+            a["조순번"] = int(m.group(1)) if m else None
         return payload, "xml_native", 추출방식
     본문, 오프셋 = payload
     if len(본문.strip()) < 빈_추출_글자수_임계치:
@@ -341,7 +342,7 @@ RE_창업 = re.compile(r"창업기업|창업자|진출자|도전자|입주기업
 RE_절_주관 = re.compile(RE_주관.pattern + r"|창업중심대학|전담기관|주관대학")
 RE_절장 = re.compile(r"[<〈]?\s*제\s*(\d+)\s*(절|장)\s*[>〉]?\s*([^<>\n]{0,22})")
 _본문_주어_구간 = 200       # 조 첫머리 몇 글자에서 주어를 찾는다
-# 조 분해 때 다음 장·절 표제가 앞 조 본문 끝에 붙는다. 줄 첫머리에 있고 뒤에 공백·괄호·줄끝이 오는 것만
+# 조문 분할 때 다음 장·절 표제가 앞 조 본문 끝에 붙는다. 줄 첫머리에 있고 뒤에 공백·괄호·줄끝이 오는 것만
 # 표제로 본다("제2장에 따른" 같은 본문 속 참조는 제외).
 RE_표제_줄 = re.compile(r"(?m)^\s*[<〈]?\s*제\s*\d+\s*(?:절|장)(?=\s|[>〉]|$)")
 
@@ -368,7 +369,7 @@ def _절값(이름: str) -> str | None:
 def _절_상속(조문: list[dict]) -> dict[str, str | None]:
     """조번호 -> 그 조가 속한 절의 적용대상. 장이 바뀌면 상속을 끊는다.
 
-    조 분해 결과에서 장·절 표제는 앞 조 본문 끝에 붙어 온다. 조가 '장' 필드를 가지고 있으면 그것을 쓴다.
+    조문 분할 결과에서 장·절 표제는 앞 조 본문 끝에 붙어 온다. 조가 '장' 필드를 가지고 있으면 그것을 쓴다.
     """
     out: dict[str, str | None] = {}
     상태: str | None = None
@@ -405,7 +406,7 @@ def _조_주체(조제목: str | None, 본문: str) -> tuple[str | None, str]:
 def _적용대상_태깅(조문: list[dict], *, layer: str, 문서명: str, 기본값: str) -> list[str]:
     """조마다 a['적용대상'] 을 채우고 경고 문장을 돌려준다. None 인 조는 청크로 만들지 않는다.
 
-    부칙·별표·붙임(조번호_int 가 없는 조)은 시행일·경과조치처럼 누구에게나 적용되므로 '공통' 이다.
+    부칙·별표·붙임(조순번이 없는 조)은 시행일·경과조치처럼 누구에게나 적용되므로 '공통' 이다.
     """
     if not _태깅_대상(layer, 문서명):
         for a in 조문:
@@ -413,7 +414,7 @@ def _적용대상_태깅(조문: list[dict], *, layer: str, 문서명: str, 기�
         return []
     절 = _절_상속(조문)
     for a in 조문:
-        if a.get("조번호_int") is None:
+        if a.get("조순번") is None:
             a["적용대상"] = "공통"
             continue
         값, 근거 = _조_주체(a.get("조제목"), a.get("본문") or "")
@@ -430,16 +431,16 @@ def _적용대상_태깅(조문: list[dict], *, layer: str, 문서명: str, 기�
 
 # 청크 분할
 #
-# 청크 형식은 기존 corpus.chunks 행과 같아야 한다(삭제된 stage2_chunk·stage2_embed, stage2_bm25.보충 과 같은
-# 형식). text 는 원문 그대로(인용 검증 대상)이고, 임베딩·BM25 입력은 stage2_bm25._헤더 가 만드는
+# 청크 형식은 기존 corpus.chunks 행과 같아야 한다(예전 일괄 적재 스크립트가 만든 행, bm25_index.증분_색인 과
+# 같은 형식). text 는 원문 그대로(인용 검증 대상)이고, 임베딩·BM25 입력은 bm25_index._헤더 가 만드는
 # 컨텍스트 헤더 + 줄바꿈 + text 다.
 # 900토큰을 넘는 조는 항 -> 호 -> 목 -> 줄 단위로 나눈 뒤 예산 안에서 연속한 조각을 다시 붙인다.
-# 조 경계는 넘지 않는다. 부속(별표·붙임 등) 가운데 박스표는 청크로 만들지 않고, 산문 부속은
-# 검색 진입점이 아니라 참조 확장으로만 닿도록 retrieval_scope='폐포전용' 으로 둔다.
+# 조 경계는 넘지 않는다. 첨부(별표·붙임 등) 가운데 괘선표는 청크로 만들지 않고, 산문 첨부는
+# 직접 검색 대상에서 빼고 참조 확장으로만 컨텍스트에 들어가도록 retrieval_scope='참조확장전용' 으로 둔다.
 
 RE_첨부 = re.compile(r"^\s*(별표|별지|붙임|서식|첨부|별첨|부록|참고)")
-RE_박스표 = re.compile(r"[┌│└├┬┼┐┘┴┤─]")
-박스표_임계 = 10              # 산문에도 장식용 괘선이 한두 개 섞인다
+RE_괘선표 = re.compile(r"[┌│└├┬┼┐┘┴┤─]")
+괘선표_임계 = 10              # 산문에도 장식용 괘선이 한두 개 섞인다
 _항기호 = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳"
 RE_항 = re.compile(f"(?=[{_항기호}])")
 RE_호 = re.compile(r"(?=\n\s*\d+\.\s)")
@@ -448,27 +449,27 @@ RE_목 = re.compile(r"(?=\n\s*[가-힣]\.\s)")
 
 def _청크_만들기(조문: list[dict], *, layer: str, 사업: list[str] | None,
              doc_id: str) -> tuple[list[dict], int]:
-    """조 목록 -> (청크 목록, 박스표라 제외한 부속 수). 청크: 조(조문 인덱스), 항호, text, retrieval_scope, 입력.
+    """조 목록 -> (청크 목록, 괘선표라 제외한 첨부 수). 청크: 조(조문 인덱스), 항호, text, retrieval_scope, 입력.
 
     삭제 조, 빈 조, 적용대상을 정하지 못한 조는 청크로 만들지 않는다.
     """
-    from stage2_bm25 import _장맵, _헤더
+    from bm25_index import _장_매핑, _헤더
 
-    장 = _장맵(조문)
+    장 = _장_매핑(조문)
     청크: list[dict] = []
     표_제외 = 0
     for i, a in enumerate(조문):
         if a["삭제"] or not (a["본문"] or "").strip() or a.get("적용대상") is None:
             continue
-        부속 = bool(RE_첨부.match(a["조번호"] or ""))
-        if 부속 and len(RE_박스표.findall(a["본문"])) >= 박스표_임계:
+        첨부 = bool(RE_첨부.match(a["조번호"] or ""))
+        if 첨부 and len(RE_괘선표.findall(a["본문"])) >= 괘선표_임계:
             표_제외 += 1
             continue
-        머리 = _헤더(layer, 사업, doc_id, 장.get(a["조번호"], ""), a["조번호"], a.get("조제목"))
+        헤더 = _헤더(layer, 사업, doc_id, 장.get(a["조번호"], ""), a["조번호"], a.get("조제목"))
         for 항호, txt in _병합(_분할(a["본문"])):
             청크.append({"조": i, "항호": 항호, "text": txt,
-                         "retrieval_scope": "폐포전용" if 부속 else "진입점",
-                         "입력": f"{머리}\n{txt}"})
+                         "retrieval_scope": "참조확장전용" if 첨부 else "검색대상",
+                         "입력": f"{헤더}\n{txt}"})
     return 청크, 표_제외
 
 
@@ -484,33 +485,33 @@ def _분할(본문: str) -> list[tuple[str | None, str]]:
         parts = [p.strip() for p in pat.split(s) if p and p.strip()]
         return parts if len(parts) > 1 else []
 
-    잎: list[tuple[str | None, str]] = []
+    분할조각: list[tuple[str | None, str]] = []
     항들 = 쪼개기(RE_항, 본문) or [본문]
     for i, (항, n) in enumerate(zip(항들, _토큰수(항들))):
         라벨 = 항[0] if 항[:1] in _항기호 else (f"항{i+1}" if len(항들) > 1 else None)
         if n <= 청크_최대토큰:
-            잎.append((라벨, 항))
+            분할조각.append((라벨, 항))
             continue
         조각들 = 쪼개기(RE_호, 항) or 쪼개기(RE_목, 항) or [항]
         for j, (조각, m) in enumerate(zip(조각들, _토큰수(조각들))):
-            꼬리 = f"{라벨 or ''}-{j+1}" if len(조각들) > 1 else 라벨
+            하위라벨 = f"{라벨 or ''}-{j+1}" if len(조각들) > 1 else 라벨
             if m <= 청크_최대토큰:
-                잎.append((꼬리, 조각))
+                분할조각.append((하위라벨, 조각))
             else:
-                for k, 토막 in enumerate(_강제분할(조각)):
-                    잎.append((f"{꼬리 or ''}#{k+1}", 토막))
-    return _재포장(잎) or [(None, 본문)]
+                for k, 부분 in enumerate(_강제분할(조각)):
+                    분할조각.append((f"{하위라벨 or ''}#{k+1}", 부분))
+    return _토큰예산_병합(분할조각) or [(None, 본문)]
 
 
-def _재포장(잎: list[tuple[str | None, str]]) -> list[tuple[str | None, str]]:
+def _토큰예산_병합(분할조각: list[tuple[str | None, str]]) -> list[tuple[str | None, str]]:
     """연속한 조각을 토큰 예산까지 다시 붙인다. 항 단위로만 자르면 200자짜리 청크가 수십 개 생긴다.
 
     붙인 조각의 라벨은 '①~③' 처럼 범위로 적는다.
     """
-    if len(잎) <= 1:
-        return 잎
+    if len(분할조각) <= 1:
+        return 분할조각
     묶음: list[list] = []                        # [[라벨들], [텍스트들], 토큰합]
-    for (라벨, txt), n in zip(잎, _토큰수([t for _, t in 잎])):
+    for (라벨, txt), n in zip(분할조각, _토큰수([t for _, t in 분할조각])):
         if 묶음 and 묶음[-1][2] + n <= 청크_최대토큰:
             묶음[-1][0].append(라벨)
             묶음[-1][1].append(txt)
@@ -563,7 +564,7 @@ def _병합(조각들: list[tuple[str | None, str]]) -> list[tuple[str | None, s
 def _토큰수(texts: list[str]) -> list[int]:
     """KURE-v1 토크나이저 기준 토큰 수 (특수 토큰 포함, 자르지 않음).
 
-    판정 경로와 공유하는 모델의 토크나이저는 쓰지 않는다. truncation 설정을 바꾸면 동시에 도는
+    판정 경로와 공유하는 모델의 토크나이저는 쓰지 않는다. truncation 설정을 바꾸면 동시에 실행되는
     쿼리 임베딩과 충돌하므로, 같은 파일에서 별도 인스턴스를 한 번 올린다.
     """
     global _토크나이저
@@ -572,7 +573,7 @@ def _토큰수(texts: list[str]) -> list[int]:
     if _토크나이저 is None:
         import retrieve
         from transformers import AutoTokenizer
-        _토크나이저 = AutoTokenizer.from_pretrained(retrieve.모델().tokenizer.name_or_path)
+        _토크나이저 = AutoTokenizer.from_pretrained(retrieve.임베딩_모델().tokenizer.name_or_path)
     enc = _토크나이저(texts, add_special_tokens=True, truncation=False, padding=False,
                      return_attention_mask=False)
     return [len(x) for x in enc["input_ids"]]
@@ -582,8 +583,8 @@ def _임베딩(입력: list[str]) -> list[str]:
     """retrieve 가 상주시킨 KURE-v1 으로 임베딩한다. retrieve.임베딩 과 같은 정규화·리터럴 형식이다."""
     import retrieve
 
-    벡터들 = retrieve.모델().encode(입력, batch_size=16, normalize_embeddings=True,
-                                   convert_to_numpy=True, show_progress_bar=False)
+    벡터들 = retrieve.임베딩_모델().encode(입력, batch_size=16, normalize_embeddings=True,
+                                         convert_to_numpy=True, show_progress_bar=False)
     if 벡터들.shape != (len(입력), 1024):
         raise _적재실패(f"임베딩 차원이 맞지 않습니다 {벡터들.shape}")
     return ["[" + ",".join(f"{x:.6f}" for x in v) + "]" for v in 벡터들]
@@ -594,12 +595,12 @@ def _bm25_색인(cur, doc_id: str) -> int:
 
     활성화 트랜잭션에서 부른다. retrieve 의 BM25 는 chunk_len 전체로 문서 수와 평균 길이를 계산하므로,
     staged 단계에서 넣으면 활성화 전부터 active 청크의 점수가 바뀐다.
-    입력은 stage2_bm25.보충 과 같다: 컨텍스트 헤더 + 줄바꿈 + text. 장 제목은 문서의 조 전체를 순서대로 보고
-    정하므로 적재 때 임베딩 입력에 쓴 헤더와 같다. 이미 색인된 청크(보충 이 먼저 넣은 경우)는 건너뛴다.
+    입력은 bm25_index.증분_색인 과 같다: 컨텍스트 헤더 + 줄바꿈 + text. 장 제목은 문서의 조 전체를 순서대로 보고
+    정하므로 적재 때 임베딩 입력에 쓴 헤더와 같다. 이미 색인된 청크(증분_색인 이 먼저 넣은 경우)는 건너뛴다.
     """
-    from stage2_bm25 import _장맵, _헤더, 토큰화
+    from bm25_index import _장_매핑, _헤더, 토큰화
 
-    장 = _장맵([{"조번호": r[0], "본문": r[1]} for r in cur.execute(
+    장 = _장_매핑([{"조번호": r[0], "본문": r[1]} for r in cur.execute(
         "SELECT 조번호, 본문 FROM corpus.doc_articles WHERE doc_id = %s ORDER BY article_id",
         (doc_id,)).fetchall()])
     행 = cur.execute(
@@ -624,8 +625,8 @@ def _bm25_색인(cur, doc_id: str) -> int:
 
 # 저장
 
-def _저장(conn, 작업: dict, 적재본: dict) -> bool:
-    """적재본을 한 트랜잭션으로 쓴다. documents·chunks 는 staged, index_target 은 FALSE 다.
+def _저장(conn, 작업: dict, 적재데이터: dict) -> bool:
+    """적재데이터를 한 트랜잭션으로 쓴다. documents·chunks 는 staged, index_target 은 FALSE 다.
 
     파싱 중에 업로드가 삭제됐으면 아무것도 쓰지 않고 False 를 돌려준다. 삭제 뒤 같은 doc_id 로
     다시 올린 업로드와 섞이지 않도록 저장경로까지 같은지 확인한다.
@@ -642,27 +643,27 @@ def _저장(conn, 작업: dict, 적재본: dict) -> bool:
             """INSERT INTO corpus.documents
                    (doc_id, layer, domain, version, 시행일, status, parse_quality, extraction,
                     src_path, index_target, retrieval_scope)
-               VALUES (%s,%s,%s,%s,%s,'staged',%s,%s,%s,FALSE,'진입점')""",
-            (doc_id, layer, DOMAIN, 작업["version"], 작업["시행일"], 적재본["품질"],
-             적재본["추출방식"], f"admin_upload/{작업['원본파일명']}"))
+               VALUES (%s,%s,%s,%s,%s,'staged',%s,%s,%s,FALSE,'검색대상')""",
+            (doc_id, layer, DOMAIN, 작업["version"], 작업["시행일"], 적재데이터["품질"],
+             적재데이터["추출방식"], f"admin_upload/{작업['원본파일명']}"))
 
         조_id: list[int] = []
-        for a in 적재본["조문"]:
+        for a in 적재데이터["조문"]:
             조_id.append(cur.execute(
-                """INSERT INTO corpus.doc_articles (doc_id, 조번호, 조제목, 조번호_int, 본문, 페이지, 삭제)
+                """INSERT INTO corpus.doc_articles (doc_id, 조번호, 조제목, 조순번, 본문, 페이지, 삭제)
                    VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING article_id""",
-                (doc_id, a["조번호"], a.get("조제목"), a.get("조번호_int"), a["본문"],
+                (doc_id, a["조번호"], a.get("조제목"), a.get("조순번"), a["본문"],
                  a.get("페이지"), a["삭제"])).fetchone()[0])
 
-        for c in 적재본["청크"]:
-            a = 적재본["조문"][c["조"]]
+        for c in 적재데이터["청크"]:
+            a = 적재데이터["조문"][c["조"]]
             cur.execute(
                 """INSERT INTO corpus.chunks
                        (doc_id, article_id, layer, parse_quality, version, status, retrieval_scope,
                         조번호, 조제목, 항호, 페이지, 사업명, 적용대상, text, embedding)
                    VALUES (%s,%s,%s,%s,%s,'staged',%s,%s,%s,%s,%s,%s,%s,%s,
                            %s::extensions.vector(1024))""",
-                (doc_id, 조_id[c["조"]], layer, 적재본["품질"], 작업["version"],
+                (doc_id, 조_id[c["조"]], layer, 적재데이터["품질"], 작업["version"],
                  c["retrieval_scope"], a["조번호"], a.get("조제목"), c["항호"], a.get("페이지"),
                  사업, a["적용대상"], c["text"], c["embedding"]))
         # BM25 색인 행(chunk_len·chunk_terms)은 활성화 때 넣는다(_bm25_색인).
@@ -670,37 +671,37 @@ def _저장(conn, 작업: dict, 적재본: dict) -> bool:
         cur.executemany(
             """INSERT INTO corpus.refs
                    (src_doc_id, src_조번호, src_layer, 참조문자열, 관계, dst_doc_id, dst_조번호,
-                    해소상태, 보정근거)
+                    해결상태, 해결근거)
                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
                ON CONFLICT (src_doc_id, src_조번호, 참조문자열) DO NOTHING""",
-            _참조_만들기(cur, doc_id, 작업["문서명"], layer, 적재본["조문"]))
+            _참조_만들기(cur, doc_id, 작업["문서명"], layer, 적재데이터["조문"]))
 
         cur.execute(
             """UPDATE corpus.ingest_jobs
-                  SET 상태 = 'done', 분해전략 = %s, 조_건수 = %s, 경고 = %s, 저장경로 = NULL,
+                  SET 상태 = 'done', 분할전략 = %s, 조_건수 = %s, 경고 = %s, 저장경로 = NULL,
                       updated_at = now()
                 WHERE doc_id = %s""",
-            (적재본["전략"], len(적재본["조문"]), Jsonb(적재본["경고"]), doc_id))
+            (적재데이터["전략"], len(적재데이터["조문"]), Jsonb(적재데이터["경고"]), doc_id))
     return True
 
 
 def _참조_만들기(cur, doc_id: str, 문서명: str, layer: str, 조문: list[dict]) -> list[tuple]:
-    """조별 참조 표기 -> corpus.refs 행. 문형 인식·해소는 build_refs 를 그대로 쓴다.
+    """조별 참조 표기 -> corpus.refs 행. 참조패턴 인식·해결은 build_refs 를 그대로 쓴다.
 
-    대상 문서 이름표는 build_refs.load_corpus_names 와 같은 규칙(L1_ 접두·_YYYYMMDD 꼬리를 뗀 제명과
+    대상 문서명 매핑은 build_refs.load_corpus_names 와 같은 규칙(L1_ 접두어·_YYYYMMDD 접미사를 뗀 제명과
     doc_id 둘 다 등록)으로 만들되, active 문서와 이 문서만 넣는다. load_corpus_names 는 status 를
     보지 않아 staged·superseded 문서까지 대상이 되므로 쓰지 않는다.
     """
     import build_refs
 
-    이름표: dict[str, str] = {}
+    문서명_매핑: dict[str, str] = {}
     for (d,) in cur.execute("SELECT doc_id FROM corpus.documents "
                             "WHERE status = 'active' AND layer IN ('L1','L2') ORDER BY doc_id"):
-        몸통 = re.sub(r"_\d{8}$", "", d[3:] if d.startswith("L1_") else d)
-        이름표.setdefault(build_refs.norm_규범(몸통), d)
-        이름표.setdefault(build_refs.norm_규범(d), d)
-    이름표[build_refs.norm_규범(문서명)] = doc_id
-    이름표[build_refs.norm_규범(doc_id)] = doc_id
+        제명 = re.sub(r"_\d{8}$", "", d[3:] if d.startswith("L1_") else d)
+        문서명_매핑.setdefault(build_refs.norm_규정명(제명), d)
+        문서명_매핑.setdefault(build_refs.norm_규정명(d), d)
+    문서명_매핑[build_refs.norm_규정명(문서명)] = doc_id
+    문서명_매핑[build_refs.norm_규정명(doc_id)] = doc_id
 
     약칭표 = build_refs.수집_약칭(" ".join(a["본문"] or "" for a in 조문))
     동적 = build_refs._동적패턴(약칭표)
@@ -708,10 +709,10 @@ def _참조_만들기(cur, doc_id: str, 문서명: str, layer: str, 조문: list
     for a in 조문:
         if a["삭제"]:
             continue                      # 효력이 없는 조는 참조의 출발점이 아니다
-        for e in build_refs.scan(a["본문"], doc_id, 이름표, src_조번호=a["조번호"],
+        for e in build_refs.scan(a["본문"], doc_id, 문서명_매핑, src_조번호=a["조번호"],
                                  약칭표=약칭표, 동적=동적):
             행.append((e["src_doc_id"], e["src_조번호"], layer, e["참조문자열"], e["관계"],
-                       e["dst_doc_id"], e["dst_조번호"], e["해소상태"], e["보정근거"]))
+                       e["dst_doc_id"], e["dst_조번호"], e["해결상태"], e["해결근거"]))
     return 행
 
 
@@ -723,7 +724,7 @@ def 활성화(conn, doc_id: str, *, 대체_doc_id: str | None = None, 신규문�
 
     거부(요청거부): 파싱 중·실패, staged 가 아님, parse_quality 가 low, 조·청크가 없음, 임베딩 누락,
     이전 판을 정할 수 없음, 신규문서인데 비슷한 active 문서가 있음(중복_허용 이 아니면).
-    이전 판은 chunks 를 지우고 doc_articles 는 남긴다(기존 superseded 문서와 같은 모양).
+    이전 판은 chunks 를 지우고 doc_articles 는 남긴다(기존 superseded 문서와 같은 상태).
     retrieval_scope 는 이전 판의 값을 이어받는다. BM25 색인 행을 넣고 term_df 를 갱신한다.
     tenant.judge_cache 는 전부 지운다.
     """
@@ -771,14 +772,14 @@ def 활성화(conn, doc_id: str, *, 대체_doc_id: str | None = None, 신규문�
                     "지정하고, 함께 검색돼야 하는 별개 문서면 중복_허용=true 를 지정하세요.", 후보=함께)
             if 함께:
                 경고.append(f"같은 {'사업' if 사업명 else '이름'}의 active 문서가 함께 검색됩니다: {', '.join(함께)}")
-        범위 = 이전[1] if 이전 else "진입점"
+        범위 = 이전[1] if 이전 else "검색대상"
         cur.execute("UPDATE corpus.documents SET status = 'active', index_target = TRUE, "
                     "retrieval_scope = %s WHERE doc_id = %s", (범위, doc_id))
-        # 부속 청크는 항상 폐포전용이다. 문서가 폐포전용이면 나머지 청크도 폐포전용이 된다.
+        # 첨부 청크는 항상 참조확장전용이다. 문서가 참조확장전용이면 나머지 청크도 참조확장전용이 된다.
         cur.execute(
             """UPDATE corpus.chunks
                   SET status = 'active',
-                      retrieval_scope = CASE WHEN %s = '폐포전용' THEN '폐포전용' ELSE retrieval_scope END
+                      retrieval_scope = CASE WHEN %s = '참조확장전용' THEN '참조확장전용' ELSE retrieval_scope END
                 WHERE doc_id = %s""", (범위, doc_id))
 
         지운_청크 = 0
@@ -791,18 +792,18 @@ def 활성화(conn, doc_id: str, *, 대체_doc_id: str | None = None, 신규문�
                 # 로컬 DB 의 eval.golden_chunks 가 청크를 참조하면 FK(SET NULL)가 CHECK 에 걸린다.
                 # 운영 DB 에는 eval 스키마가 없다. 트랜잭션 전체가 롤백되므로 아무것도 바뀌지 않는다.
                 raise 요청거부(f"이전 판 청크를 {e.diag.schema_name}.{e.diag.table_name} 가 참조하고 있어 "
-                           "지울 수 없습니다. eval.golden_chunks 라면 정답셋 청크 재매칭을 먼저 하세요.") from e
+                           "지울 수 없습니다. eval.golden_chunks 라면 골든셋 청크 재매칭을 먼저 하세요.") from e
             경고 += _활성화_경고(cur, 이전[0])
-        cur.execute("UPDATE corpus.ingest_jobs SET 대체한_doc_id = %s, updated_at = now() "
+        cur.execute("UPDATE corpus.ingest_jobs SET 이전판_doc_id = %s, updated_at = now() "
                     "WHERE doc_id = %s", (이전[0] if 이전 else None, doc_id))
         _bm25_색인(cur, doc_id)
         # 판정 캐시 키는 코퍼스 상태를 담지 않는다. 행 수가 바뀌지 않는 상태 전환도 있어
-        # 설정 해시만으로는 무효화가 보장되지 않으므로 여기서 지운다(RLS 정책 ingest_cache_purge).
+        # 데이터버전 해시만으로는 무효화가 보장되지 않으므로 여기서 지운다(RLS 정책 ingest_cache_purge).
         캐시_삭제 = cur.execute("DELETE FROM tenant.judge_cache").rowcount
         # CONCURRENTLY 는 읽기를 막지 않는 락(EXCLUSIVE)만 잡아 검색 쿼리가 기다리지 않는다.
         # term_df(term) 고유 인덱스가 필요하다(db/migrations/2026-11-01_corpus_ingest.sql).
         cur.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY corpus.term_df")
-    return {"doc_id": doc_id, "상태": "active", "대체한_doc_id": 이전[0] if 이전 else None,
+    return {"doc_id": doc_id, "상태": "active", "이전판_doc_id": 이전[0] if 이전 else None,
             "retrieval_scope": 범위, "이전판_청크_삭제": 지운_청크, "판정캐시_삭제": 캐시_삭제,
             "경고": 경고}
 
@@ -918,7 +919,7 @@ def 문서_상태(conn, doc_id: str) -> dict:
     cur = conn.cursor()
     row = cur.execute(
         """SELECT j.doc_id AS 작업, j.상태 AS 작업상태, j.발행기관, j.문서명, j.사업명, j.적용대상,
-                  j.원본파일명, j.파일형식, j.분해전략, j.경고, j.실패사유, j.대체한_doc_id,
+                  j.원본파일명, j.파일형식, j.분할전략, j.경고, j.실패사유, j.이전판_doc_id,
                   j.created_at AS 등록일시, j.updated_at AS 갱신일시,
                   coalesce(j.layer, d.layer) AS layer, coalesce(j.시행일, d.시행일) AS 시행일,
                   coalesce(j.version, d.version) AS version,
@@ -929,14 +930,14 @@ def 문서_상태(conn, doc_id: str) -> dict:
     r = dict(zip([c.name for c in cur.description], row))
     if r["작업"] is None and r["status"] is None:
         raise 문서없음(f"문서를 찾을 수 없습니다: {doc_id}")
-    조수, 삭제조수, 청크수, 임베딩없음, 참조수, 끊긴참조 = cur.execute(
+    조수, 삭제조수, 청크수, 임베딩없음, 참조수, 미해결참조 = cur.execute(
         """SELECT (SELECT count(*) FROM corpus.doc_articles WHERE doc_id = %(d)s),
                   (SELECT count(*) FROM corpus.doc_articles WHERE doc_id = %(d)s AND 삭제),
                   (SELECT count(*) FROM corpus.chunks WHERE doc_id = %(d)s),
                   (SELECT count(*) FROM corpus.chunks WHERE doc_id = %(d)s AND embedding IS NULL),
                   (SELECT count(*) FROM corpus.refs WHERE src_doc_id = %(d)s),
                   (SELECT count(*) FROM corpus.refs WHERE src_doc_id = %(d)s
-                      AND 해소상태 = 'dangling' AND 관계 <> '미규정위임')""",
+                      AND 해결상태 = 'dangling' AND 관계 <> '미규정위임')""",
         {"d": doc_id}).fetchone()
     샘플 = [{"조번호": 조, "조제목": 제목, "본문": 본문[:300]} for 조, 제목, 본문 in cur.execute(
         """SELECT 조번호, 조제목, 본문 FROM corpus.doc_articles
@@ -947,9 +948,9 @@ def 문서_상태(conn, doc_id: str) -> dict:
         "시행일": r["시행일"], "version": r["version"], "적용대상": r["적용대상"],
         "원본파일명": r["원본파일명"], "파일형식": r["파일형식"],
         "parse_quality": r["parse_quality"], "retrieval_scope": r["retrieval_scope"],
-        "분해전략": r["분해전략"], "조_건수": 조수, "삭제조_건수": 삭제조수, "청크_건수": 청크수,
-        "임베딩_누락": 임베딩없음, "참조_건수": 참조수, "끊긴참조_건수": 끊긴참조,
-        "경고": r["경고"] or [], "실패사유": r["실패사유"], "대체한_doc_id": r["대체한_doc_id"],
+        "분할전략": r["분할전략"], "조_건수": 조수, "삭제조_건수": 삭제조수, "청크_건수": 청크수,
+        "임베딩_누락": 임베딩없음, "참조_건수": 참조수, "미해결참조_건수": 미해결참조,
+        "경고": r["경고"] or [], "실패사유": r["실패사유"], "이전판_doc_id": r["이전판_doc_id"],
         "샘플": 샘플, "등록일시": r["등록일시"], "갱신일시": r["갱신일시"],
     }
 

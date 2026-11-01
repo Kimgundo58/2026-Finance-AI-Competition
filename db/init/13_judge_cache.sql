@@ -11,8 +11,8 @@
 -- 게스트(org 없음)는 이 캐시를 쓰지 않는다(서버 프로세스 메모리 캐시를 쓴다). RLS 정책이
 -- org_id = current_org() 라 한쪽이 NULL 이면 비교 결과가 NULL 이 되어 통과하지 못한다.
 --
--- 설정_해시 는 룰 재검수·코퍼스 재적재를 캐시가 알아채기 위한 값이다(response_cache._설정_해시). 코퍼스·룰 상태를
--- 해시한 값이 조회 시점 값과 다르면 미스로 처리한다. 행은 지우지 않고 expires_at 이 지나면 무시된다.
+-- 데이터버전_해시 는 룰 재검수·코퍼스 재적재를 캐시가 알아채기 위한 값이다(server/response_cache.py 가 계산한다).
+-- 코퍼스·룰·우선순위·체크항목·별칭 상태를 해시한 값이 조회 시점 값과 다르면 미스로 처리한다. 행은 지우지 않고 expires_at 이 지나면 무시된다.
 -- 규정 적재 API 의 활성화는 이 테이블을 전부 지운다(18_corpus_ingest.sql 의 ingest_cache_purge).
 
 CREATE TABLE IF NOT EXISTS tenant.judge_cache (
@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS tenant.judge_cache (
     org_id      UUID NOT NULL REFERENCES tenant.orgs(org_id) ON DELETE CASCADE,
     종류        TEXT NOT NULL CHECK (종류 IN ('normalize', 'judge')),
     value       JSONB NOT NULL,
-    설정_해시   TEXT NOT NULL,
+    데이터버전_해시 TEXT NOT NULL,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     expires_at  TIMESTAMPTZ NOT NULL
 );
@@ -39,7 +39,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON tenant.judge_cache TO suddoe_app;
 -- 검증 (적용 후 suddoe_app 으로 확인한다. postgres 는 RLS 를 우회해 차이가 보이지 않는다)
 --   1. 쓰기 후 새 커넥션에서 읽기:
 --        select set_config('app.org_id','<실재 org_id>', true);
---        insert into tenant.judge_cache(key,org_id,종류,value,설정_해시,expires_at)
+--        insert into tenant.judge_cache(key,org_id,종류,value,데이터버전_해시,expires_at)
 --          values ('t1','<같은 org_id>','judge','{"x":1}','h1', now()+interval '1 min');
 --        -- 새 psql 세션에서:
 --        select set_config('app.org_id','<같은 org_id>', true);

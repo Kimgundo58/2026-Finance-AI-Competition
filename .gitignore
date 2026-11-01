@@ -4,13 +4,12 @@ __pycache__/
 venv/
 .env
 .env.*
-# 🔴 .gitignore 는 «줄 끝 주석»을 안 받는다. 같은 줄에 # 를 쓰면
-#    패턴에 통째로 붙어 아무것도 안 걸린다 (2026-09-03 에 이걸로 한 번 놓쳤다)
+# 주의: .gitignore 는 '줄 끝 주석'을 지원하지 않는다. 같은 줄에 # 를 쓰면
+#    주석까지 패턴에 포함돼 아무 파일도 제외되지 않는다 (2026-09-03 에 이 문제로 한 번 누락됐다)
 !.env.example
 *.log
 .DS_Store
 Thumbs.db
-scripts/_stage0_report.json
 scripts/_review_memo.txt
 scripts/_test_out.txt
 
@@ -18,10 +17,16 @@ scripts/_test_out.txt
 관리자_프로토타입*.html
 *프로토타입*.html
 
-# ── Stage 0 파생물 ──────────────────────────────────────────────
-# 조 본문 전량 덤프(74MB). 원본 코퍼스를 JSON 으로 복제한 것이라 저장소에 두지 않는다.
-# `python scripts/archive/indexing/stage0_run.py` 로 언제든 재생성된다. 메타데이터는 _stage0_report.json 에 있다.
+# ── 조문 분할 파생물 ─────────────────────────────────────────────
+# 조 본문 전체 덤프(74MB). build_refs.py 의 입력이다. 원본 코퍼스를 JSON 으로 복제한 것이라
+# 저장소에 두지 않는다. 생성 스크립트는 9ca8d03 에서 저장소에서 삭제됐다(git 이력에서 복구).
+2026_Finance_DATA_FOR_RAG/_articles.json
+# 구 이름 호환(제거 예정: 다음 릴리스) — 스크립트 이름을 바꾸기 전에 만든 로컬 산출물이 커밋되지 않게 남겨 둔다.
+# .gitignore 는 줄 끝 주석을 지원하지 않아 표식을 패턴 줄에 붙이지 못한다. 아래 네 줄이 호환 대상이다.
 2026_Finance_DATA_FOR_RAG/_stage0_articles.json
+scripts/_stage0_report.json
+scripts/_work/_stage0_articles_before.py
+scripts/_work/_stage2_chunks.jsonl
 
 # 파서 진단·측정의 **중간 산출물**만 제외한다. 검증 스크립트(*.py)는 문서가
 # 실행 명령으로 참조하므로 저장소에 남긴다.
@@ -30,15 +35,13 @@ scripts/_work/_refs_*.json
 scripts/_work/_precedence_prev.json
 scripts/_work/_cdu.txt
 scripts/_work/_붙임2_*.txt
-scripts/_work/_stage0_articles_before.py
 
 # ── 2026-08-31 추가 ─────────────────────────────────────────────
-# 런타임 상태 — 팟 id 가 담긴다. 커밋할 것이 아니다
+# 런타임 상태 — 파드 id 가 담긴다. 커밋할 것이 아니다
 .claude/_runpod_open.json
 
 # 재생성 가능한 대용량 산출물. 임베딩은 GPU 15분/$0.06 이면 다시 만든다
 scripts/_work/emb.npy
-scripts/_work/_stage2_chunks.jsonl
 scripts/_work/*.bak
 scripts/_work/*.bak2
 
@@ -62,7 +65,7 @@ scripts/_work/_rrf_tune_cache.pkl
 *.dump
 deploy/ncp/backups/
 
-# 커밋 메시지 임시파일 (git add -A 에 쓸려 들어간 적 있다)
+# 커밋 메시지 임시파일 (git add -A 로 함께 커밋된 적 있다)
 _m.txt
 _msg.tmp
 
@@ -72,10 +75,10 @@ _orgs_*.json
 # L3 기관 규정 업로드 원본 — 사용자 문서다. 저장소에 올리지 않는다
 _l3_업로드/
 
-# 🔴 프롬프트 전문 덤프는 추적하지 않는다 (2026-09-03).
-#    dry 한 번(약 80초)이면 재생성되는 파생물인데 한 벌이 3.7MB 고, 스냅샷을 뜰 때마다
+# 주의: 프롬프트 전체 덤프는 추적하지 않는다 (2026-09-03).
+#    dry 한 번(약 80초)이면 재생성되는 파생물인데 파일 하나가 3.7MB 이고, 스냅샷을 만들 때마다
 #    새로 커밋돼 히스토리에 영구히 쌓인다. 대조에 실제로 쓰는 건 옆의 72KB
-#    `P4_블록스냅샷_*.json` 이고 그건 남긴다 — 무거운 건 «입력», 가벼운 건 «결론» 이다.
+#    `P4_블록스냅샷_*.json` 이고 그건 남긴다 — 큰 파일은 '입력', 작은 파일은 '결론' 이다.
 scratchpad/*.프롬프트.jsonl
 
 # ── 개발 세션 도구·임시 파일 (2026-09-07 트리 정리) ──

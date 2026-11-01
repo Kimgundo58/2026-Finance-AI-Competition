@@ -10,11 +10,11 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 
 from server import auth, response_cache
-from server._common import MOCK, _sse, _sse응답, 클라이언트_ip, 비목_ENUM
+from server._common import MOCK, _sse, _sse응답, 구키_추가, 클라이언트_ip, 비목_ENUM
 from server.catalog import _사업명_표준화, _심층질문마스터
 from server.models import 정규화요청
 from server.rate_limit import 제한
-from server.selftest import 목_정규화
+from server.selftest import mock_정규화
 
 router = APIRouter()
 
@@ -29,22 +29,22 @@ def normalize(req: Request, body: 정규화요청):
     # 캐시 키를 만들기 전에 표준화한다. 표기만 다른 같은 사업이 다른 키로 나뉘지 않게 한다.
     body.사업명 = _사업명_표준화(body.사업명)
 
-    # F5 는 판정 후 폐기하는 값이라 키에 해시로만 들어간다. 추가설명은 용도에 합쳐져 LLM 입력이
+    # 특수관계 값은 판정 후 폐기하는 값이라 키에 해시로만 들어간다. 추가설명은 용도에 합쳐져 LLM 입력이
     # 되므로 키에 넣는다. 집행예정일·거래처는 정규화에 쓰이지 않아 넣지 않는다.
     k = response_cache.캐시키("normalize", (body.질문 or "").strip(),
                             body.품목, body.금액, body.용도, body.추가설명, body.사업명,
-                            body.f5.친족거래, body.f5.전직임직원업체)
+                            body.특수관계.친족거래, body.특수관계.전직임직원업체)
     org = auth.검증된_org(req)
-    캐시 = response_cache.꺼내기(k, org)
+    캐시 = response_cache.조회(k, org)
 
     def gen():
-        yield _sse("진행", {"단계": "정규화", "설명": "질문에서 사실을 뽑는 중"})
+        yield _sse("진행", {"단계": "정규화", "설명": "입력에서 정보를 추출하는 중"})
         if 캐시 is not None:
             yield _sse("결과", 캐시)
             yield _sse("완료", {"캐시": True})
             return
         try:
-            out, 실패 = (dict(목_정규화), False) if MOCK else _실_정규화(body)
+            out, 실패 = (dict(mock_정규화), False) if MOCK else _live_정규화(body)
         except Exception as e:                                # noqa: BLE001
             # 500 을 내지 않고 오류 이벤트로 끝낸다.
             yield _sse("오류", {"메시지": "정규화에 실패했습니다", "종류": type(e).__name__})
@@ -52,7 +52,7 @@ def normalize(req: Request, body: 정규화요청):
             return
         out.setdefault("질문원문", _합성_질문(body))
         if not 실패:                  # 일시적 LLM 오류로 빈 비목후보가 캐시에 남지 않게 한다
-            response_cache.넣기(k, out, 종류="normalize", org=org)
+            response_cache.저장(k, out, 종류="normalize", org=org)
         for 필드 in ("품목", "금액", "금액_추정여부", "용도", "비목후보"):
             if 필드 in out:
                 yield _sse("필드", {필드: out[필드]})
@@ -62,7 +62,7 @@ def normalize(req: Request, body: 정규화요청):
     return _sse응답(gen())
 
 
-def _실_정규화(body: 정규화요청) -> tuple[dict, bool]:
+def _live_정규화(body: 정규화요청) -> tuple[dict, bool]:
     """live 정규화. (결과, 실패) — 실패는 폼 경로 LLM 오류로 비목후보가 비었다는 뜻이다."""
     실패 = False
     if body.질문 and body.질문.strip():
@@ -70,7 +70,7 @@ def _실_정규화(body: 정규화요청) -> tuple[dict, bool]:
         out, _메타 = 정규화(body.질문, 비목목록=비목_ENUM)
     else:
         # 폼 경로: 품목·금액·용도는 이미 구조화돼 있어 비목후보만 LLM 으로 채운다.
-        # 합성 문장(_합성_질문)을 LLM 에 다시 넣지 않는다 — 필드→문장→필드 왕복은 정보를 잃는다.
+        # 합성 문장(_합성_질문)을 LLM 에 다시 넣지 않는다. 필드→문장→필드 왕복은 정보를 잃는다.
         from normalize_run import 비목후보_추출
         용도 = body.용도 or ""
         if body.추가설명:
@@ -103,8 +103,9 @@ def _합성_질문(body: 정규화요청) -> str:
 def _심층질문_선별(사업명: str | None, 비목후보: list[dict] | None) -> list[dict]:
     """사업명과 신뢰도 1위 비목후보로 심층질문을 거른다.
 
-    정규화 시점에는 비목이 후보뿐이라 거칠게만 거른다. 사업명이 없으면 전부 준다 — 서버가
+    정규화 시점에는 비목이 후보뿐이라 거칠게만 거른다. 사업명이 없으면 전부 준다. 서버가
     추측으로 줄이면 '해당 없음' 과 '아직 모름' 을 구분할 수 없다.
+    필요프로필필드는 한 릴리스 동안 이전 키 이름으로도 함께 보낸다.
     """
     표 = _심층질문마스터()
     if not 표:
@@ -121,5 +122,6 @@ def _심층질문_선별(사업명: str | None, 비목후보: list[dict] | None)
             continue
         if q["비목"] and 최우선비목 and q["비목"] != 최우선비목:
             continue
-        out.append({k: v for k, v in q.items() if k not in ("사업명", "비목")})
+        항목 = {k: v for k, v in q.items() if k not in ("사업명", "비목")}
+        out.append(구키_추가(항목, {"필요프로필필드": "필요F필드"}))  # 구 이름 호환(제거 예정: 다음 릴리스)
     return out

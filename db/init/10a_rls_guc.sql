@@ -22,7 +22,7 @@ BEGIN
 END
 $$;
 
--- eval 은 아무 권한도 주지 않는다. 정답셋이라 앱이 읽을 수 있으면 그 자체가 정답 유출이다.
+-- eval 은 아무 권한도 주지 않는다. 골든셋이라 앱이 읽을 수 있으면 그 자체가 정답 유출이다.
 REVOKE ALL ON SCHEMA eval FROM suddoe_app;
 
 
@@ -38,5 +38,5 @@ REVOKE ALL ON SCHEMA eval FROM suddoe_app;
 -- 1. 게스트(org_id IS NULL) 행은 GUC 와 무관하게 RLS 를 통과하지 못한다. NULL = NULL 은 참이 아니라 NULL 이다.
 --    그래서 suddoe_app 으로는 게스트 판정을 tenant.decisions 에 남길 수 없다.
 -- 2. tenant.unmapped_premise 는 RLS 가 켜져 있고 정책이 없다. suddoe_app 의 쓰기는 거부되고 읽기는 0행이다.
---    앱은 이 테이블에 쓰지 않는다(PREMISE_UNMAPPED 코드는 decisions.강등코드 에만 남는다).
+--    앱은 이 테이블에 쓰지 않는다(PREMISE_UNMAPPED 코드는 decisions.검증코드 에만 남는다).
 -- 데모 세션의 tenant.orgs INSERT 는 앱이 uuid 를 먼저 만들어 GUC 에 설정한 뒤 같은 값으로 INSERT 해 통과한다.

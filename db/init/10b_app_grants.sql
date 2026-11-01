@@ -22,7 +22,7 @@ BEGIN
 END
 $$;
 
--- eval(정답셋)은 운영에 없다. 없는 스키마에 REVOKE 를 실행하면 오류가 나므로 여기서는 eval 을 다루지 않는다.
+-- eval(골든셋)은 운영에 없다. 없는 스키마에 REVOKE 를 실행하면 오류가 나므로 여기서는 eval 을 다루지 않는다.
 -- 로컬의 eval 권한 회수는 10a_rls_guc.sql 이 한다.
 
 
@@ -49,7 +49,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA corpus
 -- search_path. pg_dump 는 DB 수준 설정을 덤프하지 않으므로 복원 직후에는 기본값이다.
 -- 설정하지 않으면 벡터 질의가 "operator does not exist: extensions.vector <=> extensions.vector" 로 실패한다.
 -- DB 이름을 하드코딩하지 않고 current_database() 를 쓴다. eval 은 평가 스크립트(postgres 롤)가 쓰므로
--- DB 수준 경로에는 남기고, 앱 롤 경로에서는 뺀다(운영에는 eval 스키마가 없고 앱은 정답셋을 읽지 않는다).
+-- DB 수준 경로에는 남기고, 앱 롤 경로에서는 뺀다(운영에는 eval 스키마가 없고 앱은 골든셋을 읽지 않는다).
 DO $do$
 BEGIN
     EXECUTE format(

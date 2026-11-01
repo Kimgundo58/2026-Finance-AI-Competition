@@ -21,22 +21,22 @@ CREATE TABLE IF NOT EXISTS corpus.check_items (
 CREATE INDEX IF NOT EXISTS ix_check_items_key ON corpus.check_items (사업명, 비목, 구분);
 
 COMMENT ON TABLE corpus.check_items IS
-    '결제 전/후 확인 항목의 폐쇄 목록. code 가 재판정 간 진행상황을 잇는 키다.';
+    '결제 전/후 확인 항목의 고정 목록. code 가 재판정 간 진행상황을 잇는 키다.';
 
 
 -- corpus.evidence_sources : 증빙 발급처 안내. CSV 원본을 그대로 적재한다 (전처리 없음).
 CREATE TABLE IF NOT EXISTS corpus.evidence_sources (
     증빙명    TEXT PRIMARY KEY,               -- "세금계산서(신용카드 영수증)", "견적서" ...
     해당비목  TEXT[],
-    패키지    TEXT[],
+    사업명    TEXT[],
     세부정보  TEXT,                           -- 화면 툴팁
     발급처    TEXT                            -- 홈택스 / IRIS / K-스타트업 / 특허로 ...
 );
 
 -- 비목 정규화 결과 컬럼. 원문 `해당비목` 은 덮지 않고 컬럼을 더한다.
--- 분류 값: 정본(표준 표기) | 표기차이 | 지급수수료_세목 | R&D계통 | 주관기관비목 | 비목아님 | 미분류
--- TIPS(R&D계통)는 해당비목_정본 이 NULL 이다. 창업 비목으로 매핑하면 조인 결과가 경고 없이 0행이 된다.
-ALTER TABLE corpus.evidence_sources ADD COLUMN IF NOT EXISTS 해당비목_정본 TEXT[];
+-- 분류 값: 표준(표준 표기) | 표기차이 | 지급수수료_세목 | RND | 주관기관비목 | 비목아님 | 미분류
+-- TIPS(RND)는 해당비목_표준 이 NULL 이다. 창업 비목으로 매핑하면 조인 결과가 경고 없이 0행이 된다.
+ALTER TABLE corpus.evidence_sources ADD COLUMN IF NOT EXISTS 해당비목_표준 TEXT[];
 ALTER TABLE corpus.evidence_sources ADD COLUMN IF NOT EXISTS 해당비목_분류 TEXT[];
 
 COMMENT ON TABLE corpus.evidence_sources IS
@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS tenant.expense_plans (
     금액        NUMERIC,
     집행예정일  DATE,
     거래처      TEXT,
-    -- 진행 상태다. 4-way 판정(가능/조건부/불가/판단불가)과 다른 축이다
+    -- 진행 상태다. 4종 판정(가능/조건부/불가/판단불가)과 별개 값이다
     상태        TEXT NOT NULL DEFAULT 'draft' CHECK (상태 IN ('draft','judged')),
     latest_decision_id BIGINT REFERENCES tenant.decisions(decision_id) ON DELETE SET NULL,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -85,7 +85,7 @@ CREATE TABLE IF NOT EXISTS tenant.plan_tasks (
     설명        TEXT,
     due_date    DATE,                         -- NULL 이면 체크리스트에만, 값이 있으면 캘린더에도
     날짜_사용자수정 BOOLEAN NOT NULL DEFAULT false,  -- true 면 재판정이 날짜를 덮지 않는다
-    -- 판정 4-way 와 다른 축. 코드가 관리한다
+    -- 4종 판정과 별개 값. 코드가 관리한다
     상태        TEXT NOT NULL DEFAULT '준비필요'
                 CHECK (상태 IN ('준비필요','집행예정','완료')),
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -113,12 +113,12 @@ ALTER TABLE tenant.orgs ADD COLUMN IF NOT EXISTS 부서 TEXT;
 
 
 -- decisions 확장 컬럼 5개.
--- 강등사유: 검증기가 조건부로 내린 이유(인용이 컨텍스트 밖 / verified=false 룰 단독 '가능' / extraction='vlm')를 남긴다.
--- 인용·전제 컬럼은 검증기 출력(객체 배열)이다. LLM 원출력(S번호 문자열 배열)이 아니다.
+-- 검증사유: 검증 단계가 판정을 하향한 이유(인용이 컨텍스트 밖 / verified=false 룰 단독 '가능' / extraction='vlm')를 남긴다.
+-- 인용·전제 컬럼은 검증 단계 출력(객체 배열)이다. LLM 원출력(문장 ID 문자열 배열)이 아니다.
 ALTER TABLE tenant.decisions ADD COLUMN IF NOT EXISTS 요약        TEXT;
-ALTER TABLE tenant.decisions ADD COLUMN IF NOT EXISTS 버전스탬프  TEXT;
-ALTER TABLE tenant.decisions ADD COLUMN IF NOT EXISTS 참조사슬    JSONB;
-ALTER TABLE tenant.decisions ADD COLUMN IF NOT EXISTS 강등사유    TEXT[];
+ALTER TABLE tenant.decisions ADD COLUMN IF NOT EXISTS 규정버전    TEXT;
+ALTER TABLE tenant.decisions ADD COLUMN IF NOT EXISTS 참조관계    JSONB;
+ALTER TABLE tenant.decisions ADD COLUMN IF NOT EXISTS 검증사유    TEXT[];
 ALTER TABLE tenant.decisions ADD COLUMN IF NOT EXISTS 미매핑전제  JSONB;
 
 

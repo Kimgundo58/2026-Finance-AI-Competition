@@ -1,5 +1,5 @@
 -- QA 계정 2건을 tenant.accounts 에 등록한다.
--- 실행 시점: seed(수동). tenant.orgs 에 기관 명부를 적재한 뒤 실행한다. init 에서는 실행하지 않는다.
+-- 실행 시점: seed(수동). tenant.orgs 에 기관 목록을 적재한 뒤 실행한다. init 에서는 실행하지 않는다.
 --    psql "$DSN" --single-transaction -v ON_ERROR_STOP=1 -f db/seed/12_qa_accounts.sql
 --
 -- 등록하지 않으면 Supabase 토큰은 발급되지만 tenant.계정찾기(email) 가 org 를 찾지 못해 API 가 403 을 반환한다.
@@ -17,7 +17,7 @@ BEGIN
                    WHERE org_id = 'cfeba091-251a-5ae4-8cc9-88c6e6679440') THEN
         RAISE EXCEPTION
             '경상국립대학교 창업중심대학사업단(cfeba091-…)이 tenant.orgs 에 없다 — '
-            '이 DB 에는 기관 명부가 적재되지 않았다. 명부를 먼저 적재한다.';
+            '이 DB 에는 기관 목록이 적재되지 않았다. 기관 목록을 먼저 적재한다.';
     END IF;
 END
 $$;

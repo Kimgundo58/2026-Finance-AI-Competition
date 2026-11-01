@@ -74,9 +74,9 @@ CREATE TABLE IF NOT EXISTS corpus.ingest_jobs (
     상태          TEXT NOT NULL DEFAULT 'parsing' CHECK (상태 IN ('parsing','done','failed')),
     실패사유      TEXT,
     경고          JSONB NOT NULL DEFAULT '[]'::jsonb,
-    분해전략      TEXT,
+    분할전략      TEXT,
     조_건수       INT,
-    대체한_doc_id TEXT,                             -- 활성화 때 superseded 로 바꾼 이전 판
+    이전판_doc_id TEXT,                             -- 활성화 때 superseded 로 바꾼 이전 판
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT ingest_jobs_사업명_check CHECK ((layer = 'L2') = (사업명 IS NOT NULL))

@@ -7,12 +7,15 @@
     지출명   → 제목           예상 비목 → 확정비목
     예상금액 → 금액           예상지출일 → 집행예정일
     AI 점검 상태 → 판정 (가능·조건부·불가·판단불가 또는 null). null 은 '점검 전' 이며 판정 값이 아니다.
+
+이름을 바꾼 필드는 한 릴리스 동안 요청에서 이전 이름도 받고(validation_alias), 응답에는 이전 이름의
+읽기 전용 필드(computed_field)를 함께 내보낸다. 해당 줄에는 호환 표식 주석을 단다.
 """
 from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import AliasChoices, BaseModel, Field, computed_field, model_validator
 
 # --- 공통 ---
 
@@ -25,10 +28,14 @@ class 오류응답(BaseModel):
     상태: int
 
 
-class F5(BaseModel):
+class 특수관계(BaseModel):
     """특수관계 거래 여부. 판정 요청에만 쓰고 저장하지 않는다."""
     친족거래: bool = False
     전직임직원업체: bool = False
+
+
+# 필드 이름이 클래스 이름을 가리면 pydantic 이 타입을 해석하지 못한다. 별칭으로 참조한다.
+_특수관계 = 특수관계
 
 
 # --- 정규화 (POST /api/normalize) ---
@@ -41,14 +48,15 @@ class 정규화요청(BaseModel):
     용도: str | None = None
     집행예정일: str | None = None
     거래처: str | None = None          # 저장만 하고 판정에는 쓰지 않는다
-    추가설명: str | None = None        # 폼 칸에 없는 예외 상황 설명. 용도 뒤에 붙여 LLM 에 넘긴다
+    추가설명: str | None = None        # 폼 필드에 없는 예외 상황 설명. 용도 뒤에 붙여 LLM 에 넘긴다
 
     # 자연어 경로 (골든셋 질문이 이 경로로 들어온다. 지우지 않는다)
     질문: str | None = Field(default=None, max_length=2000)
 
     # 공통
     사업명: str | None = None
-    f5: F5 = Field(default_factory=F5)
+    특수관계: _특수관계 = Field(default_factory=_특수관계,
+                             validation_alias=AliasChoices("특수관계", "f5"))  # 구 이름 호환(제거 예정: 다음 릴리스)
 
     @model_validator(mode="after")
     def _질문_XOR_폼(self):
@@ -89,9 +97,14 @@ class 심층질문항목(BaseModel):
     유형: Literal["예아니오", "선택", "숫자", "텍스트"]
     선택지: list[심층질문선택지] = Field(default_factory=list)   # 유형="선택" 일 때만 채운다
     근거: 심층질문근거                       # 필수. 질문하는 근거 조항이므로 비우지 않는다
-    # 컬럼명을 그대로 넣는다(예: "정부지원_현금"). F1~F4 접두사는 orchestrate.f값_경로키() 가
+    # 컬럼명을 그대로 넣는다(예: "정부지원_현금"). 프로필 경로 접두사는 orchestrate.프로필값_경로키() 가
     # 붙인다. 그 함수의 매핑표에 없는 컬럼을 쓰면 매핑표도 함께 늘려야 한다.
-    필요F필드: list[str] = Field(default_factory=list)
+    필요프로필필드: list[str] = Field(default_factory=list)
+
+    @computed_field  # 구 이름 호환(제거 예정: 다음 릴리스)
+    @property
+    def 필요F필드(self) -> list[str]:  # 구 이름 호환(제거 예정: 다음 릴리스)
+        return self.필요프로필필드
 
 
 class 답변항목(BaseModel):
@@ -126,8 +139,9 @@ class 판정요청(BaseModel):
     사업명: str | None = None
     org_id: str | None = None
     plan_id: int | None = None         # 있으면 판정 후 expense_plans 에 연결한다
-    f5: F5 = Field(default_factory=F5)
-    # 심층질문 답. 비어 있으면 orchestrate.판정() 이 사용자 답 없이 F값을 계산한다.
+    특수관계: _특수관계 = Field(default_factory=_특수관계,
+                             validation_alias=AliasChoices("특수관계", "f5"))  # 구 이름 호환(제거 예정: 다음 릴리스)
+    # 심층질문 답. 비어 있으면 orchestrate.판정() 이 사용자 답 없이 프로필값을 계산한다.
     답변: list[답변항목] = Field(default_factory=list)
 
 
@@ -138,7 +152,8 @@ class 할일(BaseModel):
     task_id: int
     plan_id: int | None = None         # null 이면 계획과 무관한 사용자 일정
     출처: Literal["ai", "user"] = "ai"
-    코드: str | None = None            # corpus.check_items.code. 매칭하지 못하면 null
+    # corpus.check_items.code. 매칭하지 못하면 null. DB 컬럼 plan_tasks.코드 와 서버가 매핑한다
+    code: str | None = Field(default=None, validation_alias=AliasChoices("code", "코드"))  # 구 이름 호환(제거 예정: 다음 릴리스)
     구분: Literal["결제전", "결제후", "집행"] = "결제전"
     항목: str
     설명: str | None = None
@@ -147,6 +162,11 @@ class 할일(BaseModel):
     날짜_사용자수정: bool = False
     상태: Literal["준비필요", "집행예정", "완료"] = "준비필요"
     계획제목: str | None = None        # 캘린더 행에 연결된 지출계획 제목
+
+    @computed_field  # 구 이름 호환(제거 예정: 다음 릴리스)
+    @property
+    def 코드(self) -> str | None:  # 구 이름 호환(제거 예정: 다음 릴리스)
+        return self.code
 
 
 class 할일생성(BaseModel):
@@ -174,10 +194,20 @@ class 할일동기화(BaseModel):
 class 할일동기화응답(BaseModel):
     생성: int = 0
     갱신: int = 0
-    보존_user: int = 0                 # 건드리지 않은 사용자 행 수
+    보존_사용자: int = 0               # 건드리지 않은 사용자 행 수
     보존_날짜수정: int = 0             # 날짜_사용자수정=true 라 덮어쓰지 않은 행 수
-    코드매칭: int = 0                  # check_items 코드를 매칭한 행 수
-    코드미상: int = 0                  # 코드=NULL 로 넣은 행 수
+    코드매칭: int = 0                  # check_items code 를 매칭한 행 수
+    코드미매칭: int = 0                # code 를 매칭하지 못해 NULL 로 넣은 행 수
+
+    @computed_field  # 구 이름 호환(제거 예정: 다음 릴리스)
+    @property
+    def 보존_user(self) -> int:  # 구 이름 호환(제거 예정: 다음 릴리스)
+        return self.보존_사용자
+
+    @computed_field  # 구 이름 호환(제거 예정: 다음 릴리스)
+    @property
+    def 코드미상(self) -> int:  # 구 이름 호환(제거 예정: 다음 릴리스)
+        return self.코드미매칭
 
 
 class 할일목록응답(BaseModel):
@@ -247,7 +277,7 @@ class 계획상세(계획요약):
     추가설명: str | None = None
     정규화: dict[str, Any] = Field(default_factory=dict)
     latest_decision_id: int | None = None
-    # 판정 전문 (요약·해야할일·인용·전제·신뢰등급·버전스탬프·참조사슬·문의초안)
+    # 판정 전문 (요약·해야할일·인용·전제·신뢰등급·규정버전·참조관계·검증사유·문의초안)
     판정상세: dict[str, Any] | None = None
     할일: list[_할일] = Field(default_factory=list)
     created_at: str | None = None
@@ -262,10 +292,16 @@ class L3업로드응답(BaseModel):
     # 업로드 요청은 접수까지만 하고 202 를 돌려준다. 파싱은 백그라운드 작업이 한다.
     상태: Literal["파싱대기", "파싱중", "완료", "실패"] = "파싱대기"
     조_건수: int | None = None
-    dangling: list[dict[str, Any]] = Field(default_factory=list)
+    # 등록된 규정에서 찾지 못한 상위 규정 참조. 업로드 실패 안내에 쓴다
+    미해결참조: list[dict[str, Any]] = Field(default_factory=list)
     메시지: str | None = None
     # 상태가 '완료' 여도 warn(조문은 추출했지만 품질이 낮음)과 pass 를 프론트가 구분할 수 있게 한다
-    파싱품질: Literal["대기", "pass", "warn", "fail"] | None = None
+    파싱품질: Literal["pending", "pass", "warn", "fail"] | None = None
+
+    @computed_field  # 구 이름 호환(제거 예정: 다음 릴리스)
+    @property
+    def dangling(self) -> list[dict[str, Any]]:  # 구 이름 호환(제거 예정: 다음 릴리스)
+        return self.미해결참조
 
 
 class L3현재문서(BaseModel):
@@ -276,7 +312,7 @@ class L3현재문서(BaseModel):
     시행일: str | None = None
     # created_at 값. 시행일이 대부분 NULL 이라 화면에는 이 값을 표시한다
     등록일: str | None = None
-    파싱품질: Literal["대기", "pass", "warn", "fail"] | None = None
+    파싱품질: Literal["pending", "pass", "warn", "fail"] | None = None
     조_건수: int = 0
 
 
@@ -290,19 +326,29 @@ class L3현재문서목록응답(BaseModel):
 class 우선순위규칙(BaseModel):
     """corpus.precedence_rules 한 행. L1/L2/L3 중 어느 계층이 우선하는지."""
     우선계층: str
-    열위계층: str
+    후순위계층: str
     범위: str | None = None
     우선규범: str | None = None
     해석: str | None = None
+
+    @computed_field  # 구 이름 호환(제거 예정: 다음 릴리스)
+    @property
+    def 열위계층(self) -> str:  # 구 이름 호환(제거 예정: 다음 릴리스)
+        return self.후순위계층
 
 
 class 사업정보(BaseModel):
     사업명: str
     별칭: list[str] = Field(default_factory=list)
-    비목계통: str | None = None
+    비목체계: str | None = None        # 창업 | RND
     트랙범위: str | None = None
     # 프론트가 우선순위 규칙을 하드코딩하지 않도록 내려준다(추가 필드라 기존 계약은 그대로다)
     우선순위규칙목록: list[우선순위규칙] = Field(default_factory=list)
+
+    @computed_field  # 구 이름 호환(제거 예정: 다음 릴리스)
+    @property
+    def 비목계통(self) -> str | None:  # 구 이름 호환(제거 예정: 다음 릴리스)
+        return self.비목체계
 
 
 class 사업목록응답(BaseModel):
@@ -310,17 +356,18 @@ class 사업목록응답(BaseModel):
     비고: str | None = None
 
 
-# --- F 프로필 (GET·PUT /api/profile) ---
-# 현물 항목은 없다. f1 은 현금 2칸이고 f3 에는 형태(현금/현물) 칸, f4 에는 이름 칸이 없다.
+# --- 기업 프로필 (GET·PUT /api/profile) ---
+# 현물 항목은 없다. 협약은 현금 2개 필드이고 집행내역에는 형태(현금/현물) 필드, 참여인력에는
+# 이름 필드가 없다.
 
-class F1(BaseModel):
+class 협약정보(BaseModel):
     정부지원_현금: float = 0
     자기부담_현금: float = 0
     협약시작일: str | None = None
     협약종료일: str | None = None
 
 
-class F3항(BaseModel):
+class 집행내역항목(BaseModel):
     비목: str
     재원: Literal["정부지원", "자기부담"]
     거래처: str | None = None
@@ -329,7 +376,7 @@ class F3항(BaseModel):
     금액: float = 0
 
 
-class F4항(BaseModel):
+class 참여인력항목(BaseModel):
     역할: str                          # 실명은 받지 않는다
     고용형태: str | None = None
     타사업참여율: float = 0
@@ -338,6 +385,9 @@ class F4항(BaseModel):
 
 
 class 프로필(BaseModel):
-    f1: F1 = Field(default_factory=F1)
-    f3: list[F3항] = Field(default_factory=list)
-    f4: list[F4항] = Field(default_factory=list)
+    협약: 협약정보 = Field(default_factory=협약정보,
+                       validation_alias=AliasChoices("협약", "f1"))  # 구 이름 호환(제거 예정: 다음 릴리스)
+    집행내역: list[집행내역항목] = Field(default_factory=list,
+                                 validation_alias=AliasChoices("집행내역", "f3"))  # 구 이름 호환(제거 예정: 다음 릴리스)
+    참여인력: list[참여인력항목] = Field(default_factory=list,
+                                 validation_alias=AliasChoices("참여인력", "f4"))  # 구 이름 호환(제거 예정: 다음 릴리스)

@@ -16,7 +16,7 @@ ENV PATH="/opt/venv/bin:$PATH"
 COPY requirements-api.txt /tmp/requirements-api.txt
 RUN pip install -r /tmp/requirements-api.txt
 
-# KURE-v1 을 SentenceTransformer 로 실제 로드해 받는다(snapshot_download 는 onnx/openvino 변형까지 딸려온다).
+# KURE-v1 을 SentenceTransformer 로 실제 로드해 받는다(snapshot_download 는 onnx/openvino 변형까지 함께 내려받는다).
 # 캐시 마운트에 받아 두고 이미지로 복사만 한다 — BuildKit 필수(DOCKER_BUILDKIT=1).
 ENV HF_HOME=/opt/hf
 RUN --mount=type=cache,target=/root/.hfcache,sharing=locked \

@@ -46,7 +46,7 @@ olefile==0.47
 pdfplumber==0.11.10
 # pdfplumber 의 필수 의존성이다. 버전을 고정하려고 명시한다
 pypdfium2==5.12.1
-# stage0_extract 의 1차 PDF 판독
+# text_extract 의 PDF 텍스트 추출 폴백(pdftext 가 예외를 낼 때만 쓴다)
 pypdf==6.15.0
 python-docx==1.2.0
 

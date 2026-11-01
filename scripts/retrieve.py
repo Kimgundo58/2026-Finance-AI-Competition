@@ -2,11 +2,11 @@
 """판정 파이프라인 3단계(검색 + 참조 확장): dense·BM25 순위를 RRF 로 합치고, 상위 청크가 참조하는 조문을 함께 가져온다.
 
 `orchestrate.py` 가 `검색()` 을 호출하고, `eval_retrieval.py` 가 같은 함수들로 검색 품질을 잰다.
-`검색()` 반환 키: top5, 폐포(참조 확장 article_id), 참조사슬, 게이트값(dense 최고 유사도), dangling, 후보수.
+`검색()` 반환 키: top5, 참조확장(참조 확장 article_id), 참조관계, 최고유사도(dense 최고 유사도), 미해결참조, 후보수.
 읽기 전용: corpus.chunks, chunk_terms, chunk_len, term_df, refs, doc_articles, documents.
-검색 대상은 FILTER 로 제한한다(L1·L2, active, 창업기업·공통 대상). L3 는 검색하지 않는다(`l3_load` 가 기관별로 로드한다).
+검색 대상은 FILTER 로 제한한다(L1·L2, active, 창업기업·공통 대상). L3 는 검색하지 않는다(`l3_load` 가 기관별로 조회한다).
 
-실행: PYTHONIOENCODING=utf-8 python scripts/retrieve.py --q "맥북 250만원 사도 되나요" [--사업 ...] | --bench
+실행: PYTHONIOENCODING=utf-8 python scripts/retrieve.py --q "맥북 250만원 사도 되나요" [--사업명 ...] | --bench
 """
 from __future__ import annotations
 
@@ -24,14 +24,14 @@ paths.ensure_on_path()
 
 # ── 검색 대상 범위(pre-filter) ────────────────────────────────────────────────
 FILTER = """embedding IS NOT NULL AND status='active' AND parse_quality='high'
-        AND retrieval_scope='진입점' AND layer IN ('L1','L2')
+        AND retrieval_scope='검색대상' AND layer IN ('L1','L2')
         AND 적용대상 IN ('창업기업','공통')"""
 
 # 사업명이 지정된 검색에서만 그 사업의 세부관리기준으로 후보를 좁히는 절.
 사업절 = " AND (사업명 IS NULL OR %(사업)s = ANY(사업명))"
 
 # 사업 필터는 다른 사업의 세부관리기준이 후보에 섞이는 것을 막는다. 검색 범위를 바꾸는 값이라
-# 모듈 기본값은 끄고, 판정 경로(orchestrate)가 SUDDOE_PROGRAM_FILTER 에 따라 호출 시 켠다.
+# 모듈 기본값은 끄고, 판정 파이프라인(orchestrate)이 SUDDOE_PROGRAM_FILTER 에 따라 호출 시 켠다.
 사업필터_기본 = False
 
 DENSE = f"""SELECT chunk_id, 1 - (embedding <=> %(v)s::extensions.vector(1024)) AS sim
@@ -62,20 +62,20 @@ WITH RECURSIVE 시작(doc_id, 조번호) AS (
 ),
 참조확장 AS (
     SELECT r.ref_id, r.src_doc_id, r.src_조번호, r.참조문자열, r.관계,
-           r.dst_doc_id, r.dst_조번호, r.해소상태, r.보정근거, 1 AS depth
+           r.dst_doc_id, r.dst_조번호, r.해결상태, r.해결근거, 1 AS depth
       FROM corpus.refs r JOIN 시작 s
         ON (r.src_doc_id, r.src_조번호) = (s.doc_id, s.조번호)
-     WHERE r.해소상태 <> 'dangling' AND r.dst_조번호 IS NOT NULL
+     WHERE r.해결상태 <> 'dangling' AND r.dst_조번호 IS NOT NULL
     UNION ALL
     SELECT r.ref_id, r.src_doc_id, r.src_조번호, r.참조문자열, r.관계,
-           r.dst_doc_id, r.dst_조번호, r.해소상태, r.보정근거, p.depth + 1
+           r.dst_doc_id, r.dst_조번호, r.해결상태, r.해결근거, p.depth + 1
       FROM corpus.refs r JOIN 참조확장 p
         ON (r.src_doc_id, r.src_조번호) = (p.dst_doc_id, p.dst_조번호)
-     WHERE r.해소상태 <> 'dangling' AND r.dst_조번호 IS NOT NULL AND p.depth < %(깊이)s
+     WHERE r.해결상태 <> 'dangling' AND r.dst_조번호 IS NOT NULL AND p.depth < %(깊이)s
 )
 SELECT DISTINCT ON (p.ref_id)
        p.ref_id, p.src_doc_id, p.src_조번호, p.참조문자열, p.관계,
-       p.dst_doc_id, p.dst_조번호, p.해소상태, p.보정근거,
+       p.dst_doc_id, p.dst_조번호, p.해결상태, p.해결근거,
        a.article_id, a.조제목, sa.조제목
   FROM 참조확장 p
   JOIN corpus.documents dd ON dd.doc_id = p.dst_doc_id AND dd.status = 'active'
@@ -84,13 +84,13 @@ SELECT DISTINCT ON (p.ref_id)
  ORDER BY p.ref_id
 """
 
-# 검색 대상 범위 안(top-k 진입점)에서 출발한 끊긴 참조만 센다. 범위 밖의 끊긴 참조는 판정과 무관하다.
+# 검색 대상 범위 안(top-k 시작 청크)에서 출발한 미해결 참조만 센다. 범위 밖의 미해결 참조는 판정과 무관하다.
 DANGLING_SQL = """
 SELECT DISTINCT r.참조문자열
   FROM corpus.refs r
   JOIN (SELECT DISTINCT doc_id, 조번호 FROM corpus.chunks WHERE chunk_id = ANY(%(cids)s)) s
     ON (r.src_doc_id, r.src_조번호) = (s.doc_id, s.조번호)
- WHERE r.해소상태 = 'dangling'
+ WHERE r.해결상태 = 'dangling'
  ORDER BY 1
 """
 
@@ -104,10 +104,10 @@ _토큰화 = None
 _모델_잠금 = threading.Lock()
 
 
-def 모델():
+def 임베딩_모델():
     """KURE-v1 을 프로세스에 한 번만 로드한다(CPU, 첫 호출 약 15초).
 
-    판정 스레드·워밍업·`rule_lookup.warmup()` 이 동시에 부를 수 있어 락을 건다 —
+    판정 스레드·워밍업·`rule_lookup.워밍업()` 이 동시에 부를 수 있어 락을 건다 —
     락이 없으면 둘 다 `None` 을 보고 각자 모델을 로드한다.
     """
     global _모델
@@ -122,11 +122,11 @@ def 모델():
 
 
 def 토큰화(texts: list[str]) -> list[list[str]]:
-    """BM25 토큰화는 `stage2_bm25.토큰화` 를 그대로 쓴다 — 색인과 쿼리가 같은 토큰화를 써야 한다."""
+    """BM25 토큰화는 `bm25_index.토큰화` 를 그대로 쓴다 — 색인과 쿼리가 같은 토큰화를 써야 한다."""
     global _토큰화
     if _토큰화 is None:
         paths.ensure_on_path()
-        from stage2_bm25 import 토큰화 as _t
+        from bm25_index import 토큰화 as _t
         _토큰화 = _t
     return _토큰화(texts)
 
@@ -135,16 +135,16 @@ def 워밍업() -> float:
     """모델 로드와 첫 인코딩을 미리 실행해, 첫 판정 요청이 모델 로딩 지연을 겪지 않게 한다.
     BM25 용 kiwi 사전도 함께 로드한다(첫 tokenize 약 1초). 걸린 시간(초)을 반환한다."""
     t = time.perf_counter()
-    모델().encode(["워밍업"], normalize_embeddings=True, convert_to_numpy=True,
-                  show_progress_bar=False)
+    임베딩_모델().encode(["워밍업"], normalize_embeddings=True, convert_to_numpy=True,
+                      show_progress_bar=False)
     토큰화(["워밍업"])
     return time.perf_counter() - t
 
 
 def 임베딩(질문: str) -> str:
     """질문 -> pgvector 리터럴. 정규화된 벡터라 `1 - (a <=> b)` 가 코사인 유사도다."""
-    v = 모델().encode([질문], normalize_embeddings=True, convert_to_numpy=True,
-                      show_progress_bar=False)[0]
+    v = 임베딩_모델().encode([질문], normalize_embeddings=True, convert_to_numpy=True,
+                          show_progress_bar=False)[0]
     return "[" + ",".join(f"{x:.6f}" for x in v) + "]"
 
 
@@ -155,7 +155,7 @@ def _사업절(사업명: str | None, 사업필터: bool) -> str:
 
 def dense(cur, 벡터: str, *, k: int = 후보K, 사업명: str | None = None,
           사업필터: bool = 사업필터_기본) -> list[tuple[int, float]]:
-    """(chunk_id, 코사인 유사도) 목록을 유사도 순으로 반환한다. 게이트값은 첫 원소의 유사도다."""
+    """(chunk_id, 코사인 유사도) 목록을 유사도 순으로 반환한다. 최고유사도는 첫 원소의 유사도다."""
     cur.execute(DENSE.format(사업=_사업절(사업명, 사업필터)),
                 {"v": 벡터, "k": k, "사업": 사업명})
     return [(r[0], float(r[1])) for r in cur.fetchall()]
@@ -181,33 +181,33 @@ def rrf(순위목록: list[list[int]], k: int = RRF_K,
 
 
 # ── 참조 확장 ─────────────────────────────────────────────────────────────────────
-def 참조확장_수집(cur, 진입점: list[int], *, 깊이값: int = 깊이) -> tuple[list[int], list[dict], list[str]]:
-    """진입점 청크의 조문이 참조하는 조문을 가져온다.
+def 참조확장_수집(cur, 시작청크: list[int], *, 깊이값: int = 깊이) -> tuple[list[int], list[dict], list[str]]:
+    """시작 청크의 조문이 참조하는 조문을 가져온다.
 
-    반환: (참조 확장 article_id 목록, 참조사슬, 끊긴 참조 표기 목록). 진입점이 없으면 빈 값 셋.
-    해소상태가 `shifted` 인 참조는 보정된 도착 조문을 쓰고 보정 근거를 `보정` 에 함께 넣는다 —
-    화면에 보정 사실을 보여주기 위해서다.
+    반환: (참조 확장 article_id 목록, 참조관계, 미해결 참조 표기 목록). 시작 청크가 없으면 빈 값 셋.
+    해결상태가 `remapped` 인 참조는 다시 매핑된 도착 조문을 쓰고 해결 근거를 `해결근거` 에 함께 넣는다 —
+    화면에 도착 조문을 바꾼 사실을 보여주기 위해서다.
     """
-    if not 진입점:
+    if not 시작청크:
         return [], [], []
-    cur.execute(참조확장SQL, {"cids": 진입점, "깊이": 깊이값})
-    확장조, 사슬 = [], []
-    처리한_조 = set()
-    for (_rid, sdoc, s조, 표기, 관계, ddoc, d조, 상태, 보정근거,
+    cur.execute(참조확장SQL, {"cids": 시작청크, "깊이": 깊이값})
+    확장조문, 참조관계 = [], []
+    처리한_조문 = set()
+    for (_rid, sdoc, s조, 참조문자열, 관계, ddoc, d조, 상태, 해결근거,
          aid, d제목, s제목) in cur.fetchall():
-        if aid not in 처리한_조:
-            처리한_조.add(aid)
-            확장조.append(aid)
-        사슬.append({
+        if aid not in 처리한_조문:
+            처리한_조문.add(aid)
+            확장조문.append(aid)
+        참조관계.append({
             "from": {"doc_id": sdoc, "조번호": s조, "조제목": s제목},
-            "표기": 표기,
+            "참조문자열": 참조문자열,
             "관계": 관계,
             "to": {"doc_id": ddoc, "조번호": d조, "조제목": d제목, "article_id": aid},
-            # 보정이 있을 때만 채운다. shifted 가 아니면 None
-            "보정": 보정근거 if 상태 == "shifted" else None,
+            # 도착 조문을 다시 매핑했을 때만 채운다. remapped 가 아니면 None
+            "해결근거": 해결근거 if 상태 == "remapped" else None,
         })
-    cur.execute(DANGLING_SQL, {"cids": 진입점})
-    return 확장조, 사슬, [r[0] for r in cur.fetchall()]
+    cur.execute(DANGLING_SQL, {"cids": 시작청크})
+    return 확장조문, 참조관계, [r[0] for r in cur.fetchall()]
 
 
 # ── 검색 인터페이스 ────────────────────────────────────────────────────────────
@@ -216,7 +216,7 @@ def 검색(cur, 질문: str, 사업명: str | None, *, top_k: int = 5,
     """질문 하나에 대한 검색 결과(dict)를 반환한다. 키는 모듈 docstring 참조.
 
     0건이어도 `None` 이 아니라 빈 리스트를 반환한다.
-    `게이트값` 은 dense 코사인 최고값이다 — RRF 점수는 스케일이 없어 임계치로 쓸 수 없다.
+    `최고유사도` 는 dense 코사인 최고값이다 — RRF 점수는 스케일이 없어 임계치로 쓸 수 없다.
     후보가 0건이면 0.0 이라 판단불가 쪽으로 판정된다.
     """
     벡터 = 임베딩(질문)
@@ -224,20 +224,20 @@ def 검색(cur, 질문: str, 사업명: str | None, *, top_k: int = 5,
     b = sparse(cur, 질문, k=후보k, 사업명=사업명, 사업필터=사업필터)
     순위 = rrf([[c for c, _ in d], b])
     top = 순위[:top_k]
-    확장조, 사슬, dang = 참조확장_수집(cur, top)
+    확장조문, 참조관계, 미해결 = 참조확장_수집(cur, top)
     return {
         "top5": top,
-        "폐포": 확장조,       # 키 이름은 orchestrate·assemble_context 와의 계약이라 유지한다
-        "참조사슬": 사슬,
-        "게이트값": d[0][1] if d else 0.0,
-        "dangling": dang,
+        "참조확장": 확장조문,
+        "참조관계": 참조관계,
+        "최고유사도": d[0][1] if d else 0.0,
+        "미해결참조": 미해결,
         "후보수": len({c for c, _ in d} | set(b)),
     }
 
 
 # ── CLI ──────────────────────────────────────────────────────────────────────
-def _p50(cur) -> None:
-    """검색 지연을 측정한다(CPU, 예산 200ms). 부하 조건이 실행마다 달라 예산 안인지만 본다."""
+def _지연측정(cur) -> None:
+    """검색 지연을 측정한다(CPU, 목표 200ms). 부하 조건이 실행마다 달라 목표 안인지만 본다."""
     질문들 = [
         "디자이너 쓸 맥북 250만원 사도 되나요?",
         "창업활동비 이번 달 60만원 써도 되나요?",
@@ -270,26 +270,26 @@ def _p50(cur) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--q", help="질문 하나를 검색해 본다")
-    ap.add_argument("--사업", default=None)
+    ap.add_argument("--사업명", default=None)
     ap.add_argument("--top-k", type=int, default=5)
-    ap.add_argument("--bench", action="store_true", help="검색 지연 측정 (예산 200ms)")
+    ap.add_argument("--bench", action="store_true", help="검색 지연 측정 (목표 200ms)")
     a = ap.parse_args()
 
     # 읽기 전용이라도 트랜잭션을 열어 두면 다른 세션의 DDL 과 락 대기가 생길 수 있어 autocommit 으로 연다.
     with db.connect(autocommit=True) as conn:
         cur = conn.cursor()
         if a.bench:
-            _p50(cur)
+            _지연측정(cur)
             return
         if not a.q:
             ap.error("--q 또는 --bench 중 하나가 필요하다")
         워밍업()
         t = time.perf_counter()
-        r = 검색(cur, a.q, a.사업, top_k=a.top_k)
+        r = 검색(cur, a.q, a.사업명, top_k=a.top_k)
         경과 = (time.perf_counter() - t) * 1000
 
         print(f"질문: {a.q}")
-        print(f"후보 {r['후보수']} · 게이트값 {r['게이트값']:.3f} · {경과:.0f}ms\n")
+        print(f"후보 {r['후보수']} · 최고유사도 {r['최고유사도']:.3f} · {경과:.0f}ms\n")
         cur.execute("""SELECT chunk_id, doc_id, 조번호, coalesce(조제목,''),
                               left(replace(text, chr(10), ' '), 76)
                          FROM corpus.chunks WHERE chunk_id = ANY(%s)""", (r["top5"],))
@@ -297,14 +297,14 @@ def main() -> None:
         for cid, doc, 조, 제목, txt in sorted(cur.fetchall(), key=lambda x: 순서[x[0]]):
             print(f"  {순서[cid]+1}. {doc[:38]:<38} {조:<9} {제목[:14]}")
             print(f"     {txt}")
-        print(f"\n참조확장 {len(r['폐포'])}조 · 참조사슬 {len(r['참조사슬'])}건 · "
-              f"dangling {len(r['dangling'])}건")
-        for c in r["참조사슬"][:6]:
-            보정 = f"  (보정: {c['보정']})" if c["보정"] else ""
-            print(f"  {c['from']['조번호']} --[{c['표기']}]--> "
-                  f"{c['to']['doc_id'][:30]} {c['to']['조번호']}{보정}")
-        if r["dangling"]:
-            print("  dangling:", json.dumps(r["dangling"][:6], ensure_ascii=False))
+        print(f"\n참조확장 {len(r['참조확장'])}조 · 참조관계 {len(r['참조관계'])}건 · "
+              f"미해결참조 {len(r['미해결참조'])}건")
+        for c in r["참조관계"][:6]:
+            해결 = f"  (해결근거: {c['해결근거']})" if c["해결근거"] else ""
+            print(f"  {c['from']['조번호']} --[{c['참조문자열']}]--> "
+                  f"{c['to']['doc_id'][:30]} {c['to']['조번호']}{해결}")
+        if r["미해결참조"]:
+            print("  미해결참조:", json.dumps(r["미해결참조"][:6], ensure_ascii=False))
 
 
 if __name__ == "__main__":

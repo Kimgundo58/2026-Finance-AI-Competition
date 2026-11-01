@@ -80,10 +80,10 @@ def 기한_해석(조문: list[tuple], 항목: str, 설명: str | None = None
     """
     if not 조문:
         return None
-    항목bg = 바이그램(f"{항목 or ''}{설명 or ''}")
+    항목_바이그램 = 바이그램(f"{항목 or ''}{설명 or ''}")
     최고: tuple[float, int, str] | None = None
-    for 조번호, 조제목, (일수, 발췌), 조문bg in 조문:
-        점수 = _포함률(항목bg, 조문bg)
+    for 조번호, 조제목, (일수, 발췌), 조문_바이그램 in 조문:
+        점수 = _포함률(항목_바이그램, 조문_바이그램)
         if 점수 < _임계:
             continue
         if 최고 is None or 점수 > 최고[0]:

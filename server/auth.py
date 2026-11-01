@@ -24,7 +24,7 @@ from urllib.parse import parse_qsl, urlencode
 from fastapi import Header, HTTPException, Request
 
 from . import _common
-from ._common import _질의
+from ._common import _질의, _환경값
 
 로그 = logging.getLogger("suddoe.auth")
 
@@ -35,11 +35,13 @@ JWKS_TTL = int(os.environ.get("SUDDOE_JWKS_TTL", "600"))          # 초
 SUPABASE_AUD = os.environ.get("SUDDOE_JWT_AUD", "authenticated")
 
 DEMO_ISS = "suddoe-demo"
-DEMO_TTL = int(os.environ.get("SUDDOE_DEMO_TTL", "7200"))         # 초
+DEMO_TOKEN_TTL = int(_환경값("SUDDOE_DEMO_TOKEN_TTL", "7200",
+                            구이름="SUDDOE_DEMO_TTL"))  # 초. # 구 이름 호환(제거 예정: 다음 릴리스)
 
-# 토큰 없는 요청이 보낸 ?org_id=(검증되지 않은 값)를 받을지. 기본은 허용, SUDDOE_ORG_PARAM=0 으로 끈다.
-# 받더라도 RLS 용 GUC 는 설정하지 않는다(OrgId주입 참조).
-ORG_PARAM_허용 = os.environ.get("SUDDOE_ORG_PARAM", "1") != "0"
+# 토큰 없는 요청이 보낸 ?org_id=(검증되지 않은 값)를 받을지. 기본은 거부이고, 로컬 개발에서만
+# SUDDOE_ALLOW_ORG_PARAM=1 로 켠다. 받더라도 RLS 용 GUC 는 설정하지 않는다(OrgId주입 참조).
+ORG_PARAM_허용 = (_환경값("SUDDOE_ALLOW_ORG_PARAM", "0",
+                         구이름="SUDDOE_ORG_PARAM") or "").strip() == "1"  # 구 이름 호환(제거 예정: 다음 릴리스)
 
 _개발기본비밀 = "suddoe-dev-only-not-a-secret"
 
@@ -91,7 +93,7 @@ def _jwks(강제갱신: bool = False) -> dict:
         if not 강제갱신 and _jwks_캐시 and time.time() - _jwks_캐시[0] < JWKS_TTL:
             return _jwks_캐시[1]
     if not JWKS_URL:
-        raise HTTPException(503, "SUDDOE_JWKS_URL 미설정 — Supabase 토큰을 검증할 수 없다")
+        raise HTTPException(503, "SUDDOE_JWKS_URL 이 설정되지 않아 Supabase 토큰을 검증할 수 없습니다")
     import httpx
     # 미들웨어 밖으로 HTTPException 이 아닌 예외가 나가면 CORS 헤더 없는 500 이 되어
     # 브라우저가 CORS 오류로 보고한다. 503 으로 바꿔 낸다.
@@ -115,7 +117,7 @@ def _서명키(토큰: str):
         for k in _jwks(강제).get("keys", []):
             if k.get("kid") == kid:
                 return jwt.PyJWK(k).key
-    raise HTTPException(401, "알 수 없는 서명 키")
+    raise HTTPException(401, "알 수 없는 서명 키입니다")
 
 
 # ── 토큰 해석 ───────────────────────────────────────────────────────
@@ -126,7 +128,7 @@ def _pyjwt():
         import jwt
         return jwt
     except ModuleNotFoundError:
-        raise HTTPException(503, "pyjwt 미설치 — 토큰을 검증할 수 없다 (pip install 'pyjwt[crypto]')")
+        raise HTTPException(503, "pyjwt 가 설치되지 않아 토큰을 검증할 수 없습니다 (pip install 'pyjwt[crypto]')")
 
 
 def 데모_사용가능() -> bool:
@@ -147,10 +149,10 @@ def 데모토큰_발급(org_id: str) -> tuple[str, int]:
     비밀 = _비밀("SUDDOE_DEMO_SECRET")
     if 비밀 is None:
         raise HTTPException(503, "데모 세션을 사용할 수 없습니다 (서버에 데모 토큰 비밀이 설정되지 않았습니다)")
-    만료 = int(time.time()) + DEMO_TTL
+    만료 = int(time.time()) + DEMO_TOKEN_TTL
     본문 = {"iss": DEMO_ISS, "sub": f"demo:{org_id}", "org": org_id,
             "iat": int(time.time()), "exp": 만료}
-    return jwt.encode(본문, 비밀, algorithm="HS256"), DEMO_TTL
+    return jwt.encode(본문, 비밀, algorithm="HS256"), DEMO_TOKEN_TTL
 
 
 def _데모해석(토큰: str) -> 주체:
@@ -164,12 +166,12 @@ def _데모해석(토큰: str) -> 주체:
                           issuer=DEMO_ISS,
                           options={"require": ["exp", "iss", "org"]})
     except jwt.ExpiredSignatureError:
-        raise HTTPException(401, "데모 세션이 만료됐다 — 다시 시작할 것")
+        raise HTTPException(401, "데모 세션이 만료됐습니다. 다시 시작해 주세요")
     except jwt.PyJWTError as e:      # 최상위 예외를 잡는다. InvalidKeyError 는 InvalidTokenError 하위가 아니다
-        raise HTTPException(401, f"데모 토큰이 유효하지 않다: {type(e).__name__}")
+        raise HTTPException(401, f"데모 토큰이 유효하지 않습니다: {type(e).__name__}")
     org = 본문.get("org")
     if not _uuid인가(org):
-        raise HTTPException(401, "데모 토큰의 org 가 UUID 가 아니다")
+        raise HTTPException(401, "데모 토큰의 org 가 UUID 형식이 아닙니다")
     return 주체(org_id=org, 출처="demo")
 
 
@@ -185,7 +187,7 @@ def _계정조회(email: str) -> tuple[str, str] | None:
     except Exception as e:                                    # noqa: BLE001
         로그.exception("계정 조회 실패(DB 오류). 미등록 계정(403)과 구분해 503 으로 응답한다")
         # 응답에 예외 문자열을 넣지 않는다. psycopg 오류 본문에 호스트·포트·사용자명이 들어 있다.
-        raise HTTPException(503, "계정 확인에 실패했습니다 — 잠시 후 다시 시도해 주세요") from e
+        raise HTTPException(503, "계정 확인에 실패했습니다. 잠시 후 다시 시도해 주세요") from e
     return (str(행[0][0]), str(행[0][1])) if 행 else None
 
 
@@ -199,17 +201,17 @@ def _supabase해석(토큰: str) -> 주체:
             options={"require": ["exp", "sub"]},
         )
     except jwt.ExpiredSignatureError:
-        raise HTTPException(401, "토큰이 만료됐다")
+        raise HTTPException(401, "토큰이 만료됐습니다")
     except jwt.PyJWTError as e:                          # _데모해석 과 같은 이유로 최상위 예외를 잡는다
-        raise HTTPException(401, f"토큰이 유효하지 않다: {type(e).__name__}")
+        raise HTTPException(401, f"토큰이 유효하지 않습니다: {type(e).__name__}")
 
     email = (본문.get("email") or "").strip().lower()
     if not email:
-        raise HTTPException(403, "토큰에 email 클레임이 없다 — 기관을 특정할 수 없다")
+        raise HTTPException(403, "토큰에 email 클레임이 없어 기관을 확인할 수 없습니다")
     계정 = _계정조회(email)
     if 계정 is None:
         # 토큰을 보낸 요청은 토큰으로만 판단한다. ?org_id= 로 폴백하지 않는다.
-        raise HTTPException(403, "등록되지 않은 계정이다")
+        raise HTTPException(403, "등록되지 않은 계정입니다")
     return 주체(org_id=계정[0], 출처="token", email=email, account_id=계정[1])
 
 
@@ -227,14 +229,14 @@ def 토큰해석(authorization: str | None) -> 주체 | None:
         return None
     토큰종류, _, 토큰 = authorization.partition(" ")
     if 토큰종류.lower() != "bearer" or not 토큰.strip():
-        raise HTTPException(401, "Authorization 은 'Bearer <token>' 형식이어야 한다")
+        raise HTTPException(401, "Authorization 헤더는 'Bearer <token>' 형식이어야 합니다")
     토큰 = 토큰.strip()
 
     jwt = _pyjwt()
     try:                                    # 서명 검증 전 값이다. 해석 경로를 고르는 데만 쓴다
         iss = jwt.decode(토큰, options={"verify_signature": False}).get("iss")
     except Exception:                                                   # noqa: BLE001
-        raise HTTPException(401, "토큰을 읽을 수 없다")
+        raise HTTPException(401, "토큰을 읽을 수 없습니다")
     return _데모해석(토큰) if iss == DEMO_ISS else _supabase해석(토큰)
 
 
@@ -267,8 +269,8 @@ def 관리자_확인(x_admin_token: str | None = Header(default=None)) -> None:
 # BaseHTTPMiddleware 가 아니라 순수 ASGI 로 구현한다. 응답을 감싸지 않아 SSE 스트림을 깨지 않는다.
 
 # 인증 없이 통과시키는 경로(접두어 비교). /api/gpu/wake 는 프론트가 토큰 없이 호출하는 정적 응답이다.
-_보호제외 = ("/api/health", "/api/orgs", "/api/demo/session", "/docs", "/openapi.json", "/redoc",
-             "/api/gpu/wake")
+_인증제외_경로 = ("/api/health", "/api/orgs", "/api/demo/session", "/docs", "/openapi.json",
+                "/redoc", "/api/gpu/wake")
 
 
 class OrgId주입:
@@ -284,13 +286,13 @@ class OrgId주입:
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
         경로 = scope.get("path", "")
-        if not 경로.startswith("/api") or 경로.startswith(_보호제외):
+        if not 경로.startswith("/api") or 경로.startswith(_인증제외_경로):
             return await self.app(scope, receive, send)
 
-        머리 = {k.decode("latin-1").lower(): v.decode("latin-1")
+        헤더 = {k.decode("latin-1").lower(): v.decode("latin-1")
                 for k, v in scope.get("headers", [])}
         try:
-            주 = 토큰해석(머리.get("authorization"))
+            주 = 토큰해석(헤더.get("authorization"))
         except HTTPException as e:
             return await _거부(send, e.status_code, e.detail)
 
@@ -303,7 +305,7 @@ class OrgId주입:
             if 주.org_id:
                 쿼리.append(("org_id", 주.org_id))
         elif 요청_org_id is not None and not ORG_PARAM_허용:
-            return await _거부(send, 401, "org_id 파라미터가 꺼져 있다 — 로그인이 필요하다")
+            return await _거부(send, 401, "이 서버는 org_id 파라미터를 받지 않습니다. 로그인해 주세요")
 
         scope = dict(scope)
         scope["query_string"] = urlencode(쿼리).encode()
@@ -322,7 +324,10 @@ class OrgId주입:
 
 
 async def _거부(send, 코드: int, 사유: str) -> None:
-    본문 = json.dumps({"detail": 사유}, ensure_ascii=False).encode()
+    """미들웨어 단계의 오류 응답. 다른 오류와 같은 형식({"오류", "상태"})으로 보낸다."""
+    오류본문 = {"오류": 사유, "상태": 코드}
+    오류본문["detail"] = 사유  # 구 이름 호환(제거 예정: 다음 릴리스)
+    본문 = json.dumps(오류본문, ensure_ascii=False).encode()
     await send({"type": "http.response.start", "status": 코드, "headers": [
         (b"content-type", b"application/json; charset=utf-8"),
         (b"content-length", str(len(본문)).encode())]})
