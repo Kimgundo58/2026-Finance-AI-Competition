@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""저장소 루트 해석과 sys.path 등록.
+"""저장소 루트 경로(ROOT)와 sys.path 등록 헬퍼.
 
-호출자는 `_lib` 를 import 할 수 있게 scripts/ 를 sys.path 에 넣는 부트스트랩 한 줄만 두고,
-나머지는 `ensure_on_path()` 에 맡긴다.
+scripts/ 의 모듈과 CLI 가 import 시점에 쓴다. 호출자는 _lib 를 import 할 수 있도록 scripts/ 를
+sys.path 에 넣는 아래 부트스트랩만 두고, 나머지 경로 등록은 ensure_on_path() 에 맡긴다.
 
     import sys, os
     _here = os.path.dirname(os.path.abspath(__file__))
