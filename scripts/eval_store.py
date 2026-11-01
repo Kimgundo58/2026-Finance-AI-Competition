@@ -2,7 +2,7 @@
 """평가 결과를 `eval.runs` / `eval.run_items` 에 저장하고 되읽는다.
 
 `eval_retrieval.py`, 판정 파이프라인 골든셋 실행(`orchestrate.py --eval-log`)이 호출한다.
-공개 함수: `기록(run, items, *, conn)`, `요약(run_id, *, conn)`, `코퍼스버전(cur)`, `사업키(사업명, 적용범위)`.
+공개 함수: `기록(run, items, *, conn)`, `요약(run_id, *, conn)`, `코퍼스버전(cur)`, `평가용_사업명(사업명, 적용범위)`.
 `지표`·`원출력` 은 jsonb 로 그대로 저장하고, `코퍼스버전`·`git커밋` 을 주지 않으면 여기서 계산해 채운다.
 채점은 전부 결정론적이며 LLM-as-judge 는 쓰지 않는다.
 """
@@ -21,7 +21,7 @@ _종류 = ("e2e", "retrieval", "judge")
 
 
 def 코퍼스버전(cur) -> str:
-    """검색 대상 코퍼스 상태를 한 문자열로 압축한다 — (청크수, 임베딩수, refs수, doc수, 최대 chunk_id) 해시."""
+    """코퍼스 전체 상태를 한 문자열로 압축한다 — (청크수, 임베딩수, refs수, doc수, 최대 chunk_id) 해시."""
     cur.execute("""
         SELECT (SELECT count(*) FROM corpus.chunks),
                (SELECT count(*) FROM corpus.chunks WHERE embedding IS NOT NULL),
@@ -91,7 +91,7 @@ def 기록(run: dict, items: list[dict] | None = None, *, conn=None) -> int:
         return run_id
 
 
-def 사업키(사업명: str | None, 적용범위: str | None = None) -> str | None:
+def 평가용_사업명(사업명: str | None, 적용범위: str | None = None) -> str | None:
     """골든셋 문항의 사업명을 검색 사업 필터에 넣을 값으로 바꾼다. 사업을 특정하지 않는 문항이면 None.
 
     None 이 되는 경우: `적용범위` 가 있다, 사업명이 비었다, 사업명이 '공통…' 이다. 뒤의 둘은 사업 이름이 아니라
