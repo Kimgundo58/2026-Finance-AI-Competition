@@ -7,6 +7,7 @@
 --   3. 롤 suddoe_ingest 를 만든다. 비특권 LOGIN 롤이고 비밀번호는 psql 변수로만 받는다.
 --      corpus 전체 SELECT, 파이프라인이 쓰는 테이블만 INSERT/UPDATE/DELETE, 시퀀스 USAGE,
 --      corpus.term_df REFRESH(PG17 MAINTAIN), tenant.judge_cache 전체 삭제(정책 ingest_cache_purge).
+--   4. corpus.term_df(term) 고유 인덱스를 만든다. 활성화가 REFRESH MATERIALIZED VIEW CONCURRENTLY 를 쓰려면 필요하다.
 --   suddoe_app 권한은 바꾸지 않는다. 앱은 corpus 에 계속 SELECT 만 한다.
 --
 -- 언제: 규정 적재 API 가 들어간 이미지를 배포하기 전에 한 번. 다시 실행해도 결과가 같다(비밀번호는 새 값으로 바뀐다).
@@ -15,9 +16,9 @@
 --   PW=$(openssl rand -hex 24)
 --   docker compose exec -T -e PGCLIENTENCODING=UTF8 db psql -U postgres -d suddoe -X -v ON_ERROR_STOP=1 \
 --       -v ingest_password="$PW" -f - < ../../db/migrations/2026-11-01_corpus_ingest.sql
---   그다음 deploy/ncp/.env 에 SUDDOE_INGEST_DB_PASSWORD=$PW 를 넣고, api 서비스 environment 에
---   SUDDOE_INGEST_DSN: postgresql://suddoe_ingest:${SUDDOE_INGEST_DB_PASSWORD}@db:5432/suddoe 를 추가한 뒤
---   docker compose up -d api 로 다시 띄운다. 자세한 절차는 docs/8_운영/8-7_규정_적재_API.md.
+--   그다음 deploy/ncp/.env 에 SUDDOE_INGEST_DSN=postgresql://suddoe_ingest:$PW@db:5432/suddoe 를 넣고
+--   (docker-compose.yml 이 api 에 넘긴다) docker compose up -d api 로 다시 띄운다.
+--   자세한 절차는 docs/8_운영/8-7_규정_적재_API.md.
 --
 -- 확인 (postgres 로):
 --   SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'documents_status_check';
@@ -26,12 +27,14 @@
 --          has_table_privilege('suddoe_ingest', 'corpus.rules', 'INSERT'),        -- false 여야 한다
 --          has_table_privilege('suddoe_ingest', 'corpus.term_df', 'MAINTAIN'),
 --          has_schema_privilege('suddoe_ingest', 'extensions', 'USAGE');
+--   SELECT indexname FROM pg_indexes WHERE schemaname = 'corpus' AND tablename = 'term_df';  -- ux_term_df_term
 --
 -- 되돌리기 (postgres 로, staged 문서와 적재 기록을 지운다. active·superseded 로 바뀐 문서는 그대로 둔다):
 --   BEGIN;
 --   DELETE FROM corpus.refs WHERE src_doc_id IN (SELECT doc_id FROM corpus.documents WHERE status = 'staged');
 --   DELETE FROM corpus.documents WHERE status = 'staged';
 --   DROP POLICY IF EXISTS ingest_cache_purge ON tenant.judge_cache;
+--   DROP INDEX IF EXISTS corpus.ux_term_df_term;
 --   DROP OWNED BY suddoe_ingest;
 --   DROP ROLE IF EXISTS suddoe_ingest;
 --   DROP TABLE IF EXISTS corpus.ingest_jobs;
@@ -103,7 +106,10 @@ GRANT INSERT, UPDATE, DELETE ON
 GRANT USAGE ON SEQUENCE
     corpus.doc_articles_article_id_seq, corpus.chunks_chunk_id_seq, corpus.refs_ref_id_seq
     TO suddoe_ingest;
-GRANT MAINTAIN ON corpus.term_df TO suddoe_ingest;     -- REFRESH MATERIALIZED VIEW (PG17 이상)
+GRANT MAINTAIN ON corpus.term_df TO suddoe_ingest;     -- REFRESH MATERIALIZED VIEW CONCURRENTLY (PG17 이상)
+
+-- 4. REFRESH MATERIALIZED VIEW CONCURRENTLY 는 고유 인덱스가 있어야 한다. term 은 GROUP BY 키라 중복이 없다.
+CREATE UNIQUE INDEX IF NOT EXISTS ux_term_df_term ON corpus.term_df (term);
 
 -- 활성화 때 판정 캐시를 비운다. judge_cache 는 RLS(org_isolation) 라 정책 없이는 0행만 지워진다.
 -- DELETE 전용 정책이고 SELECT 권한은 주지 않는다. 앱이 WHERE 없이 지우므로 다른 기관 행을 읽을 일이 없다.

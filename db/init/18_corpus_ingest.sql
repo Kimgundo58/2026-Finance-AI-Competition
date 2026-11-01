@@ -1,7 +1,7 @@
 -- 규정 적재 API(server/routes_ingest.py, scripts/corpus_ingest.py)용 스키마·권한. 새 로컬 DB 전용.
 --
 -- 운영 DB 는 db/migrations/2026-11-01_corpus_ingest.sql 로 적용한다. 내용은 같고 비밀번호만 다르다.
--- 여기서는 로컬 전용 비밀번호 'devpw' 를 쓴다(10_rls_guc.sql 의 suddoe_app 과 같은 관례).
+-- 여기서는 로컬 전용 비밀번호 'devpw' 를 쓴다(10a_rls_guc.sql 의 suddoe_app 과 같은 관례).
 -- 로컬 접속: SUDDOE_INGEST_DSN=postgresql://suddoe_ingest:devpw@localhost:5432/suddoe
 -- init 스크립트는 빈 볼륨에서만 돈다. 이미 띄운 로컬 DB 에는 마이그레이션 파일을 -v ingest_password=devpw 로 실행한다.
 -- 앞선 파일이 만든 corpus.programs(04), tenant.judge_cache(13) 가 있어야 한다.
@@ -60,7 +60,10 @@ GRANT INSERT, UPDATE, DELETE ON
 GRANT USAGE ON SEQUENCE
     corpus.doc_articles_article_id_seq, corpus.chunks_chunk_id_seq, corpus.refs_ref_id_seq
     TO suddoe_ingest;
-GRANT MAINTAIN ON corpus.term_df TO suddoe_ingest;     -- REFRESH MATERIALIZED VIEW (PG17 이상)
+GRANT MAINTAIN ON corpus.term_df TO suddoe_ingest;     -- REFRESH MATERIALIZED VIEW CONCURRENTLY (PG17 이상)
+
+-- REFRESH MATERIALIZED VIEW CONCURRENTLY 는 고유 인덱스가 있어야 한다. 활성화 중에도 검색이 term_df 를 읽을 수 있다.
+CREATE UNIQUE INDEX IF NOT EXISTS ux_term_df_term ON corpus.term_df (term);
 
 -- 활성화 때 판정 캐시를 비운다. judge_cache 는 RLS(org_isolation) 라 정책 없이는 0행만 지워진다.
 GRANT DELETE ON tenant.judge_cache TO suddoe_ingest;

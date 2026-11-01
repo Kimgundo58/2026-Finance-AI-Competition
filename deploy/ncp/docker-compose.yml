@@ -57,6 +57,9 @@ services:
       SUDDOE_DSN: postgresql://suddoe_app:${SUDDOE_APP_DB_PASSWORD:?SUDDOE_APP_DB_PASSWORD is not set in .env}@db:5432/suddoe
       SUDDOE_MOCK: "0"
       SUDDOE_ADMIN_TOKEN: ${SUDDOE_ADMIN_TOKEN:?SUDDOE_ADMIN_TOKEN is not set in .env}
+      # 규정 적재 API 전용 접속(롤 suddoe_ingest). 비어 있으면 /admin/documents 만 503 이다.
+      # 값: postgresql://suddoe_ingest:<비밀번호>@db:5432/suddoe (docs/8_운영/8-7_규정_적재_API.md)
+      SUDDOE_INGEST_DSN: ${SUDDOE_INGEST_DSN:-}
       SUDDOE_CORS: ${SUDDOE_CORS:?SUDDOE_CORS is not set in .env}
       SUDDOE_JWKS_URL: ${SUDDOE_JWKS_URL:?SUDDOE_JWKS_URL is not set in .env}
       SUDDOE_DEMO_SECRET: ${SUDDOE_DEMO_SECRET:?SUDDOE_DEMO_SECRET is not set in .env}

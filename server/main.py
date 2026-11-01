@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """「써도돼요」 백엔드 FastAPI 앱. 앱 생성·미들웨어·라우터 등록·예외 처리기만 둔다.
 
-    SUDDOE_MOCK=1 (기본)  고정 응답을 돌려준다. DB·LLM 없이 뜬다 (server/selftest.py 의 목_정규화·목_판정)
-    SUDDOE_MOCK=0         normalize_run.정규화() 와 orchestrate.판정() 을 실제로 호출한다
+    기본(SUDDOE_MOCK 미설정)  live 모드. normalize_run.정규화() 와 orchestrate.판정() 을 실제로 호출한다
+    SUDDOE_MOCK=1             mock 모드(명시해야 켜진다). DB·LLM 없이 고정 응답을 돌려준다
+                              (server/selftest.py 의 목_정규화·목_판정)
 
 라우터
     catalog            GET  /api/vocab, /api/programs
@@ -10,6 +11,7 @@
     routes_judge       POST /api/judge (SSE)
     routes_profile     GET·PUT /api/profile
     routes_admin       GET /admin/cost, /admin/queue · POST /admin/warmup (X-Admin-Token)
+    routes_ingest      /admin/documents — L1·L2 규정 적재 (X-Admin-Token, SUDDOE_INGEST_DSN 없으면 503)
     routes_plans · routes_tasks · routes_l3 · routes_orgs   지출계획·할일·기관 규정(L3)·기관 목록
 
 실행:
@@ -33,9 +35,9 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))   # 판정 파이프라인 모듈(orchestrate·retrieve 등)을 바로 import 한다
 sys.path.insert(0, str(ROOT))               # `python server/main.py` 로 실행해도 server 패키지가 보이게
 
-from server import (auth, catalog, routes_admin, routes_judge,  # noqa: E402
-                    routes_l3, routes_normalize, routes_orgs, routes_plans,
-                    routes_profile, routes_tasks)
+from server import (auth, catalog, routes_admin, routes_ingest,  # noqa: E402
+                    routes_judge, routes_l3, routes_normalize, routes_orgs,
+                    routes_plans, routes_profile, routes_tasks)
 from server._common import MOCK, _int환경, 판정_ENUM  # noqa: E402
 
 app = FastAPI(title="써도돼요 API", version="0.1.0",
@@ -46,7 +48,7 @@ app = FastAPI(title="써도돼요 API", version="0.1.0",
 def _기동시_워밍업() -> None:
     """기동 단계에서 임베딩·비목확정 모델을 동기로 로드해 첫 요청이 모델 로드를 기다리지 않게 한다.
 
-    백그라운드 스레드로 미루지 않는 이유: Cloud Run 은 요청을 처리하는 동안에만 CPU 를 할당한다.
+    백그라운드 스레드로 미루면 로드가 끝나기 전에 들어온 첫 판정 요청이 모델 로드 시간만큼 늦어진다.
     mock 모드에서는 하지 않는다. SUDDOE_WARMUP_ON_START=0 으로 끌 수 있다.
     """
     if MOCK or os.environ.get("SUDDOE_WARMUP_ON_START", "1") == "0":
@@ -72,7 +74,7 @@ app.add_middleware(
 )
 
 for _router_모듈 in (routes_plans, routes_tasks, routes_l3, routes_orgs, catalog,
-                    routes_normalize, routes_judge, routes_profile, routes_admin):
+                    routes_normalize, routes_judge, routes_profile, routes_admin, routes_ingest):
     app.include_router(_router_모듈.router)
 
 

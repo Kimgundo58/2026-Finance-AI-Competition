@@ -69,7 +69,8 @@ def _헤더(layer, 사업, doc_id, 장, 조번호, 조제목) -> str:
 def 보충(dry_run: bool = False) -> None:
     """`corpus.chunk_len` 에 없는 청크만 토큰화해 BM25 세 테이블에 추가한다.
 
-    문서 재적재는 `corpus.chunks` 만 갱신하므로 BM25 색인에 누락이 생긴다. 한 트랜잭션으로
+    문서 재적재는 `corpus.chunks` 만 갱신하므로 BM25 색인에 누락이 생긴다. staged 청크는 건너뛴다
+    (활성화 전에 색인하면 active 청크의 BM25 점수가 바뀐다). 한 트랜잭션으로
     쓰고 `ON CONFLICT DO NOTHING` 이라 재실행해도 안전하다. 끝에 `term_df` 를 REFRESH 한다.
     `dry_run` 이면 대상 건수만 출력하고 DB 에 쓰지 않는다.
     """
@@ -79,6 +80,7 @@ def 보충(dry_run: bool = False) -> None:
         SELECT c.chunk_id, c.doc_id, c.layer, c.사업명, c.조번호, c.조제목, c.text
           FROM corpus.chunks c
          WHERE NOT EXISTS (SELECT 1 FROM corpus.chunk_len l WHERE l.chunk_id = c.chunk_id)
+           AND c.status <> 'staged'      -- 적재 API 의 staged 청크는 활성화 때 색인한다(corpus_ingest)
          ORDER BY c.doc_id, c.chunk_id
     """
     with db.connect() as conn:

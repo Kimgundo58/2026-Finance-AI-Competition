@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import psycopg
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
@@ -38,20 +38,12 @@ if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
 import corpus_ingest  # noqa: E402
+from server import auth  # noqa: E402
 
 _log = logging.getLogger("suddoe.routes_ingest")
 
 _복사_단위 = 1024 * 1024
 _요청_여유 = 1024 * 1024        # multipart 경계·메타데이터 필드 몫
-
-
-def _관리자_확인(x_admin_token: str | None = Header(default=None)) -> None:
-    """관리자 토큰 검사는 server.auth.관리자_확인 에 맡긴다. 그 함수가 없으면 열지 않는다(503)."""
-    try:
-        from .auth import 관리자_확인
-    except ImportError:
-        raise HTTPException(503, "관리자 인증(server.auth.관리자_확인)이 없어 규정 적재 API 를 열 수 없습니다.")
-    관리자_확인(x_admin_token)
 
 
 def _적재_dsn() -> str:
@@ -64,7 +56,7 @@ def _적재_dsn() -> str:
 
 
 router = APIRouter(prefix="/admin/documents", tags=["관리·규정 적재"],
-                   dependencies=[Depends(_관리자_확인)])
+                   dependencies=[Depends(auth.관리자_확인)])
 
 
 # 입력·응답 모델
@@ -164,11 +156,16 @@ class 문서상태응답(BaseModel):
 
 
 class 활성화요청(BaseModel):
-    """이전 판을 자동으로 찾지 못할 때 대체_doc_id 나 신규문서 중 하나를 지정한다."""
+    """이전 판을 자동으로 찾지 못할 때 대체_doc_id 나 신규문서 중 하나를 지정한다.
+
+    신규문서인데 같은 사업·비슷한 이름의 active 문서가 있으면 409 다. 그 문서와 함께 검색돼야 하는
+    별개 문서임을 확인했을 때만 중복_허용=true 를 준다.
+    """
     model_config = ConfigDict(extra="forbid")
 
     대체_doc_id: str | None = None
     신규문서: bool = False
+    중복_허용: bool = False
 
 
 class 활성화응답(BaseModel):
@@ -263,7 +260,11 @@ async def 업로드(요청: Request, 배경: BackgroundTasks, dsn: str = Depends
         원본파일명 = Path(파일.filename or "upload").name[:200]
         저장소 = corpus_ingest.저장소()
         임시 = 저장소 / f"{uuid.uuid4().hex}.upload"
-        크기 = await run_in_threadpool(_원본_저장, 파일, 임시)
+        try:
+            크기 = await run_in_threadpool(_원본_저장, 파일, 임시)
+        except BaseException:
+            임시.unlink(missing_ok=True)       # 디스크 부족·I/O 오류로 중간까지 쓴 파일을 남기지 않는다
+            raise
     finally:
         await 폼.close()
 
@@ -333,7 +334,8 @@ def 활성화(doc_id: str, 본문: 활성화요청 | None = None,
     본문 = 본문 or 활성화요청()
     with _db(dsn) as conn:
         결과: dict[str, Any] = corpus_ingest.활성화(
-            conn, doc_id, 대체_doc_id=본문.대체_doc_id, 신규문서=본문.신규문서)
+            conn, doc_id, 대체_doc_id=본문.대체_doc_id, 신규문서=본문.신규문서,
+            중복_허용=본문.중복_허용)
     _log.info("규정 활성화 doc_id=%s 대체=%s", doc_id, 결과["대체한_doc_id"])
     return 활성화응답(**결과)
 

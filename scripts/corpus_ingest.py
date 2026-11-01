@@ -3,12 +3,14 @@
 
 호출자: server/routes_ingest.py. 업로드는 접수() 뒤 백그라운드 작업으로 적재_실행() 을, 관리 요청은
 활성화()·삭제()·문서_상태()·문서_목록() 을 부른다. FastAPI 는 import 하지 않는다.
-흐름: 텍스트 추출(stage0_extract, PDF 는 pdftext) -> 조 분해·품질 판정(stage0_articles) -> 청크 분할 -> KURE-v1 임베딩
-(retrieve.모델) -> BM25 색인 행(stage2_bm25) -> 참조(build_refs.scan) -> 한 트랜잭션으로 저장.
-쓰는 테이블: corpus.ingest_jobs, documents, doc_articles, chunks, chunk_len, chunk_terms, refs, term_df(REFRESH),
+흐름: 텍스트 추출(stage0_extract, PDF 는 pdftext) -> 조 분해·품질 판정(stage0_articles) -> 조별 적용대상 태깅
+-> 청크 분할 -> KURE-v1 임베딩(retrieve.모델) -> 참조(build_refs.scan) -> 한 트랜잭션으로 저장.
+BM25 색인 행(stage2_bm25 토큰화)은 활성화 트랜잭션에서 넣는다.
+쓰는 테이블: corpus.ingest_jobs, documents, doc_articles, chunks, refs, chunk_len·chunk_terms·term_df(활성화 때),
 tenant.judge_cache(활성화 때 삭제). 접속은 호출자가 넘기는 DSN(SUDDOE_INGEST_DSN, 롤 suddoe_ingest) 만 쓴다.
 불변식: 추출 실패·조 0건은 failed 이고 staged 가 되지 않는다. staged 문서는 검색 필터(status='active')에
-걸리지 않는다. 활성화는 한 트랜잭션에서 새 판을 active, 이전 판을 superseded 로 바꾼다.
+걸리지 않고 BM25 통계에도 들어가지 않는다. 적용대상을 정하지 못한 조는 청크로 만들지 않는다.
+활성화는 한 트랜잭션에서 새 판을 active, 이전 판을 superseded 로 바꾼다.
 """
 from __future__ import annotations
 
@@ -70,10 +72,21 @@ def 저장소() -> Path:
                 or Path(tempfile.gettempdir()) / "suddoe_corpus_upload")
 
 
+# 판을 나타내는 괄호 표기: (2025년), (2026년도), (제10차), (11차 개정), (개정본), (2025.3.1. 개정) 등.
+# '(창업기업용)'·'(주관기관용)' 처럼 문서를 구별하는 괄호는 남겨야 서로 다른 문서가 같은 키가 되지 않는다.
+_RE_판_괄호 = re.compile(
+    r"[(（\[]\s*(?:"
+    r"\d{4}\s*년도?|\d{4}[.\-]\s*\d{1,2}(?:[.\-]\s*\d{1,2})?\.?|제?\s*\d+\s*차"
+    r")?\s*(?:개정(?:본|안)?|시행|판)?\s*[)）\]]")
+
+
 def 문서키(문서명: str) -> str:
-    """같은 문서의 이전 판을 찾는 키. 괄호 안의 연도·차수 표기와 공백·구두점을 뺀다."""
-    s = re.sub(r"[(（\[][^)）\]]*[)）\]]", "", 문서명)
-    return re.sub(r"[\s_·ㆍ‧\-—「」『』'\".,]", "", s)
+    """같은 문서의 이전 판을 찾는 키. 괄호 안의 연도·차수·개정 표기와 공백·구두점을 뺀다.
+
+    판 표기가 아닌 괄호(예: '(창업기업용)')는 키에 남긴다.
+    """
+    s = _RE_판_괄호.sub("", 문서명)
+    return re.sub(r"[\s_·ㆍ‧\-—「」『』'\".,()（）\[\]]", "", s)
 
 
 def doc_id_생성(문서명: str, 시행일: date) -> str:
@@ -206,7 +219,7 @@ def _실패_기록(dsn: str, doc_id: str, 사유: str, 저장경로: str | None 
 
 
 def _준비(작업: dict) -> dict:
-    """DB 에 쓰기 전의 계산 전부: 추출, 조 분해, 품질 판정, 청크, 임베딩, BM25 토큰.
+    """DB 에 쓰기 전의 계산 전부: 추출, 조 분해, 품질 판정, 적용대상 태깅, 청크, 임베딩.
 
     반환: {조문, 전략, 추출방식, 품질, 경고, 청크}. staged 로 둘 수 없으면 _적재실패.
     """
@@ -224,26 +237,28 @@ def _준비(작업: dict) -> dict:
     품질 = ("low" if v["quality"] == "low"
             or any(f.startswith(("V1:", "V3:")) for f in v["flags"]) else "high")
     경고 = list(v["flags"])
-    조문, 범위밖_수 = _범위밖_제거(doc_id, 조문)
+    # 범위 판정은 운영자가 입력한 문서명이 아니라 표준 사업명으로 한다. 별칭으로 올려도 같은 구간이 빠진다.
+    조문, 범위밖_수 = _범위밖_제거(f"{작업['사업명'] or ''} {doc_id}", 조문)
     if 범위밖_수:
         경고.append(f"사업 범위 밖 조 {범위밖_수}건 제외")
     경고 += _조번호_중복_정리(조문)
     for a in 조문:
         a["삭제"] = is_deleted(a)
+    경고 += _적용대상_태깅(조문, layer=layer, 문서명=작업["문서명"], 기본값=작업["적용대상"])
 
-    사업 =[작업["사업명"]] if 작업["사업명"] else None
+    사업 = [작업["사업명"]] if 작업["사업명"] else None
     청크, 표_제외 = _청크_만들기(조문, layer=layer, 사업=사업, doc_id=doc_id)
     if 표_제외:
         경고.append(f"박스표 부속 {표_제외}건은 청크에서 제외 (조문으로는 저장)")
     if not 청크:
-        raise _적재실패("검색에 넣을 청크가 없습니다 (모든 조가 삭제 조문이거나 표입니다).")
+        raise _적재실패("검색에 넣을 청크가 없습니다 (모든 조가 삭제 조문·표이거나 적용대상을 정하지 못했습니다).")
 
     입력 = [c["입력"] for c in 청크]
     초과 = sum(1 for n in _토큰수(입력) if n > 임베딩_최대토큰)
     if 초과:
         경고.append(f"임베딩 입력이 {임베딩_최대토큰}토큰을 넘어 뒷부분이 잘린 청크 {초과}건")
-    for c, 벡터, 토큰 in zip(청크, _임베딩(입력), _bm25_토큰(입력)):
-        c["embedding"], c["토큰"] = 벡터, 토큰
+    for c, 벡터 in zip(청크, _임베딩(입력)):
+        c["embedding"] = 벡터
     return {"조문": 조문, "전략": 전략, "추출방식": 추출방식, "품질": 품질, "경고": 경고,
             "청크": 청크}
 
@@ -309,6 +324,101 @@ def _조번호_중복_정리(조문: list[dict]) -> list[str]:
     return [f"조번호 중복 {len(바꾼)}건에 [n] 표기 추가 ({', '.join(바꾼[:5])})"] if 바꾼 else []
 
 
+# 적용대상 태깅
+#
+# 검색 필터는 적용대상 IN ('창업기업','공통') 이다. 세부관리기준·통합관리지침은 주관기관 조항과 창업기업 조항이
+# 한 문서에 섞여 있어, 문서 하나에 값 하나를 붙이면 주관기관 전담인력 규정이 창업기업 판정 근거로 검색된다.
+# 그래서 이런 문서는 조마다 결정적 규칙으로 정한다. 우선순위는 조제목 > 절 표제 > 본문 첫머리 주어다
+# (기존 코퍼스 실측: 조제목이 주체를 정한 조에서 절 표제와 충돌 0건, 본문 주어는 절 표제와 충돌하면 대부분 절이 맞았다).
+# 규칙으로 정하지 못한 조는 None 으로 두고 청크로 만들지 않는다. 틀린 값으로 색인하는 것보다 빠지는 편이 안전하다.
+# 법령처럼 주체 구분이 없는 문서는 업로드 메타데이터의 적용대상(기본 '공통')을 모든 조에 쓴다.
+
+_태깅_대상어 = ("세부관리기준", "관리기준", "통합관리지침", "운영지침")
+_태깅_제외어 = ("별지서식", "모집공고", "공고문", "현황", "신청서")
+RE_주관 = re.compile(r"주관기관|전담조직|전담인력|운영기관|지역허브|전문기관|총괄기관|운영사")
+RE_창업 = re.compile(r"창업기업|창업자|진출자|도전자|입주기업|창업팀")
+# 절 표제는 주체를 선언하므로 본문 주어보다 어휘를 넓게 잡는다. 창업중심대학은 그 사업의 주관기관이다.
+RE_절_주관 = re.compile(RE_주관.pattern + r"|창업중심대학|전담기관|주관대학")
+RE_절장 = re.compile(r"[<〈]?\s*제\s*(\d+)\s*(절|장)\s*[>〉]?\s*([^<>\n]{0,22})")
+_본문_주어_구간 = 200       # 조 첫머리 몇 글자에서 주어를 찾는다
+
+
+def _태깅_대상(layer: str, 문서명: str) -> bool:
+    """조별 태깅을 하는 문서인가. L2 전부와 이름에 관리기준·지침이 들어간 L1 문서. 서식·공고는 제외."""
+    if any(k in 문서명 for k in _태깅_제외어):
+        return False
+    return layer == "L2" or any(k in 문서명 for k in _태깅_대상어)
+
+
+def _절값(이름: str) -> str | None:
+    """절 표제 이름에서 적용대상을 읽는다. 못 읽으면 None."""
+    if "공통" in 이름:
+        return "공통"
+    주, 창 = bool(RE_절_주관.search(이름)), bool(RE_창업.search(이름))
+    if 주 and not 창:
+        return "주관기관"
+    if 창 and not 주:
+        return "창업기업"
+    return None
+
+
+def _절_상속(조문: list[dict]) -> dict[str, str | None]:
+    """조번호 -> 그 조가 속한 절의 적용대상. 장이 바뀌면 상속을 끊는다.
+
+    조 분해 결과에서 장·절 표제는 앞 조 본문 끝에 붙어 온다. 조가 '장' 필드를 가지고 있으면 그것을 쓴다.
+    """
+    out: dict[str, str | None] = {}
+    상태: str | None = None
+    for a in 조문:
+        장 = (a.get("장") or "").strip()
+        if 장:
+            상태 = _절값(장.split("/")[-1]) if "절" in 장 else None
+        out[a["조번호"]] = 상태
+        if not 장:
+            for m in RE_절장.finditer(a.get("본문") or ""):
+                상태 = None if m.group(2) == "장" else _절값(m.group(3))
+    return out
+
+
+def _조_주체(조제목: str | None, 본문: str) -> tuple[str | None, str]:
+    """(적용대상, 근거). 조제목 주어를 먼저 보고, 없으면 본문 첫머리 주어를 본다. 못 정하면 (None, '미정')."""
+    for 글, 근거 in ((조제목 or "", "조제목"), (본문[:_본문_주어_구간], "본문주어")):
+        주, 창 = bool(RE_주관.search(글)), bool(RE_창업.search(글))
+        if 주 and not 창:
+            return "주관기관", 근거
+        if 창 and not 주:
+            return "창업기업", 근거
+        if 주 and 창:
+            return None, "미정"         # 두 주체가 함께 나오면 규칙으로 가르지 않는다
+    return None, "미정"
+
+
+def _적용대상_태깅(조문: list[dict], *, layer: str, 문서명: str, 기본값: str) -> list[str]:
+    """조마다 a['적용대상'] 을 채우고 경고 문장을 돌려준다. None 인 조는 청크로 만들지 않는다.
+
+    부칙·별표·붙임(조번호_int 가 없는 조)은 시행일·경과조치처럼 누구에게나 적용되므로 '공통' 이다.
+    """
+    if not _태깅_대상(layer, 문서명):
+        for a in 조문:
+            a["적용대상"] = 기본값
+        return []
+    절 = _절_상속(조문)
+    for a in 조문:
+        if a.get("조번호_int") is None:
+            a["적용대상"] = "공통"
+            continue
+        값, 근거 = _조_주체(a.get("조제목"), a.get("본문") or "")
+        if 근거 != "조제목" and 절.get(a["조번호"]) is not None:
+            값 = 절[a["조번호"]]
+        a["적용대상"] = 값
+    분포 = Counter(a["적용대상"] or "미정" for a in 조문 if not a["삭제"])
+    경고 = ["적용대상 조별 태깅: " + ", ".join(f"{k} {분포[k]}" for k in ("창업기업", "주관기관", "공통", "미정")
+                                         if 분포[k])]
+    if 분포["미정"]:
+        경고.append(f"적용대상을 정하지 못한 조 {분포['미정']}건은 검색에서 제외 (조문으로는 저장)")
+    return 경고
+
+
 # 청크 분할
 #
 # 청크 형식은 기존 corpus.chunks 행과 같아야 한다(삭제된 stage2_chunk·stage2_embed, stage2_bm25.보충 과 같은
@@ -329,14 +439,17 @@ RE_목 = re.compile(r"(?=\n\s*[가-힣]\.\s)")
 
 def _청크_만들기(조문: list[dict], *, layer: str, 사업: list[str] | None,
              doc_id: str) -> tuple[list[dict], int]:
-    """조 목록 -> (청크 목록, 박스표라 제외한 부속 수). 청크: 조(조문 인덱스), 항호, text, retrieval_scope, 입력."""
+    """조 목록 -> (청크 목록, 박스표라 제외한 부속 수). 청크: 조(조문 인덱스), 항호, text, retrieval_scope, 입력.
+
+    삭제 조, 빈 조, 적용대상을 정하지 못한 조는 청크로 만들지 않는다.
+    """
     from stage2_bm25 import _장맵, _헤더
 
     장 = _장맵(조문)
     청크: list[dict] = []
     표_제외 = 0
     for i, a in enumerate(조문):
-        if a["삭제"] or not (a["본문"] or "").strip():
+        if a["삭제"] or not (a["본문"] or "").strip() or a.get("적용대상") is None:
             continue
         부속 = bool(RE_첨부.match(a["조번호"] or ""))
         if 부속 and len(RE_박스표.findall(a["본문"])) >= 박스표_임계:
@@ -467,11 +580,37 @@ def _임베딩(입력: list[str]) -> list[str]:
     return ["[" + ",".join(f"{x:.6f}" for x in v) + "]" for v in 벡터들]
 
 
-def _bm25_토큰(입력: list[str]) -> list[list[str]]:
-    """색인 토큰. 검색 쿼리와 같은 함수(stage2_bm25.토큰화)여야 BM25 가 맞는다."""
-    from stage2_bm25 import 토큰화
+def _bm25_색인(cur, doc_id: str) -> int:
+    """문서의 청크를 BM25 색인(chunk_len·chunk_terms)에 넣는다. 넣은 청크 수를 돌려준다.
 
-    return 토큰화(입력)
+    활성화 트랜잭션에서 부른다. retrieve 의 BM25 는 chunk_len 전체로 문서 수와 평균 길이를 계산하므로,
+    staged 단계에서 넣으면 활성화 전부터 active 청크의 점수가 바뀐다.
+    입력은 stage2_bm25.보충 과 같다: 컨텍스트 헤더 + 줄바꿈 + text. 장 제목은 문서의 조 전체를 순서대로 보고
+    정하므로 적재 때 임베딩 입력에 쓴 헤더와 같다. 이미 색인된 청크(보충 이 먼저 넣은 경우)는 건너뛴다.
+    """
+    from stage2_bm25 import _장맵, _헤더, 토큰화
+
+    장 = _장맵([{"조번호": r[0], "본문": r[1]} for r in cur.execute(
+        "SELECT 조번호, 본문 FROM corpus.doc_articles WHERE doc_id = %s ORDER BY article_id",
+        (doc_id,)).fetchall()])
+    행 = cur.execute(
+        """SELECT c.chunk_id, c.layer, c.사업명, c.조번호, c.조제목, c.text
+             FROM corpus.chunks c
+            WHERE c.doc_id = %s
+              AND NOT EXISTS (SELECT 1 FROM corpus.chunk_len l WHERE l.chunk_id = c.chunk_id)
+            ORDER BY c.chunk_id""", (doc_id,)).fetchall()
+    if not 행:
+        return 0
+    토큰들 = 토큰화([f"{_헤더(layer, 사업, doc_id, 장.get(조번호, ''), 조번호, 조제목)}\n{text}"
+                   for _, layer, 사업, 조번호, 조제목, text in 행])
+    with cur.copy("COPY corpus.chunk_len (chunk_id, dl) FROM STDIN") as cp:
+        for r, 토큰 in zip(행, 토큰들):
+            cp.write_row((r[0], len(토큰)))
+    with cur.copy("COPY corpus.chunk_terms (chunk_id, term, tf) FROM STDIN") as cp:
+        for r, 토큰 in zip(행, 토큰들):
+            for term, tf in Counter(토큰).items():
+                cp.write_row((r[0], term, tf))
+    return len(행)
 
 
 # 저장
@@ -506,29 +645,18 @@ def _저장(conn, 작업: dict, 적재본: dict) -> bool:
                 (doc_id, a["조번호"], a.get("조제목"), a.get("조번호_int"), a["본문"],
                  a.get("페이지"), a["삭제"])).fetchone()[0])
 
-        청크_id: list[int] = []
         for c in 적재본["청크"]:
             a = 적재본["조문"][c["조"]]
-            청크_id.append(cur.execute(
+            cur.execute(
                 """INSERT INTO corpus.chunks
                        (doc_id, article_id, layer, parse_quality, version, status, retrieval_scope,
                         조번호, 조제목, 항호, 페이지, 사업명, 적용대상, text, embedding)
                    VALUES (%s,%s,%s,%s,%s,'staged',%s,%s,%s,%s,%s,%s,%s,%s,
-                           %s::extensions.vector(1024))
-                   RETURNING chunk_id""",
+                           %s::extensions.vector(1024))""",
                 (doc_id, 조_id[c["조"]], layer, 적재본["품질"], 작업["version"],
                  c["retrieval_scope"], a["조번호"], a.get("조제목"), c["항호"], a.get("페이지"),
-                 사업, 작업["적용대상"], c["text"], c["embedding"])).fetchone()[0])
-
-        # BM25 색인. term_df(materialized view) 는 활성화 때 REFRESH 한다.
-        # staged 청크는 검색 필터에 걸리지 않으므로 그 전까지 df 에 없어도 된다.
-        with cur.copy("COPY corpus.chunk_len (chunk_id, dl) FROM STDIN") as cp:
-            for cid, c in zip(청크_id, 적재본["청크"]):
-                cp.write_row((cid, len(c["토큰"])))
-        with cur.copy("COPY corpus.chunk_terms (chunk_id, term, tf) FROM STDIN") as cp:
-            for cid, c in zip(청크_id, 적재본["청크"]):
-                for term, tf in Counter(c["토큰"]).items():
-                    cp.write_row((cid, term, tf))
+                 사업, a["적용대상"], c["text"], c["embedding"]))
+        # BM25 색인 행(chunk_len·chunk_terms)은 활성화 때 넣는다(_bm25_색인).
 
         cur.executemany(
             """INSERT INTO corpus.refs
@@ -580,12 +708,15 @@ def _참조_만들기(cur, doc_id: str, 문서명: str, layer: str, 조문: list
 
 # 활성화·삭제
 
-def 활성화(conn, doc_id: str, *, 대체_doc_id: str | None = None, 신규문서: bool = False) -> dict:
+def 활성화(conn, doc_id: str, *, 대체_doc_id: str | None = None, 신규문서: bool = False,
+         중복_허용: bool = False) -> dict:
     """staged 문서를 active 로 바꾸고 이전 판을 superseded 로 바꾼다. 한 트랜잭션이다.
 
     거부(요청거부): 파싱 중·실패, staged 가 아님, parse_quality 가 low, 조·청크가 없음, 임베딩 누락,
-    이전 판을 정할 수 없음. 이전 판은 chunks 를 지우고 doc_articles 는 남긴다(기존 superseded 문서와
-    같은 모양). retrieval_scope 는 이전 판의 값을 이어받는다. tenant.judge_cache 는 전부 지운다.
+    이전 판을 정할 수 없음, 신규문서인데 비슷한 active 문서가 있음(중복_허용 이 아니면).
+    이전 판은 chunks 를 지우고 doc_articles 는 남긴다(기존 superseded 문서와 같은 모양).
+    retrieval_scope 는 이전 판의 값을 이어받는다. BM25 색인 행을 넣고 term_df 를 갱신한다.
+    tenant.judge_cache 는 전부 지운다.
     """
     with conn.transaction():
         cur = conn.cursor()
@@ -622,8 +753,13 @@ def 활성화(conn, doc_id: str, *, 대체_doc_id: str | None = None, 신규문�
         이전 = _이전판_결정(cur, doc_id, layer, 키, 사업명, 대체_doc_id, 신규문서)
         경고: list[str] = []
         if 이전 is None:
-            # 신규문서로 올리면 비슷한 active 문서와 함께 검색된다. 막지는 않고 알린다.
+            # 신규문서로 올리면 비슷한 active 문서와 함께 검색된다. 그 문서가 사실 이전 판이면 옛 판이
+            # 새 판이 금지한 것을 허용하는 채로 남으므로, 운영자가 중복_허용 으로 확인해야 진행한다.
             함께 = _이전판_후보(cur, layer, 키, 사업명)
+            if 함께 and not 중복_허용:
+                raise 요청거부(
+                    f"같은 {'사업' if 사업명 else '이름'}의 active 문서가 있습니다. 이전 판이면 대체_doc_id 로 "
+                    "지정하고, 함께 검색돼야 하는 별개 문서면 중복_허용=true 를 지정하세요.", 후보=함께)
             if 함께:
                 경고.append(f"같은 {'사업' if 사업명 else '이름'}의 active 문서가 함께 검색됩니다: {', '.join(함께)}")
         범위 = 이전[1] if 이전 else "진입점"
@@ -650,11 +786,13 @@ def 활성화(conn, doc_id: str, *, 대체_doc_id: str | None = None, 신규문�
             경고 += _활성화_경고(cur, 이전[0])
         cur.execute("UPDATE corpus.ingest_jobs SET 대체한_doc_id = %s, updated_at = now() "
                     "WHERE doc_id = %s", (이전[0] if 이전 else None, doc_id))
+        _bm25_색인(cur, doc_id)
         # 판정 캐시 키는 코퍼스 상태를 담지 않는다. 행 수가 바뀌지 않는 상태 전환도 있어
         # 설정 해시만으로는 무효화가 보장되지 않으므로 여기서 지운다(RLS 정책 ingest_cache_purge).
         캐시_삭제 = cur.execute("DELETE FROM tenant.judge_cache").rowcount
-        # REFRESH 는 term_df 에 배타 락을 건다. 마지막에 실행해 락을 쥐는 시간을 줄인다.
-        cur.execute("REFRESH MATERIALIZED VIEW corpus.term_df")
+        # CONCURRENTLY 는 읽기를 막지 않는 락(EXCLUSIVE)만 잡아 검색 쿼리가 기다리지 않는다.
+        # term_df(term) 고유 인덱스가 필요하다(db/migrations/2026-11-01_corpus_ingest.sql).
+        cur.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY corpus.term_df")
     return {"doc_id": doc_id, "상태": "active", "대체한_doc_id": 이전[0] if 이전 else None,
             "retrieval_scope": 범위, "이전판_청크_삭제": 지운_청크, "판정캐시_삭제": 캐시_삭제,
             "경고": 경고}
