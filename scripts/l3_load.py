@@ -26,9 +26,6 @@ import uuid
 from decimal import Decimal
 from typing import Any
 
-if (sys.stdout.encoding or "").lower().replace("-", "") != "utf8":
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _lib import db                                                   # noqa: E402
 
@@ -282,32 +279,6 @@ def _상위문서해소(cur, 법령: str | None, 약칭: str | None) -> str | No
     return None
 
 
-def _shifted_재매칭(cur, doc_id: str, 약칭: str | None, 조번호숫자: str) -> str | None:
-    """조번호 참조는 구판일 수 있다 — 조 제목으로 재매칭한다.
-
-    L3 가 인용한 「지침 제N조」의 N이 옛 개정판 번호면, 현행판에서 조번호가 옮겨가
-    직접 조회가 dangling 이 된다. `build_refs.py` 가 L1↔L1 참조에 쓰는 같은
-    기준표(`지침_조제목`)를 재사용한다. 「지침」 계열이 아니면 None.
-    """
-    if 약칭 not in ("지침", "통합관리지침"):
-        return None
-    try:
-        from build_refs import 지침_조제목
-    except ImportError:
-        return None
-    for 판, tbl in 지침_조제목.items():
-        if 판 == "제14차" or 조번호숫자 not in tbl:
-            continue
-        제목 = tbl[조번호숫자]
-        현행 = cur.execute(
-            "SELECT 조번호 FROM corpus.doc_articles "
-            " WHERE doc_id=%s AND 조제목=%s AND NOT coalesce(삭제,false) LIMIT 1",
-            (doc_id, 제목)).fetchone()
-        if 현행:
-            return 현행[0]
-    return None
-
-
 def 상위참조(cur, 본문: str) -> list[dict[str, Any]]:
     """조문이 인용한 상위 규범을 (해소 여부와 함께) 뽑는다.
 
@@ -334,11 +305,6 @@ def 상위참조(cur, 본문: str) -> list[dict[str, Any]]:
                 "SELECT 1 FROM corpus.doc_articles "
                 " WHERE doc_id=%s AND 조번호=%s AND NOT coalesce(삭제,false)",
                 (doc_id, 조)).fetchone())
-            if not 해소 and not m.group("의"):     # 「의N」 붙은 조는 기준표 대상이 아니다
-                재매칭 = _shifted_재매칭(cur, doc_id, 약칭, 조번호숫자)
-                if 재매칭:
-                    해소, 보정 = True, f"{조} 로 표기됨 → {재매칭} 로 재매칭(구판 조번호)"
-                    조 = 재매칭
         out.append({"표기": 표기, "doc_id": doc_id if 해소 else None,
                     "조번호": 조, "해소": 해소, "보정": 보정})
     return out
@@ -371,11 +337,10 @@ def _org정규화(org_id) -> str | None:
 
 
 def _org_컨텍스트(cur, org_id: str) -> None:
-    """RLS 축을 세션에 심는다.
+    """RLS 정책이 읽는 GUC app.org_id 를 트랜잭션 범위로 설정한다.
 
-    지금 앱은 테이블 소유자로 붙어서 RLS 가 우회된다 — 아래 `WHERE org_id = %s`
-    가 실질 1차 방어다. 이 SET 은 저권한 롤로 바뀌는 날 정책이 곧바로 먹도록
-    미리 깔아두는 것이다.
+    앱은 RLS 가 적용되는 비특권 롤(suddoe_app)로 접속하므로 이 값이 없으면 0행이다.
+    쿼리의 `WHERE org_id = %s` 는 RLS 와 별개로 두는 코드 쪽 격리 조건이다.
     """
     cur.execute("SELECT set_config('app.org_id', %s, true)", (str(org_id),))
 
@@ -396,16 +361,8 @@ def 로드(cur, org_id: str, 사업명: str | None = None,
     org_id = _org정규화(org_id)
     if org_id is None:
         return []
-    _org_컨텍스트(cur, org_id)
-    rows = cur.execute(
-        "SELECT a.article_id, a.조번호, a.조제목, a.본문, a.장, a.조번호_int "
-        "  FROM tenant.l3_articles a "
-        "  JOIN tenant.l3_documents d ON d.doc_id = a.doc_id "
-        " WHERE a.org_id = %s AND d.org_id = %s AND d.status = 'active' "
-        " ORDER BY a.조번호_int NULLS LAST, a.조번호",
-        (org_id, org_id)).fetchall()
-    조문 = [{"article_id": aid, "조번호": 조, "조제목": 제목, "본문": 본문}
-           for aid, 조, 제목, 본문, 장, _ in rows if 사업비관련장(장)]
+    조문 = [{k: a[k] for k in ("article_id", "조번호", "조제목", "본문")}
+           for a in _조문들(cur, org_id)]
     return _비목순_재정렬(cur, 조문, 비목)
 
 
@@ -450,7 +407,6 @@ def l3룰(cur, org_id: str, 비목: str) -> dict[str, Any] | None:
     org_id = _org정규화(org_id)
     if org_id is None or not 비목:
         return None
-    _org_컨텍스트(cur, org_id)
     vocab = 비목어휘(cur)
     조문 = _조문들(cur, org_id)
     # 제목 패스 결과를 먼저 모으고, 본문 패스는 제목 패스가 못 잡은 조문에 한해
@@ -478,13 +434,18 @@ def l3룰(cur, org_id: str, 비목: str) -> dict[str, Any] | None:
 
 
 def _조문들(cur, org_id: str) -> list[dict[str, Any]]:
-    rows = cur.execute(
-        "SELECT a.article_id, a.조번호, a.조제목, a.본문, a.장, "
-        "       d.doc_id, d.원본파일명, d.출처, d.extraction, d.파싱품질 "
-        "  FROM tenant.l3_articles a "
-        "  JOIN tenant.l3_documents d ON d.doc_id = a.doc_id "
-        " WHERE a.org_id = %s AND d.org_id = %s AND d.status='active' "
-        " ORDER BY a.조번호_int NULLS LAST, a.조번호", (org_id, org_id)).fetchall()
+    # set_config(..., true) 는 트랜잭션 범위다. autocommit 커넥션에서 따로 실행하면
+    # 다음 SELECT 전에 GUC 가 사라져 RLS 정책이 0행을 돌려준다. 같은 트랜잭션
+    # (autocommit 이면 BEGIN/COMMIT, 아니면 SAVEPOINT) 안에서 함께 실행한다.
+    with cur.connection.transaction():
+        _org_컨텍스트(cur, org_id)
+        rows = cur.execute(
+            "SELECT a.article_id, a.조번호, a.조제목, a.본문, a.장, "
+            "       d.doc_id, d.원본파일명, d.출처, d.extraction, d.파싱품질 "
+            "  FROM tenant.l3_articles a "
+            "  JOIN tenant.l3_documents d ON d.doc_id = a.doc_id "
+            " WHERE a.org_id = %s AND d.org_id = %s AND d.status='active' "
+            " ORDER BY a.조번호_int NULLS LAST, a.조번호", (org_id, org_id)).fetchall()
     keys = ("article_id", "조번호", "조제목", "본문", "장",
             "doc_id", "원본파일명", "출처", "extraction", "파싱품질")
     return [dict(zip(keys, r)) for r in rows if 사업비관련장(r[4])]
@@ -613,6 +574,8 @@ def org해소(cur, 기관: str) -> tuple[str, str] | None:
 
 
 def main() -> None:
+    if (sys.stdout.encoding or "").lower().replace("-", "") != "utf8":
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser(description="L3 로드 점검")
     ap.add_argument("--org", required=True, help="org_id 또는 기관명 일부")
     ap.add_argument("--사업명", default=None)

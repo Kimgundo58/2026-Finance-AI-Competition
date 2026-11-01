@@ -167,10 +167,20 @@ def extract(path, max_pages: int | None = None) -> tuple[str, bool]:
 
 def extract_meta(path, max_pages: int | None = None) -> tuple[str, dict]:
     """(본문, {dedupe, gutter, pages}) — 진단용."""
+    texts, meta = _pages_meta(path, max_pages)
+    return NL.join(texts), meta
+
+
+def extract_pages(path, max_pages: int | None = None) -> list[str]:
+    """페이지별 본문 목록. NL 로 이으면 `extract_meta()` 의 본문과 같다."""
+    return _pages_meta(path, max_pages)[0]
+
+
+def _pages_meta(path, max_pages: int | None) -> tuple[list[str], dict]:
     with pdfplumber.open(path) as pdf:
         pages = pdf.pages if max_pages is None else pdf.pages[:max_pages]
         if not pages:
-            return "", {"dedupe": False, "gutter": None, "quad": None, "pages": 0}
+            return [], {"dedupe": False, "gutter": None, "quad": None, "pages": 0}
 
         probe = pages[min(4, len(pages) - 1)].extract_text() or ""
         deduped = dup_ratio(probe) > DUP_THRESHOLD
@@ -178,6 +188,6 @@ def extract_meta(path, max_pages: int | None = None) -> tuple[str, dict]:
 
         gutter = is_two_column(src)
         quad = is_quadrant(src, gutter)
-        text = NL.join(_page_text(p, gutter, quad) for p in src)
-        return text, {"dedupe": deduped, "gutter": gutter, "quad": quad,
-                      "pages": len(pages)}
+        texts = [_page_text(p, gutter, quad) for p in src]
+        return texts, {"dedupe": deduped, "gutter": gutter, "quad": quad,
+                       "pages": len(pages)}

@@ -190,18 +190,21 @@ def 파싱(cur, doc_id: str) -> dict:
 
     # tenant.l3_articles 에 넣는다. UNIQUE(doc_id, 조번호) 가 걸려 있고
     # jang·paragraph 전략은 중복을 못 막을 수 있어, ON CONFLICT 와 try 양쪽으로 막는다.
-    cur.execute("DELETE FROM tenant.l3_articles WHERE doc_id=%s", (doc_id,))
+    # 세이브포인트 안에서 지우고 넣는다. 실패하면 이 블록만 롤백되므로 부분 INSERT 는
+    # 남지 않고, 호출자가 설정한 트랜잭션 범위 GUC app.org_id 는 유지되어 아래 fail
+    # UPDATE 가 RLS 정책을 통과한다(커넥션 전체 rollback 은 GUC 까지 지운다).
     try:
-        for a in arts:
-            cur.execute(
-                "INSERT INTO tenant.l3_articles "
-                " (doc_id, org_id, \"조번호\", \"조제목\", \"조번호_int\", \"장\", \"본문\", \"페이지\") "
-                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s) "
-                "ON CONFLICT (doc_id, \"조번호\") DO NOTHING",
-                (doc_id, org_id, a["조번호"], a.get("조제목"), a.get("조번호_int"),
-                 a.get("장"), a["본문"], a.get("페이지")))
+        with cur.connection.transaction():
+            cur.execute("DELETE FROM tenant.l3_articles WHERE doc_id=%s", (doc_id,))
+            for a in arts:
+                cur.execute(
+                    "INSERT INTO tenant.l3_articles "
+                    " (doc_id, org_id, \"조번호\", \"조제목\", \"조번호_int\", \"장\", \"본문\", \"페이지\") "
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s) "
+                    "ON CONFLICT (doc_id, \"조번호\") DO NOTHING",
+                    (doc_id, org_id, a["조번호"], a.get("조제목"), a.get("조번호_int"),
+                     a.get("장"), a["본문"], a.get("페이지")))
     except Exception as e:
-        cur.connection.rollback()      # 부분 INSERT 가 'fail' 과 함께 커밋되면 안 된다
         return _닫기("fail", 사유=f"l3_articles 적재 실패 {type(e).__name__}: {e}",
                     트레이스=traceback.format_exc()[-800:])
 
@@ -230,26 +233,39 @@ def _품질판정(arts: list[dict], validate_flags: list[str]) -> tuple[str, lis
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(
+        description="L3 문서를 다시 파싱한다. 문서 목록과 org_id 는 --owner-dsn(RLS 를 "
+                    "우회하는 테이블 소유자 롤)으로 읽고, 파싱은 SUDDOE_DSN 커넥션에서 "
+                    "문서마다 GUC app.org_id 를 설정한 트랜잭션으로 실행한다.")
     g = ap.add_mutually_exclusive_group(required=True)
     g.add_argument("--doc-id")
     g.add_argument("--all-pending", action="store_true",
                    help="파싱품질='대기' 인 행 전부")
+    ap.add_argument("--owner-dsn", default=DSN,
+                    help="문서 목록·org_id 조회용 DSN. 테이블 소유자 롤이어야 한다 "
+                         "(기본: SUDDOE_DSN)")
     a = ap.parse_args()
+
+    with psycopg.connect(a.owner_dsn) as owner:
+        if a.doc_id:
+            대상 = owner.execute(
+                "SELECT doc_id, org_id FROM tenant.l3_documents WHERE doc_id=%s",
+                (a.doc_id,)).fetchall()
+        else:
+            대상 = owner.execute(
+                "SELECT doc_id, org_id FROM tenant.l3_documents WHERE \"파싱품질\"='대기'"
+            ).fetchall()
+            print(f"대기 {len(대상)}건")
+    if a.doc_id and not 대상:
+        print(f"  {a.doc_id}  ->  l3_documents 에 없음")
 
     with psycopg.connect(DSN) as conn:
         cur = conn.cursor()
-        if a.doc_id:
-            대상 = [a.doc_id]
-        else:
-            대상 = [r[0] for r in cur.execute(
-                "SELECT doc_id FROM tenant.l3_documents WHERE \"파싱품질\"='대기'"
-            ).fetchall()]
-            print(f"대기 {len(대상)}건")
-
-        for doc_id in 대상:
-            r = 파싱(cur, str(doc_id))
-            conn.commit()
+        for doc_id, org_id in 대상:
+            # RLS 정책이 읽는 GUC 를 문서마다 같은 트랜잭션 안에서 설정한다
+            with conn.transaction():
+                cur.execute("SELECT set_config('app.org_id', %s, true)", (str(org_id),))
+                r = 파싱(cur, str(doc_id))
             print(f"  {doc_id}  ->  {r}")
 
 

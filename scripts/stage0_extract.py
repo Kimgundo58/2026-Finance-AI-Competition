@@ -120,28 +120,26 @@ def _pdf_pypdf(path: Path) -> tuple[str, dict[int, int]]:
     return "\n".join(parts), offsets
 
 
-def _pdf_plumber(path: Path) -> tuple[str, dict[int, int]]:
-    """느린 경로. 다단 레이아웃 등 pypdf 가 실패할 때만."""
-    import pdfplumber
+def _pdf_pdftext(path: Path) -> tuple[str, dict[int, int]]:
+    """pdftext 경로. 문자중복 레이어와 2단·4분면 조판을 해소한 페이지별 본문을 쓴다."""
+    import pdftext
 
     parts, offsets, pos = [], {}, 0
-    with pdfplumber.open(str(path)) as pdf:
-        for i, page in enumerate(pdf.pages, 1):
-            t = page.extract_text() or ""
-            offsets[pos] = i
-            parts.append(t)
-            pos += len(t) + 1
+    for i, t in enumerate(pdftext.extract_pages(str(path)), 1):
+        offsets[pos] = i
+        parts.append(t)
+        pos += len(t) + 1
     return "\n".join(parts), offsets
 
 
 def extract_pdf(path: Path) -> tuple[str, dict[int, int]]:
     """PDF → 평문 + {문자오프셋: 페이지번호}.
 
-    pdfplumber 를 기본으로 쓴다. pypdf 는 실패 시 대체 경로일 뿐이다 —
-    한국어 PDF 에서 쉼표·괄호·숫자를 문장 끝으로 밀어내 조문 헤더를 깨뜨린다.
+    pdftext(pdfplumber 기반)를 기본으로 쓴다. pypdf 는 pdftext 가 예외를 낼 때만
+    쓰는 폴백이다 — 한국어 PDF 에서 쉼표·괄호·숫자를 문장 끝으로 밀어내 조문 헤더를 깨뜨린다.
     """
     try:
-        return _pdf_plumber(path)
+        return _pdf_pdftext(path)
     except Exception:
         return _pdf_pypdf(path)
 
@@ -165,13 +163,13 @@ def _find_soffice() -> str | None:
     return None
 
 
-def _libreoffice_docx(path: Path) -> Path | None:
-    """구형 `.hwp`(OLE) 를 LibreOffice+H2Orestart 로 `.docx` 변환한다. 실패하면 `None`.
+def _libreoffice_docx(path: Path) -> str | None:
+    """구형 `.hwp`(OLE) 를 LibreOffice+H2Orestart 로 `.docx` 변환해 본문을 돌려준다. 실패하면 `None`.
 
     `hwp_extract.py` 는 PARA_TEXT 레코드만 훑어 표 구조가 없다. LibreOffice 로
     docx 를 거치면 `docx_extract._walk_table()` 의 표 걷기를 그대로 태울 수 있다.
     실패는 예외로 올리지 않고 `None` 을 돌려준다 — 호출부(`extract_hwp`)가 기존
-    `hwp_extract` 경로로 폴백한다.
+    `hwp_extract` 경로로 폴백한다. 변환본은 임시 디렉터리 안에서 읽고 함께 지운다.
 
     ASCII 임시 파일명으로 복사한 뒤 변환한다 — 한글 파일명은 H2Orestart(Java)
     인코딩 문제로 깨진다.
@@ -198,11 +196,11 @@ def _libreoffice_docx(path: Path) -> Path | None:
                     path.name, proc.returncode, (proc.stderr or b"")[:300],
                 )
                 return None
-            # tmp 디렉터리가 with 종료 시 지워지므로, 그 전에 영속 위치로 옮겨 돌려준다.
-            keep_dir = Path(tempfile.mkdtemp(prefix="hwp2docx_out_"))
-            keep = keep_dir / out.name
-            shutil.copy(out, keep)
-            return keep
+            try:
+                return extract_docx(out)
+            except Exception as e:
+                _로그.warning("LibreOffice 변환본 파싱 실패(%s) — 기존 경로로 폴백: %s", path.name, e)
+                return None
     except Exception as e:
         _로그.warning("LibreOffice 변환 예외(%s): %s", path.name, e)
         return None
@@ -271,12 +269,9 @@ def extract_hwp(path: Path) -> str:
     # 구형 .hwp(OLE) 는 표 구조가 없다(hwp_extract 는 PARA_TEXT 만 훑는다) —
     # LibreOffice+H2Orestart 로 .docx 를 거쳐 docx_extract 의 표 걷기를 태운다.
     # 실패하면(LibreOffice 미설치·변환 오류·재파싱 실패) 기존 경로로 폴백한다.
-    변환됨 = _libreoffice_docx(path)
-    if 변환됨:
-        try:
-            return extract_docx(변환됨)
-        except Exception as e:
-            _로그.warning("LibreOffice 변환본 파싱 실패(%s) — 기존 경로로 폴백: %s", path.name, e)
+    변환본문 = _libreoffice_docx(path)
+    if 변환본문 is not None:
+        return 변환본문
 
     from hwp_extract import extract
 

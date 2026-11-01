@@ -37,8 +37,6 @@ import pdftext  # noqa: E402  문자중복 레이어 + 2단 조판 자동 처리
 from stage0_articles import split_articles  # noqa: E402  섹션분리 + 3단 대체 경로
 from scope import 범위밖_조                   # noqa: E402  모두의창업 제3편 로컬트랙 컷
 
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace", line_buffering=True)
-
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "2026_Finance_DATA_FOR_RAG" / "_refs.json"
 
@@ -364,6 +362,7 @@ def scan(text: str, doc_id: str, corpus: dict[str, str],
 
 
 def main() -> None:
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace", line_buffering=True)
     ap = argparse.ArgumentParser()
     ap.add_argument("--src", default="")
     ap.add_argument("--show", default="")
