@@ -1,0 +1,43 @@
+# PR 과 main push 마다 DB·LLM·외부 키 없이 도는 검사. 절차: docs/8_운영/8-8_CI_CD.md
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+          cache-dependency-path: requirements-api.txt
+
+      - name: 의존성 설치 (API 컨테이너와 같은 requirements-api.txt)
+        run: pip install -r requirements-api.txt
+
+      - name: 문법 검사
+        run: python -m compileall -q server scripts
+
+      - name: 서버 self-test (SUDDOE_MOCK=1, DB·LLM 없음)
+        env:
+          SUDDOE_MOCK: "1"
+        run: python -m server.selftest
+
+      - name: rule_lookup self-test (DB 없음)
+        run: python scripts/rule_lookup_check.py --self-test

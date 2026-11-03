@@ -1,0 +1,4 @@
+# 운영 서버 자동 배포 (docs/8_운영/8-8_CI_CD.md). 설치: install -m 644 deploy/ncp/suddoe-deploy.cron /etc/cron.d/suddoe-deploy
+# /etc/cron.d 에 넣을 때는 이름에 점을 쓰지 않는다(run-parts 가 무시한다).
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+*/5 * * * * root flock -n /run/lock/suddoe-deploy.lock /opt/suddoe/deploy/ncp/deploy.sh --auto >> /var/log/suddoe-deploy.log 2>&1
