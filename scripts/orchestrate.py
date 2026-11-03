@@ -244,7 +244,8 @@ def _프로필값_읽기(cur, org_id) -> tuple[str | None, dict | None]:
     try:
         r = cur.execute("""SELECT 협약시작일, 협약종료일, 정부지원_현금, 자기부담_현금,
                                   과업범위요약
-                             FROM tenant.profile_agreements WHERE org_id=%s LIMIT 1""",
+                             FROM tenant.profile_agreements WHERE org_id=%s
+                            ORDER BY updated_at DESC, profile_id LIMIT 1""",
                         (org_id,)).fetchone()
         성공 = True
         if r:

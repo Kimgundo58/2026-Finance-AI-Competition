@@ -51,6 +51,20 @@ def l3_해시(org: str | None) -> str:
     return 행[0][0] if 행 else ""
 
 
+def 프로필_해시(org: str | None) -> str:
+    """기관 협약 프로필(tenant.profile_agreements) 내용의 해시. 판정 캐시키에 넣는다. 게스트·mock·DB 오류면 빈 문자열.
+
+    협약값은 판정 프롬프트 B5 에 들어간다. PUT /api/profile 로 값이 바뀌면 키가 바뀌어 이전 판정이 적중하지 않는다.
+    updated_at 은 넣지 않는다(같은 값을 다시 저장해도 캐시를 버리지 않게).
+    """
+    if org is None or MOCK:
+        return ""
+    행 = _질의('SELECT md5(coalesce(string_agg(concat_ws(\'|\', profile_id, "사업명", "협약시작일", '
+              '"협약종료일", "정부지원_현금", "자기부담_현금", "과업범위요약"), \'#\' ORDER BY profile_id), \'\')) '
+              'FROM tenant.profile_agreements WHERE org_id = %s', (org,))
+    return 행[0][0] if 행 else ""
+
+
 def 조회(k: str, org: str | None) -> Any | None:
     """저장된 응답 또는 None. 적중하면 일일 판정 카운트를 되돌린다(LLM 을 부르지 않았다)."""
     global _적중

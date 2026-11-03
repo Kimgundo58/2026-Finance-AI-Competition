@@ -68,6 +68,8 @@ def judge(req: Request, body: 판정요청, mock: str | None = None,
         # L3 를 새로 올리거나 파싱이 끝나면 키가 바뀐다. 파싱 커밋 직전에 시작한 판정이 옛 L3 결과를
         # 캐시에 남겨도 이후 요청에는 적중하지 않는다(routes_l3 의 캐시 삭제와 함께 쓴다).
         response_cache.l3_해시(body.org_id),
+        # 협약 프로필(B5)을 PUT /api/profile 로 바꾸면 키가 바뀐다(routes_profile 의 캐시 삭제와 함께 쓴다).
+        response_cache.프로필_해시(body.org_id),
         # ?mock= 은 mock 모드에서만 응답을 바꾼다. live 에서 키에 넣으면 캐시를 우회할 수 있다.
         *([mock] if MOCK else []))
     캐시 = response_cache.조회(k, body.org_id)
