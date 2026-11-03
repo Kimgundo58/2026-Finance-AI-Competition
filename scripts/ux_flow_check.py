@@ -23,6 +23,9 @@ FastAPI TestClient 로 서버를 프로세스 안에서 띄우고 로컬 DB 에 
   13 실패를 거듭해도 /api/l3/current 의 실패 문서는 1건이다
   14 파싱이 끊겨 'pending' 으로 오래 남은 문서는 '실패'(실패사유 중단)로 보이고, 다음 실패 업로드 때 목록에서 빠진다
   15 10분 넘게 걸린 파싱이 그사이 '중단'으로 정리됐다가 성공하면 다시 적용 문서가 된다 (적용 문서 0건이 되지 않는다)
+  16 OCR 이 설정되면 스캔본 PDF 를 OCR 로 읽어 '완료'(warn, 추출방식 ocr)로 등록하고 판정이 그 조문을 읽는다.
+     이 조문을 인용한 '가능' 은 신뢰등급 B 로 조건부가 된다. CLOVA OCR 호출만 가짜로 바꾼다(네트워크·과금 없음)
+  17 OCR 이 없을 때 쪽번호만 텍스트 레이어에 있는 스캔본은 조문 1건짜리로 저장되지 않고 '실패'(스캔본)가 된다
   18 PUT /api/profile 로 저장한 협약 기간·금액이 GET 과 판정 프롬프트 B5 에 나오고, 다시 저장해도 행은 1개다
      (게스트 PUT 은 401, 시작일 > 종료일은 422, 값을 바꾸면 캐시가 아니라 새 값으로 판정한다)
 
@@ -103,10 +106,18 @@ def _hwpx(문단들: list[str]) -> bytes:
     return buf.getvalue()
 
 
-def _빈_pdf() -> bytes:
-    """텍스트가 없는 1쪽 PDF(스캔본과 같은 경우)."""
-    객체 = [b"<</Type/Catalog/Pages 2 0 R>>", b"<</Type/Pages/Kids[3 0 R]/Count 1>>",
-          b"<</Type/Page/Parent 2 0 R/MediaBox[0 0 595 842]>>"]
+def _빈_pdf(쪽번호: str | None = None) -> bytes:
+    """텍스트가 없는 1쪽 PDF(스캔본과 같은 경우). 쪽번호 를 주면 그 글자만 텍스트 레이어에 넣는다."""
+    if 쪽번호 is None:
+        객체 = [b"<</Type/Catalog/Pages 2 0 R>>", b"<</Type/Pages/Kids[3 0 R]/Count 1>>",
+              b"<</Type/Page/Parent 2 0 R/MediaBox[0 0 595 842]>>"]
+    else:
+        내용 = f"BT /F1 10 Tf 290 30 Td ({쪽번호}) Tj ET".encode()
+        객체 = [b"<</Type/Catalog/Pages 2 0 R>>", b"<</Type/Pages/Kids[3 0 R]/Count 1>>",
+              b"<</Type/Page/Parent 2 0 R/MediaBox[0 0 595 842]"
+              b"/Resources<</Font<</F1 5 0 R>>>>/Contents 4 0 R>>",
+              f"<</Length {len(내용)}>>\nstream\n".encode() + 내용 + b"\nendstream\n",
+              b"<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>"]
     out, 위치 = bytearray(b"%PDF-1.4\n"), []
     for i, o in enumerate(객체, 1):
         위치.append(len(out))
@@ -166,7 +177,8 @@ def _환경_준비(l3_dir: str) -> None:
     })
     os.environ.setdefault("SUDDOE_DEMO_SECRET", secrets.token_hex(32))
     os.environ.setdefault("SUDDOE_SLUG_SECRET", secrets.token_hex(32))
-    for k in ("SUDDOE_JWKS_URL", "SUDDOE_ADMIN_TOKEN"):
+    # OCR 은 점검 16 에서만 가짜로 켠다. 실제 키가 있어도 다른 점검은 OCR 없는 경로를 본다(과금 방지)
+    for k in ("SUDDOE_JWKS_URL", "SUDDOE_ADMIN_TOKEN", "SUDDOE_OCR_URL", "SUDDOE_OCR_SECRET"):
         os.environ.pop(k, None)
     for p in (str(ROOT / "scripts"), str(ROOT)):
         if p not in sys.path:
@@ -417,6 +429,53 @@ def _점검(결과: 점검결과) -> None:
                and bool(읽은7) and 읽은7 <= 느린_조문,
                f"current={[(d.get('원본파일명'), d.get('파싱품질')) for d in 현재7]} · "
                f"판정이 읽은 조문 {len(읽은7)}건 중 느린 문서 밖 {len(읽은7 - 느린_조문)}건")
+
+        # 스캔본 OCR. CLOVA OCR 호출(clova_ocr._쪽_인식)만 가짜로 바꾸고 렌더링·분할·저장·판정은 실제로 거친다
+        import clova_ocr
+        import llm_validate
+        from llm_schema import 인용
+        ocr_문단 = [p.replace(표식, "문자인식기관") for p in 픽스처_문단]
+        원래_설정됨, 원래_쪽인식 = clova_ocr.설정됨, clova_ocr._쪽_인식
+        clova_ocr.설정됨 = lambda: True
+        clova_ocr._쪽_인식 = lambda _c, _이미지, _쪽: {
+            "inferResult": "SUCCESS", "fields": [{"inferText": p, "lineBreak": True} for p in ocr_문단]}
+        try:
+            헤더3, org3 = 데모세션()
+            코드, ocr_doc, ocr_상태 = 업로드(헤더3, "스캔본_OCR.pdf", _빈_pdf())
+        finally:
+            clova_ocr.설정됨, clova_ocr._쪽_인식 = 원래_설정됨, 원래_쪽인식
+        ocr_조문 = 조문(ocr_doc)
+        현재8 = 현재문서(헤더3)
+        _, l3조회8, _ = 판정(헤더3)
+        읽은8 = {str(a["article_id"]) for o, rows in l3조회8 if o == org3 for a in rows}
+        # 인용 단계: 이 문서 조문의 extraction 이 'ocr' 로 읽히고, 이를 인용한 '가능' 은 조건부가 된다.
+        # 인용 계층에 L1 을 넣어 L3 단독 하향(L3_ONLY_DOWNGRADE)과 섞이지 않게 한다
+        메타 = llm_validate.문장ID_메타({"S01": ("l3", int(min(ocr_조문, key=int)), None)},
+                                    org_id=org3) if ocr_조문 else {}
+        기록 = llm_validate._검증기록()
+        인용들 = [인용(문장ID="S01", extraction=메타.get("S01", {}).get("extraction"))]
+        등급 = llm_validate._신뢰등급(인용들, None, 기록)
+        하향, _ = llm_validate._판정_하향("가능", 등급, 인용들, ["L1", "L3"], None, None, 기록)
+        결과.기록("16 OCR 설정 시 스캔본 → OCR 로 '완료'(warn·ocr) · 판정이 읽음 · 인용한 '가능' 은 조건부",
+               ocr_상태.get("상태") == "완료" and ocr_상태.get("조_건수") == 픽스처_조_건수
+               and ocr_상태.get("파싱품질") == "warn" and ocr_상태.get("추출방식") == "ocr"
+               and "OCR 로 읽었습니다" in (ocr_상태.get("메시지") or "")
+               and bool(현재8) and 현재8[0].get("doc_id") == ocr_doc and 현재8[0].get("추출방식") == "ocr"
+               and bool(읽은8) and 읽은8 <= ocr_조문
+               and 등급 == "B" and 하향 == "조건부" and "B_GRADE_DOWNGRADE" in 기록.코드,
+               f"업로드 {코드} · 상태={ocr_상태.get('상태')} 조={ocr_상태.get('조_건수')} "
+               f"품질={ocr_상태.get('파싱품질')} 추출방식={ocr_상태.get('추출방식')} · "
+               f"판정이 읽은 조문 {len(읽은8)}건 · 인용 extraction={메타.get('S01', {}).get('extraction')} "
+               f"등급={등급} 가능→{하향} · 메시지={ocr_상태.get('메시지')}")
+
+        # 쪽번호만 텍스트 레이어에 있는 스캔본(OCR 없음): 쪽번호를 조문 1건으로 저장하면 안 된다(백로그 L3 업로드)
+        코드, 쪽번호_doc, 쪽번호_상태 = 업로드(헤더3, "쪽번호만_있는_스캔본.pdf", _빈_pdf("- 1 -"))
+        결과.기록("17 쪽번호만 있는 스캔본(OCR 없음) → '실패'(스캔본) · 조문 저장 없음 · 기존 문서 유지",
+               쪽번호_상태.get("상태") == "실패" and 쪽번호_상태.get("실패사유") == "스캔본"
+               and not 조문(쪽번호_doc) and 쪽번호_상태.get("적용중_문서") == "스캔본_OCR.pdf",
+               f"업로드 {코드} · 상태={쪽번호_상태.get('상태')} 실패사유={쪽번호_상태.get('실패사유')} "
+               f"조문 {len(조문(쪽번호_doc))}건 · 적용중_문서={쪽번호_상태.get('적용중_문서')}")
+
         # 마이페이지 협약 4칸 → PUT /api/profile → tenant.profile_agreements → 판정 프롬프트 B5.
         # 두 번 저장해 두 번째 값이 B5 에 나오는지 본다(첫 판정 결과가 캐시로 답하면 프롬프트가 안 만들어진다)
         def 협약(시작, 종료, 정부, 자기) -> dict:

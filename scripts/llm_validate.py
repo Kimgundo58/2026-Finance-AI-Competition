@@ -217,11 +217,13 @@ _메타_SQL = {
                d.version, d.extraction, a.본문, d.기관id, d.domain, d.layer, NULL
           FROM corpus.doc_articles a JOIN corpus.documents d ON d.doc_id = a.doc_id
          WHERE a.article_id = ANY(%s)""",
-    # L3 는 RLS 정책과 별도로 org_id 조건을 코드에서도 건다. extraction·version 이 없어 native 로 본다.
+    # L3 는 RLS 정책과 별도로 org_id 조건을 코드에서도 건다. version 이 없다. extraction 은 OCR 로 읽은
+    # 스캔본('ocr')만 구분하고 나머지(hwpx·hwp·native)는 텍스트 레이어에서 읽었으므로 native 로 본다.
     # 기관id 자리에는 org_id 를 넣어 인용 단계의 TENANT_LEAK 대조에 쓴다. 원본파일명은 화면 표시용이다
     "l3": """
         SELECT a.article_id, a.doc_id::text, a.조번호, a.조제목, NULL,
-               NULL, 'native', a.본문, a.org_id::text, '창업지원사업', 'L3', d.원본파일명
+               NULL, CASE WHEN d.extraction = 'ocr' THEN 'ocr' ELSE 'native' END,
+               a.본문, a.org_id::text, '창업지원사업', 'L3', d.원본파일명
           FROM tenant.l3_articles a
           LEFT JOIN tenant.l3_documents d ON d.doc_id = a.doc_id
          WHERE a.article_id = ANY(%s) AND a.org_id = %s::uuid""",
@@ -389,10 +391,10 @@ def _신뢰등급(인용목록: list[인용], 미해결참조: Optional[list], �
     """인용 문서의 실제 속성으로 신뢰등급을 정한다. 인용이 없으면 None."""
     if not 인용목록:
         등급 = None
-    elif vlm := [c.문장ID for c in 인용목록 if c.extraction == "vlm"]:
-        # extraction='vlm' 은 스캔 문서의 VLM 추출본이라 A등급 인용으로 쓰지 않는다
+    elif 스캔 := [c.문장ID for c in 인용목록 if c.extraction in ("vlm", "ocr")]:
+        # 스캔 문서를 VLM·OCR 로 읽은 추출본('vlm'·'ocr')은 A등급 인용으로 쓰지 않는다. 코드 이름은 DB 제약과 맞춰 둔다
         등급 = "B"
-        검증기록("VLM_DOWNGRADE", f"인용 {vlm} 가 extraction='vlm'(스캔 VLM 추출) → A등급 금지, B 로 하향")
+        검증기록("VLM_DOWNGRADE", f"인용 {스캔} 가 스캔본 추출본(VLM·OCR) → A등급 금지, B 로 하향")
     else:
         등급 = "A"
     # 조가 지정된 미해결 참조만 센다. 문서 전체를 가리키는 참조(조 없음)는 원래 참조 확장 대상이 아니라서,
@@ -419,9 +421,9 @@ def _판정_하향(판정: str, 신뢰등급: Optional[str], 인용목록: list[
     if 룰들 is not None and 판정 == "가능" and 룰들 and not any(r.get("verified") for r in 룰들):
         검증기록("UNVERIFIED_RULE", "미검수(verified=false) 룰만으로 '가능' → 조건부로 하향")
         판정 = "조건부"
-    # 스캔 문서의 VLM 추출본만 근거로 '가능' 을 내면 추출 오류 하나가 곧 잘못된 '가능' 이 된다
+    # 스캔 문서의 추출본(VLM·OCR)을 근거로 '가능' 을 내면 금액·조번호 오인식 하나가 곧 잘못된 '가능' 이 된다
     if 판정 == "가능" and 인용목록 and 신뢰등급 == "B" and "VLM_DOWNGRADE" in 검증기록.코드:
-        검증기록("B_GRADE_DOWNGRADE", "'가능' 인데 인용이 B등급(VLM 추출본)뿐 → 조건부로 하향")
+        검증기록("B_GRADE_DOWNGRADE", "'가능' 인데 인용에 스캔본 추출본(VLM·OCR)이 있음 → 조건부로 하향")
         판정 = "조건부"
     # 기관 자체규정(L3)은 국가 지침 위에 추가되는 문서라 단독으로 '가능' 의 근거가 되지 못한다.
     # 상위 지침의 제약을 놓칠 수 있기 때문이다. L3 단독 '불가' 는 안전한 방향이라 건드리지 않는다

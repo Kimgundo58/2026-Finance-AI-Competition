@@ -269,9 +269,9 @@ CREATE TABLE tenant.l3_documents (
     -- 기관당 판정에 쓰는 문서는 하나다. 새 문서 파싱이 성공하면 이전 문서를 superseded 로 바꾼다
     -- (scripts/l3_parse.적용문서_정리). active 로 남는 것은 적용 중 1건, 처리 중, 최근 실패 1건이다.
     status       TEXT NOT NULL CHECK (status IN ('active','superseded')),
-    -- hwpx/hwp 는 L3 사용자 업로드 파서 경로
+    -- hwpx/hwp 는 L3 사용자 업로드 파서 경로. ocr 은 스캔본 PDF 를 CLOVA OCR 로 읽은 문서(인용 신뢰등급 B)
     extraction   TEXT NOT NULL DEFAULT 'native'
-                 CHECK (extraction IN ('native','dedupe','hancom','vlm','hwpx','hwp')),
+                 CHECK (extraction IN ('native','dedupe','hancom','vlm','hwpx','hwp','ocr')),
     -- 'pending' = 접수만 됐고 파싱 평가 전. 'warn'(평가했는데 의심스러움)과 구분한다
     파싱품질     TEXT NOT NULL CHECK (파싱품질 IN ('pending','pass','warn','fail')),
     미해결참조수 INT NOT NULL DEFAULT 0,   -- 업로드 시점에 알린다 (판정 시점 아님)

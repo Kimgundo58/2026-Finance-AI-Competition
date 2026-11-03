@@ -1932,6 +1932,17 @@
       "type": "integer",
       "title": "조 건수",
       "default": 0
+     },
+     "추출방식": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "추출방식"
      }
     },
     "type": "object",
@@ -2035,6 +2046,17 @@
        }
       ],
       "title": "적용중 문서"
+     },
+     "추출방식": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "추출방식"
      },
      "dangling": {
       "items": {
