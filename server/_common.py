@@ -17,15 +17,12 @@ import logging
 import os
 import threading
 import time
-from pathlib import Path
 from typing import Any, Callable, Iterator
 
 from fastapi import Request
 from fastapi.responses import StreamingResponse
 
 로그 = logging.getLogger("suddoe.db")
-
-ROOT = Path(__file__).resolve().parent.parent
 
 DSN = os.environ.get("SUDDOE_DSN", "postgresql://postgres:devpw@localhost:5432/suddoe")
 

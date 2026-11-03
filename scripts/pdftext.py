@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
 """PDF 텍스트 추출 공용 모듈 — 문자중복 레이어와 2단·4분면 조판을 자동으로 감지해 처리한다.
 
-text_extract.extract_pdf 가 쓴다(PDF 텍스트 추출은 반드시 이 모듈을 거친다). 공개 함수:
-extract(path) -> (본문, 중복레이어였나), extract_meta(path) -> (본문, 진단 dict),
-extract_pages(path) -> 페이지별 본문 목록. 문자중복 레이어는 pdfplumber 의 `page.dedupe_chars()` 로
+text_extract.extract_pdf 와 corpus_ingest 가 쓴다(PDF 텍스트 추출은 반드시 이 모듈을 거친다). 공개 함수:
+extract_meta(path) -> (본문, 진단 dict), extract_pages(path) -> 페이지별 본문 목록. 문자중복 레이어는 pdfplumber 의 `page.dedupe_chars()` 로
 풀고, 2단 조판은 단 사이 여백(gutter, 세로 빈 띠)을 찾아 좌우로 crop 한다. 2단 여부는 문서 단위로 판정하되
 자르는 위치는 페이지별로 쓴다 — 표지·목차는 본문과 단 위치가 다르다.
 """
@@ -155,16 +154,6 @@ def _page_text(page, two_col: float | None, quad: float | None = None) -> str:
         boxes = [(0, 0, x, H), (x, 0, W, H)]
 
     return NL.join((page.crop(bx).extract_text() or "") for bx in boxes)
-
-
-def extract(path, max_pages: int | None = None) -> tuple[str, bool]:
-    """(본문, 중복레이어였나) 를 돌려준다.
-
-    다단 조판은 감지되면 별도 표시 없이 처리한다. 어느 문서가 다단이었는지 알아야 하면
-    `extract_meta()` 를 쓴다.
-    """
-    text, meta = extract_meta(path, max_pages)
-    return text, meta["dedupe"]
 
 
 def extract_meta(path, max_pages: int | None = None) -> tuple[str, dict]:

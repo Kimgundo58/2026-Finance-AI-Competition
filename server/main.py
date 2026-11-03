@@ -105,7 +105,7 @@ def _검증오류(req: Request, exc: RequestValidationError):
 
 @app.exception_handler(HTTPException)
 def _http오류(req: Request, exc: HTTPException):
-    """모든 4xx·5xx 를 {오류, 상태} 로 통일한다(models.오류응답)."""
+    """모든 4xx·5xx 를 {오류, 상태} 로 통일한다. 프론트가 판정 화면과 같은 틀로 오류를 표시한다."""
     return JSONResponse(status_code=exc.status_code,
                         content={"오류": exc.detail, "상태": exc.status_code})
 
