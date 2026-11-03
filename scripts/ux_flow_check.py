@@ -23,6 +23,8 @@ FastAPI TestClient 로 서버를 프로세스 안에서 띄우고 로컬 DB 에 
   13 실패를 거듭해도 /api/l3/current 의 실패 문서는 1건이다
   14 파싱이 끊겨 'pending' 으로 오래 남은 문서는 '실패'(실패사유 중단)로 보이고, 다음 실패 업로드 때 목록에서 빠진다
   15 10분 넘게 걸린 파싱이 그사이 '중단'으로 정리됐다가 성공하면 다시 적용 문서가 된다 (적용 문서 0건이 되지 않는다)
+  18 PUT /api/profile 로 저장한 협약 기간·금액이 GET 과 판정 프롬프트 B5 에 나오고, 다시 저장해도 행은 1개다
+     (게스트 PUT 은 401, 시작일 > 종료일은 422, 값을 바꾸면 캐시가 아니라 새 값으로 판정한다)
 
 실행:
   PYTHONIOENCODING=utf-8 python scripts/ux_flow_check.py           # 점검 실행
@@ -415,6 +417,43 @@ def _점검(결과: 점검결과) -> None:
                and bool(읽은7) and 읽은7 <= 느린_조문,
                f"current={[(d.get('원본파일명'), d.get('파싱품질')) for d in 현재7]} · "
                f"판정이 읽은 조문 {len(읽은7)}건 중 느린 문서 밖 {len(읽은7 - 느린_조문)}건")
+        # 마이페이지 협약 4칸 → PUT /api/profile → tenant.profile_agreements → 판정 프롬프트 B5.
+        # 두 번 저장해 두 번째 값이 B5 에 나오는지 본다(첫 판정 결과가 캐시로 답하면 프롬프트가 안 만들어진다)
+        def 협약(시작, 종료, 정부, 자기) -> dict:
+            return {"협약": {"협약시작일": 시작, "협약종료일": 종료,
+                           "정부지원_현금": 정부, "자기부담_현금": 자기}}
+
+        def b5(프롬프트들: list) -> str:
+            텍스트 = 프롬프트들[-1][0] if 프롬프트들 else ""
+            i = 텍스트.find("## B5.")
+            return 텍스트[i:텍스트.find("\n## ", i + 1)] if i >= 0 else ""
+
+        게스트_put = client.put("/api/profile", json=협약("2026-04-02", "2026-11-29", 43210000, 1234567))
+        거꾸로 = client.put("/api/profile", headers=헤더2,
+                         json=협약("2026-12-01", "2026-04-01", 1, 1))
+        저장들, b5들 = [], []
+        for 값 in (("2026-04-02", "2026-11-29", 43210000, 1234567),
+                   ("2026-05-03", "2026-10-30", 51234000, 2345678)):
+            r = client.put("/api/profile", headers=헤더2, json=협약(*값))
+            저장들.append((r.status_code, r.json() if r.status_code == 200 else r.text[:200]))
+            _, _, 프롬프트9 = 판정(헤더2)
+            b5들.append(b5(프롬프트9))
+        읽음 = client.get("/api/profile", headers=헤더2).json().get("협약", {})
+        with psycopg.connect(OWNER_DSN, connect_timeout=5) as c:
+            행수 = c.execute("SELECT count(*) FROM tenant.profile_agreements WHERE org_id = %s",
+                           (org2,)).fetchone()[0]
+        기대 = [("협약시작일: 2026-04-02", "협약종료일: 2026-11-29", "정부지원(현금): 43210000",
+                 "자기부담(현금): 1234567"),
+                ("협약시작일: 2026-05-03", "협약종료일: 2026-10-30", "정부지원(현금): 51234000",
+                 "자기부담(현금): 2345678")]
+        결과.기록("18 PUT /api/profile 협약값 → GET · 판정 프롬프트 B5 반영 · 행 1개 · 게스트 401 · 역순 기간 422",
+               게스트_put.status_code == 401 and 거꾸로.status_code == 422
+               and all(s == 200 and isinstance(j, dict) and j.get("저장") is True for s, j in 저장들)
+               and 읽음 == {"협약시작일": "2026-05-03", "협약종료일": "2026-10-30",
+                           "정부지원_현금": 51234000.0, "자기부담_현금": 2345678.0}
+               and 행수 == 1 and all(all(x in b for x in 기대[i]) for i, b in enumerate(b5들)),
+               f"게스트 {게스트_put.status_code} · 역순 {거꾸로.status_code} · 저장 {[s for s, _ in 저장들]} · "
+               f"GET {읽음} · 행 {행수}개 · B5 {[b.replace(chr(10), ' / ') for b in b5들]}")
     finally:
         l3_load.조문_조회, orchestrate.프롬프트_구성, orchestrate.판정 = (
             원래_조문조회, 원래_프롬프트, 원래_판정)

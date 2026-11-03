@@ -22,6 +22,6 @@ DB 스키마는 `db/init/01_schema.sql` 과 [[3_데이터/3-5_저장소_스키�
 | 안건 | 막힌 이유 |
 |---|---|
 | 게스트 격리 | `expense_plans.org_id` 가 uuid + `orgs` FK. 로그인 설계와 분리 불가 |
-| `PUT /api/profile` 쓰기 | 저장하지 않고 받은 값을 돌려주는 스텁 그대로(`server/routes_profile.py`). 응답 형식만 동결 |
+| `PUT /api/profile` 집행내역·참여인력 | 협약 네 값만 저장한다(2026-11-03, `server/routes_profile.py`). 집행내역·참여인력은 여러 행이라 판정이 한 값으로 못 읽어 저장하지 않는다 |
 | 조항별 해당/불해당 | 판정 출력에 필드가 없다. 판정 파이프라인 확장 필요 |
 | `decisions.plan_id` 실측 | `persist.MOCK` 값이 바뀌지 않아 mock 분기를 거친다 (모듈 경계) |
