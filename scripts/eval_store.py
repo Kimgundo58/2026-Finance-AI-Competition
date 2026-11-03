@@ -37,12 +37,12 @@ def _git커밋() -> str | None:
     try:
         out = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
                              capture_output=True, text=True, timeout=10)
-        더러움 = subprocess.run(["git", "status", "--porcelain"],
+        변경있음 = subprocess.run(["git", "status", "--porcelain"],
                                 capture_output=True, text=True, timeout=10)
         if out.returncode:
             return None
-        # 워킹트리가 더러우면 커밋 해시만으로는 재현이 안 되므로 +dirty 를 붙인다.
-        return out.stdout.strip() + ("+dirty" if 더러움.stdout.strip() else "")
+        # 커밋 안 된 변경이 있으면 커밋 해시만으로는 재현이 안 되므로 +dirty 를 붙인다.
+        return out.stdout.strip() + ("+dirty" if 변경있음.stdout.strip() else "")
     except Exception:
         return None
 

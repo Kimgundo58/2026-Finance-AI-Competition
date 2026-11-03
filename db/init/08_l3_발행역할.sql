@@ -1,5 +1,5 @@
 -- corpus.programs.L3발행역할 과 뷰 v_L3발행기관_최신. 실행 시점: init.
--- 사업마다 L3(기관 규정)를 내는 주체의 역할 이름이 다르다. 모두의창업·TIPS 에는 「주관기관」이 없다.
+-- 사업마다 L3(기관 자체규정)를 내는 주체의 역할 이름이 다르다. 모두의창업·TIPS 에는 「주관기관」이 없다.
 -- 「주관기관」으로 일반화하지 않고, 사업마다 어느 역할이 L3 발행 주체인지를 값으로 둔다.
 
 ALTER TABLE corpus.programs ADD COLUMN IF NOT EXISTS "L3발행역할" TEXT;

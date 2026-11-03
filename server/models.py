@@ -297,6 +297,10 @@ class L3업로드응답(BaseModel):
     메시지: str | None = None
     # 상태가 '완료' 여도 warn(조문은 추출했지만 품질이 낮음)과 pass 를 프론트가 구분할 수 있게 한다
     파싱품질: Literal["pending", "pass", "warn", "fail"] | None = None
+    # 실패 분류 코드(스캔본·보호문서·조문없음·중단 등). 실패가 아니면 null. 안내 문구는 메시지에 있다
+    실패사유: str | None = None
+    # 이 기관이 지금 판정에 쓰는 L3 문서 이름(이 문서일 수도 있다). 없으면 null — 상위 규정만으로 판정한다
+    적용중_문서: str | None = None
 
     @computed_field  # 구 이름 호환(제거 예정: 다음 릴리스)
     @property
@@ -305,7 +309,9 @@ class L3업로드응답(BaseModel):
 
 
 class L3현재문서(BaseModel):
-    """org 에 지금 적용 중인 L3 문서 한 건. status='active' 만 포함하고 superseded 문서는 뺀다."""
+    """org 의 active L3 문서 한 건(적용 중·처리 중·최근 실패). superseded 문서는 뺀다.
+
+    파싱품질이 pending 인 채로 오래된 문서(파싱이 끊김)는 fail 로 내보낸다(server/routes_l3.py)."""
     doc_id: str
     원본파일명: str
     version: str | None = None

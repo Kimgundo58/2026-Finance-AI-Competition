@@ -27,7 +27,7 @@ CREATE INDEX IF NOT EXISTS ix_exec_agg ON tenant.profile_expenditures (profile_i
 --   rules: 기관id NULL(L1/L2 전역 룰) 중복 적재 / unmapped_premise: 사업명·비목이 NULL 이면 집계가 합쳐지지 않음
 --   item_alias: 사업명 NULL(전 사업 공통 별칭)이 seed 재실행마다 늘어남
 
--- rules."사업명" 을 nullable 로 내린다 — (L1, 기관id=NULL, 사업명=NULL, 비목)으로 "전 사업 공통 L1 룰" 을 표현한다.
+-- rules."사업명" 을 nullable 로 바꾼다 — (L1, 기관id=NULL, 사업명=NULL, 비목)으로 "전 사업 공통 L1 룰" 을 표현한다.
 -- 유일성은 uq_rules_key 의 NULLS NOT DISTINCT 가 지킨다 — 비목당 L1 1행.
 ALTER TABLE corpus.rules ALTER COLUMN "사업명" DROP NOT NULL;
 
@@ -44,7 +44,7 @@ ALTER TABLE tenant.unmapped_premise
   ADD CONSTRAINT uq_unmapped_premise_key
   UNIQUE NULLS NOT DISTINCT (premise_text, "사업명", "비목");
 
--- item_alias 에는 UNIQUE 가 없었다. 선적재분에 중복이 있으면 ADD CONSTRAINT 가 실패하므로 먼저 최소 alias_id 만 남긴다.
+-- item_alias 에는 UNIQUE 가 없었다. 이미 적재된 행에 중복이 있으면 ADD CONSTRAINT 가 실패하므로 먼저 최소 alias_id 만 남긴다.
 DELETE FROM corpus.item_alias a
  USING corpus.item_alias b
  WHERE a.alias_id > b.alias_id
@@ -109,7 +109,7 @@ CREATE TABLE IF NOT EXISTS tenant.incidents (
 );
 CREATE INDEX IF NOT EXISTS ix_incidents_time ON tenant.incidents ("발생시각" DESC);
 
--- corpus.recheck_queue : 법령 개정 대응 출력. 근거 조문이 흔들린 룰을 여기 쌓고 사람이 승인해 반영한다.
+-- corpus.recheck_queue : 법령 개정 대응 출력. 근거 조문이 개정·이동·삭제된 룰을 여기 쌓고 사람이 승인해 반영한다.
 -- corpus.rules 를 직접 UPDATE 하지 않는다. 개정 감지는 이전판·신판 위치를 둘 다 저장해야 추적이 된다.
 CREATE TABLE IF NOT EXISTS corpus.recheck_queue (
   queue_id   BIGSERIAL PRIMARY KEY,
@@ -153,7 +153,7 @@ ALTER TABLE corpus.recheck_queue
     ("종류", "사유코드", "대상종류", "대상id", doc_id, "조번호", "이전판_doc_id", "이전판_조번호");
 
 
--- tenant.l3_documents."출처" — 합성 L3 픽스처가 실기관 규정과 섞이지 않게 막는 라벨.
+-- tenant.l3_documents."출처" — 합성 L3 픽스처가 실제 기관 자체규정과 섞이지 않게 막는 라벨.
 
 ALTER TABLE tenant.l3_documents
   ADD COLUMN IF NOT EXISTS "출처" TEXT NOT NULL DEFAULT '기관업로드';
@@ -304,7 +304,7 @@ CREATE TABLE IF NOT EXISTS eval.runs (
   종료         TIMESTAMPTZ,
   코퍼스버전   TEXT,
   git커밋      TEXT,
-  설정         JSONB       NOT NULL DEFAULT '{}',   -- 하이퍼파라미터 전건. 재현의 근거
+  설정         JSONB       NOT NULL DEFAULT '{}',   -- 하이퍼파라미터 전체. 재현의 근거
   문항수       INT,
   지표         JSONB       NOT NULL DEFAULT '{}',
   라벨         TEXT,

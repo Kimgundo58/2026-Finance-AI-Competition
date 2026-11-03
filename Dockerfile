@@ -25,7 +25,7 @@ RUN --mount=type=cache,target=/root/.hfcache,sharing=locked \
 from sentence_transformers import SentenceTransformer; \
 m = SentenceTransformer('nlpai-lab/KURE-v1', device='cpu'); \
 m.max_seq_length = 1024; \
-print('baked:', m.encode(['워밍업']).shape)" \
+print('model cached:', m.encode(['워밍업']).shape)" \
  && cp -a /root/.hfcache/. /opt/hf/
 
 # kiwipiepy 사전(BM25 토큰화)이 휠 안에 있는지 빌드에서 확인한다.

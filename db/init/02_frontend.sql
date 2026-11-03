@@ -2,7 +2,7 @@
 -- 실행 시점: init (01_schema.sql 다음). corpus.chunks / doc_articles / refs 는 건드리지 않는다.
 
 
--- corpus.check_items : 결제 전/후 확인 항목의 허용 목록. code 는 재판정 사이에 진행 상황을 이어 주는 고정 식별자다.
+-- corpus.check_items : 결제 전/후 확인 항목의 허용 목록. code 는 재판정해도 같은 항목임을 알아보는 고정 식별자다.
 CREATE TABLE IF NOT EXISTS corpus.check_items (
     code          TEXT PRIMARY KEY,           -- 계약범위확정 / 비교견적준비 / 특수관계확인 ...
     사업명        TEXT,                       -- NULL = 전 사업 공통
@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS tenant.expense_plans (
     제목        TEXT,                         -- 목록의 "지출명". 정규화가 문장에서 뽑아 채운다
     질문원문    TEXT NOT NULL,                -- 목록 검색 대상
     정규화      JSONB,                        -- 정규화 단계 출력 전체
-    -- 아래 4개는 정렬·필터에 쓰는 값만 JSONB 에서 컬럼으로 승격한 것이다
+    -- 아래 4개는 정렬·필터에 쓰는 값만 JSONB 에서 컬럼으로 따로 뺀 것이다
     확정비목    TEXT,
     금액        NUMERIC,
     집행예정일  DATE,
@@ -132,7 +132,7 @@ CREATE POLICY org_isolation ON tenant.expense_plans USING (org_id = tenant.curre
 CREATE POLICY org_isolation ON tenant.plan_tasks    USING (org_id = tenant.current_org());
 
 
--- updated_at 자동 갱신 트리거. 앱이 아니라 DB 가 찍는다.
+-- updated_at 자동 갱신 트리거. 앱이 아니라 DB 가 기록한다.
 CREATE OR REPLACE FUNCTION tenant.touch_updated_at() RETURNS trigger
 LANGUAGE plpgsql AS $fn$
 BEGIN

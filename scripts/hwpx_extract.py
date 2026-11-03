@@ -4,7 +4,7 @@
 text_extract 와 docx_extract 가 쓴다. 공개 함수: extract(path) -> str, sniff(path) -> 판별 결과 문자열,
 예외 NotHwpxError·HwpProtectedError. hwpx 는 zip 이고 본문은 `Contents/section*.xml`, 문단은 `hp:p`,
 글자는 `hp:run/hp:t`, 표는 `hp:tbl/hp:tr/hp:tc/hp:subList/hp:p` 로 중첩된다.
-불변식: 후속 조문 분할 단계가 줄 단위라 문단 하나·표 셀 하나를 각각 한 줄로 낸다. hwpx 가 아니면
+불변 조건: 후속 조문 분할 단계가 줄 단위라 문단 하나·표 셀 하나를 각각 한 줄로 낸다. hwpx 가 아니면
 빈 문자열 대신 NotHwpxError 로, 배포용/암호화 HWP 는 HwpProtectedError 로 실패한다.
 """
 from __future__ import annotations

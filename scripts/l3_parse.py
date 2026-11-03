@@ -3,9 +3,11 @@
 
 server/routes_l3.백그라운드_파싱 이 업로드 응답 뒤 백그라운드로 부른다. 공개 함수는
 파싱(cur, doc_id) -> {ok, 파싱품질, 조_건수, 미해결참조수, strategy, flags, 사유} 와 원본경로/L3_저장소.
-tenant.l3_documents 의 파싱품질·미해결참조수를 갱신한다. 호출자는 GUC app.org_id 를 설정한
+tenant.l3_documents 의 파싱품질·미해결참조수·실패사유를 갱신한다. 호출자는 GUC app.org_id 를 설정한
 트랜잭션 안에서 불러야 한다(RLS). 불변식: 조 0건은 실패이고, 파싱품질은 'pending' 에서 항상
 pass/warn/fail 로 바뀐다. 텍스트 레이어가 없는 스캔본은 텍스트 인식(OCR)을 하지 않고 실패로 기록한다.
+기관당 판정에 쓰는 L3 는 한 문서다. 파싱이 성공하면 같은 기관의 이전 문서를 superseded 로 바꾸고,
+실패하면 이전 문서를 그대로 둔다(`적용문서_정리`).
 
 실행: PYTHONIOENCODING=utf-8 python scripts/l3_parse.py --doc-id <uuid> | --all-pending [--owner-dsn <DSN>]
 """
@@ -30,6 +32,8 @@ _허용_확장자 = {"pdf", "hwpx", "hwp"}
 L3_저장소 = Path(os.environ.get("SUDDOE_L3_DIR", str(ROOT / "_l3_업로드")))
 
 _스캔본_사유 = "텍스트가 없다(스캔본으로 보임) — 스캔본 텍스트 인식은 지원하지 않는다"
+# 'pending' 으로 이만큼 넘게 남은 문서는 파싱이 끊긴 것으로 본다. server/routes_l3.py `_중단_판정_분` 과 같은 값
+중단_판정_분 = 10
 
 
 def 원본경로(doc_id: str, 확장: str) -> Path:
@@ -46,21 +50,24 @@ def _확장자(원본파일명: str) -> str:
 
 
 def _본문_추출(경로: Path) -> tuple[str, dict[int, int]] | dict:
-    """(본문, 페이지오프셋). 실패하면 결과에 덧붙일 {사유, 트레이스?} dict 를 돌려준다.
+    """(본문, 페이지오프셋). 실패하면 결과에 덧붙일 {사유, 실패사유, 트레이스?} dict 를 돌려준다.
 
     형식은 확장자가 아니라 파일 내용으로 판정한다(text_extract.extract).
+    `실패사유` 는 화면 안내용 분류 코드다(server/routes_l3.py `_실패_안내`).
     """
     if not 경로.exists():
-        return {"사유": f"원본 파일 없음: {경로}"}
+        return {"사유": f"원본 파일 없음: {경로}", "실패사유": "원본없음"}
     try:
         kind, payload = extract(경로)
     except Exception as e:
         # 파일 손상·형식 위장처럼 추출 자체가 실패한 경우다. 스캔본(텍스트 없음)과는 다르다.
+        보호 = type(e).__name__ == "HwpProtectedError"      # 배포용·암호화 HWP
         return {"사유": f"추출 실패 {type(e).__name__}: {e}",
+                "실패사유": "보호문서" if 보호 else "추출실패",
                 "트레이스": traceback.format_exc()[-800:]}
     if kind != "text":
         # 업로드는 pdf/hwpx/hwp 만 받으므로 조문 구조(법령 XML) 경로는 오지 않는다
-        return {"사유": f"지원하지 않는 형식({kind})"}
+        return {"사유": f"지원하지 않는 형식({kind})", "실패사유": "형식"}
     return payload
 
 
@@ -91,11 +98,45 @@ def _미해결참조_수(cur, arts: list[dict]) -> int:
                for r in l3_load.상위참조(cur, a["본문"]) if not r["해결"])
 
 
-def _상태_기록(cur, doc_id: str, 파싱품질: str, 미해결참조수: int) -> None:
+def _상태_기록(cur, doc_id: str, 파싱품질: str, 미해결참조수: int,
+             실패사유: str | None = None) -> None:
     cur.execute(
-        "UPDATE tenant.l3_documents SET \"파싱품질\"=%s, \"미해결참조수\"=%s "
+        "UPDATE tenant.l3_documents SET \"파싱품질\"=%s, \"미해결참조수\"=%s, \"실패사유\"=%s "
         " WHERE doc_id=%s",
-        (파싱품질, 미해결참조수, doc_id))
+        (파싱품질, 미해결참조수, 실패사유, doc_id))
+
+
+def 적용문서_정리(cur, doc_id: str, org_id, 성공: bool) -> None:
+    """기관당 판정에 쓰는 L3 를 한 문서로 맞춘다. 파싱 결과를 기록한 같은 트랜잭션에서 부른다.
+
+    성공(pass/warn): 이 문서보다 먼저 올린 active 문서(이전 규정, 이전 실패·대기)를 superseded 로 바꾼다.
+      이 문서보다 나중에 올린 문서가 이미 성공해 있으면(파싱 완료 순서가 뒤바뀐 경우) 이 문서를 내린다.
+    실패: 판정에 쓰는 이전 규정은 그대로 둔다. 이 문서보다 먼저 실패한 문서와 파싱이 끊겨 `중단_판정_분`
+      넘게 'pending' 으로 남은 문서만 내려 최근 실패 1건만 남긴다(아직 파싱 중인 이전 업로드는 건드리지 않는다).
+    판정(l3_load._조문들)은 status='active' 만 읽으므로 이 함수가 곧 '어느 규정으로 판정하는가' 를 정한다.
+    """
+    조건 = ("org_id=%s AND doc_id<>%s AND status='active' "
+          "AND created_at <= (SELECT created_at FROM tenant.l3_documents WHERE doc_id=%s)")
+    if not 성공:
+        cur.execute("UPDATE tenant.l3_documents SET status='superseded' "
+                    f"WHERE {조건} AND (\"파싱품질\"='fail' OR (\"파싱품질\"='pending' "
+                    f"AND created_at < now() - interval '{중단_판정_분} minutes'))",
+                    (org_id, doc_id, doc_id))
+        return
+    cur.execute(f"UPDATE tenant.l3_documents SET status='superseded' WHERE {조건}",
+                (org_id, doc_id, doc_id))
+    cur.execute(
+        "UPDATE tenant.l3_documents SET status='superseded' WHERE doc_id=%s AND EXISTS ("
+        "  SELECT 1 FROM tenant.l3_documents n WHERE n.org_id=%s AND n.doc_id<>%s "
+        "     AND n.status='active' AND n.\"파싱품질\" IN ('pass','warn') "
+        "     AND n.created_at > (SELECT created_at FROM tenant.l3_documents WHERE doc_id=%s))",
+        (doc_id, org_id, doc_id, doc_id))
+
+
+def 실패_기록(cur, doc_id: str, org_id, 실패사유: str) -> None:
+    """파싱 실패를 기록하고 적용 문서를 정리한다. 파서 밖 예외 경로(server/routes_l3)도 이 함수를 쓴다."""
+    _상태_기록(cur, doc_id, "fail", 0, 실패사유)
+    적용문서_정리(cur, doc_id, org_id, 성공=False)
 
 
 def 파싱(cur, doc_id: str) -> dict:
@@ -112,8 +153,10 @@ def 파싱(cur, doc_id: str) -> dict:
     org_id, 원본파일명 = row
 
     def _결과_기록(파싱품질: str, 조_건수: int = 0, 미해결참조수: int = 0, **부가) -> dict:
-        _상태_기록(cur, doc_id, 파싱품질, 미해결참조수)
-        return {"ok": 파싱품질 in ("pass", "warn"), "파싱품질": 파싱품질,
+        성공 = 파싱품질 in ("pass", "warn")
+        _상태_기록(cur, doc_id, 파싱품질, 미해결참조수, None if 성공 else 부가.get("실패사유"))
+        적용문서_정리(cur, doc_id, org_id, 성공)
+        return {"ok": 성공, "파싱품질": 파싱품질,
                 "조_건수": 조_건수, "미해결참조수": 미해결참조수, **부가}
 
     추출 = _본문_추출(원본경로(doc_id, _확장자(원본파일명)))
@@ -125,19 +168,19 @@ def 파싱(cur, doc_id: str) -> dict:
         arts, strategy = split_articles(raw_text, page_offsets)
     except Exception as e:
         return _결과_기록("fail", 사유=f"조문 분할 실패 {type(e).__name__}: {e}",
-                      트레이스=traceback.format_exc()[-800:])
+                      실패사유="분할실패", 트레이스=traceback.format_exc()[-800:])
 
     v = validate(arts, strategy)
     if not v["ok"]:                 # 조 0건은 성공이 아니다
-        사유 = (_스캔본_사유 if len(raw_text) < 빈_추출_글자수_임계치
-               else f"조 0건 ({strategy})")
-        return _결과_기록("fail", 사유=사유, strategy=strategy)
+        스캔본 = len(raw_text) < 빈_추출_글자수_임계치
+        return _결과_기록("fail", 사유=_스캔본_사유 if 스캔본 else f"조 0건 ({strategy})",
+                      실패사유="스캔본" if 스캔본 else "조문없음", strategy=strategy)
 
     try:
         _조문_저장(cur, doc_id, org_id, arts)
     except Exception as e:
         return _결과_기록("fail", 사유=f"l3_articles 적재 실패 {type(e).__name__}: {e}",
-                      트레이스=traceback.format_exc()[-800:])
+                      실패사유="저장실패", 트레이스=traceback.format_exc()[-800:])
 
     # 미해결 참조는 업로드(파싱) 시점에 세어 l3_documents.미해결참조수 에 둔다
     flags = list(v["flags"])

@@ -4,7 +4,7 @@
 /api/judge(server/routes_judge._live_판정)가 판정(...) 을 부른다. LLM 호출은 정규화와 판정 두 번이고 나머지는 코드다.
 게이트: A 금지목록 일치(즉시 불가, 판정 LLM 호출 없음), B 검색 결과 0건(판단불가), C 비목 후보 근접(1순위로
 판정하고 후보를 응답에 포함), D 정상. 공개: 판정(...), decisions_저장(cur, 행), 프로필값_경로키, 증빙_발급처, 코퍼스버전.
-불변식: 모든 실패(DB·타임아웃·스키마·검색 0건·인용 검증 실패·예외)는 판단불가로 반환한다. 쓰는 테이블: tenant.decisions.
+불변 조건: 모든 실패(DB·타임아웃·스키마·검색 0건·인용 검증 실패·예외)는 판단불가로 반환한다. 쓰는 테이블: tenant.decisions.
 실행(eval_e2e 로 위임): PYTHONIOENCODING=utf-8 python scripts/orchestrate.py --q "맥북 250만원" --dry
 """
 from __future__ import annotations
@@ -447,7 +447,7 @@ def _검색단계(상태: _판정상태) -> dict | None:
             상태.l3본문, l3err = fl3.result()
             상태.검색결과, se_err = fse.result()
         if l3err:
-            # 기관 규정 없이 판정하면 L3 가 금지한 지출을 L1·L2 만 보고 '가능' 으로 답할 수 있다
+            # 기관 자체규정 없이 판정하면 L3 가 금지한 지출을 L1·L2 만 보고 '가능' 으로 답할 수 있다
             return _실패응답(상태, "L3로드", "기관 규정을 불러오지 못해 판정을 내리지 않았습니다.",
                           f"L3 로드 실패: {l3err}")
         if se_err:
