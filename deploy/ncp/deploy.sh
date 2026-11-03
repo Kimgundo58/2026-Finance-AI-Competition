@@ -15,7 +15,8 @@ REPO=/opt/suddoe
 COMPOSE_DIR=$REPO/deploy/ncp
 IMAGE=suddoe.kr.ncr.ntruss.com/suddoe-api
 STATE_DIR=/var/lib/suddoe
-MIN_FREE_GB=8          # 처음 받을 때 이미지 전체(약 6.5GB)를 받는다
+MIN_FREE_GB_FIRST=8    # 레지스트리 이미지가 서버에 없으면 전체(약 6.5GB)를 받는다
+MIN_FREE_GB_NEXT=3     # 있으면 바뀐 레이어만 받는다(캐시가 맞을 때 코드 레이어 수 MB)
 HEALTH_TIMEOUT=420     # compose healthcheck start_period 180초 + 재시도 여유
 
 mode=${1:-}
@@ -46,8 +47,10 @@ if [ "$mode" = --auto ]; then
 fi
 
 free_gb=$(df -BG --output=avail / | tail -1 | tr -dc 0-9)
-if [ "$free_gb" -lt "$MIN_FREE_GB" ]; then
-  log "skip $target: 디스크 여유 ${free_gb}G < ${MIN_FREE_GB}G"
+need_gb=$MIN_FREE_GB_FIRST
+[ -n "$(docker images -q "$IMAGE")" ] && need_gb=$MIN_FREE_GB_NEXT
+if [ "$free_gb" -lt "$need_gb" ]; then
+  log "skip $target: 디스크 여유 ${free_gb}G < ${need_gb}G (docker builder prune·지난 rollback-* 정리)"
   exit 1
 fi
 
