@@ -56,7 +56,7 @@ CREATE TABLE corpus.doc_articles (
     doc_id      TEXT NOT NULL REFERENCES corpus.documents(doc_id) ON DELETE CASCADE,
     조번호      TEXT NOT NULL,
     조제목      TEXT,
-    조순번      INT,             -- 정렬 및 단조성 검증용
+    조순번      INT,             -- 정렬 및 조 번호 증가 순서 검사용
     본문        TEXT NOT NULL,
     페이지      INT,
     -- `제N조 삭제 <날짜>` 플래그. 빈 조가 아니라 원문 사실이라 검색·청킹에서 뺀다
@@ -78,7 +78,7 @@ CREATE TABLE corpus.chunks (
     parse_quality TEXT NOT NULL DEFAULT 'high' CHECK (parse_quality IN ('high','low')),
     version     TEXT,
     status      TEXT NOT NULL,
-    -- documents 에서 내려온 사본. pre-filter 를 단일 테이블 스캔으로 유지하기 위한 비정규화
+    -- documents 에서 복사한 값. 사전 필터를 테이블 하나만 스캔해 처리하려는 비정규화
     retrieval_scope TEXT NOT NULL DEFAULT '검색대상'
                     CHECK (retrieval_scope IN ('검색대상','참조확장전용')),
     조번호      TEXT,
@@ -92,14 +92,14 @@ CREATE TABLE corpus.chunks (
                                  -- 임베딩·BM25 입력은 text 가 아니라 [컨텍스트 헤더]+text
     embedding   extensions.vector(1024)     -- KURE-v1
 );
--- 검색 전에 pre-filter 로 구버전·타사업·타기관·참조 확장 전용 청크를 제외한다
+-- 검색 전에 사전 필터로 구버전·타사업·타기관·참조 확장 전용 청크를 제외한다
 CREATE INDEX ix_chunks_filter ON corpus.chunks
     (status, parse_quality, retrieval_scope, layer, 적용대상, 기관ID);
 CREATE INDEX ix_chunks_사업명 ON corpus.chunks USING GIN (사업명);
 COMMENT ON COLUMN corpus.chunks.text IS '원문 문자열 그대로. 인용 검증이 이 값과 대조한다.';
--- ANN 인덱스(HNSW/IVFFlat)를 만들지 않는다 — 근사 검색의 리콜 손실은 인용 누락이다. 1만 청크 초과 시 재검토.
+-- ANN 인덱스(HNSW/IVFFlat)를 만들지 않는다 — 근사 검색의 재현율 저하는 곧 인용 누락이다. 1만 청크 초과 시 재검토.
 
--- corpus.rules : 룰 테이블 (fast path). 벡터 없음.
+-- corpus.rules : 룰 테이블. 검색 없이 코드가 (사업명, 비목)으로 바로 조회한다. 벡터 없음.
 CREATE TABLE corpus.rules (
     rule_id       BIGSERIAL PRIMARY KEY,
     layer         TEXT NOT NULL CHECK (layer IN ('L1','L2','L3')),
@@ -127,7 +127,7 @@ CREATE INDEX ix_rules_lookup ON corpus.rules (사업명, 비목);
 
 -- TRUNCATE 금지 트리거와 저장 전 검증 트리거는 16_rules_guard.sql 에 있다.
 COMMENT ON COLUMN corpus.rules.verified IS 'false 인 룰만으로 "가능" 판정 금지. 조문 인용 동반 필수.';
--- layer='L3' 행은 기관 데이터지만 overlay 설계에 따라 corpus 에 둔다.
+-- layer='L3' 행은 기관 데이터지만 상위 룰에 L3 룰을 병합하는 설계(L3 병합)라 corpus 에 둔다.
 
 -- corpus.precedence_rules : 우선순위 조항. 어느 계층이 우선하는지를 담는 충돌 해결 룰이다(비목 룰 아님).
 CREATE TABLE corpus.precedence_rules (
@@ -154,12 +154,12 @@ COMMENT ON COLUMN corpus.precedence_rules.범위 IS
   'all = 항상 우선계층을 적용(재도전성공패키지 제3조) / unspecified_only = 상위에 없는 사항만 하위 적용(초격차 제3조)';
 -- 조회 키가 사업명이다. 모두의창업 로컬트랙(제3편)은 위임 관계가 달라 범위에서 제외한다.
 
--- corpus.refs : 참조 그래프. 한 행 = 엣지 하나 ("어느 조가 어느 조를 가리키는가"). 깊이 3, 재귀 CTE 로 조회한다.
+-- corpus.refs : 참조 그래프. 한 행 = 엣지 하나 ("어느 조가 어느 조를 가리키는가"). 재귀 CTE 로 조회하고, 참조 확장 깊이는 1이다(scripts/retrieve.py 깊이).
 CREATE TABLE corpus.refs (
     ref_id      BIGSERIAL PRIMARY KEY,
     src_doc_id  TEXT NOT NULL,
     src_조번호  TEXT NOT NULL,
-    -- 엣지의 출처 레이어. 참조 확장의 레이어별 상한과 집계에 쓴다
+    -- 참조를 건 조의 규정 계층. build_refs.py 가 계층별 해결 상태 집계에 쓴다
     src_layer   TEXT CHECK (src_layer IN ('L1','L2','L3','사례') OR src_layer IS NULL),
     참조문자열  TEXT NOT NULL,   -- 원문 표기 그대로: "통합관리지침 제33조부터 제42조까지"
     관계        TEXT NOT NULL CHECK (관계 IN ('위임','준용','별표참조','인용','미규정위임')),
@@ -176,9 +176,9 @@ CREATE INDEX ix_refs_dst ON corpus.refs (dst_doc_id, dst_조번호);   -- 역참
 CREATE INDEX ix_refs_dangling ON corpus.refs (해결상태) WHERE 해결상태 = 'dangling';
 
 COMMENT ON TABLE  corpus.refs IS
-  '참조 그래프. 검색된 조에서 깊이 3까지 참조 확장 대상을 모아 LLM 컨텍스트에 넣는다. LLM 은 이 표를 보지 않는다 — 코드가 조회해 텍스트로 넣는다.';
+  '참조 그래프. 검색된 조에서 깊이 1까지 참조 확장 대상을 모아 LLM 컨텍스트에 넣는다. LLM 은 이 표를 보지 않는다 — 코드가 조회해 텍스트로 넣는다.';
 COMMENT ON COLUMN corpus.refs.해결상태 IS
-  'resolved=정상 / remapped=조번호가 구판이라 조제목으로 재매칭함 / dangling=코퍼스에 대상 없음(판단불가 예고)';
+  'resolved=정상 / remapped=조번호가 구판이라 조제목으로 재매칭함 / dangling=코퍼스에 대상 없음(판단불가가 될 수 있음)';
 COMMENT ON COLUMN corpus.refs.관계 IS
   '미규정위임 = "이 지침에서 정하지 아니한 사항은 ~에 따름". 건국대 지침에서 확인한 문장 형식. L3 상위 규정 확인(docs/5_룰/5-2_효력_결정.md 3절)의 근거가 된다.';
 
@@ -217,7 +217,7 @@ CREATE TABLE corpus.item_alias (
 );
 CREATE INDEX ix_alias_name ON corpus.item_alias (품목);
 
--- corpus.xref_mismatch : 크로스 레퍼런스 불일치
+-- corpus.xref_mismatch : 교차 참조 불일치
 CREATE TABLE corpus.xref_mismatch (
     id          BIGSERIAL PRIMARY KEY,
     src_doc_id  TEXT,

@@ -283,7 +283,7 @@ class 계획상세(계획요약):
     created_at: str | None = None
 
 
-# --- 기관 규정(L3) 업로드 ---
+# --- 기관 자체규정(L3) 업로드 ---
 
 class L3업로드응답(BaseModel):
     doc_id: str
