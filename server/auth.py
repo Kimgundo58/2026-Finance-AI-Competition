@@ -70,7 +70,6 @@ class 주체:
     org_id: str | None
     출처: str                    # 'token' | 'demo' | 'param' | 'none'
     email: str | None = None
-    account_id: str | None = None
 
     @property
     def 검증됨(self) -> bool:
@@ -175,20 +174,20 @@ def _데모해석(토큰: str) -> 주체:
     return 주체(org_id=org, 출처="demo")
 
 
-def _계정조회(email: str) -> tuple[str, str] | None:
-    """email -> (org_id, account_id). 등록되지 않은 계정이면 None, DB 장애면 HTTPException(503).
+def _계정조회(email: str) -> str | None:
+    """email -> org_id. 등록되지 않은 계정이면 None, DB 장애면 HTTPException(503).
 
     이 시점에는 GUC 가 없어 tenant.accounts 를 직접 읽으면 RLS 정책에 의해 0행이 된다.
     그래서 SECURITY DEFINER 함수 tenant.계정찾기() 를 호출한다.
     """
     try:
-        행 = _질의("SELECT org_id, account_id FROM tenant.계정찾기(%s)",
+        행 = _질의("SELECT org_id FROM tenant.계정찾기(%s)",
                    (email,), 예외전파=True)
     except Exception as e:                                    # noqa: BLE001
         로그.exception("계정 조회 실패(DB 오류). 미등록 계정(403)과 구분해 503 으로 응답한다")
         # 응답에 예외 문자열을 넣지 않는다. psycopg 오류 본문에 호스트·포트·사용자명이 들어 있다.
         raise HTTPException(503, "계정 확인에 실패했습니다. 잠시 후 다시 시도해 주세요") from e
-    return (str(행[0][0]), str(행[0][1])) if 행 else None
+    return str(행[0][0]) if 행 else None
 
 
 def _supabase해석(토큰: str) -> 주체:
@@ -212,7 +211,7 @@ def _supabase해석(토큰: str) -> 주체:
     if 계정 is None:
         # 토큰을 보낸 요청은 토큰으로만 판단한다. ?org_id= 로 폴백하지 않는다.
         raise HTTPException(403, "등록되지 않은 계정입니다")
-    return 주체(org_id=계정[0], 출처="token", email=email, account_id=계정[1])
+    return 주체(org_id=계정, 출처="token", email=email)
 
 
 def _uuid인가(v) -> bool:

@@ -22,12 +22,6 @@ from pydantic import AliasChoices, BaseModel, Field, computed_field, model_valid
 판정타입 = Literal["가능", "조건부", "불가", "판단불가"]
 
 
-class 오류응답(BaseModel):
-    """모든 4xx·5xx 응답 본문. 프론트가 판정 화면과 같은 틀로 오류를 표시한다."""
-    오류: str
-    상태: int
-
-
 class 특수관계(BaseModel):
     """특수관계 거래 여부. 판정 요청에만 쓰고 저장하지 않는다."""
     친족거래: bool = False
@@ -71,64 +65,10 @@ class 정규화요청(BaseModel):
         return self
 
 
-class 비목후보(BaseModel):
-    비목: str
-    신뢰도: float
-
-
-# 필드 이름이 클래스 이름을 가리면 pydantic 이 타입을 해석하지 못한다. 별칭으로 참조한다.
-_비목후보 = 비목후보
-
-
-class 심층질문선택지(BaseModel):
-    값: str
-    라벨: str
-
-
-class 심층질문근거(BaseModel):
-    doc_id: str
-    조번호: str
-
-
-class 심층질문항목(BaseModel):
-    """corpus.check_items 에서 고른 심층질문 한 항목."""
-    code: str                              # corpus.check_items.code
-    질문문: str
-    유형: Literal["예아니오", "선택", "숫자", "텍스트"]
-    선택지: list[심층질문선택지] = Field(default_factory=list)   # 유형="선택" 일 때만 채운다
-    근거: 심층질문근거                       # 필수. 질문하는 근거 조항이므로 비우지 않는다
-    # 컬럼명을 그대로 넣는다(예: "정부지원_현금"). 프로필 경로 접두사는 orchestrate.프로필값_경로키() 가
-    # 붙인다. 그 함수의 매핑표에 없는 컬럼을 쓰면 매핑표도 함께 늘려야 한다.
-    필요프로필필드: list[str] = Field(default_factory=list)
-
-    @computed_field  # 구 이름 호환(제거 예정: 다음 릴리스)
-    @property
-    def 필요F필드(self) -> list[str]:  # 구 이름 호환(제거 예정: 다음 릴리스)
-        return self.필요프로필필드
-
-
 class 답변항목(BaseModel):
     """/api/judge 가 받는 심층질문 답 한 건."""
     code: str
     값: Any
-
-
-class 정규화응답(BaseModel):
-    품목: str | None = None
-    금액: float | None = None
-    금액_추정여부: bool = False
-    용도: str | None = None
-    비목후보: list[_비목후보] = Field(default_factory=list)
-    # 폼이 묻지 않는 값. 정규화가 품목·용도에서 추출한다. 하위항목은 비목이 지급수수료일 때만 매칭한다.
-    하위항목: str | None = None
-    결제수단: str | None = None
-    구매명의: str | None = None
-    신청일: str | None = None
-    비교견적: str | None = None
-    # 폼 값을 문장으로 합성한 것. 저장·검색·표시에만 쓰고 LLM 입력으로 다시 넣지 않는다.
-    질문원문: str | None = None
-    # check_items 에서 고른 심층질문. LLM 이 만들지 않는다(LLM 호출 수가 늘지 않는다).
-    심층질문: list[심층질문항목] = Field(default_factory=list)
 
 
 # --- 판정 (POST /api/judge) ---

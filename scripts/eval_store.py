@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""평가 결과를 `eval.runs` / `eval.run_items` 에 저장하고 되읽는다.
+"""평가 결과를 `eval.runs` / `eval.run_items` 에 저장한다.
 
 `eval_retrieval.py`, 판정 파이프라인 골든셋 실행(`orchestrate.py --eval-log`)이 호출한다.
-공개 함수: `기록(run, items, *, conn)`, `요약(run_id, *, conn)`, `코퍼스버전(cur)`, `평가용_사업명(사업명, 적용범위)`.
+공개 함수: `기록(run, items, *, conn)`, `코퍼스버전(cur)`, `평가용_사업명(사업명, 적용범위)`.
 `지표`·`원출력` 은 jsonb 로 그대로 저장하고, `코퍼스버전`·`git커밋` 을 주지 않으면 여기서 계산해 채운다.
 채점은 전부 결정론적이며 LLM-as-judge 는 쓰지 않는다.
 """
@@ -101,33 +101,3 @@ def 평가용_사업명(사업명: str | None, 적용범위: str | None = None) 
     if 적용범위 or not 사업명 or 사업명.startswith("공통"):
         return None
     return 사업명
-
-
-def 요약(run_id: int, *, conn=None) -> dict:
-    """저장된 실행 하나를 사람이 읽는 형태로 되읽는다. 없으면 LookupError."""
-    with db.borrow(conn) as conn:
-        cur = conn.cursor()
-        cur.execute("SELECT 종류, 시작, 코퍼스버전, git커밋, 문항수, 지표, 설정, 라벨 "
-                    "FROM eval.runs WHERE run_id=%s", (run_id,))
-        r = cur.fetchone()
-        if not r:
-            raise LookupError(f"run_id={run_id} 없음")
-        cur.execute("SELECT count(*), count(*) FILTER (WHERE 적중) "
-                    "FROM eval.run_items WHERE run_id=%s", (run_id,))
-        n, hit = cur.fetchone()
-        return {"run_id": run_id, "종류": r[0], "시작": r[1], "코퍼스버전": r[2],
-                "git커밋": r[3], "문항수": r[4], "지표": r[5], "설정": r[6], "라벨": r[7],
-                "items": n, "적중": hit}
-
-
-def main() -> None:
-    """스모크 테스트 — eval.runs 에 1행을 실제로 저장하고 되읽는다."""
-    rid = 기록({"종류": "judge", "설정": {"smoke": True}, "지표": {},
-               "라벨": "eval_store 스모크", "비고": "eval_store 스모크 테스트"}, [])
-    print("run_id =", rid)
-    for k, v in 요약(rid).items():
-        print(f"  {k:10} {v}")
-
-
-if __name__ == "__main__":
-    main()
