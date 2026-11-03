@@ -380,7 +380,10 @@ def _조문들(cur, org_id: str) -> list[dict[str, Any]]:
             "       d.doc_id, d.원본파일명, d.출처, d.extraction, d.파싱품질 "
             "  FROM tenant.l3_articles a "
             "  JOIN tenant.l3_documents d ON d.doc_id = a.doc_id "
+            # 파싱품질도 본다: 적용 중인 문서를 다시 파싱했다가 실패하면 status 는 active 로 남지만
+            # (l3_parse.적용문서_정리) 판정에 쓰면 안 된다. 화면은 이때 '적용 규정 없음' 으로 안내한다.
             " WHERE a.org_id = %s AND d.org_id = %s AND d.status='active' "
+            "   AND d.파싱품질 IN ('pass', 'warn') "
             " ORDER BY a.조순번 NULLS LAST, a.조번호", (org_id, org_id)).fetchall()
     keys = ("article_id", "조번호", "조제목", "본문", "장",
             "doc_id", "원본파일명", "출처", "extraction", "파싱품질")

@@ -8,6 +8,7 @@
 -- 2. 이미 쌓인 문서를 같은 규칙으로 정리한다. 기관마다
 --      - 적용 문서: active 이고 pass/warn 인 문서 중 최신 1건. 같은 분(minute)에 함께 올린 문서(시드 등)는
 --        조문이 많은 쪽을 고른다(본문 문서와 양식이 같이 시드된 경우 양식이 남지 않게).
+--        조문이 0건인 warn 문서는 조문이 있는 문서가 하나도 없을 때만 고른다.
 --      - 적용 문서보다 먼저 올린 active 문서는 전부 superseded.
 --      - 적용 문서보다 나중에 실패한 문서는 최신 1건만 남기고 superseded.
 --    행과 조문은 지우지 않는다(status 만 바꾼다). 판정은 status='active' 만 읽는다.
@@ -37,7 +38,7 @@ BEGIN
     ), 적용 AS (
         SELECT DISTINCT ON (org_id) org_id, doc_id, created_at
           FROM 조수
-         ORDER BY org_id, date_trunc('minute', created_at) DESC, n DESC, created_at DESC
+         ORDER BY org_id, (n > 0) DESC, date_trunc('minute', created_at) DESC, n DESC, created_at DESC
     )
     UPDATE tenant.l3_documents d SET status = 'superseded'
       FROM 적용 a

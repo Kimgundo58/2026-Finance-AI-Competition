@@ -4,7 +4,7 @@
 server/routes_l3.백그라운드_파싱 이 업로드 응답 뒤 백그라운드로 부른다. 공개 함수는
 파싱(cur, doc_id) -> {ok, 파싱품질, 조_건수, 미해결참조수, strategy, flags, 사유} 와 원본경로/L3_저장소.
 tenant.l3_documents 의 파싱품질·미해결참조수·실패사유를 갱신한다. 호출자는 GUC app.org_id 를 설정한
-트랜잭션 안에서 불러야 한다(RLS). 불변식: 조 0건은 실패이고, 파싱품질은 'pending' 에서 항상
+트랜잭션 안에서 불러야 한다(RLS). 항상 지키는 조건: 조 0건은 실패이고, 파싱품질은 'pending' 에서 항상
 pass/warn/fail 로 바뀐다. 텍스트 레이어가 없는 스캔본은 텍스트 인식(OCR)을 하지 않고 실패로 기록한다.
 기관당 판정에 쓰는 L3 는 한 문서다. 파싱이 성공하면 같은 기관의 이전 문서를 superseded 로 바꾸고,
 실패하면 이전 문서를 그대로 둔다(`적용문서_정리`).
@@ -106,15 +106,41 @@ def _상태_기록(cur, doc_id: str, 파싱품질: str, 미해결참조수: int,
         (파싱품질, 미해결참조수, 실패사유, doc_id))
 
 
+def _기관_정리_잠금(cur, org_id) -> None:
+    """같은 기관의 결과 기록·적용 문서 정리를 한 번에 하나씩 하게 하는 트랜잭션 범위 advisory lock.
+
+    두 파싱이 동시에 끝나도 뒤에 잠금을 얻은 쪽이 앞 트랜잭션의 커밋 결과를 보고 판단한다.
+    교착을 피하려면 이 트랜잭션이 l3_documents 행을 처음 UPDATE 하기 전에(`_상태_기록` 전에) 잡아야 한다.
+    같은 트랜잭션에서 다시 불러도 된다(advisory lock 은 중첩된다).
+    """
+    cur.execute("SELECT pg_advisory_xact_lock(hashtext('l3_적용문서'), hashtext(%s))", (str(org_id),))
+
+
 def 적용문서_정리(cur, doc_id: str, org_id, 성공: bool) -> None:
     """기관당 판정에 쓰는 L3 를 한 문서로 맞춘다. 파싱 결과를 기록한 같은 트랜잭션에서 부른다.
 
-    성공(pass/warn): 이 문서보다 먼저 올린 active 문서(이전 규정, 이전 실패·대기)를 superseded 로 바꾼다.
-      이 문서보다 나중에 올린 문서가 이미 성공해 있으면(파싱 완료 순서가 뒤바뀐 경우) 이 문서를 내린다.
-    실패: 판정에 쓰는 이전 규정은 그대로 둔다. 이 문서보다 먼저 실패한 문서와 파싱이 끊겨 `중단_판정_분`
-      넘게 'pending' 으로 남은 문서만 내려 최근 실패 1건만 남긴다(아직 파싱 중인 이전 업로드는 건드리지 않는다).
-    판정(l3_load._조문들)은 status='active' 만 읽으므로 이 함수가 곧 '어느 규정으로 판정하는가' 를 정한다.
+    규칙은 '나중에 올린(created_at) 문서가 이긴다' 이다.
+    성공(pass/warn): 이 문서보다 나중에 올린 문서가 이미 성공해 있으면(파싱 완료 순서가 뒤바뀐 경우) 이 문서를
+      superseded 로 바꾼다. 아니면 이 문서를 active 로 두고 — 파싱이 `중단_판정_분` 보다 오래 걸려 다른 업로드의
+      실패 정리에서 superseded 로 바뀌었어도 되돌린다 — 이 문서보다 먼저 올린 active 문서(이전 규정, 이전 실패·대기)를
+      superseded 로 바꾼다. 되돌리지 않으면 이 문서가 이전 규정만 내리고 자신은 빠져 적용 문서가 0건이 된다.
+    실패: 판정에 쓰는 이전 규정은 그대로 둔다. 이 문서보다 나중에 올린 문서가 이미 결과(성공·실패)를 냈으면 이 문서를
+      superseded 로 바꾼다. 아니면 이 문서보다 먼저 실패한 문서와 파싱이 끊겨 `중단_판정_분` 넘게 'pending' 으로
+      남은 문서만 superseded 로 바꿔 최근 실패 1건만 남긴다(아직 파싱 중인 이전 업로드는 건드리지 않는다).
+    판정(l3_load._조문들)은 status='active' 이고 pass/warn 인 문서만 읽으므로 이 함수가 곧 '어느 규정으로
+    판정하는가' 를 정한다.
     """
+    _기관_정리_잠금(cur, org_id)
+    이후_결과 = ("pass", "warn") if 성공 else ("pass", "warn", "fail")
+    이후_있음 = cur.execute(
+        "SELECT 1 FROM tenant.l3_documents n WHERE n.org_id=%s AND n.doc_id<>%s "
+        "   AND n.status='active' AND n.\"파싱품질\" = ANY(%s) "
+        "   AND n.created_at > (SELECT created_at FROM tenant.l3_documents WHERE doc_id=%s) LIMIT 1",
+        (org_id, doc_id, list(이후_결과), doc_id)).fetchone()
+    if 이후_있음:
+        cur.execute("UPDATE tenant.l3_documents SET status='superseded' "
+                    "WHERE doc_id=%s AND status<>'superseded'", (doc_id,))
+        return
     조건 = ("org_id=%s AND doc_id<>%s AND status='active' "
           "AND created_at <= (SELECT created_at FROM tenant.l3_documents WHERE doc_id=%s)")
     if not 성공:
@@ -123,18 +149,15 @@ def 적용문서_정리(cur, doc_id: str, org_id, 성공: bool) -> None:
                     f"AND created_at < now() - interval '{중단_판정_분} minutes'))",
                     (org_id, doc_id, doc_id))
         return
+    cur.execute("UPDATE tenant.l3_documents SET status='active' "
+                "WHERE doc_id=%s AND status<>'active'", (doc_id,))
     cur.execute(f"UPDATE tenant.l3_documents SET status='superseded' WHERE {조건}",
                 (org_id, doc_id, doc_id))
-    cur.execute(
-        "UPDATE tenant.l3_documents SET status='superseded' WHERE doc_id=%s AND EXISTS ("
-        "  SELECT 1 FROM tenant.l3_documents n WHERE n.org_id=%s AND n.doc_id<>%s "
-        "     AND n.status='active' AND n.\"파싱품질\" IN ('pass','warn') "
-        "     AND n.created_at > (SELECT created_at FROM tenant.l3_documents WHERE doc_id=%s))",
-        (doc_id, org_id, doc_id, doc_id))
 
 
 def 실패_기록(cur, doc_id: str, org_id, 실패사유: str) -> None:
     """파싱 실패를 기록하고 적용 문서를 정리한다. 파서 밖 예외 경로(server/routes_l3)도 이 함수를 쓴다."""
+    _기관_정리_잠금(cur, org_id)
     _상태_기록(cur, doc_id, "fail", 0, 실패사유)
     적용문서_정리(cur, doc_id, org_id, 성공=False)
 
@@ -154,6 +177,7 @@ def 파싱(cur, doc_id: str) -> dict:
 
     def _결과_기록(파싱품질: str, 조_건수: int = 0, 미해결참조수: int = 0, **부가) -> dict:
         성공 = 파싱품질 in ("pass", "warn")
+        _기관_정리_잠금(cur, org_id)          # `_상태_기록` 의 행 잠금보다 먼저 잡는다(교착 방지)
         _상태_기록(cur, doc_id, 파싱품질, 미해결참조수, None if 성공 else 부가.get("실패사유"))
         적용문서_정리(cur, doc_id, org_id, 성공)
         return {"ok": 성공, "파싱품질": 파싱품질,
@@ -208,8 +232,10 @@ def main() -> None:
                 "SELECT doc_id, org_id FROM tenant.l3_documents WHERE doc_id=%s",
                 (a.doc_id,)).fetchall()
         else:
+            # superseded 된 pending(이후 업로드로 이미 교체된 문서)은 다시 파싱하지 않는다
             대상 = owner.execute(
-                "SELECT doc_id, org_id FROM tenant.l3_documents WHERE \"파싱품질\"='pending'"
+                "SELECT doc_id, org_id FROM tenant.l3_documents "
+                " WHERE \"파싱품질\"='pending' AND status='active'"
             ).fetchall()
             print(f"파싱 대기(pending) {len(대상)}건")
     if a.doc_id and not 대상:
