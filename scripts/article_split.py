@@ -171,7 +171,7 @@ RE_OUTLINE = re.compile(r"(?:^|\n)[ \t]*(\d{1,2})\.[ \t]*([^\n]{1,40})")
 def _outline_headings(body: str) -> list[re.Match]:
     """`N.` 표제만 고른다.
 
-    중첩 열거도 표기가 같아 정규식으로는 못 가른다. 번호 단조성으로 가른다 —
+    중첩 열거도 표기가 같아 정규식으로는 못 가른다. 번호가 차례로 커지는지로 가른다 —
     표제 번호는 장을 넘어 이어지고, 중첩 열거는 1부터 다시 시작한다.
     """
     out, last = [], 0
@@ -187,7 +187,7 @@ def _roman_chapters(text: str, page_offsets: dict[int, int]) -> list[dict]:
     """"표제줄 \\n 로마숫자 단독줄" 을 장 경계로 쓴다 — "제N장" 이 없는 개요형 문서용.
 
     등장 순서가 Ⅰ,Ⅱ,Ⅲ… 로 정확히 이어지는지 먼저 검사한다. 3개 미만이거나 순서가 어긋나면
-    빈 리스트를 돌려주고 호출부가 단락 분할로 내려간다.
+    빈 리스트를 돌려주고, 호출부는 대신 단락 분할을 쓴다.
     """
     marks = list(RE_ROMAN.finditer(text))
     seq = "".join(m.group(1) for m in marks)

@@ -77,6 +77,7 @@ docker compose ps                                              # 3개 모두 hea
 | 작업 | 명령 |
 |---|---|
 | 코드 업데이트 배포 | `git pull && docker compose up -d --build api` |
+| 배포 전 이미지 정리 | `docker tag suddoe-api:prod suddoe-api:rollback-<날짜>` 후 그보다 오래된 `rollback-*` 는 `docker rmi`. api 이미지 1개가 6.5GB 라 2~3개를 넘기면 디스크(50GB)가 부족해 빌드가 실패한다(2026-11-03) |
 | 스키마 변경 | `db/migrations/README.md` 순서대로 postgres 롤로 적용 (적용 전 `./backup.sh`) |
 | 로그 | `docker compose logs -f api` (json-file, 20MB × 5 로테이션) |
 | 수동 백업 | `./backup.sh` → `backups/` |

@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """사용자 흐름 점검: L3 업로드 → 파싱 → 저장 → 판정 반영을 실제 API 로 따라가며 확인한다.
 
-사용자가 본 장애(기관 규정을 올렸는데 판정은 다른 기관 규정 기준으로 나옴)를 다시 만들지 않으려고 둔다.
+사용자가 본 장애(기관 자체규정을 올렸는데 판정은 다른 기관 자체규정 기준으로 나옴)를 다시 만들지 않으려고 둔다.
 FastAPI TestClient 로 서버를 프로세스 안에서 띄우고 로컬 DB 에 비특권 롤(suddoe_app, RLS 적용)로 접속한다.
-데모 세션 → 업로드 → 백그라운드 파싱 → 상태 조회 → /api/l3/current → /api/judge 까지 실제 경로를 탄다.
+데모 세션 → 업로드 → 백그라운드 파싱 → 상태 조회 → /api/l3/current → /api/judge 까지 실제 경로를 거친다.
 판정은 orchestrate.판정 을 dry 로 바꿔 프롬프트 구성까지만 실행한다(LLM 호출 0회, 판정 기록 없음).
 검색은 실제로 실행하므로 임베딩 모델 로드에 15초 안팎이 걸린다. 만든 데모 기관은 끝나면 지운다.
 
@@ -22,6 +22,7 @@ FastAPI TestClient 로 서버를 프로세스 안에서 띄우고 로컬 DB 에 
   12 적용 중인 문서가 있을 때 새 업로드가 실패하면 '실패' 와 함께 기존 문서를 계속 쓴다고 안내하고, 판정도 기존 문서를 읽는다
   13 실패를 거듭해도 /api/l3/current 의 실패 문서는 1건이다
   14 파싱이 끊겨 'pending' 으로 오래 남은 문서는 '실패'(실패사유 중단)로 보이고, 다음 실패 업로드 때 목록에서 빠진다
+  15 10분 넘게 걸린 파싱이 그사이 '중단'으로 정리됐다가 성공하면 다시 적용 문서가 된다 (적용 문서 0건이 되지 않는다)
 
 실행:
   PYTHONIOENCODING=utf-8 python scripts/ux_flow_check.py           # 점검 실행
@@ -261,7 +262,7 @@ def _점검(결과: 점검결과) -> None:
 
         r = client.post("/api/l3/upload", files=파일)
         결과.기록("1 게스트 업로드는 401", r.status_code == 401,
-               f"실제 {r.status_code} (게스트 업로드를 받으면 어느 기관 규정인지 알 수 없다)"
+               f"실제 {r.status_code} (게스트 업로드를 받으면 어느 기관의 자체규정인지 알 수 없다)"
                if r.status_code != 401 else "")
 
         r = client.post("/api/l3/upload", files=파일, headers=헤더)
@@ -313,9 +314,9 @@ def _점검(결과: 점검결과) -> None:
         헤더2, org2 = 데모세션()
         본문2, l3조회2, 프롬프트2 = 판정(헤더2)
         다른기관_L3 = [a for o, rows in l3조회2 for a in rows]
-        새어나감 = (표식 in 본문2) or any(표식 in p[0] for p in 프롬프트2) or bool(다른기관_L3)
-        결과.기록("7 다른 기관 판정에 이 기관 L3 가 섞이지 않음", not 새어나감,
-               f"다른 기관 L3 조회 {len(다른기관_L3)}건 · 표식 노출={새어나감}")
+        유출됨 = (표식 in 본문2) or any(표식 in p[0] for p in 프롬프트2) or bool(다른기관_L3)
+        결과.기록("7 다른 기관 판정에 이 기관 L3 가 섞이지 않음", not 유출됨,
+               f"다른 기관 L3 조회 {len(다른기관_L3)}건 · 표식 노출={유출됨}")
 
         def 실패_목록(h: dict) -> list[dict]:
             return [d for d in 현재문서(h) if d.get("파싱품질") == "fail"]
@@ -384,6 +385,36 @@ def _점검(결과: 점검결과) -> None:
                and [d.get("원본파일명") for d in 실패6] == ["스캔본3.pdf"],
                f"끊긴 문서 상태={끊긴_상태.get('상태')} 실패사유={끊긴_상태.get('실패사유')} · "
                f"current 실패 문서={[d.get('원본파일명') for d in 실패6]}")
+
+        # 느린 파싱: 업로드 뒤 10분 넘게 파싱 중이던 문서(P)가, 그사이 다른 업로드가 실패하면서 '중단'으로 보고
+        # superseded 됐다가 뒤늦게 성공한 경우. P 가 다시 적용 문서가 되고 이전 문서는 내려가야 한다(0건 금지).
+        # 시각은 소유자 롤로 맞추고, 파싱은 서버의 백그라운드 작업 함수를 그대로 부른다.
+        import l3_parse
+        from server import routes_l3
+        _, 이전_doc, _ = 업로드(헤더2, "느린파싱기관_이전지침.hwpx", _hwpx(픽스처_문단))
+        느린_문단 = [p.replace(표식, "느린파싱기관") for p in 픽스처_문단]
+        with psycopg.connect(OWNER_DSN, connect_timeout=5) as c:
+            c.execute("UPDATE tenant.l3_documents SET created_at = now() - interval '30 minutes' "
+                      "WHERE doc_id = %s", (이전_doc,))
+            느린_doc = str(c.execute(
+                "INSERT INTO tenant.l3_documents (org_id, \"원본파일명\", status, extraction, "
+                " \"파싱품질\", \"미해결참조수\", created_at) "
+                "VALUES (%s, '느린파싱기관_새지침.hwpx', 'active', 'hwpx', 'pending', 0, "
+                "        now() - interval '15 minutes') RETURNING doc_id", (org2,)).fetchone()[0])
+        l3_parse.원본경로(느린_doc, "hwpx").write_bytes(_hwpx(느린_문단))
+        업로드(헤더2, "스캔본4.pdf", _빈_pdf())       # 실패 정리가 P 를 '중단'으로 보고 superseded 로 바꾼다
+        routes_l3.백그라운드_파싱(느린_doc, org2)     # 그 뒤 P 파싱이 끝난다
+        느린_조문 = 조문(느린_doc)
+        현재7 = 현재문서(헤더2)
+        적용7 = [d for d in 현재7 if d.get("파싱품질") in ("pass", "warn")]
+        _, l3조회7, _ = 판정(헤더2)
+        읽은7 = {str(a["article_id"]) for o, rows in l3조회7 if o == org2 for a in rows}
+        결과.기록("15 '중단'으로 정리된 느린 파싱이 성공하면 다시 적용 문서 · 이전 문서는 내려감 · 판정도 이 문서",
+               bool(느린_조문) and [d.get("doc_id") for d in 적용7] == [느린_doc]
+               and bool(현재7) and 현재7[0].get("doc_id") == 느린_doc
+               and bool(읽은7) and 읽은7 <= 느린_조문,
+               f"current={[(d.get('원본파일명'), d.get('파싱품질')) for d in 현재7]} · "
+               f"판정이 읽은 조문 {len(읽은7)}건 중 느린 문서 밖 {len(읽은7 - 느린_조문)}건")
     finally:
         l3_load.조문_조회, orchestrate.프롬프트_구성, orchestrate.판정 = (
             원래_조문조회, 원래_프롬프트, 원래_판정)
@@ -426,8 +457,8 @@ def _git(*args: str) -> str:
                           encoding="utf-8", errors="replace").stdout
 
 
-def _변경_지문() -> str | None:
-    """감시 경로의 커밋되지 않은 변경 지문. 변경이 없으면 None."""
+def _변경_해시() -> str | None:
+    """감시 경로의 커밋되지 않은 변경 내용의 해시. 변경이 없으면 None."""
     diff = _git("diff", "HEAD", "--", *_감시_경로)
     새파일 = [f for f in _git("ls-files", "--others", "--exclude-standard", "--", *_감시_경로).splitlines()
            if f.endswith(_감시_확장자)]
@@ -449,10 +480,10 @@ def _상태_읽기() -> dict:
         return {}
 
 
-def _상태_쓰기(지문: str, 판정: str) -> None:
+def _상태_쓰기(변경해시: str, 판정: str) -> None:
     try:
         _상태파일.parent.mkdir(exist_ok=True)
-        _상태파일.write_text(json.dumps({"지문": 지문, "결과": 판정}), encoding="utf-8")
+        _상태파일.write_text(json.dumps({"변경해시": 변경해시, "결과": 판정}), encoding="utf-8")
     except OSError:
         pass
 
@@ -462,13 +493,13 @@ def _훅() -> int:
         입력 = json.loads(sys.stdin.read() or "{}")
     except ValueError:
         입력 = {}
-    지문 = _변경_지문()
-    if 지문 is None:
+    변경해시 = _변경_해시()
+    if 변경해시 is None:
         return 0
     이전 = _상태_읽기()
-    if 이전.get("지문") == 지문 and 이전.get("결과") == "통과":
+    if 이전.get("변경해시") == 변경해시 and 이전.get("결과") == "통과":
         return 0
-    if 입력.get("stop_hook_active") and 이전.get("지문") == 지문 and 이전.get("결과") == "실패":
+    if 입력.get("stop_hook_active") and 이전.get("변경해시") == 변경해시 and 이전.get("결과") == "실패":
         print(json.dumps({"systemMessage": "UX 흐름 점검 실패가 아직 남아 있습니다. "
                           "python scripts/ux_flow_check.py 로 확인하세요."}, ensure_ascii=False))
         return 0
@@ -482,13 +513,13 @@ def _훅() -> int:
         코드, 보고 = 종료_환경없음, "UX 흐름 점검이 280초 안에 끝나지 않았다"
 
     if 코드 == 종료_통과:
-        _상태_쓰기(지문, "통과")
+        _상태_쓰기(변경해시, "통과")
         return 0
     if 코드 == 종료_환경없음:
         print(json.dumps({"systemMessage": f"UX 흐름 점검을 건너뛰었습니다: {보고[-300:]}"},
                          ensure_ascii=False))
         return 0
-    _상태_쓰기(지문, "실패")
+    _상태_쓰기(변경해시, "실패")
     sys.stderr.write(
         "코드 변경 뒤 UX 흐름 점검(L3 업로드 → 파싱 → 판정 반영)이 실패했다. "
         "원인을 고치고 다시 확인한다. 점검 자체가 틀렸다고 판단되면 그 근거를 사용자에게 설명한다.\n"
