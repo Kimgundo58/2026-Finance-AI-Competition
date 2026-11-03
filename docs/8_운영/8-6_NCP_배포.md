@@ -1,7 +1,7 @@
 # 8-6 NCP 배포 (현재 운영)
 
 네이버클라우드 VM 1대에 API · PostgreSQL · Caddy 를 Docker Compose 로 운영한다.
-배포 파일은 `deploy/ncp/` 에 있다. 이관 전 GCP(Cloud Run + Cloud SQL) 기록은 [[8-5_GCP_배포]].
+배포 파일은 `deploy/ncp/` 에 있다. 이관 전 GCP(Cloud Run + Cloud SQL) 절차는 git 이력의 `docs/8_운영/8-5_GCP_배포.md`(커밋 381d317)에 있다.
 
 ## 구성
 
