@@ -7,13 +7,13 @@ PR 검사와 이미지 빌드는 GitHub Actions, 이미지 보관은 네이버�
 
 ```
 PR          ─▶ ci.yml     문법 검사 · server.selftest(SUDDOE_MOCK=1) · rule_lookup self-test (DB·LLM·키 없음)
-main push   ─▶ ci.yml + image.yml ─▶ suddoe.kr.ncr.ntruss.com/suddoe-api:<커밋 SHA>, :main
+main push   ─▶ ci.yml ─(통과하면)▶ image.yml ─▶ suddoe.kr.ncr.ntruss.com/suddoe-api:<커밋 SHA>, :main
 운영 서버   ─▶ cron 5분마다 deploy.sh --auto
                새 커밋 이미지 받기 → suddoe-api:prod 태그 → api 재생성 → healthy 확인(실패하면 되돌림)
 ```
 
-이미지 빌드는 캐시가 맞으면 수 분, 캐시가 없으면 20~30분 걸린다. 병합 후 운영 반영까지 보통 10~35분이다.
-문서만 바뀐 커밋은 이미지가 같아 재시작하지 않는다.
+2026-11-03 실측: ci 약 1분, 이미지 빌드는 캐시가 있으면 약 2분 30초, 없으면 약 10분. 병합 후 운영 반영까지 보통 5~10분이다.
+ci 가 실패한 커밋은 이미지를 만들지 않으므로 배포되지 않는다. 문서만 바뀐 커밋은 이미지가 같아 재시작하지 않는다.
 
 ## 구성
 
@@ -24,8 +24,9 @@ main push   ─▶ ci.yml + image.yml ─▶ suddoe.kr.ncr.ntruss.com/suddoe-api
 | push 키 | 서브 계정 `suddoe-ci-push` (NCP_CONTAINER_REGISTRY_MANAGER, 콘솔 접속 없음). GitHub secrets `NCR_PUSH_ACCESS_KEY` · `NCR_PUSH_SECRET_KEY` |
 | pull 키 | 서브 계정 `suddoe-server-pull` (NCP_CONTAINER_REGISTRY_VIEWER). 서버 `/root/.docker/config.json` |
 | 키 로컬 사본 | 레포 루트 `.env.ncloud` 의 `NCR_PUSH_*` · `NCR_PULL_*` (git 제외) |
-| 배포 상태 | 서버 `/var/lib/suddoe/` — `deployed_sha` · `blocked_sha` · `failed_sha` · `pending` |
-| 로그 | 서버 `/var/log/suddoe-deploy.log` (배포·보류·되돌림이 있을 때만 쓴다) |
+| 배포 상태 | 서버 `/var/lib/suddoe/` — `deployed_sha` · `failed_sha` · `pending` · `logged_*`(같은 기록을 커밋당 한 번만 남기는 표시) |
+| 로그 | 서버 `/var/log/suddoe-deploy.log` (배포·보류·되돌림·pull 실패·디스크 부족이 있을 때만 쓴다) |
+| 잠금 | `/run/lock/suddoe-deploy.run.lock`. 손으로 부른 `--force` 와 cron 실행이 겹치지 않는다 |
 
 `NCP_CONTAINER_REGISTRY_MANAGER` 에는 Object Storage 관리 권한도 들어 있다. Object Storage 를 쓰게 되면
 push 키 권한을 레지스트리 하나로 좁힌 정책으로 바꾼다.
@@ -37,10 +38,12 @@ push 키 권한을 레지스트리 하나로 좁힌 정책으로 바꾼다.
 
 1. 서버에서 `cd /opt/suddoe && git pull`
 2. 마이그레이션 적용([db/migrations/README.md](../../db/migrations/README.md)), compose·`.env` 변경 반영
-3. `cd deploy/ncp && ./deploy.sh --force`
+3. `cd deploy/ncp && nohup ./deploy.sh --force >> /var/log/suddoe-deploy.log 2>&1 &` (SSH 가 끊겨도 계속 돈다)
 
-디스크 여유가 기준보다 적으면 배포하지 않는다. 레지스트리 이미지가 서버에 없을 때(전체 6.5GB 를 받음) 8GB,
-있을 때(바뀐 레이어만 받음) 3GB 다. `docker builder prune` 과 지난 `rollback-*` 이미지 삭제로 공간을 만든다.
+디스크 여유가 기준보다 적으면 배포하지 않는다. 이미지 전체(6.5GB)를 받을 때(서버에 레지스트리 이미지가 없거나
+`Dockerfile`·`requirements-api.txt` 가 바뀜) 8GB, 바뀐 레이어만 받을 때 3GB 다.
+`docker builder prune` 과 지난 `rollback-*` 이미지 삭제로 공간을 만든다.
+`docker pull` 이 인증·네트워크 문제로 실패하면 로그에 `pull 실패` 를 남긴다. 이미지가 아직 없는 것과 구분한다.
 
 ## 되돌리기
 
@@ -56,13 +59,15 @@ health 200 은 판정이 정상이라는 뜻이 아니다. 배포 로그를 본 
 
 1. pull 키로 로그인: `docker login suddoe.kr.ncr.ntruss.com -u <NCR_PULL_ACCESS_KEY> --password-stdin` (secret 은 표준 입력으로)
 2. cron 설치: `install -m 644 deploy/ncp/suddoe-deploy.cron /etc/cron.d/suddoe-deploy`
-3. 첫 배포: `cd /opt/suddoe/deploy/ncp && ./deploy.sh --force`
+3. 첫 배포: `cd /opt/suddoe/deploy/ncp && nohup ./deploy.sh --force >> /var/log/suddoe-deploy.log 2>&1 &`.
+   `deployed_sha` 가 없으면 `--auto` 는 배포하지 않고 이 안내만 로그에 남긴다
 
 ## 비용 (2026-11-03)
 
 - GitHub Actions: 공개 레포라 무료. 레포를 비공개로 바꾸면 월 2,000분 무료 뒤 과금된다.
-- Container Registry: 관리 비용은 없고 저장 용량·요청·전송량만 과금된다. 캐시 포함 약 13GB 로 예상한다.
-  요금 안내의 Standard 예시 단가(GB-월 28원)를 쓰면 월 약 400원이다. 실제 단가는 콘솔 요금 안내에서 확인한다.
+- Container Registry: 관리 비용은 없고 저장 용량·요청·전송량만 과금된다. 2026-11-03 레지스트리 조회로
+  이미지 2.45GB + 빌드 캐시 4.86GB(압축 크기)다. 요금 안내의 Standard 예시 단가(GB-월 28원)를 쓰면 월 약 200원이다.
+  실제 단가는 콘솔 요금 안내에서 확인한다.
 
 ## 아직 CI 에 없는 검사
 
