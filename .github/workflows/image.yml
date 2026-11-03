@@ -1,4 +1,4 @@
-# main 에 push 되면 API 이미지를 빌드해 네이버클라우드 Container Registry 에 올린다.
+# main 에 push 된 커밋이 ci 를 통과하면 API 이미지를 빌드해 네이버클라우드 Container Registry 에 올린다.
 # 운영 서버의 deploy/ncp/deploy.sh 가 5분마다 이 이미지를 받아 배포한다. 절차: docs/8_운영/8-8_CI_CD.md
 #
 # 태그: <커밋 SHA>, main. 빌드 캐시는 같은 레지스트리의 buildcache 태그에 둔다.
@@ -6,8 +6,11 @@
 name: image
 
 on:
-  push:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
     branches: [main]
+  # ci 를 거치지 않는 수동 빌드. main 에서만 돈다
   workflow_dispatch:
 
 permissions:
@@ -24,9 +27,19 @@ env:
 
 jobs:
   build-push:
-    if: github.ref == 'refs/heads/main'
+    # workflow_run 은 secrets 를 쓸 수 있다. 포크 PR 의 ci 실행(포크 브랜치 이름이 main 인 경우 포함)이
+    # 이미지를 올리지 못하게 이 저장소의 push 로 시작한 ci 성공만 받는다
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    env:
+      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
     steps:
       # 이미지가 6.5GB 이고 빌더 단계까지 합치면 디스크가 부족할 수 있어 쓰지 않는 도구를 지운다
       - name: 디스크 확보
@@ -35,6 +48,8 @@ jobs:
           df -h /
 
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SHA }}
 
       - uses: docker/setup-buildx-action@v3
 
@@ -51,7 +66,7 @@ jobs:
           push: true
           provenance: false
           tags: |
-            ${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.IMAGE }}:${{ env.SHA }}
             ${{ env.IMAGE }}:main
           cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
           cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max
