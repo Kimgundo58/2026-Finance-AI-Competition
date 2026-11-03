@@ -266,6 +266,8 @@ CREATE TABLE tenant.l3_documents (
     원본파일명   TEXT NOT NULL,
     version      TEXT,
     시행일       DATE,
+    -- 기관당 판정에 쓰는 문서는 하나다. 새 문서 파싱이 성공하면 이전 문서를 superseded 로 바꾼다
+    -- (scripts/l3_parse.적용문서_정리). active 로 남는 것은 적용 중 1건, 처리 중, 최근 실패 1건이다.
     status       TEXT NOT NULL CHECK (status IN ('active','superseded')),
     -- hwpx/hwp 는 L3 사용자 업로드 파서 경로
     extraction   TEXT NOT NULL DEFAULT 'native'
@@ -273,6 +275,8 @@ CREATE TABLE tenant.l3_documents (
     -- 'pending' = 접수만 됐고 파싱 평가 전. 'warn'(평가했는데 의심스러움)과 구분한다
     파싱품질     TEXT NOT NULL CHECK (파싱품질 IN ('pending','pass','warn','fail')),
     미해결참조수 INT NOT NULL DEFAULT 0,   -- 업로드 시점에 알린다 (판정 시점 아님)
+    -- 파싱 실패 분류 코드(스캔본·보호문서·조문없음 등, scripts/l3_parse.py). 안내 문구는 server/routes_l3.py
+    실패사유     TEXT,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

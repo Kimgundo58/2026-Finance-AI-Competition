@@ -732,7 +732,7 @@
      "L3 업로드"
     ],
     "summary": "현재문서",
-    "description": "org 에 지금 적용 중인(status='active') L3 문서 목록. org_id 가 없으면(게스트) 빈 목록이다.\n\n`/{doc_id}` 보다 먼저 등록해야 한다. 그렇지 않으면 'current' 가 doc_id 경로 파라미터로 매칭된다.",
+    "description": "org 의 active L3 문서 목록. org_id 가 없으면(게스트) 빈 목록이다.\n\n기관당 판정에 쓰는 문서는 하나라서 목록은 많아야 세 건이다: 적용 중인 문서(pass/warn), 그보다 나중에\n올려 처리 중인 문서(pending), 최근 실패 1건(fail). 적용 중인 문서를 맨 앞에 둔다. 프론트는 첫 번째\n비실패 문서를 「적용 중」으로, fail 문서를 실패 목록으로 보여준다.\n`/{doc_id}` 보다 먼저 등록해야 한다. 그렇지 않으면 'current' 가 doc_id 경로 파라미터로 매칭된다.",
     "operationId": "현재문서_api_l3_current_get",
     "parameters": [
      {
@@ -1940,7 +1940,7 @@
      "원본파일명"
     ],
     "title": "L3현재문서",
-    "description": "org 에 지금 적용 중인 L3 문서 한 건. status='active' 만 포함하고 superseded 문서는 뺀다."
+    "description": "org 의 active L3 문서 한 건(적용 중·처리 중·최근 실패). superseded 문서는 뺀다.\n\n파싱품질이 pending 인 채로 오래된 문서(파싱이 끊김)는 fail 로 내보낸다(server/routes_l3.py)."
    },
    "L3_____": {
     "properties": {
@@ -2013,6 +2013,28 @@
        }
       ],
       "title": "파싱품질"
+     },
+     "실패사유": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "실패사유"
+     },
+     "적용중_문서": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "적용중 문서"
      },
      "dangling": {
       "items": {

@@ -6,6 +6,10 @@ POST /api/l3/upload 는 tenant.l3_documents 행을 만들고 원본을 저장한
 GET /api/l3/{doc_id} 를 폴링하고, GET /api/l3/current 로 적용 중인 문서 목록을 본다.
 허용 형식은 PDF·HWPX·HWP 이고 파일 내용으로 형식을 확인한다. DOC·DOCX 는 415.
 파싱이 성공하면 이 기관의 tenant.judge_cache 행을 지운다(L3 가 바뀐 뒤 캐시가 답하지 않게).
+
+기관당 판정에 쓰는 L3 는 한 문서다. 새 문서의 파싱이 성공하면 이전 문서를 대체하고, 실패하면 이전 문서가
+계속 적용된다(scripts/l3_parse.적용문서_정리). 상태 응답의 메시지는 이 두 경우와 '적용 중인 규정 없음' 을
+나눠 안내한다. 'pending' 으로 `_중단_판정_분` 분 넘게 남은 문서(서버 재시작 등으로 파싱이 끊김)는 실패로 보여준다.
 """
 from __future__ import annotations
 
@@ -30,6 +34,29 @@ router = APIRouter(prefix="/api/l3", tags=["L3 업로드"])
 최대_바이트 = 30 * 1024 * 1024
 
 _접수_메시지 = "접수했습니다. 조문 분할이 끝나면 상태가 「완료」로 바뀝니다."
+
+# 파싱이 이 시간보다 오래 'pending' 이면 끊긴 것으로 본다. 정상 파싱은 수십 초 안에 끝난다
+_중단_판정_분 = 10        # scripts/l3_parse.py `중단_판정_분` 과 같은 값(서버 기동 때 파서를 import 하지 않으려고 따로 둔다)
+
+# 실패사유 코드(scripts/l3_parse.py 가 기록) → 사용자 안내. 다음에 할 일을 함께 적는다
+_실패_안내 = {
+    "원본없음": "서버에서 원본 파일을 찾지 못했습니다. 다시 올려 주세요.",
+    "보호문서": "배포용이거나 암호가 걸린 문서라 내용을 읽을 수 없습니다. 보호를 해제한 HWP·HWPX 나 PDF 로 올려 주세요.",
+    "추출실패": "파일이 손상됐거나 내용을 읽을 수 없습니다. 원본을 다시 저장해 올려 주세요.",
+    "형식": "지원하지 않는 형식입니다. PDF·HWPX·HWP 로 올려 주세요.",
+    "스캔본": "글자를 인식할 수 없는 문서입니다(스캔한 PDF 등). 글자를 선택할 수 있는 PDF 나 HWPX 로 올려 주세요.",
+    "조문없음": "규정 조문을 하나도 찾지 못했습니다. 기관 규정 원문 파일이 맞는지 확인해 주세요.",
+    "분할실패": "조문을 나누는 중 오류가 났습니다. 다시 올려 주세요.",
+    "저장실패": "조문을 저장하는 중 오류가 났습니다. 다시 올려 주세요.",
+    "서버오류": "처리 중 서버 오류가 났습니다. 다시 올려 주세요.",
+    "중단": "처리가 중단됐습니다(서버 재시작 등). 다시 올려 주세요.",
+}
+_실패_기본안내 = "다시 올려 주세요."
+
+# 화면에 보일 파싱품질. 오래 'pending' 인 문서는 끊긴 것이므로 fail 로 보여준다
+_표시_품질_SQL = (f"CASE WHEN d.\"파싱품질\" = 'pending' "
+                f"AND d.created_at < now() - interval '{_중단_판정_분} minutes' "
+                f"THEN 'fail' ELSE d.\"파싱품질\" END")
 
 
 def 실제형식(본문: bytes) -> str:
@@ -124,19 +151,22 @@ def 업로드(
 
 @router.get("/current", response_model=L3현재문서목록응답)
 def 현재문서(org_id: str | None = None) -> L3현재문서목록응답:
-    """org 에 지금 적용 중인(status='active') L3 문서 목록. org_id 가 없으면(게스트) 빈 목록이다.
+    """org 의 active L3 문서 목록. org_id 가 없으면(게스트) 빈 목록이다.
 
+    기관당 판정에 쓰는 문서는 하나라서 목록은 많아야 세 건이다: 적용 중인 문서(pass/warn), 그보다 나중에
+    올려 처리 중인 문서(pending), 최근 실패 1건(fail). 적용 중인 문서를 맨 앞에 둔다. 프론트는 첫 번째
+    비실패 문서를 「적용 중」으로, fail 문서를 실패 목록으로 보여준다.
     `/{doc_id}` 보다 먼저 등록해야 한다. 그렇지 않으면 'current' 가 doc_id 경로 파라미터로 매칭된다.
     """
     if MOCK:
         return L3현재문서목록응답(문서=[])
     조건, org인자 = _org조건(org_id, "d")
     행 = _질의(
-        f'SELECT d.doc_id, d."원본파일명", d.version, d."시행일", d.created_at, d."파싱품질", '
+        f'SELECT d.doc_id, d."원본파일명", d.version, d."시행일", d.created_at, {_표시_품질_SQL}, '
         f'       (SELECT count(*) FROM tenant.l3_articles a WHERE a.doc_id = d.doc_id) '
         f'  FROM tenant.l3_documents d '
         f' WHERE {조건} AND d.status = \'active\' '
-        f' ORDER BY d.created_at DESC',
+        f' ORDER BY (d."파싱품질" IN (\'pass\', \'warn\')) DESC, d.created_at DESC',
         org인자,
     )
     return L3현재문서목록응답(문서=[
@@ -205,6 +235,7 @@ def 백그라운드_파싱(doc_id: str, org_id: str) -> None:
     `_common` 헬퍼를 거치지 않는 커넥션이라 GUC app.org_id 를 직접 설정한다. 설정하지 않으면
     RLS 정책 때문에 0행이 된다. 파싱이 성공하면 같은 트랜잭션에서 이 기관의 judge_cache 를 지운다.
     예외를 밖으로 던지지 않는다. 실패는 파싱품질='fail' 로 기록해 상태가 'pending' 으로 남지 않게 한다.
+    파싱() 이 실패를 직접 기록하므로, 여기서는 파서 밖에서 난 예외만 `_실패_직접기록` 으로 남긴다.
     """
     try:
         import psycopg
@@ -219,24 +250,60 @@ def 백그라운드_파싱(doc_id: str, org_id: str) -> None:
                     cur.execute("DELETE FROM tenant.judge_cache WHERE org_id = %s", (str(org_id),))
             conn.commit()
         if not 결과.get("ok", True):
-            # 파싱() 은 실패도 예외 없이 dict 로 돌려준다. 여기서 'fail' 로 기록한다
             _log.error("L3 파싱 실패(예외 아님) doc_id=%s 사유=%s", doc_id, 결과.get("사유"))
-            _실행('UPDATE tenant.l3_documents SET "파싱품질" = %s WHERE doc_id = %s',
-                 ("fail", doc_id))
-    except Exception as e:                              # noqa: BLE001
+    except Exception:                                   # noqa: BLE001
         _log.exception("L3 파싱 백그라운드 작업 실패 doc_id=%s", doc_id)
-        _실행('UPDATE tenant.l3_documents SET "파싱품질" = %s WHERE doc_id = %s',
-             ("fail", doc_id))
-        _log.error("  → 파싱품질을 fail 로 기록했다 (%s)", type(e).__name__)
+        _실패_직접기록(doc_id, org_id, "서버오류")
 
 
-def _상태_메시지(파싱품질: str | None, 조_건수: int, 미해결참조수: int | None
+def _실패_직접기록(doc_id: str, org_id: str, 실패사유: str) -> None:
+    """파서 밖 예외(파서 import 실패, DB 오류 등)를 fail 로 남긴다.
+
+    `_실행()` 은 요청 컨텍스트의 org 로 GUC 를 설정하는데, 백그라운드 작업에서는 그 값에 기대지 않는다.
+    자체 커넥션에 GUC 를 설정하고, 파서를 불러올 수 있으면 적용 문서 정리까지 같은 트랜잭션에서 한다.
+    """
+    try:
+        import psycopg
+        with psycopg.connect(DSN, connect_timeout=10) as conn:
+            conn.execute("SELECT set_config('app.org_id', %s, true)", (str(org_id),))
+            try:
+                from l3_parse import 실패_기록
+            except ImportError:
+                conn.execute('UPDATE tenant.l3_documents SET "파싱품질" = \'fail\', "실패사유" = %s '
+                             'WHERE doc_id = %s', (실패사유, doc_id))
+            else:
+                with conn.cursor() as cur:
+                    실패_기록(cur, doc_id, org_id, 실패사유)
+            conn.commit()
+        _log.error("  → 파싱품질을 fail 로 기록했다 (실패사유=%s)", 실패사유)
+    except Exception:                                   # noqa: BLE001
+        _log.exception("L3 실패 기록도 실패했다 doc_id=%s — 상태 조회에서 %d분 뒤 실패로 보인다",
+                       doc_id, _중단_판정_분)
+
+
+def _상태_메시지(파싱품질: str | None, 조_건수: int, 미해결참조수: int | None, *,
+              실패사유: str | None = None, 대체됨: bool = False,
+              다른_적용문서: str | None = None, 이전_문서: str | None = None
               ) -> tuple[str, int | None, str]:
-    """파싱품질과 조문 건수로 (상태, 조_건수, 메시지) 를 정한다. DB 를 읽지 않는 순수 함수다."""
+    """(상태, 조_건수, 메시지) 를 정한다. DB 를 읽지 않는 순수 함수다.
+
+    다른_적용문서: 이 문서가 아닌, 지금 판정에 쓰는 같은 기관 문서의 이름. 없으면 None.
+    이전_문서: 이 문서가 대체한 이전 문서 이름. 대체됨: 이 문서가 나중에 올린 문서로 대체됐는가.
+    """
     if 파싱품질 == "fail":
-        return "실패", None, "파싱에 실패했습니다. 다시 업로드해 주세요."
+        메시지 = "파싱에 실패했습니다. " + _실패_안내.get(실패사유 or "", _실패_기본안내)
+        if 다른_적용문서:
+            메시지 += f" 판정에는 기존 규정을 계속 씁니다(「{다른_적용문서}」)."
+        else:
+            메시지 += " 지금은 적용 중인 기관 규정이 없어 상위 규정(중기부·창진원 지침)만으로 판정합니다."
+        return "실패", None, 메시지
     if 조_건수:
         메시지 = f"{조_건수}개 조를 등록했습니다."
+        if 대체됨:
+            메시지 += " 이후 올린 문서로 교체되어 판정에는 쓰지 않습니다" + (
+                f"(현재: 「{다른_적용문서}」)." if 다른_적용문서 else ".")
+        elif 이전_문서:
+            메시지 += f" 이전 규정을 대체해 이 문서로 판정합니다(이전: 「{이전_문서}」)."
         if 미해결참조수:
             메시지 += f" 참조 {미해결참조수}건은 상위 규정을 등록된 규정에서 찾지 못했습니다."
         # 조문은 뽑혔지만 품질이 낮다. 상태는 '완료'로 두고 메시지로만 알린다
@@ -246,28 +313,52 @@ def _상태_메시지(파싱품질: str | None, 조_건수: int, 미해결참조
     if 파싱품질 == "warn":
         # 파서는 실행됐지만 조문이 0건이다. 아직 처리 전인 경우와 원인이 달라 메시지를 나눈다
         return "파싱대기", None, "파싱을 시도했지만 조문을 뽑아내지 못했습니다. 확인이 필요합니다."
-    return "파싱대기", None, _접수_메시지
+    메시지 = _접수_메시지
+    if 다른_적용문서:
+        메시지 += f" 처리가 끝날 때까지는 기존 규정으로 판정합니다(「{다른_적용문서}」)."
+    return "파싱대기", None, 메시지
 
 
 def _live_상태(doc_id: str, org_id: str | None) -> L3업로드응답:
     """l3_documents 와 l3_articles 건수로 상태(완료/실패/파싱대기)를 정해 반환한다.
 
-    미해결 참조 상세(조·참조·사유)는 저장하는 테이블이 없어 항상 빈 배열이다.
+    같은 기관에서 지금 판정에 쓰는 문서(active, pass/warn 중 최신)와 이 문서가 대체한 이전 문서를 함께
+    읽어 메시지를 정한다. 미해결 참조 상세(조·참조·사유)는 저장하는 테이블이 없어 항상 빈 배열이다.
     `_org조건()` 을 써서 게스트(org_id 없음)는 0행, 즉 404 가 된다.
     """
     조건, org인자 = _org조건(org_id, "d")
     행 = _질의(
-        f'SELECT d."원본파일명", d."파싱품질", d."미해결참조수" '
+        f'SELECT d."원본파일명", d."파싱품질", {_표시_품질_SQL}, d."미해결참조수", d."실패사유", '
+        f'       d.status, d.org_id, d.created_at '
         f'FROM tenant.l3_documents d '
         f'WHERE d.doc_id = %s AND {조건}',
         (doc_id, *org인자),
     )
     if not 행:
         raise HTTPException(404, f"L3 문서 {doc_id} 을(를) 찾을 수 없습니다")
-    파일명, 파싱품질, 미해결참조수 = 행[0]
+    파일명, 원래_품질, 파싱품질, 미해결참조수, 실패사유, status, 문서_org, 등록 = 행[0]
+    if 원래_품질 == "pending" and 파싱품질 == "fail":
+        실패사유 = "중단"                     # 파싱이 끊겨 'pending' 으로 남은 문서
     확장자 = 파일명.rsplit(".", 1)[-1].lower() if "." in (파일명 or "") else ""
 
     개수 = _질의('SELECT count(*) FROM tenant.l3_articles WHERE doc_id = %s', (doc_id,))
-    상태값, 조_건수, 메시지 = _상태_메시지(파싱품질, 개수[0][0] if 개수 else 0, 미해결참조수)
+    적용 = _질의(
+        'SELECT doc_id, "원본파일명" FROM tenant.l3_documents '
+        " WHERE org_id = %s AND status = 'active' AND \"파싱품질\" IN ('pass', 'warn') "
+        ' ORDER BY created_at DESC LIMIT 1', (문서_org,))
+    적용_id, 적용_이름 = (str(적용[0][0]), 적용[0][1]) if 적용 else (None, None)
+    이전 = []
+    if 적용_id == doc_id:
+        이전 = _질의(
+            'SELECT "원본파일명" FROM tenant.l3_documents '
+            " WHERE org_id = %s AND status = 'superseded' AND \"파싱품질\" IN ('pass', 'warn') "
+            '   AND created_at < %s ORDER BY created_at DESC LIMIT 1', (문서_org, 등록))
+    상태값, 조_건수, 메시지 = _상태_메시지(
+        파싱품질, 개수[0][0] if 개수 else 0, 미해결참조수, 실패사유=실패사유,
+        대체됨=status == "superseded",
+        다른_적용문서=적용_이름 if 적용_id != doc_id else None,
+        이전_문서=이전[0][0] if 이전 else None)
     return L3업로드응답(doc_id=doc_id, 파일명=파일명, 확장자=확장자, 상태=상태값,
-                        조_건수=조_건수, 미해결참조=[], 메시지=메시지, 파싱품질=파싱품질)
+                        조_건수=조_건수, 미해결참조=[], 메시지=메시지, 파싱품질=파싱품질,
+                        실패사유=실패사유 if 파싱품질 == "fail" else None,
+                        적용중_문서=적용_이름)
