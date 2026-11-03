@@ -5,7 +5,8 @@ server/routes_l3.백그라운드_파싱 이 업로드 응답 뒤 백그라운드
 파싱(cur, doc_id) -> {ok, 파싱품질, 조_건수, 미해결참조수, strategy, flags, 사유} 와 원본경로/L3_저장소.
 tenant.l3_documents 의 파싱품질·미해결참조수·실패사유를 갱신한다. 호출자는 GUC app.org_id 를 설정한
 트랜잭션 안에서 불러야 한다(RLS). 항상 지키는 조건: 조 0건은 실패이고, 파싱품질은 'pending' 에서 항상
-pass/warn/fail 로 바뀐다. 텍스트 레이어가 없는 스캔본은 텍스트 인식(OCR)을 하지 않고 실패로 기록한다.
+pass/warn/fail 로 바뀐다. 텍스트 레이어가 없는 PDF(스캔본)는 CLOVA OCR 이 설정돼 있으면(clova_ocr.설정됨)
+OCR 로 다시 읽고 extraction='ocr', 파싱품질 warn 으로 기록한다. 설정이 없으면 실패(스캔본)로 기록한다.
 기관당 판정에 쓰는 L3 는 한 문서다. 파싱이 성공하면 같은 기관의 이전 문서를 superseded 로 바꾸고,
 실패하면 이전 문서를 그대로 둔다(`적용문서_정리`).
 
@@ -15,10 +16,12 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import traceback
 import uuid
 from pathlib import Path
 
+import clova_ocr
 import l3_load
 from _lib import db
 from article_split import split_articles, validate
@@ -31,7 +34,7 @@ ROOT = Path(__file__).resolve().parent.parent
 _허용_확장자 = {"pdf", "hwpx", "hwp"}
 L3_저장소 = Path(os.environ.get("SUDDOE_L3_DIR", str(ROOT / "_l3_업로드")))
 
-_스캔본_사유 = "텍스트가 없다(스캔본으로 보임) — 스캔본 텍스트 인식은 지원하지 않는다"
+_스캔본_사유 = "텍스트가 없다(스캔본으로 보임) — OCR 이 설정되지 않아 읽지 않았다"
 # 'pending' 으로 이만큼 넘게 남은 문서는 파싱이 끊긴 것으로 본다. server/routes_l3.py `_중단_판정_분` 과 같은 값
 중단_판정_분 = 10
 
@@ -71,6 +74,38 @@ def _본문_추출(경로: Path) -> tuple[str, dict[int, int]] | dict:
     return payload
 
 
+# 스캔본 판별에 세는 글자. 공백·숫자·기호는 빼야 쪽번호만 텍스트 레이어에 있는 스캔본도 스캔본으로 잡힌다
+_RE_글자 = re.compile(r"[가-힣A-Za-z一-龥]")
+
+
+def _스캔본_pdf(경로: Path, 본문: str) -> bool:
+    """텍스트 레이어에서 글자가 거의 나오지 않은 PDF 인가(쪽번호·공백만 있는 경우 포함)."""
+    with 경로.open("rb") as f:
+        pdf = f.read(5).startswith(b"%PDF")
+    return pdf and len(_RE_글자.findall(본문)) < 빈_추출_글자수_임계치
+
+
+def _문자인식(경로: Path) -> tuple[str, dict[int, int]] | dict:
+    """스캔본 PDF 를 OCR 로 읽는다. 실패하면 `_본문_추출` 과 같은 {사유, 실패사유, 트레이스?} dict."""
+    try:
+        return clova_ocr.pdf_문자인식(경로)
+    except clova_ocr.문자인식오류 as e:
+        return {"사유": f"OCR 실패: {e}", "실패사유": e.실패사유}
+    except Exception as e:                                   # noqa: BLE001
+        return {"사유": f"OCR 실패 {type(e).__name__}: {e}", "실패사유": "문자인식실패",
+                "트레이스": traceback.format_exc()[-800:]}
+
+
+def _분할(본문: str, 페이지오프셋: dict[int, int]) -> tuple[list[dict], str, dict] | dict:
+    """(조 목록, 분할 전략, validate 결과). 분할 중 예외는 실패 dict 로 돌려준다."""
+    try:
+        arts, strategy = split_articles(본문, 페이지오프셋)
+    except Exception as e:
+        return {"사유": f"조문 분할 실패 {type(e).__name__}: {e}",
+                "실패사유": "분할실패", "트레이스": traceback.format_exc()[-800:]}
+    return arts, strategy, validate(arts, strategy)
+
+
 def _조문_저장(cur, doc_id: str, org_id, arts: list[dict]) -> None:
     """doc_id 의 기존 조문을 지우고 다시 넣는다. 실패하면 예외를 올린다.
 
@@ -99,11 +134,13 @@ def _미해결참조_수(cur, arts: list[dict]) -> int:
 
 
 def _상태_기록(cur, doc_id: str, 파싱품질: str, 미해결참조수: int,
-             실패사유: str | None = None) -> None:
+             실패사유: str | None = None, 추출방식: str | None = None) -> None:
+    """추출방식 이 있으면 extraction 도 바꾼다(OCR 로 읽은 문서는 'ocr'). 없으면 업로드 때 값을 둔다."""
     cur.execute(
-        "UPDATE tenant.l3_documents SET \"파싱품질\"=%s, \"미해결참조수\"=%s, \"실패사유\"=%s "
+        "UPDATE tenant.l3_documents SET \"파싱품질\"=%s, \"미해결참조수\"=%s, \"실패사유\"=%s, "
+        "       extraction = COALESCE(%s, extraction) "
         " WHERE doc_id=%s",
-        (파싱품질, 미해결참조수, 실패사유, doc_id))
+        (파싱품질, 미해결참조수, 실패사유, 추출방식, doc_id))
 
 
 def _기관_정리_잠금(cur, org_id) -> None:
@@ -175,30 +212,43 @@ def 파싱(cur, doc_id: str) -> dict:
         return {"ok": False, "사유": f"l3_documents 에 doc_id={doc_id} 없음"}
     org_id, 원본파일명 = row
 
+    추출방식: str | None = None      # OCR 로 읽으면 'ocr'. None 이면 업로드 때 기록한 값을 둔다
+
     def _결과_기록(파싱품질: str, 조_건수: int = 0, 미해결참조수: int = 0, **부가) -> dict:
         성공 = 파싱품질 in ("pass", "warn")
         _기관_정리_잠금(cur, org_id)          # `_상태_기록` 의 행 잠금보다 먼저 잡는다(교착 방지)
-        _상태_기록(cur, doc_id, 파싱품질, 미해결참조수, None if 성공 else 부가.get("실패사유"))
+        _상태_기록(cur, doc_id, 파싱품질, 미해결참조수, None if 성공 else 부가.get("실패사유"), 추출방식)
         적용문서_정리(cur, doc_id, org_id, 성공)
-        return {"ok": 성공, "파싱품질": 파싱품질,
-                "조_건수": 조_건수, "미해결참조수": 미해결참조수, **부가}
+        return {"ok": 성공, "파싱품질": 파싱품질, "조_건수": 조_건수, "미해결참조수": 미해결참조수,
+                "추출방식": 추출방식, **부가}
 
-    추출 = _본문_추출(원본경로(doc_id, _확장자(원본파일명)))
+    경로 = 원본경로(doc_id, _확장자(원본파일명))
+    추출 = _본문_추출(경로)
     if isinstance(추출, dict):
         return _결과_기록("fail", **추출)
     raw_text, page_offsets = 추출
 
-    try:
-        arts, strategy = split_articles(raw_text, page_offsets)
-    except Exception as e:
-        return _결과_기록("fail", 사유=f"조문 분할 실패 {type(e).__name__}: {e}",
-                      실패사유="분할실패", 트레이스=traceback.format_exc()[-800:])
+    # 텍스트 레이어에서 글자가 거의 나오지 않은 PDF 는 스캔본이다. OCR 이 설정돼 있으면 OCR 로 다시 읽고, 아니면
+    # 실패로 기록한다. 쪽번호만 있는 스캔본을 그대로 나누면 원문이 아닌 조문(대개 1건)이 나오므로 나누지 않는다
+    if _스캔본_pdf(경로, raw_text):
+        if not clova_ocr.설정됨():
+            return _결과_기록("fail", 사유=_스캔본_사유, 실패사유="스캔본")
+        추출방식 = "ocr"
+        추출 = _문자인식(경로)
+        if isinstance(추출, dict):
+            return _결과_기록("fail", **추출)
+        raw_text, page_offsets = 추출
 
-    v = validate(arts, strategy)
+    분할 = _분할(raw_text, page_offsets)
+    if isinstance(분할, dict):
+        return _결과_기록("fail", **분할)
+    arts, strategy, v = 분할
     if not v["ok"]:                 # 조 0건은 성공이 아니다
-        스캔본 = len(raw_text) < 빈_추출_글자수_임계치
-        return _결과_기록("fail", 사유=_스캔본_사유 if 스캔본 else f"조 0건 ({strategy})",
-                      실패사유="스캔본" if 스캔본 else "조문없음", strategy=strategy)
+        # 글자가 거의 없으면 조문이 없는 것이 아니라 읽지 못한 것이다(OCR 결과가 비었거나, 이미지뿐인 HWP 등)
+        글자적음 = len(_RE_글자.findall(raw_text)) < 빈_추출_글자수_임계치
+        실패사유 = ("문자인식실패" if 추출방식 == "ocr" else "스캔본") if 글자적음 else "조문없음"
+        return _결과_기록("fail", 사유=f"조 0건 ({strategy}{', OCR' if 추출방식 else ''})",
+                      실패사유=실패사유, strategy=strategy)
 
     try:
         _조문_저장(cur, doc_id, org_id, arts)
@@ -208,6 +258,9 @@ def 파싱(cur, doc_id: str) -> dict:
 
     # 미해결 참조는 업로드(파싱) 시점에 세어 l3_documents.미해결참조수 에 둔다
     flags = list(v["flags"])
+    if 추출방식 == "ocr":
+        # OCR 은 금액·조번호를 잘못 읽을 수 있다. 항상 warn 으로 두고, 인용 신뢰등급은 B 가 된다(llm_validate)
+        flags.append("OCR:스캔본 문자 인식")
     return _결과_기록("warn" if flags else "pass", 조_건수=len(arts),
                   미해결참조수=_미해결참조_수(cur, arts), strategy=strategy, flags=flags)
 

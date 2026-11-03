@@ -45,6 +45,10 @@ _실패_안내 = {
     "추출실패": "파일이 손상됐거나 내용을 읽을 수 없습니다. 원본을 다시 저장해 올려 주세요.",
     "형식": "지원하지 않는 형식입니다. PDF·HWPX·HWP 로 올려 주세요.",
     "스캔본": "글자를 인식할 수 없는 문서입니다(스캔한 PDF 등). 글자를 선택할 수 있는 PDF 나 HWPX 로 올려 주세요.",
+    # 아래 두 코드는 스캔본을 OCR(scripts/clova_ocr.py)로 읽으려다 실패한 경우다
+    "쪽수초과": "스캔본은 OCR 로 읽는데, 쪽수가 한도를 넘었습니다. 규정 부분만 나눠 올리거나 "
+             "글자를 선택할 수 있는 PDF·HWPX 로 올려 주세요.",
+    "문자인식실패": "스캔본을 OCR 로 읽지 못했습니다. 잠시 뒤 다시 올리거나 글자를 선택할 수 있는 PDF·HWPX 로 올려 주세요.",
     "조문없음": "규정 조문을 하나도 찾지 못했습니다. 기관 규정 원문 파일이 맞는지 확인해 주세요.",
     "분할실패": "조문을 나누는 중 오류가 났습니다. 다시 올려 주세요.",
     "저장실패": "조문을 저장하는 중 오류가 났습니다. 다시 올려 주세요.",
@@ -163,7 +167,7 @@ def 현재문서(org_id: str | None = None) -> L3현재문서목록응답:
     조건, org인자 = _org조건(org_id, "d")
     행 = _질의(
         f'SELECT d.doc_id, d."원본파일명", d.version, d."시행일", d.created_at, {_표시_품질_SQL}, '
-        f'       (SELECT count(*) FROM tenant.l3_articles a WHERE a.doc_id = d.doc_id) '
+        f'       (SELECT count(*) FROM tenant.l3_articles a WHERE a.doc_id = d.doc_id), d.extraction '
         f'  FROM tenant.l3_documents d '
         f' WHERE {조건} AND d.status = \'active\' '
         f' ORDER BY (d."파싱품질" IN (\'pass\', \'warn\')) DESC, d.created_at DESC',
@@ -173,8 +177,8 @@ def 현재문서(org_id: str | None = None) -> L3현재문서목록응답:
         L3현재문서(doc_id=str(doc_id), 원본파일명=이름, version=버전,
                 시행일=시행일.isoformat() if 시행일 else None,
                 등록일=등록.date().isoformat() if 등록 else None,
-                파싱품질=파싱품질, 조_건수=건수)
-        for doc_id, 이름, 버전, 시행일, 등록, 파싱품질, 건수 in 행])
+                파싱품질=파싱품질, 조_건수=건수, 추출방식=추출방식)
+        for doc_id, 이름, 버전, 시행일, 등록, 파싱품질, 건수, 추출방식 in 행])
 
 
 @router.get("/{doc_id}", response_model=L3업로드응답)
@@ -283,12 +287,13 @@ def _실패_직접기록(doc_id: str, org_id: str, 실패사유: str) -> None:
 
 def _상태_메시지(파싱품질: str | None, 조_건수: int, 미해결참조수: int | None, *,
               실패사유: str | None = None, 대체됨: bool = False,
-              다른_적용문서: str | None = None, 이전_문서: str | None = None
-              ) -> tuple[str, int | None, str]:
+              다른_적용문서: str | None = None, 이전_문서: str | None = None,
+              ocr: bool = False) -> tuple[str, int | None, str]:
     """(상태, 조_건수, 메시지) 를 정한다. DB 를 읽지 않는 순수 함수다.
 
     다른_적용문서: 이 문서가 아닌, 지금 판정에 쓰는 같은 기관 문서의 이름. 없으면 None.
     이전_문서: 이 문서가 대체한 이전 문서 이름. 대체됨: 이 문서가 나중에 올린 문서로 대체됐는가.
+    ocr: 스캔본을 OCR 로 읽은 문서인가(extraction='ocr').
     """
     if 파싱품질 == "fail":
         메시지 = "파싱에 실패했습니다. " + _실패_안내.get(실패사유 or "", _실패_기본안내)
@@ -307,7 +312,11 @@ def _상태_메시지(파싱품질: str | None, 조_건수: int, 미해결참조
         if 미해결참조수:
             메시지 += f" 참조 {미해결참조수}건은 상위 규정을 등록된 규정에서 찾지 못했습니다."
         # 조문은 뽑혔지만 품질이 낮다. 상태는 '완료'로 두고 메시지로만 알린다
-        if 파싱품질 == "warn":
+        if ocr:
+            # 이 문서를 인용한 '가능' 은 조건부로 낮춘다(scripts/llm_validate.py B_GRADE_DOWNGRADE)
+            메시지 += (" 스캔본이라 OCR 로 읽었습니다. 금액·조번호를 잘못 읽었을 수 있어 이 문서를 근거로 한 "
+                     "'가능' 은 '조건부' 로 안내합니다. 원문과 대조해 확인해 주세요.")
+        elif 파싱품질 == "warn":
             메시지 += " (품질 확인 필요 — 조문 인식이 형식과 어긋났을 수 있습니다.)"
         return "완료", 조_건수, 메시지
     if 파싱품질 == "warn":
@@ -333,14 +342,14 @@ def _live_상태(doc_id: str, org_id: str | None) -> L3업로드응답:
     조건, org인자 = _org조건(org_id, "d")
     행 = _질의(
         f'SELECT d."원본파일명", d."파싱품질", {_표시_품질_SQL}, d."미해결참조수", d."실패사유", '
-        f'       d.status, d.org_id, d.created_at '
+        f'       d.status, d.org_id, d.created_at, d.extraction '
         f'FROM tenant.l3_documents d '
         f'WHERE d.doc_id = %s AND {조건}',
         (doc_id, *org인자),
     )
     if not 행:
         raise HTTPException(404, f"L3 문서 {doc_id} 을(를) 찾을 수 없습니다")
-    파일명, 원래_품질, 파싱품질, 미해결참조수, 실패사유, status, 문서_org, 등록 = 행[0]
+    파일명, 원래_품질, 파싱품질, 미해결참조수, 실패사유, status, 문서_org, 등록, 추출방식 = 행[0]
     if 원래_품질 == "pending" and 파싱품질 == "fail":
         실패사유 = "중단"                     # 파싱이 끊겨 'pending' 으로 남은 문서
     확장자 = 파일명.rsplit(".", 1)[-1].lower() if "." in (파일명 or "") else ""
@@ -361,8 +370,8 @@ def _live_상태(doc_id: str, org_id: str | None) -> L3업로드응답:
         파싱품질, 개수[0][0] if 개수 else 0, 미해결참조수, 실패사유=실패사유,
         대체됨=status == "superseded",
         다른_적용문서=적용_이름 if 적용_id != doc_id else None,
-        이전_문서=이전[0][0] if 이전 else None)
+        이전_문서=이전[0][0] if 이전 else None, ocr=추출방식 == "ocr")
     return L3업로드응답(doc_id=doc_id, 파일명=파일명, 확장자=확장자, 상태=상태값,
                         조_건수=조_건수, 미해결참조=[], 메시지=메시지, 파싱품질=파싱품질,
                         실패사유=실패사유 if 파싱품질 == "fail" else None,
-                        적용중_문서=적용_이름)
+                        적용중_문서=적용_이름, 추출방식=추출방식)

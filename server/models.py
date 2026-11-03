@@ -241,6 +241,8 @@ class L3업로드응답(BaseModel):
     실패사유: str | None = None
     # 이 기관이 지금 판정에 쓰는 L3 문서 이름(이 문서일 수도 있다). 없으면 null — 상위 규정만으로 판정한다
     적용중_문서: str | None = None
+    # 텍스트를 얻은 방식(l3_documents.extraction). 'ocr' 이면 스캔본을 OCR 로 읽은 문서다
+    추출방식: str | None = None
 
     @computed_field  # 구 이름 호환(제거 예정: 다음 릴리스)
     @property
@@ -260,6 +262,8 @@ class L3현재문서(BaseModel):
     등록일: str | None = None
     파싱품질: Literal["pending", "pass", "warn", "fail"] | None = None
     조_건수: int = 0
+    # 텍스트를 얻은 방식(l3_documents.extraction). 'ocr' 이면 스캔본을 OCR 로 읽은 문서다
+    추출방식: str | None = None
 
 
 class L3현재문서목록응답(BaseModel):

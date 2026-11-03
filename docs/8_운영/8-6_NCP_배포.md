@@ -89,7 +89,7 @@ docker compose ps                                              # 3개 모두 hea
 - `SUDDOE_DEMO_SECRET` · `SUDDOE_SLUG_SECRET` 은 GCP 운영에서 미설정이었다(개발용 기본값 사용). 새 값으로 바꾸면 기관 slug 가 전부 바뀐다.
 - `postgres` 롤은 이 구성에서 superuser 다. 앱 DSN 은 반드시 `suddoe_app` 을 쓴다(compose 에 고정).
 - `db/docker-compose.yml`(개발용)은 5432 와 pgweb 을 외부에 노출한다. 서버에서 쓰지 않는다.
-- 스캔 PDF(텍스트 없는 L3)는 OCR 하지 않는다. 업로드는 실패로 처리되고 사유를 알린다.
+- 스캔 PDF(텍스트 없는 L3)는 `.env` 에 `SUDDOE_OCR_URL`·`SUDDOE_OCR_SECRET`(CLOVA OCR 도메인)이 있으면 OCR 로 읽는다(쪽당 과금, 문서당 `SUDDOE_OCR_MAX_PAGES` 쪽까지). 없으면 실패로 처리하고 사유를 알린다.
 - 덤프는 `--no-privileges` 라 권한이 복원되지 않는다. `restore.sh` 가 `db/init/10b_app_grants.sql` 로
   권한과 search_path 를 다시 설정한다(로컬 init 과 같은 파일, `extensions` 스키마 USAGE 포함).
 - Caddy 는 요청 본문을 35MB 로 제한한다(L3 업로드 앱 상한 30MB).
