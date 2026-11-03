@@ -69,4 +69,4 @@ COMMENT ON COLUMN tenant.l3_documents."파싱품질" IS
 -- 의도적으로 하지 않은 것:
 -- expense_plans.질문원문 NOT NULL 은 유지한다. 폼 경로는 폼 값을 문장으로 합성해 채운다.
 --   합성 문장을 다시 LLM 입력으로 쓰지 않는다. 필드→문장→필드 왕복은 정보를 잃는다.
--- expense_plans.용도·하위항목 은 정규화 JSONB 안에 두고 컬럼으로 승격하지 않는다.
+-- expense_plans.용도·하위항목 은 정규화 JSONB 안에 두고 컬럼으로 따로 빼지 않는다.

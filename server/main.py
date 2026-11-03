@@ -12,7 +12,7 @@
     routes_profile     GET·PUT /api/profile
     routes_admin       GET /admin/status, /admin/queue · POST /admin/warmup (X-Admin-Token)
     routes_ingest      /admin/documents — L1·L2 규정 적재 (X-Admin-Token, SUDDOE_INGEST_DSN 없으면 503)
-    routes_plans · routes_tasks · routes_l3 · routes_orgs   지출계획·할일·기관 규정(L3)·기관 목록
+    routes_plans · routes_tasks · routes_l3 · routes_orgs   지출계획·할일·기관 자체규정(L3)·기관 목록
 
 실행:
     PYTHONIOENCODING=utf-8 python -m uvicorn server.main:app --reload --port 8080

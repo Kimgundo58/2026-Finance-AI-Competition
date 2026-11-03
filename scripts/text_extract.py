@@ -5,7 +5,7 @@ l3_parse(L3 업로드)와 코퍼스 적재가 부른다. 공개 함수: extract(
 ('articles', [조문 dict]) 또는 ('text', (본문, {문자오프셋: 페이지번호})), 빈_추출_글자수_임계치.
 형식은 확장자가 아니라 파일 앞 바이트로 판정한다: %PDF → pdftext, OLE → HWP v5,
 ZIP → HWPX/DOCX(내용물로 구분), <?xml → 법령 XML 또는 HWPML, 그 밖의 .txt → 평문.
-불변식: 모든 형식의 출력은 extract() 한 곳에서 서로게이트 정리를 거친다.
+불변 조건: 모든 형식의 출력은 extract() 한 곳에서 서로게이트 정리를 거친다.
 """
 from __future__ import annotations
 
@@ -79,7 +79,7 @@ def extract_xml(path: Path) -> list[dict]:
         if 본문:
             out.append({"조번호": 조번호, "조제목": 제목, "본문": 본문, "페이지": None})
 
-    # 별표는 조문단위 바깥에 있다. 인용 대상이므로 의사 조문으로 만들어 같이 넘긴다.
+    # 별표는 조문단위 바깥에 있다. 인용 대상이므로 조문 형식의 항목으로 만들어 같이 넘긴다.
     for b in tree.findall(".//별표단위"):
         내용 = (b.findtext("별표내용") or "").strip()
         if not 내용:
@@ -301,12 +301,12 @@ _치환문자 = chr(0xFFFD)
 
 
 def 서로게이트_정리(text: str, 라벨: str = "") -> str:
-    """UTF-16 서로게이트(surrogate) 쌍을 합치고, 못 합친 고아는 U+FFFD 로 치환한다.
+    """UTF-16 서로게이트(surrogate) 쌍을 합치고, 못 합친 짝 없는 서로게이트는 U+FFFD 로 치환한다.
 
     결합되지 않은 서로게이트 쌍은 파이썬 문자열에 서로게이트 코드 2개로 남아 UTF-8
     인코딩이 불가능하다 — 그대로 DB 로 가면 psycopg 가 UnicodeEncodeError 를 낸다.
 
-    고아는 지우지 않고 U+FFFD 로 치환해 자리를 남기며, 몇 개를 처리했는지 로그에 남긴다.
+    짝 없는 서로게이트는 지우지 않고 U+FFFD 로 치환해 자리를 남기며, 몇 개를 처리했는지 로그에 남긴다.
 
     정규식을 쓰지 않는다 — 패턴에 서로게이트 문자를 적으려면 이 소스 파일이 그 문자를
     포함해야 하는데, 그러면 UTF-8 로 저장할 수 없다.
@@ -315,7 +315,7 @@ def 서로게이트_정리(text: str, 라벨: str = "") -> str:
         return text
     if not any(_서로게이트_시작 <= ord(c) <= _서로게이트_끝 for c in text):
         return text
-    결과, 쌍수, 고아수 = [], 0, 0
+    결과, 쌍수, 짝없음수 = [], 0, 0
     i, n = 0, len(text)
     while i < n:
         o = ord(text[i])
@@ -328,12 +328,12 @@ def 서로게이트_정리(text: str, 라벨: str = "") -> str:
             continue
         if _서로게이트_시작 <= o <= _서로게이트_끝:
             결과.append(_치환문자)          # 버리지 않는다 — 자리를 남긴다
-            고아수 += 1
+            짝없음수 += 1
         else:
             결과.append(text[i])
         i += 1
-    _log.warning("서로게이트 정리%s — 쌍 결합 %d개 · 고아 U+FFFD 치환 %d개",
-                  f"({라벨})" if 라벨 else "", 쌍수, 고아수)
+    _log.warning("서로게이트 정리%s — 쌍 결합 %d개 · 짝 없는 서로게이트 U+FFFD 치환 %d개",
+                  f"({라벨})" if 라벨 else "", 쌍수, 짝없음수)
     return "".join(결과)
 
 

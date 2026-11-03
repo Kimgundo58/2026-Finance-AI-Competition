@@ -4,7 +4,7 @@
 text_extract.extract_pdf 가 쓴다(PDF 텍스트 추출은 반드시 이 모듈을 거친다). 공개 함수:
 extract(path) -> (본문, 중복레이어였나), extract_meta(path) -> (본문, 진단 dict),
 extract_pages(path) -> 페이지별 본문 목록. 문자중복 레이어는 pdfplumber 의 `page.dedupe_chars()` 로
-풀고, 2단 조판은 거터(세로 빈 띠)를 찾아 좌우로 crop 한다. 2단 여부는 문서 단위로 판정하되
+풀고, 2단 조판은 단 사이 여백(gutter, 세로 빈 띠)을 찾아 좌우로 crop 한다. 2단 여부는 문서 단위로 판정하되
 자르는 위치는 페이지별로 쓴다 — 표지·목차는 본문과 단 위치가 다르다.
 """
 from __future__ import annotations
@@ -16,7 +16,7 @@ import pdfplumber
 DUP_THRESHOLD = 0.35
 NL = chr(10)           # 개행
 
-# 거터 판정 파라미터
+# 단 사이 여백 판정 파라미터
 GUTTER_MIN_W = 18      # 이보다 좁은 빈 띠는 자간·표 여백일 수 있다
 GUTTER_RANGE = (0.25, 0.75)  # 페이지 폭의 이 구간 안에 있어야 단 경계로 본다
 GUTTER_SAMPLE = 8      # 검사할 페이지 수
@@ -40,7 +40,7 @@ def dup_ratio(txt: str) -> float:
 def page_gutter(page) -> tuple[float, float] | None:
     """이 페이지의 가장 넓은 세로 빈 띠. (중심 x, 폭) 또는 None.
 
-    x0 만 보면 표에서 오탐이 난다 — x0~x1 구간을 합쳐 덮인 영역으로 판단한다.
+    x0 만 보면 표에서 오탐이 난다 — x0~x1 구간을 합쳐 글자가 차지한 영역으로 판단한다.
     """
     words = page.extract_words()
     if len(words) < 30:
@@ -98,7 +98,7 @@ def is_quadrant(pages, gutter: float | None) -> float | None:
     """4분면(4-up) 배치인가. 맞으면 대표 가로 띠 y, 아니면 None.
 
     좌상 -> 우상 -> 좌하 -> 우하 순으로 읽어야 조 순서가 맞다.
-    세로 거터가 없으면 4분면일 수 없고, 과반 페이지에서 나와야 채택한다.
+    세로 단 사이 여백이 없으면 4분면일 수 없고, 과반 페이지에서 나와야 채택한다.
     """
     if gutter is None or len(pages) < 2:
         return None
@@ -115,7 +115,7 @@ def is_quadrant(pages, gutter: float | None) -> float | None:
 
 
 def is_two_column(pages) -> float | None:
-    """이 문서가 2단인가. 2단이면 대표 거터 x, 아니면 None.
+    """이 문서가 2단인가. 2단이면 대표 단 사이 여백 x, 아니면 None.
 
     이상치를 버리고 판정한다. 표지·목차는 본문과 단 위치가 달라 이상치가 되므로,
     median 근처에 몰린 페이지가 과반이면 2단으로 본다.
@@ -135,10 +135,10 @@ def is_two_column(pages) -> float | None:
 
 
 def _page_text(page, two_col: float | None, quad: float | None = None) -> str:
-    """2단이면 그 페이지 자신의 거터로 자른다. 4분면이면 좌상->우상->좌하->우하.
+    """2단이면 그 페이지 자신의 단 사이 여백으로 자른다. 4분면이면 좌상->우상->좌하->우하.
 
     문서 대표값으로 일괄 자르면 표지처럼 단 위치가 다른 페이지에서 글자를 가른다.
-    페이지에 거터가 없으면(전면 표 등) 자르지 않는다 — 표를 둘로 자르는 것보다 낫다.
+    페이지에 단 사이 여백이 없으면(전면 표 등) 자르지 않는다 — 표를 둘로 자르는 것보다 낫다.
     """
     if two_col is None:
         return page.extract_text() or ""

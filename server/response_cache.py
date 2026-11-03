@@ -37,11 +37,11 @@ def 캐시키(*조각: Any) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
-def l3_지문(org: str | None) -> str:
+def l3_해시(org: str | None) -> str:
     """기관 L3 문서 집합과 파싱 상태의 해시. 판정 캐시키에 넣는다. 게스트·mock·DB 오류면 빈 문자열.
 
-    L3 파싱이 커밋되면 파싱품질이 'pending' 에서 바뀌므로 지문이 바뀐다. 요청 시작 때 계산하므로,
-    파싱 커밋 전에 시작해 옛 L3 로 판정한 요청은 옛 지문 키로 저장되어 이후 요청에 적중하지 않는다.
+    L3 파싱이 커밋되면 파싱품질이 'pending' 에서 바뀌므로 해시가 바뀐다. 요청 시작 때 계산하므로,
+    파싱 커밋 전에 시작해 옛 L3 로 판정한 요청은 옛 해시 키로 저장되어 이후 요청에 적중하지 않는다.
     """
     if org is None or MOCK:
         return ""
@@ -132,7 +132,7 @@ def _db_조회(k: str, org: str) -> Any | None:
 
 # 캐시 무효화 기준. 코퍼스·룰·우선순위 규칙·체크항목·별칭이 바뀌면 값이 바뀌어 기존 DB 행이 미스가 된다.
 # 행 수만으로는 행 수를 그대로 둔 컬럼 단위 UPDATE 를 못 잡으므로, 판정에 쓰이는 룰 컬럼은
-# rule_id 순으로 이어붙여 md5 한다. TEXT[] 컬럼은 원소 순서가 흔들려도 같은 값이 나오게 정렬한다.
+# rule_id 순으로 이어붙여 md5 한다. TEXT[] 컬럼은 원소 순서가 달라도 같은 값이 나오게 정렬한다.
 _데이터버전_해시_SQL = """SELECT (SELECT count(*) FROM corpus.chunks),
                         (SELECT count(*) FROM corpus.chunks WHERE embedding IS NOT NULL),
                         (SELECT count(*) FROM corpus.refs),

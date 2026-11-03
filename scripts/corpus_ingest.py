@@ -8,7 +8,7 @@
 BM25 색인 행(bm25_index 토큰화)은 활성화 트랜잭션에서 넣는다.
 쓰는 테이블: corpus.ingest_jobs, documents, doc_articles, chunks, refs, chunk_len·chunk_terms·term_df(활성화 때),
 tenant.judge_cache(활성화 때 삭제). 접속은 호출자가 넘기는 DSN(SUDDOE_INGEST_DSN, 롤 suddoe_ingest) 만 쓴다.
-불변식: 추출 실패·조 0건은 failed 이고 staged 가 되지 않는다. staged 문서는 검색 필터(status='active')에
+불변 조건: 추출 실패·조 0건은 failed 이고 staged 가 되지 않는다. staged 문서는 검색 필터(status='active')에
 걸리지 않고 BM25 통계에도 들어가지 않는다. 적용대상을 정하지 못한 조는 청크로 만들지 않는다.
 활성화는 한 트랜잭션에서 새 판을 active, 이전 판을 superseded 로 바꾼다.
 """
@@ -267,7 +267,7 @@ def _조문_추출(경로: Path) -> tuple[list[dict], str, str]:
     """원본 -> (조 목록, 분할 전략, documents.extraction 값). 텍스트가 거의 없으면 _적재실패.
 
     PDF 는 text_extract.extract 대신 pdftext.extract_meta 로 직접 읽는다. 기존 L1·L2 적재와 같은 경로이고,
-    글자가 두 번씩 찍힌 텍스트 레이어와 2단 조판을 처리하며, 문자중복 레이어였는지(dedupe)를
+    글자가 두 번씩 들어간 텍스트 레이어와 2단 조판을 처리하며, 문자중복 레이어였는지(dedupe)를
     documents.extraction 에 남긴다. text_extract.extract_pdf 는 pdftext 가 예외를 내면 pypdf 로 폴백하는데,
     pypdf 는 조 헤더를 깨뜨린다. 이 경로는 페이지 오프셋이 없어 페이지는 NULL 이다(기존 행과 같다).
     """
@@ -580,7 +580,7 @@ def _토큰수(texts: list[str]) -> list[int]:
 
 
 def _임베딩(입력: list[str]) -> list[str]:
-    """retrieve 가 상주시킨 KURE-v1 으로 임베딩한다. retrieve.임베딩 과 같은 정규화·리터럴 형식이다."""
+    """retrieve 가 미리 로드해 둔 KURE-v1 으로 임베딩한다. retrieve.임베딩 과 같은 정규화·리터럴 형식이다."""
     import retrieve
 
     벡터들 = retrieve.임베딩_모델().encode(입력, batch_size=16, normalize_embeddings=True,

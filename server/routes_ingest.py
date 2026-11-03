@@ -9,7 +9,7 @@
   GET    /admin/documents/{doc_id}         상태(parsing|staged|active|failed|superseded), 품질, 경고, 샘플
   POST   /admin/documents/{doc_id}/activate  staged -> active, 이전 판 -> superseded (한 트랜잭션)
   DELETE /admin/documents/{doc_id}         staged·failed·parsing 업로드 폐기
-불변식: 모든 경로는 관리자 토큰(server.auth.관리자_확인)을 먼저 검사한다. DB 는 SUDDOE_INGEST_DSN(롤 suddoe_ingest)
+불변 조건: 모든 경로는 관리자 토큰(server.auth.관리자_확인)을 먼저 검사한다. DB 는 SUDDOE_INGEST_DSN(롤 suddoe_ingest)
 으로만 쓰고, 값이 없으면 모든 경로가 503 이다. 앱 DSN(suddoe_app)은 corpus 에 SELECT 권한만 있다.
 layer 는 메타데이터로만 정하고 파일명은 보지 않는다. 파일 형식은 내용으로 판별한다.
 이름을 바꾼 응답 필드는 한 릴리스 동안 이전 이름의 읽기 전용 필드(computed_field)로도 내보낸다.

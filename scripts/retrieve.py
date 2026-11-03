@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _lib import db, paths                                           # noqa: E402
 paths.ensure_on_path()
 
-# ── 검색 대상 범위(pre-filter) ────────────────────────────────────────────────
+# ── 검색 대상 범위(사전 필터) ────────────────────────────────────────────────
 FILTER = """embedding IS NOT NULL AND status='active' AND parse_quality='high'
         AND retrieval_scope='검색대상' AND layer IN ('L1','L2')
         AND 적용대상 IN ('창업기업','공통')"""

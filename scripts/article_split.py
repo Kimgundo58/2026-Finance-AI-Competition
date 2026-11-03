@@ -4,7 +4,7 @@
 l3_parse(L3 업로드)와 코퍼스 적재가 text_extract 다음 단계로 부른다. 공개 함수:
 split_articles(text, page_offsets) -> (조 리스트, 전략 이름), validate(arts, strategy) -> {ok, quality, flags},
 is_deleted(art), sanitize(t). 전략은 article_titled → outline_numbered → article_untitled → chapter →
-roman_chapter → paragraph 순으로 시도한다. 불변식: 조 0개면 validate 의 ok 가 False 다.
+roman_chapter → paragraph 순으로 시도한다. 불변 조건: 조 0개면 validate 의 ok 가 False 다.
 """
 from __future__ import annotations
 import re

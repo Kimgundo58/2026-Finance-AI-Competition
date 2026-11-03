@@ -5,7 +5,7 @@ server/main.py 가 live 모드에서 OrgId주입 을 ASGI 미들웨어로 등록
 관리자_확인, slug(), 데모토큰_발급() 을 쓴다. 토큰은 iss 로 두 종류를 구분한다.
     Supabase  RS256/ES256, JWKS(SUDDOE_JWKS_URL) 검증, email 클레임 -> tenant.accounts
     데모      HS256, 서버 자체 서명(SUDDOE_DEMO_SECRET), org 클레임을 그대로 쓴다
-불변식: Authorization 헤더가 있으면 토큰만 보고, 실패하면 거부한다(?org_id= 로 폴백하지 않는다).
+불변 조건: Authorization 헤더가 있으면 토큰만 보고, 실패하면 거부한다(?org_id= 로 폴백하지 않는다).
 토큰 종류마다 허용 알고리즘을 고정한다. 고정하지 않으면 공개키를 HMAC 비밀키로 쓰는 alg confusion 이 가능하다.
 """
 from __future__ import annotations
