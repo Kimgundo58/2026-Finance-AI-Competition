@@ -15,7 +15,7 @@ import time
 from fastapi import APIRouter, HTTPException, Request
 
 from server import auth, response_cache
-from server._common import MOCK, 비목_ENUM, 클라이언트_ip
+from server._common import MOCK, 답변_반영, 비목_ENUM, 클라이언트_ip
 from server.catalog import _비목_표준화, _사업명_표준화
 from server.models import 질문요청
 from server.rate_limit import 제한
@@ -52,6 +52,8 @@ def questions(req: Request, body: 질문요청) -> dict:
         return dict(_실패_응답)
     if MOCK:
         return mock_질문
+    if not 답변_반영():                                    # 답을 쓰지 않을 때는 묻지 않는다
+        return {"상태": "없음", "질문세트": None, "질문": []}
 
     org, account = auth.검증된_org(req), auth.검증된_account(req)
     try:
@@ -90,12 +92,17 @@ def _live_질문(body: 질문요청, org: str | None, account: str | None, ip: s
          "용도": body.용도, "금액": body.금액, "질문": body.질문원문},
         org_id=org, account_id=account)
     메타 = r.get("메타") or {}
+    if not 메타.get("LLM호출"):                         # LLM 을 부르지 않았으면 일일 카운트를 되돌린다
+        제한.카운트_복원()
     # 버린질문의 키는 질문 문장이라 사유 코드만 남긴다
-    버린사유 = sorted({사유 for 목록 in (메타.get("버린질문") or {}).values() for 사유 in 목록})
+    버린사유 = sorted({사유 for 항목 in (메타.get("버린질문") or {}).values() for 사유 in 항목["사유"]})
     _로그(r["상태"], len(r["질문"]), 버린사유 or ([메타["사유"]] if 메타.get("사유") else []), False, t0)
     if r["상태"] == "실패":                             # 일시적 장애를 24시간 고정하지 않는다
         return dict(_실패_응답)
     저장값 = {"상태": r["상태"], "질문": r["질문"]}
-    response_cache.저장(k, 저장값, 종류="questions", org=org, account=account,
-                       데이터버전_해시=데이터버전해시, ttl초=_질문세트_TTL초)
+    저장됨 = response_cache.저장(k, 저장값, 종류="questions", org=org, account=account,
+                              데이터버전_해시=데이터버전해시, ttl초=_질문세트_TTL초)
+    if not 저장됨 and 저장값["질문"]:                    # 답을 받아도 판정에서 질문을 찾지 못하니 묻지 않는다
+        _로그("실패", 0, ["저장실패"], False, t0)
+        return dict(_실패_응답)
     return 응답(저장값)

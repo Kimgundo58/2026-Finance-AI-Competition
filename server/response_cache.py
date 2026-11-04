@@ -93,8 +93,8 @@ def 질문세트_조회(k: str, org: str | None, account: str | None = None) -> 
 
 
 def 저장(k: str, 값: Any, *, 종류: str, org: str | None, account: str | None = None,
-         데이터버전_해시: str | None = None, ttl초: int | None = None) -> None:
-    """응답을 저장한다. DB 쓰기 실패는 삼킨다(캐시는 판정 결과에 영향을 주지 않는다).
+         데이터버전_해시: str | None = None, ttl초: int | None = None) -> bool:
+    """응답을 저장하고 저장 여부를 돌려준다. DB 쓰기 실패는 삼킨다(캐시는 판정 결과에 영향을 주지 않는다).
 
     데이터버전_해시 는 요청 시작 때 요청_해시() 로 계산한 값을 넘긴다. 저장 시점에 다시 계산하면, 규정
     활성화 전에 시작해 옛 규정으로 판정한 결과가 새 해시로 저장되어 이후 요청에 적중한다.
@@ -109,16 +109,16 @@ def 저장(k: str, 값: Any, *, 종류: str, org: str | None, account: str | Non
             if len(_메모리) >= _상한:          # FIFO. LRU 까지는 필요 없다
                 _메모리.pop(next(iter(_메모리), None), None)
             _메모리[k] = (time.time() + ttl초, 해시, 값)
-        return
+        return True
     # 같은 key 가 다른 계정 행이면 RLS 가 UPDATE 를 거부해 저장이 실패한다(캐시만 못 쓴다). 키에 계정이 들어가
     # 있어 정상 경로에서는 생기지 않는다.
-    _실행(
+    return _실행(
         'INSERT INTO tenant.judge_cache (key, org_id, account_id, 종류, value, 데이터버전_해시, expires_at) '
         'VALUES (%s,%s,%s,%s,%s,%s, now() + make_interval(secs => %s)) '
         'ON CONFLICT (key) DO UPDATE SET '
         '  value = EXCLUDED.value, 데이터버전_해시 = EXCLUDED.데이터버전_해시, '
         '  expires_at = EXCLUDED.expires_at, created_at = now()',
-        (k, org, account, 종류, _jsonb(값), 데이터버전_해시, ttl초))
+        (k, org, account, 종류, _jsonb(값), 데이터버전_해시, ttl초)) >= 0
 
 
 def 요청_해시() -> str:

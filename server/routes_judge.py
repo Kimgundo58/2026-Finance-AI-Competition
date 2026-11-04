@@ -8,7 +8,7 @@ persist.판정_저장() 으로 계획에 연결한다. 응답은 response_cache 
 이벤트 이름과 순서는 프론트 계약이다. 참조관계 이벤트 바로 뒤에 같은 내용을 이전 이벤트 이름으로 한 번
 더 보낸다(한 릴리스 동안, judge_response 호환 블록). 예외·타임아웃·파이프라인 실패는 모두 판단불가로
 반환하고, 그 결과는 캐시하지 않으며 계획에도 연결하지 않는다.
-환경변수: SUDDOE_JUDGE_HEARTBEAT_SEC(12), SUDDOE_JUDGE_DEADLINE_SEC(180), SUDDOE_JUDGE_ANSWERS(1, 0 이면 답변 미반영).
+환경변수: SUDDOE_JUDGE_HEARTBEAT_SEC(12), SUDDOE_JUDGE_DEADLINE_SEC(180), SUDDOE_JUDGE_ANSWERS(1, 0 이면 확인 질문·답변 미반영).
 """
 from __future__ import annotations
 
@@ -16,13 +16,12 @@ import concurrent.futures
 import contextvars
 import json
 import logging
-import os
 import time
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from server import auth, inquiry, response_cache
-from server._common import MOCK, _정수_환경변수, _sse, _sse응답, 클라이언트_ip, 비목_ENUM
+from server._common import MOCK, _정수_환경변수, _sse, _sse응답, 답변_반영, 클라이언트_ip, 비목_ENUM
 from server.catalog import _비목_표준화, _사업명_표준화
 from server.judge_response import (_사용자프로필값_구성, 구_참조관계_이벤트, 구_판정키_포함,
                                    파이프라인결과_매핑, 할일_공개)
@@ -65,7 +64,7 @@ def judge(req: Request, body: 판정요청, mock: str | None = None,
     account_id = auth.검증된_account(req)
     # 저장 질문 목록이 판정 프롬프트 B6 에 들어가 확인 질문 답변과 섞이지 않게 뺀다. 표시 전용 값이라 키에서도 뺀다.
     body.정규화 = {k: v for k, v in body.정규화.items() if k != "심층질문"}
-    답변_반영 = _답변_반영()
+    반영 = 답변_반영()
 
     k = response_cache.캐시키(
         # 계정을 키에 넣는다. 다른 계정의 응답(그 계정의 계획·판정 id·프로필 전제)이 나가면 안 된다.
@@ -74,7 +73,7 @@ def judge(req: Request, body: 판정요청, mock: str | None = None,
         body.특수관계.친족거래, body.특수관계.전직임직원업체,
         json.dumps([a.model_dump() for a in body.답변], ensure_ascii=False, sort_keys=True),
         # 답변을 판정에 넣지 않는 동안(SUDDOE_JUDGE_ANSWERS=0)에는 답변을 넣은 옛 결과가 적중하지 않게 한다.
-        body.질문세트 if 답변_반영 else None,
+        body.질문세트 if 반영 else None,
         # L3 를 새로 올리거나 파싱이 끝나면 키가 바뀐다. 파싱 커밋 직전에 시작한 판정이 옛 L3 결과를
         # 캐시에 남겨도 이후 요청에는 적중하지 않는다(routes_l3 의 캐시 삭제와 함께 쓴다).
         response_cache.l3_해시(body.org_id),
@@ -87,7 +86,7 @@ def judge(req: Request, body: 판정요청, mock: str | None = None,
     데이터버전해시 = response_cache.요청_해시()
     # 미들웨어 컨텍스트(RLS GUC)가 있는 여기서 읽는다. 저장 질문을 읽지 못하면 판정에서 「가능」을 내지 않는다.
     사용자답변, 답변유실 = (_사용자답변_읽기(body, account_id)
-                       if 답변_반영 and 캐시 is None and not MOCK else (None, False))
+                       if 반영 and 캐시 is None and not MOCK else (None, False))
 
     def gen():
         for 단계, 설명 in (("검색", "관련 조항을 찾는 중"),
@@ -119,15 +118,10 @@ def judge(req: Request, body: 판정요청, mock: str | None = None,
     return _sse응답(gen())
 
 
-def _답변_반영() -> bool:
-    """SUDDOE_JUDGE_ANSWERS=0 이면 답변을 판정에 넣지 않는다(되돌리기용)."""
-    return os.environ.get("SUDDOE_JUDGE_ANSWERS", "1") != "0"
-
-
 def _사용자답변_읽기(body: 판정요청, account_id: str | None) -> tuple[list[dict] | None, bool]:
     """저장한 질문세트와 화면 답변으로 (사용자답변, 답변유실) 을 만든다. 프론트가 보낸 글은 쓰지 않는다.
 
-    질문세트와 답변이 왔는데 저장값을 못 읽으면(만료·재시작·다른 계정 키·DB 오류) 답변유실이다. 사용자가
+    질문세트가 왔는데 저장값을 못 읽으면(만료·재시작·다른 계정 키·DB 오류) 답변유실이다. 사용자가
     「아니오」라고 답했을 수 있으므로 판정이 「가능」을 내지 못하게 한다. 화면에는 오류를 내지 않는다.
     """
     if not body.질문세트:
@@ -140,7 +134,7 @@ def _사용자답변_읽기(body: 판정요청, account_id: str | None) -> tuple
                     False)
     except Exception as e:                                    # noqa: BLE001
         _log.warning("질문세트 읽기 실패: %s", type(e).__name__)
-    return None, bool(body.답변)
+    return None, True
 
 
 def _판정_이벤트(out: dict):

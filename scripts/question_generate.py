@@ -107,8 +107,11 @@ def 조문_후보(cur, *, 사업명: str | None, 비목: str, 검색결과: dict
     키들 = list(dict.fromkeys(_룰_근거(cur, 사업명, 비목) + _공통_조문(cur, 사업명)))
     이미: set[tuple[str, str]] = set()
     if 키들:
-        cur.execute("""SELECT article_id, doc_id, "조번호", "조제목", "본문" FROM corpus.doc_articles
-                        WHERE (doc_id, "조번호") IN (SELECT * FROM unnest(%s::text[], %s::text[]))""",
+        # 룰 근거가 옛 판을 가리켜도 활성 문서만 쓴다.
+        cur.execute("""SELECT a.article_id, a.doc_id, a."조번호", a."조제목", a."본문"
+                         FROM corpus.doc_articles a JOIN corpus.documents d USING (doc_id)
+                        WHERE d.status = 'active'
+                          AND (a.doc_id, a."조번호") IN (SELECT * FROM unnest(%s::text[], %s::text[]))""",
                     ([k[0] for k in 키들], [k[1] for k in 키들]))
         순서 = {k: i for i, k in enumerate(키들)}
         for a in sorted(cur.fetchall(), key=lambda r: 순서.get((r[1], r[2]), 999)):
@@ -195,9 +198,9 @@ _판단어 = re.compile(r"가능|불가|허용|적합")
 # 없는 절차나 기준을 만들어 내기 쉬운 말. 고른 근거 문장에 있어야 한다.
 _근거필요어 = re.compile(r"허용|적합|승인|금지|인정")
 # 문장 끝이 부정형이면 「예」의 뜻이 헷갈린다.
-_부정_끝 = re.compile(r"(?:아닌가요|아니었나요|아닙니까|아닌지요|아니죠|않나요|않았나요|않습니까|않은가요|않는지요"
-                  r"|없나요|없었나요|없습니까|없는지요)\?$")
-_내부값 = re.compile(r"\bS\d{2,3}\b|제\s?\d+\s?조|https?:|www\.|<[a-zA-Z/]")
+_부정_끝 = re.compile(r"(?:아니|아닌|아닙|않|없)[가-힣]{0,4}\?$")
+# 한글도 \w 라 \b 로는 「S04에」를 못 잡는다.
+_내부값 = re.compile(r"(?<![A-Za-z0-9])S\d{2,3}(?!\d)|제\s?\d+\s?조|https?:|www\.|<[a-zA-Z/]")
 
 
 def _접기(글: str | None) -> str:

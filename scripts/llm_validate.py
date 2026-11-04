@@ -312,6 +312,8 @@ def _인용_검증(llm출력: dict, 문장맵: dict, 메타: dict[str, dict], �
     인용목록: list[인용] = []
     인용계층: list[str] = []
     유출: list[dict] = []
+    # 같은 항이 B2 청크와 B3 조문에 함께 있으면 문장 ID 가 둘이다. 둘 다 고르면 화면에 같은 인용이 두 번 나간다
+    이미: set[tuple] = set()
     # 같은 문장 ID 를 두 번 고르면 같은 조문이 두 번 나간다. 순서를 지키며 중복을 뺀다
     for s in dict.fromkeys(llm출력.get("인용") or []):
         if s not in 문장맵:
@@ -339,6 +341,10 @@ def _인용_검증(llm출력: dict, 문장맵: dict, 메타: dict[str, dict], �
         if m.get("domain") and m["domain"] != "창업지원사업":
             검증기록("DOMAIN_WARN",
                 f"인용 {s} 의 문서 domain='{m['domain']}' 이 창업지원사업이 아니다 → 경고")
+        키 = (m.get("doc_id"), m.get("조번호"), 항호 or m.get("원문"))
+        if 키 in 이미:
+            continue
+        이미.add(키)
         인용계층.append(m.get("layer") or ("L3" if 종류 == "l3" else "?"))
         인용목록.append(인용(문장ID=s, doc_id=m.get("doc_id"), 조번호=m.get("조번호"),
                           조제목=m.get("조제목"), 항호=항호,

@@ -492,17 +492,18 @@ def _검색단계(상태: _판정상태) -> dict | None:
 def _답변_근거조문(cur, 사용자답변: list[dict], 검색_청크: list[int]) -> list[int]:
     """사용자가 답한 질문의 근거 조문 article_id. 판정이 그 조문을 인용할 수 있게 B3 에 더한다.
 
-    청크는 doc_id·조번호로 조문을 찾는다. L3 는 B1 에 전체가 있어 더하지 않는다. 근거 문장이 이미 B2 청크에
-    있어도 더하지 않는다. 같은 문장에 문장 ID 가 둘이면 화면에 같은 인용이 두 번 나온다.
+    청크는 doc_id·조번호로 조문을 찾는다. L3 는 B1 에 전체가 있어 더하지 않는다. 근거 항이 이미 B2 청크에
+    있어도 더하지 않는다(발췌는 줄을 다듬은 값이라 글자로 비교하지 않는다).
     """
     if not 사용자답변:
         return []
-    cur.execute("SELECT text FROM corpus.chunks WHERE chunk_id = ANY(%s)", (검색_청크,))
-    b2 = [r[0] or "" for r in cur.fetchall()]
+    cur.execute('SELECT doc_id, "조번호", "항호" FROM corpus.chunks WHERE chunk_id = ANY(%s)', (검색_청크,))
+    b2 = {tuple(r) for r in cur.fetchall()}
     out: list[int] = []
     for a in 사용자답변:
-        g, 원문 = a.get("근거조문") or {}, (a.get("근거") or {}).get("원문")
-        if 원문 and any(원문 in 글 for 글 in b2):
+        g, 근거 = a.get("근거조문") or {}, a.get("근거") or {}
+        조 = (근거.get("doc_id"), 근거.get("조번호"))
+        if (*조, 근거.get("항호") or None) in b2 or (*조, None) in b2:
             continue
         if g.get("종류") == "article" and g.get("id"):
             out.append(g["id"])

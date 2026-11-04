@@ -35,6 +35,7 @@ def 자체점검() -> int:
         ("이유 빈칸", {**좋은, "이유": ""}, 근거, "빈칸"),
         ("질문 김", {**좋은, "질문문": "가" * 71 + "?"}, 근거, "길이"),
         ("문장 번호 노출", {**좋은, "이유": "S04 에 따라 임직원으로 한정돼요."}, 근거, "내부값"),
+        ("문장 번호에 조사", {**좋은, "이유": "S04에 따라 임직원으로 한정돼요."}, 근거, "내부값"),
         ("조문 번호 노출", {**좋은, "이유": "제43조에 따라 임직원으로 한정돼요."}, 근거, "내부값"),
         ("근거에 없는 숫자", {**좋은, "이유": "여비는 70만원까지로 임직원으로 한정돼요."}, 근거, "새숫자"),
         ("조건 붙은 가능 통과", {**좋은, "이유": "4대사회보험에 가입된 임직원만 여비 집행이 가능해요."}, 근거, None),
@@ -44,6 +45,9 @@ def 자체점검() -> int:
         ("충족답 없음", {**좋은, "충족답": "모름"}, 근거, "충족답"),
         ("근거 없는 승인", {**좋은, "질문문": "주관기관의 승인을 받았나요?"}, 근거, "근거없는말"),
         ("부정형 질문", {**좋은, "질문문": "임직원이 4대보험 미가입자가 아닌가요?"}, 근거, "부정질문"),
+        ("높임 부정형", {**좋은, "질문문": "4대보험에 가입하지 않으셨나요?"}, 근거, "부정질문"),
+        ("높임 부정형 없음", {**좋은, "질문문": "4대보험 가입 이력이 없으신가요?"}, 근거, "부정질문"),
+        ("문장 중간 부정 통과", {**좋은, "질문문": "임직원이 아니면 4대보험 가입자인가요?"}, 근거, None),
         ("쉬운 질문문 통과", {"질문문": "항공권 등급이 이코노미인가요?", "충족답": "예",
                       "이유": "해외 여비는 항공을 Economy Class급으로 한정해요.", "할일": "항공권 등급 확인"},
          "④ 해외 여비인 경우, 운임은 실비를 지급하며 항공은 Economy Class급으로 한정한다.", None),
@@ -158,11 +162,11 @@ def 실측(모델들: list[str], 출력파일: str | None) -> int:
     return 0
 
 
-def 판정비교(표본수: int, 반복: int, 동시: int, 출력파일: str | None) -> int:
-    """정답이 「가능」이 아닌 정답셋 문항을 답변 없음 / 모두 충족답으로 판정해 틀린 「가능」 수를 비교한다.
+def 판정비교(표본수: int, 반복: int, 동시: int, 출력파일: str | None, 제외파일: str | None = None) -> int:
+    """정답이 「가능」이 아닌 정답셋 문항을 답변 없음 / 모두 충족답 / 모두 모름으로 판정해 분포를 비교한다.
 
     모두 충족답으로 답하는 쪽이 가장 위험한 경우다. 표본은 시드로 고정한다. 기록은 남기지 않는다(기록=False).
-    정답 라벨은 사람이 검수하지 않았다.
+    `제외파일` 은 앞선 --out 결과다. 이미 잰 문항을 빼고 잰다. 정답 라벨은 사람이 검수하지 않았다.
     """
     import random
     from concurrent.futures import ThreadPoolExecutor
@@ -182,6 +186,9 @@ def 판정비교(표본수: int, 반복: int, 동시: int, 출력파일: str | N
                              AND coalesce(평가범위, '') NOT LIKE '범위밖%%'
                            ORDER BY gold_id""").fetchall()
     행 = [r for r in 행 if 평가용_사업명(r[2], r[3])]
+    if 제외파일:
+        제외 = {x["gold_id"] for x in json.load(open(제외파일, encoding="utf-8"))}
+        행 = [r for r in 행 if r[0] not in 제외]
     표본 = random.Random(20261104).sample(행, min(표본수, len(행)))
     print(f"대상 {len(행)}행 중 {len(표본)}행, 반복 {반복}회", flush=True)
 
@@ -192,31 +199,34 @@ def 판정비교(표본수: int, 반복: int, 동시: int, 출력파일: str | N
         정규 = {k: v for k, v in 정규.items() if k != "심층질문"}
         후보 = 정규.get("비목후보") or []
         확정 = 비목 if 비목 in 비목_ENUM else (후보[0].get("비목") if 후보 else None)
-        기록 = {"gold_id": gid, "정답": 정답, "사업명": 사업명, "비목": 확정, "질문": [], "없음": [], "충족답": []}
+        기록 = {"gold_id": gid, "정답": 정답, "사업명": 사업명, "비목": 확정, "질문": [], "없음": [], "충족답": [], "모름": []}
         질문결과 = 질문생성({"사업명": 사업명, "비목": 확정, "품목": 정규.get("품목"), "용도": 정규.get("용도"),
                        "금액": 정규.get("금액"), "질문": 질문}) if 확정 else {"질문": [], "상태": "없음"}
         기록["질문상태"] = 질문결과["상태"]
         기록["질문"] = [q["질문문"] for q in 질문결과["질문"]]
         답변 = 답변_구성(질문결과, [{"code": q["id"], "값": q["충족답"]} for q in 질문결과["질문"]])
+        모름 = 답변_구성(질문결과, [{"code": q["id"], "값": "모름"} for q in 질문결과["질문"]])
         for _ in range(반복):
             공통 = dict(사업명=사업명, 확정비목=확정, 정규화결과=정규, 기록=False)
             기록["없음"].append(orchestrate.판정(질문, **공통).get("판정"))
             기록["충족답"].append(orchestrate.판정(질문, 사용자답변=답변 or None, **공통).get("판정"))
-        print(f"{gid} 정답={정답} 질문{len(기록['질문'])} 없음={기록['없음']} 충족답={기록['충족답']}", flush=True)
+            기록["모름"].append(orchestrate.판정(질문, 사용자답변=모름 or None, **공통).get("판정"))
+        print(f"{gid} 정답={정답} 질문{len(기록['질문'])} 없음={기록['없음']} 충족답={기록['충족답']} 모름={기록['모름']}",
+              flush=True)
         return 기록
 
     with ThreadPoolExecutor(max_workers=동시) as ex:
         결과 = list(ex.map(문항, 표본))
     if 출력파일:
         json.dump(결과, open(출력파일, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
-    전체 = sum(len(x["없음"]) for x in 결과)
     질문있음 = [x for x in 결과 if x["질문"]]
     for 이름, 묶음 in (("전체", 결과), ("질문이 나온 문항", 질문있음)):
-        없음 = sum(v == "가능" for x in 묶음 for v in x["없음"])
-        충족 = sum(v == "가능" for x in 묶음 for v in x["충족답"])
         판정수 = sum(len(x["없음"]) for x in 묶음)
-        print(f"{이름} {len(묶음)}문항 판정 {판정수}회씩: 틀린 가능 답변없음 {없음} / 충족답 {충족}")
-    print(f"판정 합계 {전체 * 2}회")
+        print(f"{이름} {len(묶음)}문항 조건별 판정 {판정수}회")
+        for 조건 in ("없음", "충족답", "모름"):
+            분포 = {v: sum(y == v for x in 묶음 for y in x[조건]) for v in ("가능", "조건부", "불가", "판단불가")}
+            일치 = sum(y == x["정답"] for x in 묶음 for y in x[조건])
+            print(f"  {조건}: {분포} 정답 일치 {일치}")
     return 0
 
 
@@ -232,10 +242,11 @@ def main() -> int:
     ap.add_argument("--sample", type=int, default=30)
     ap.add_argument("--repeat", type=int, default=2)
     ap.add_argument("--workers", type=int, default=4)
+    ap.add_argument("--skip-from", help="이 --out 결과에 있는 문항을 빼고 잰다")
     ap.add_argument("--out")
     a = ap.parse_args()
     if a.judge_compare:
-        return 판정비교(a.sample, a.repeat, a.workers, a.out)
+        return 판정비교(a.sample, a.repeat, a.workers, a.out, a.skip_from)
     if a.self_test:
         return 자체점검()
     if a.db:
