@@ -2,9 +2,9 @@
 """인증과 테넌트 결정: 요청이 어느 기관(org)의 것인지 서버가 정한다.
 
 server/main.py 가 live 모드에서 OrgId주입 을 ASGI 미들웨어로 등록하고, 라우터는 검증된_org(),
-관리자_확인, slug(), 데모토큰_발급() 을 쓴다. 토큰은 iss 로 두 종류를 구분한다.
-    Supabase  RS256/ES256, JWKS(SUDDOE_JWKS_URL) 검증, email 클레임 -> tenant.accounts
-    데모      HS256, 서버 자체 서명(SUDDOE_DEMO_SECRET), org 클레임을 그대로 쓴다
+검증된_account(), 관리자_확인, slug(), 데모토큰_발급() 을 쓴다. 토큰은 iss 로 두 종류를 구분한다.
+    Supabase  RS256/ES256, JWKS(SUDDOE_JWKS_URL) 검증, email 클레임 -> tenant.accounts (org_id, account_id)
+    데모      HS256, 서버 자체 서명(SUDDOE_DEMO_SECRET), org 클레임을 그대로 쓴다(계정 없음)
 불변 조건: Authorization 헤더가 있으면 토큰만 보고, 실패하면 거부한다(?org_id= 로 폴백하지 않는다).
 토큰 종류마다 허용 알고리즘을 고정한다. 고정하지 않으면 공개키를 HMAC 비밀키로 쓰는 alg confusion 이 가능하다.
 """
@@ -70,6 +70,7 @@ class 주체:
     org_id: str | None
     출처: str                    # 'token' | 'demo' | 'param' | 'none'
     email: str | None = None
+    account_id: str | None = None    # Supabase 토큰일 때만 있다. 데모 세션·게스트는 None
 
     @property
     def 검증됨(self) -> bool:
@@ -174,20 +175,20 @@ def _데모해석(토큰: str) -> 주체:
     return 주체(org_id=org, 출처="demo")
 
 
-def _계정조회(email: str) -> str | None:
-    """email -> org_id. 등록되지 않은 계정이면 None, DB 장애면 HTTPException(503).
+def _계정조회(email: str) -> tuple[str, str] | None:
+    """email -> (org_id, account_id). 등록되지 않은 계정이면 None, DB 장애면 HTTPException(503).
 
     이 시점에는 GUC 가 없어 tenant.accounts 를 직접 읽으면 RLS 정책에 의해 0행이 된다.
     그래서 SECURITY DEFINER 함수 tenant.계정찾기() 를 호출한다.
     """
     try:
-        행 = _질의("SELECT org_id FROM tenant.계정찾기(%s)",
+        행 = _질의("SELECT org_id, account_id FROM tenant.계정찾기(%s)",
                    (email,), 예외전파=True)
     except Exception as e:                                    # noqa: BLE001
         로그.exception("계정 조회 실패(DB 오류). 미등록 계정(403)과 구분해 503 으로 응답한다")
         # 응답에 예외 문자열을 넣지 않는다. psycopg 오류 본문에 호스트·포트·사용자명이 들어 있다.
         raise HTTPException(503, "계정 확인에 실패했습니다. 잠시 후 다시 시도해 주세요") from e
-    return str(행[0][0]) if 행 else None
+    return (str(행[0][0]), str(행[0][1])) if 행 else None
 
 
 def _supabase해석(토큰: str) -> 주체:
@@ -211,7 +212,7 @@ def _supabase해석(토큰: str) -> 주체:
     if 계정 is None:
         # 토큰을 보낸 요청은 토큰으로만 판단한다. ?org_id= 로 폴백하지 않는다.
         raise HTTPException(403, "등록되지 않은 계정입니다")
-    return 주체(org_id=계정, 출처="token", email=email)
+    return 주체(org_id=계정[0], 출처="token", email=email, account_id=계정[1])
 
 
 def _uuid인가(v) -> bool:
@@ -251,6 +252,15 @@ def 검증된_org(req: Request) -> str | None:
     return 주.org_id if 주 is not None and 주.검증됨 else None
 
 
+def 검증된_account(req: Request) -> str | None:
+    """검증된 Supabase 토큰의 account_id. 데모 세션·게스트·?org_id= 요청이면 None.
+
+    기업 데이터(프로필·지출계획·할일·판정·캐시)는 org 와 이 값으로 함께 거른다. L3 는 org 만 본다.
+    """
+    주 = req.scope.get("suddoe_주체")
+    return 주.account_id if 주 is not None and 주.검증됨 else None
+
+
 def 관리자_확인(x_admin_token: str | None = Header(default=None)) -> None:
     """관리 엔드포인트용 FastAPI 의존성. X-Admin-Token 이 SUDDOE_ADMIN_TOKEN 과 다르면 403.
 
@@ -275,7 +285,7 @@ _인증제외_경로 = ("/api/health", "/api/orgs", "/api/demo/session", "/docs"
 class OrgId주입:
     """app.add_middleware(auth.OrgId주입) 으로 등록한다.
 
-    요청 scope 에 suddoe_주체 를 넣고, 검증된 주체일 때만 _common.현재_org 를 설정한다.
+    요청 scope 에 suddoe_주체 를 넣고, 검증된 주체일 때만 _common.현재_org·현재_account 를 설정한다.
     """
 
     def __init__(self, app):
@@ -314,11 +324,13 @@ class OrgId주입:
         # RLS 용 GUC 는 검증된 주체(token, demo)일 때만 설정한다. ?org_id= 와 게스트는 None 이라
         # current_org() 가 NULL 이 되어 쓰기는 거부되고 읽기는 0행이 된다.
         # 태스크 재사용에 기대지 않고 finally 에서 원래 값으로 되돌린다.
-        토큰 = _common.현재_org.set(
-            str(주.org_id) if (주 is not None and 주.검증됨 and 주.org_id) else None)
+        검증 = 주 is not None and 주.검증됨 and bool(주.org_id)
+        토큰 = _common.현재_org.set(str(주.org_id) if 검증 else None)
+        계정토큰 = _common.현재_account.set(str(주.account_id) if 검증 and 주.account_id else None)
         try:
             return await self.app(scope, receive, send)
         finally:
+            _common.현재_account.reset(계정토큰)
             _common.현재_org.reset(토큰)
 
 

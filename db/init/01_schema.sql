@@ -253,6 +253,26 @@ EXCEPTION WHEN others THEN
 END
 $fn$;
 
+-- 계정 단위 격리용. 앱은 GUC app.account_id 를 app.org_id 와 같은 트랜잭션에 설정한다. 없으면 NULL(데모 세션·게스트).
+-- 기업 데이터(프로필·지출계획·할일·판정·캐시)는 org 와 account 가 둘 다 맞아야 보인다. L3 는 org 단위다.
+CREATE FUNCTION tenant.current_account() RETURNS uuid
+LANGUAGE plpgsql STABLE AS $fn$
+DECLARE v text;
+BEGIN
+    BEGIN
+        v := current_setting('request.jwt.claims', true)::json ->> 'account_id';
+    EXCEPTION WHEN others THEN
+        v := NULL;
+    END;
+    IF v IS NULL OR v = '' THEN
+        v := nullif(current_setting('app.account_id', true), '');
+    END IF;
+    RETURN v::uuid;
+EXCEPTION WHEN others THEN
+    RETURN NULL;
+END
+$fn$;
+
 CREATE TABLE tenant.orgs (
     org_id      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     기관명      TEXT NOT NULL,
@@ -305,10 +325,12 @@ CREATE TABLE tenant.accounts (
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- 기업 프로필: 협약 정보와 과업범위 요약. 사업(협약) 1건 = 1행.
+-- 기업 프로필: 협약 정보와 과업범위 요약. 계정의 사업(협약) 1건 = 1행.
 CREATE TABLE tenant.profile_agreements (
     profile_id      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     org_id          UUID NOT NULL REFERENCES tenant.orgs(org_id) ON DELETE CASCADE,
+    -- NULL = 계정 없는 기관(데모 세션). 같은 기관의 계정마다 따로 저장한다
+    account_id      UUID REFERENCES tenant.accounts(account_id) ON DELETE CASCADE,
     사업명          TEXT NOT NULL,
     협약시작일      DATE,
     협약종료일      DATE,
@@ -317,7 +339,7 @@ CREATE TABLE tenant.profile_agreements (
     자기부담_현금   NUMERIC, 자기부담_현물 NUMERIC,
     과업범위요약    TEXT,          -- 사업계획서의 과업범위 요약. 원문은 저장하지 않는다
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (org_id, 사업명)
+    CONSTRAINT uq_profile_agreements_key UNIQUE NULLS NOT DISTINCT (org_id, account_id, 사업명)
 );
 
 -- 기업 프로필: 집행내역. 집계 기준 3개(비목별·거래처별·인별월별)가 이 한 테이블에서 나온다.
@@ -365,6 +387,8 @@ CREATE TABLE tenant.decisions (
     decision_id BIGSERIAL PRIMARY KEY,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     org_id      UUID REFERENCES tenant.orgs(org_id) ON DELETE SET NULL,  -- NULL = 게스트
+    -- NULL = 게스트 또는 계정 없는 기관(데모 세션). 계정을 지워도 판정 기록은 남긴다
+    account_id  UUID REFERENCES tenant.accounts(account_id) ON DELETE SET NULL,
     사업명      TEXT,
     기관ID      TEXT,
     질문원문    TEXT NOT NULL,
@@ -399,13 +423,20 @@ CREATE POLICY org_isolation ON tenant.orgs          USING (org_id = tenant.curre
 CREATE POLICY org_isolation ON tenant.l3_documents  USING (org_id = tenant.current_org());
 CREATE POLICY org_isolation ON tenant.l3_articles   USING (org_id = tenant.current_org());
 CREATE POLICY org_isolation ON tenant.accounts      USING (org_id = tenant.current_org());
-CREATE POLICY org_isolation ON tenant.profile_agreements USING (org_id = tenant.current_org());
-CREATE POLICY org_isolation ON tenant.decisions     USING (org_id = tenant.current_org());
+-- 기업 데이터는 계정 단위다. 데모 세션은 account_id 가 NULL 이라 IS NOT DISTINCT FROM 으로 비교한다
+CREATE POLICY account_isolation ON tenant.profile_agreements USING (
+    org_id = tenant.current_org() AND account_id IS NOT DISTINCT FROM tenant.current_account());
+CREATE POLICY account_isolation ON tenant.decisions USING (
+    org_id = tenant.current_org() AND account_id IS NOT DISTINCT FROM tenant.current_account());
 -- profile_id 를 거쳐 격리한다
-CREATE POLICY org_isolation ON tenant.profile_expenditures USING (
-    profile_id IN (SELECT profile_id FROM tenant.profile_agreements WHERE org_id = tenant.current_org()));
-CREATE POLICY org_isolation ON tenant.profile_personnel USING (
-    profile_id IN (SELECT profile_id FROM tenant.profile_agreements WHERE org_id = tenant.current_org()));
+CREATE POLICY account_isolation ON tenant.profile_expenditures USING (
+    profile_id IN (SELECT profile_id FROM tenant.profile_agreements
+                    WHERE org_id = tenant.current_org()
+                      AND account_id IS NOT DISTINCT FROM tenant.current_account()));
+CREATE POLICY account_isolation ON tenant.profile_personnel USING (
+    profile_id IN (SELECT profile_id FROM tenant.profile_agreements
+                    WHERE org_id = tenant.current_org()
+                      AND account_id IS NOT DISTINCT FROM tenant.current_account()));
 -- unmapped_premise 는 org 컬럼이 없는 전체 통계라 정책 없이 RLS 만 켠다. suddoe_app 은 읽기 0행, 쓰기 거부다.
 
 

@@ -28,6 +28,8 @@ FastAPI TestClient 로 서버를 프로세스 안에서 띄우고 로컬 DB 에 
   17 OCR 이 없을 때 쪽번호만 텍스트 레이어에 있는 스캔본은 조문 1건짜리로 저장되지 않고 '실패'(스캔본)가 된다
   18 PUT /api/profile 로 저장한 협약 기간·금액이 GET 과 판정 프롬프트 B5 에 나오고, 다시 저장해도 행은 1개다
      (게스트 PUT 은 401, 시작일 > 종료일은 422, 값을 바꾸면 캐시가 아니라 새 값으로 판정한다)
+  19 같은 기관(org)의 두 계정은 협약 프로필·지출계획·판정·할일·판정 캐시를 따로 쓰고(판정 B5 도 자기 값),
+     L3 는 기관 것을 같이 읽는다. Supabase 토큰은 점검용 EC 키로 서명하고 서명키 조회만 바꾼다
 
 실행:
   PYTHONIOENCODING=utf-8 python scripts/ux_flow_check.py           # 점검 실행
@@ -513,6 +515,8 @@ def _점검(결과: 점검결과) -> None:
                and 행수 == 1 and all(all(x in b for x in 기대[i]) for i, b in enumerate(b5들)),
                f"게스트 {게스트_put.status_code} · 역순 {거꾸로.status_code} · 저장 {[s for s, _ in 저장들]} · "
                f"GET {읽음} · 행 {행수}개 · B5 {[b.replace(chr(10), ' / ') for b in b5들]}")
+
+        _계정_분리_점검(결과, client, 데모세션, 업로드, 조문, 판정, 캡처, b5, 협약)
     finally:
         l3_load.조문_조회, orchestrate.프롬프트_구성, orchestrate.판정 = (
             원래_조문조회, 원래_프롬프트, 원래_판정)
@@ -520,6 +524,126 @@ def _점검(결과: 점검결과) -> None:
             _정리(만든_기관)
         except Exception as e:                                   # noqa: BLE001
             결과.기록("정리(데모 기관 삭제)", False, f"{type(e).__name__}: {e}")
+
+
+def _sse_이벤트(본문: str, 이름: str) -> dict | None:
+    """SSE 응답 본문에서 이름이 같은 첫 이벤트의 data(JSON)."""
+    for 덩어리 in 본문.split("\n\n"):
+        줄 = dict(l.split(": ", 1) for l in 덩어리.splitlines() if ": " in l)
+        if 줄.get("event") == 이름:
+            return json.loads(줄.get("data", "null"))
+    return None
+
+
+def _계정_분리_점검(결과: 점검결과, client, 데모세션, 업로드, 조문, 판정, 캡처, b5, 협약) -> None:
+    """19: 같은 기관(org)의 두 계정이 기업 데이터를 나눠 쓰지 않고 L3 만 같이 쓰는지 본다.
+
+    계정 두 개를 소유자 롤로 데모 기관에 넣고, Supabase 토큰 검증의 서명키 조회(auth._서명키)만 점검용 EC 키로
+    바꾼다. 토큰 → email → tenant.계정찾기 → (org, 계정) → GUC 설정 경로는 실제로 거친다. 만든 계정은 지운다.
+    """
+    import uuid as _uuid
+
+    import jwt
+    import psycopg
+    from cryptography.hazmat.primitives.asymmetric import ec
+
+    from server import auth
+
+    헤더_데모, org = 데모세션()
+    _, l3_doc, _ = 업로드(헤더_데모, 픽스처_파일명, _hwpx(픽스처_문단))
+    업로드_조문 = 조문(l3_doc)
+
+    접미 = secrets.token_hex(4)
+    이메일 = {"A": f"ux-account-a-{접미}@ux-check.invalid", "B": f"ux-account-b-{접미}@ux-check.invalid"}
+    키 = ec.generate_private_key(ec.SECP256R1())
+    원래_서명키 = auth._서명키
+    auth._서명키 = lambda _토큰: 키.public_key()
+    try:
+        with psycopg.connect(OWNER_DSN, connect_timeout=5) as c:
+            계정 = {k: str(c.execute("INSERT INTO tenant.accounts (org_id, email) VALUES (%s, %s) "
+                                    "RETURNING account_id", (org, e)).fetchone()[0])
+                  for k, e in 이메일.items()}
+
+        def 헤더(k: str) -> dict:
+            토큰 = jwt.encode({"sub": str(_uuid.uuid4()), "email": 이메일[k], "aud": "authenticated",
+                              "iss": "ux-check", "exp": int(time.time()) + 600}, 키, algorithm="ES256")
+            return {"Authorization": f"Bearer {토큰}"}
+
+        값 = {"A": ("2026-03-01", "2026-12-31", 11110000, 1110000),
+             "B": ("2026-06-01", "2026-09-30", 22220000, 2220000)}
+        저장, 계획, b5들, l3읽음, 연결 = {}, {}, {}, {}, {}
+        for k in ("A", "B"):
+            저장[k] = client.put("/api/profile", headers=헤더(k), json=협약(*값[k])).status_code
+            r = client.post("/api/plans", headers=헤더(k), json={
+                "사업명": 판정_요청["사업명"], "품목": f"계정{k} 필라멘트", "금액": 400000,
+                "용도": "시제품 제작", "확정비목": "재료비", "정규화": 판정_요청["정규화"]})
+            계획[k] = r.json().get("plan_id") if r.status_code == 201 else None
+            # 첫 판정: 캐시가 없어야 프롬프트가 만들어진다(다른 계정의 캐시가 답하면 프롬프트가 비어 있다)
+            요청 = dict(판정_요청, plan_id=계획[k])
+            for v in 캡처.values():
+                v.clear()
+            client.post("/api/judge", json=요청, headers=헤더(k))
+            b5들[k] = b5(list(캡처["프롬프트"]))
+            l3읽음[k] = {(o, str(a["article_id"])) for o, rows in 캡처["l3"] for a in rows}
+            # 같은 요청을 다시 보내면 자기 캐시가 답하고, 처리단계 '캐시' 판정 행이 이 계정 계획에 연결된다
+            연결[k] = _sse_이벤트(client.post("/api/judge", json=요청, headers=헤더(k)).text, "저장") or {}
+
+        A, B = 헤더("A"), 헤더("B")
+        a_할일 = client.post(f"/api/plans/{계획['A']}/tasks", headers=A,
+                            json={"구분": "결제전", "항목": "계정A 할일"})
+        b_목록 = {p["plan_id"] for p in client.get("/api/plans", headers=B).json().get("항목", [])}
+        a_목록 = {p["plan_id"] for p in client.get("/api/plans", headers=A).json().get("항목", [])}
+        b_상세_a = client.get(f"/api/plans/{계획['A']}", headers=B).status_code
+        a_상세 = client.get(f"/api/plans/{계획['A']}", headers=A).json()
+        b_할일 = [t for t in client.get("/api/tasks", headers=B).json().get("항목", [])
+                 if t.get("plan_id") == 계획["A"]]
+        b_할일추가_a = client.post(f"/api/plans/{계획['A']}/tasks", headers=B,
+                                 json={"구분": "결제전", "항목": "침범"}).status_code
+        b_삭제_a = client.delete(f"/api/plans/{계획['A']}", headers=B).status_code
+        읽음 = {k: client.get("/api/profile", headers=h).json().get("협약", {}) for k, h in (("A", A), ("B", B))}
+        with psycopg.connect(OWNER_DSN, connect_timeout=5) as c:
+            판정행 = dict(c.execute(
+                "SELECT plan_id, account_id::text FROM tenant.decisions WHERE plan_id = ANY(%s)",
+                ([계획["A"], 계획["B"]],)).fetchall())
+            캐시행 = c.execute("SELECT account_id::text, count(*) FROM tenant.judge_cache "
+                             "WHERE org_id = %s AND 종류 = 'judge' GROUP BY 1", (org,)).fetchall()
+            프로필행 = c.execute("SELECT count(*) FROM tenant.profile_agreements WHERE org_id = %s",
+                              (org,)).fetchone()[0]
+
+        def b5_맞음(k):
+            시작, 종료, 정부, 자기 = 값[k]
+            return all(x in b5들[k] for x in (f"협약시작일: {시작}", f"협약종료일: {종료}",
+                                                f"정부지원(현금): {정부}", f"자기부담(현금): {자기}"))
+
+        업로드_l3 = {(org, a) for a in 업로드_조문}
+        결과.기록(
+            "19 같은 기관의 두 계정: 프로필·계획·판정·할일·판정 캐시는 계정별, L3 는 기관 것을 같이 읽음",
+            all(저장[k] == 200 for k in 저장) and all(계획.values())
+            and b5_맞음("A") and b5_맞음("B")
+            and 읽음["A"].get("정부지원_현금") == 값["A"][2] and 읽음["B"].get("정부지원_현금") == 값["B"][2]
+            and 프로필행 == 2
+            and bool(업로드_l3) and l3읽음["A"] and l3읽음["B"] and l3읽음["A"] <= 업로드_l3
+            and l3읽음["B"] <= 업로드_l3
+            and all(연결[k].get("저장") is True for k in 연결)
+            and 판정행.get(계획["A"]) == 계정["A"] and 판정행.get(계획["B"]) == 계정["B"]
+            and sorted(캐시행) == sorted([(계정["A"], 1), (계정["B"], 1)])
+            and 계획["A"] in a_목록 and 계획["A"] not in b_목록 and 계획["B"] not in a_목록
+            and b_상세_a == 404 and (a_상세.get("판정상세") or {}).get("판정") is not None
+            and a_할일.status_code == 201 and not b_할일 and b_할일추가_a == 404 and b_삭제_a == 404,
+            f"PUT {저장} · 계획 {계획} · B5 A={b5_맞음('A')} B={b5_맞음('B')} · GET 협약 "
+            f"A={읽음['A'].get('정부지원_현금')} B={읽음['B'].get('정부지원_현금')} · 프로필 행 {프로필행} · "
+            f"L3 읽음 A={len(l3읽음['A'])} B={len(l3읽음['B'])} (업로드 {len(업로드_l3)}) · "
+            f"연결 {[연결[k].get('저장') for k in 연결]} · 판정 행 계정 일치 "
+            f"A={판정행.get(계획['A']) == 계정['A']} B={판정행.get(계획['B']) == 계정['B']} · 캐시 행 {len(캐시행)}개 계정 · "
+            f"B 가 본 A 계획: 목록={계획['A'] in b_목록} 상세={b_상세_a} 할일={len(b_할일)} "
+            f"할일추가={b_할일추가_a} 삭제={b_삭제_a}")
+    finally:
+        auth._서명키 = 원래_서명키
+        with psycopg.connect(OWNER_DSN, connect_timeout=5) as c:
+            # decisions.account_id 는 SET NULL 이라 계정을 지우기 전에 판정 행을 먼저 지운다
+            c.execute("DELETE FROM tenant.decisions WHERE account_id IN "
+                      "(SELECT account_id FROM tenant.accounts WHERE email = ANY(%s))", (list(이메일.values()),))
+            c.execute("DELETE FROM tenant.accounts WHERE email = ANY(%s)", (list(이메일.values()),))
 
 
 def 실행() -> tuple[int, str]:

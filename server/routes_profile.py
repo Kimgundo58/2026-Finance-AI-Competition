@@ -1,14 +1,16 @@
 # -*- coding: utf-8 -*-
-"""GET/PUT /api/profile — 기관의 기업 프로필(협약 금액·기간). 집행내역·참여인력은 항상 빈 목록이다.
+"""GET/PUT /api/profile — 계정의 기업 프로필(협약 금액·기간). 집행내역·참여인력은 항상 빈 목록이다.
 
-GET 은 토큰으로 검증된 org 의 tenant.profile_agreements 를 읽는다(코드 조건 + RLS). ?org_id= 쿼리 값은 믿지 않는다.
+프로필은 계정 단위다. org 는 주관기관이라 같은 org 의 다른 계정(다른 창업기업)과 나눠 쓰지 않는다.
+GET 은 토큰으로 검증된 org·계정의 tenant.profile_agreements 를 읽는다(코드 조건 + RLS). ?org_id= 쿼리 값은 믿지 않는다.
 프로필이 없거나 게스트면 빈 프로필을 준다. 프로필 없이도 판정은 되고 전제가 늘어날 뿐이다.
-PUT 은 협약 네 값(협약시작일·협약종료일·정부지원_현금·자기부담_현금)을 검증된 org 의 행에 저장한다.
-  - org 는 토큰(데모 토큰 포함)에서만 정한다. 게스트는 401 이다(routes_plans·routes_l3 와 같다).
-  - 판정(orchestrate._프로필값_읽기, B5)은 org 당 한 행을 읽는다. 표의 UNIQUE 는 (org_id, 사업명) 이라
-    org 하나에 행이 둘 생길 수 있으므로, 코드가 기존 행(최근 수정 순 첫 행)을 UPDATE 하고 없을 때만
-    INSERT 한다. INSERT 의 사업명은 org 마다 정해진 값(_새행_사업명)이라 동시 요청도 ON CONFLICT 로 한 행에 모인다.
-  - 같은 트랜잭션에서 이 기관의 판정 캐시(judge_cache 종류 judge)를 지운다. 캐시키에도 프로필 해시가 들어간다.
+PUT 은 협약 네 값(협약시작일·협약종료일·정부지원_현금·자기부담_현금)을 검증된 org·계정의 행에 저장한다.
+  - org·계정은 토큰에서만 정한다. 데모 토큰은 계정이 없어 account_id NULL 행을 쓴다. 게스트는 401 이다.
+  - 판정(orchestrate._프로필값_읽기, B5)은 계정당 한 행을 읽는다. 표의 UNIQUE 는 (org_id, account_id, 사업명)
+    (NULLS NOT DISTINCT)이라 계정 하나에 행이 둘 생길 수 있으므로, 코드가 기존 행(최근 수정 순 첫 행)을 UPDATE
+    하고 없을 때만 INSERT 한다. INSERT 의 사업명은 org 마다 정해진 값(_새행_사업명)이라 동시 요청도
+    ON CONFLICT 로 한 행에 모인다.
+  - 같은 트랜잭션에서 이 계정의 판정 캐시(judge_cache 종류 judge)를 지운다. 캐시키에도 프로필 해시가 들어간다.
   - 집행내역·참여인력은 받기만 하고 저장하지 않는다(판정이 읽는 표가 여러 행이면 한 값으로 정할 수 없다).
   - mock 모드는 저장하지 않고 {"저장": false} 와 받은 값을 돌려준다(프론트가 이 값으로 mock 안내를 띄운다).
 PMS 원문·실명·과제번호는 스키마에 필드가 없어 받지 않는다.
@@ -24,7 +26,7 @@ from decimal import Decimal
 from fastapi import APIRouter, Body, HTTPException, Request
 
 from server import auth
-from server._common import MOCK, _질의, 구키_추가, 트랜잭션
+from server._common import MOCK, _계정조건, _질의, 구키_추가, 트랜잭션
 from server.models import 프로필, 협약정보
 
 router = APIRouter()
@@ -65,8 +67,9 @@ def profile_get(req: Request) -> dict:
     org_id = auth.검증된_org(req)
     if MOCK or not org_id:
         return _빈_프로필()
+    조건, 인자 = _계정조건(org_id, "p", auth.검증된_account(req))
     행 = _질의('SELECT "정부지원_현금", "자기부담_현금", "협약시작일", "협약종료일" '
-              f'FROM tenant.profile_agreements WHERE org_id = %s {_행_순서}', (org_id,))
+              f'FROM tenant.profile_agreements p WHERE {조건} {_행_순서}', 인자)
     if not 행:
         return _빈_프로필()
     return _구키_포함({"협약": _협약_dict(*행[0]), "집행내역": [], "참여인력": []})
@@ -114,33 +117,34 @@ def _새행_사업명(cur, org_id: str) -> str:
     return 사업들[0] if len(사업들) == 1 else _사업명_미지정
 
 
-def _협약_저장(org_id: str, 시작, 종료, 정부, 자기) -> tuple:
-    """한 트랜잭션에서 org 의 협약 행을 UPDATE(있으면) 또는 INSERT 하고 판정 캐시를 지운다. 저장된 값을 돌려준다."""
-    with 트랜잭션(org_id) as cur:
-        # FOR UPDATE: 같은 org 의 동시 PUT 이 같은 행을 순서대로 고치게 한다
-        r = cur.execute("SELECT profile_id FROM tenant.profile_agreements "
-                        f"WHERE org_id = %s {_행_순서} FOR UPDATE", (org_id,)).fetchone()
+def _협약_저장(org_id: str, account_id: str | None, 시작, 종료, 정부, 자기) -> tuple:
+    """한 트랜잭션에서 계정의 협약 행을 UPDATE(있으면) 또는 INSERT 하고 판정 캐시를 지운다. 저장된 값을 돌려준다."""
+    조건, 인자 = _계정조건(org_id, "p", account_id)
+    with 트랜잭션(org_id, account_id) as cur:
+        # FOR UPDATE: 같은 계정의 동시 PUT 이 같은 행을 순서대로 고치게 한다
+        r = cur.execute("SELECT profile_id FROM tenant.profile_agreements p "
+                        f"WHERE {조건} {_행_순서} FOR UPDATE", 인자).fetchone()
         if r:
             저장됨 = cur.execute(
-                'UPDATE tenant.profile_agreements SET "협약시작일" = %s, "협약종료일" = %s, '
+                'UPDATE tenant.profile_agreements p SET "협약시작일" = %s, "협약종료일" = %s, '
                 '"정부지원_현금" = %s, "자기부담_현금" = %s, updated_at = now() '
-                'WHERE profile_id = %s AND org_id = %s '
+                f'WHERE p.profile_id = %s AND {조건} '
                 'RETURNING "정부지원_현금", "자기부담_현금", "협약시작일", "협약종료일"',
-                (시작, 종료, 정부, 자기, r[0], org_id)).fetchone()
+                (시작, 종료, 정부, 자기, r[0], *인자)).fetchone()
         else:
-            # 행이 없던 두 요청이 동시에 오면 둘 다 여기로 온다. 사업명이 같아 UNIQUE(org_id, 사업명)에서 만난다
+            # 행이 없던 두 요청이 동시에 오면 둘 다 여기로 온다. 사업명이 같아 UNIQUE(org_id, account_id, 사업명)에서 만난다
             저장됨 = cur.execute(
                 'INSERT INTO tenant.profile_agreements '
-                '(org_id, "사업명", "협약시작일", "협약종료일", "정부지원_현금", "자기부담_현금") '
-                'VALUES (%s, %s, %s, %s, %s, %s) '
-                'ON CONFLICT (org_id, "사업명") DO UPDATE SET '
+                '(org_id, account_id, "사업명", "협약시작일", "협약종료일", "정부지원_현금", "자기부담_현금") '
+                'VALUES (%s, %s, %s, %s, %s, %s, %s) '
+                'ON CONFLICT (org_id, account_id, "사업명") DO UPDATE SET '
                 '"협약시작일" = EXCLUDED."협약시작일", "협약종료일" = EXCLUDED."협약종료일", '
                 '"정부지원_현금" = EXCLUDED."정부지원_현금", "자기부담_현금" = EXCLUDED."자기부담_현금", '
                 'updated_at = now() '
                 'RETURNING "정부지원_현금", "자기부담_현금", "협약시작일", "협약종료일"',
-                (org_id, _새행_사업명(cur, org_id), 시작, 종료, 정부, 자기)).fetchone()
-        # 협약값은 판정 프롬프트 B5 에 들어간다. 이전 값으로 만든 판정 캐시가 답하지 않게 지운다
-        cur.execute("DELETE FROM tenant.judge_cache WHERE org_id = %s AND 종류 = 'judge'", (org_id,))
+                (org_id, account_id, _새행_사업명(cur, org_id), 시작, 종료, 정부, 자기)).fetchone()
+        # 협약값은 판정 프롬프트 B5 에 들어간다. 이 계정의 이전 값으로 만든 판정 캐시가 답하지 않게 지운다
+        cur.execute(f"DELETE FROM tenant.judge_cache p WHERE {조건} AND p.종류 = 'judge'", 인자)
     return 저장됨
 
 
@@ -150,16 +154,17 @@ def profile_put(req: Request, body: 프로필 = Body(...)) -> dict:
     if MOCK:
         return _저장_응답(False, "mock 모드(SUDDOE_MOCK=1)에서는 저장하지 않습니다", body.model_dump())
 
-    # 본문에는 org_id 필드가 없다. 쿼리의 ?org_id= 도 쓰지 않고 토큰의 org 만 쓴다
+    # 본문에는 org_id 필드가 없다. 쿼리의 ?org_id= 도 쓰지 않고 토큰의 org·계정만 쓴다
     org_id = auth.검증된_org(req)
     if not org_id:
         raise HTTPException(401, "저장하려면 로그인이 필요합니다")
+    account_id = auth.검증된_account(req)
     try:
-        저장됨 = _협약_저장(org_id, 시작, 종료, 정부, 자기)
+        저장됨 = _협약_저장(org_id, account_id, 시작, 종료, 정부, 자기)
     except Exception as e:                                    # noqa: BLE001
         상태 = getattr(e, "sqlstate", None)
         # 응답에는 SQLSTATE·DB 메시지를 넣지 않는다(호스트·포트가 포함될 수 있다)
-        _log.exception("기업 프로필 저장 실패 — sqlstate=%s org=%s", 상태, org_id)
+        _log.exception("기업 프로필 저장 실패 — sqlstate=%s org=%s account=%s", 상태, org_id, account_id)
         if 상태 == "42501":              # RLS 정책 또는 권한에 의해 거부됨
             raise HTTPException(403, "이 기관의 프로필을 저장할 권한이 없습니다") from e
         if 상태 is None:                 # 접속 자체가 실패했다

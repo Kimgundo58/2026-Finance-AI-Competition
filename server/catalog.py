@@ -139,12 +139,17 @@ def _심층질문마스터() -> list[dict]:
 
 # 라우트
 
+def _사업_비목(사업명: str | None) -> list[str]:
+    """사업에 있는 비목. 창업활동비는 예비창업패키지에만 있다. 사업명은 표준 표기로 받는다."""
+    return [b for b in 비목_ENUM
+            if b != "창업활동비" or 사업명 is None or 사업명 in 창업활동비_사업]
+
+
 @router.get("/api/vocab")
 def vocab(사업명: str | None = None) -> dict:
-    """비목 목록과 별칭. 창업활동비는 예비창업패키지에만 있다."""
+    """비목 목록과 별칭."""
     사업명 = _사업명_표준화(사업명)          # 창업활동비_사업 비교가 표준 표기 기준이라 먼저 바꾼다
-    목록 = [b for b in 비목_ENUM
-            if b != "창업활동비" or 사업명 is None or 사업명 in 창업활동비_사업]
+    목록 = _사업_비목(사업명)
     별칭: dict[str, list[str]] = {}
     for r in _질의("SELECT \"비목\", \"별칭\" FROM corpus.item_vocab WHERE \"비목체계\"='창업'"):
         별칭[r[0]] = list(r[1] or [])

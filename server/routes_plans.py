@@ -5,7 +5,8 @@ GET/POST /api/plans, GET/DELETE /api/plans/{plan_id}. mock 모드(SUDDOE_MOCK=1)
 mock_data 를 쓰고, live 모드 구현은 `_live_*` 함수에 있다. 읽고 쓰는 테이블은
 tenant.expense_plans, tenant.decisions, tenant.plan_tasks 이다.
 응답 모델(models.계획*)을 바꾸면 프론트가 깨지므로 필드는 합의 후에만 바꾼다.
-통계는 별도 API 없이 목록 응답에 포함한다. 다른 기관의 계획은 404 로 숨긴다.
+통계는 별도 API 없이 목록 응답에 포함한다. 다른 기관·다른 계정의 계획은 404 로 숨긴다.
+계획은 계정 단위다(같은 주관기관의 다른 계정과 나눠 쓰지 않는다). 계정은 토큰에서 정한 현재_account 다.
 판정상세의 이름을 바꾼 키는 한 릴리스 동안 이전 이름으로도 함께 보낸다(judge_response.구_판정키_포함).
 """
 from __future__ import annotations
@@ -15,7 +16,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from ._common import MOCK, 탭_판정, _jsonb, _org조건, _질의, _실행
+from ._common import MOCK, 탭_판정, _jsonb, _계정조건, _질의, _실행
 from .judge_response import 구_판정키_포함
 from .models import 계획목록응답, 계획상세, 계획생성, 계획통계, 계획요약
 from . import auth, mock_data
@@ -155,7 +156,8 @@ def 생성(요청: Request, body: 계획생성) -> 계획상세:
         }
         mock_data.mock_계획.append(행)
         return 계획상세(**행, 할일=[], 판정상세=None)
-    return _live_생성(body, org_id=_계획_org(요청, body.org_id))
+    return _live_생성(body, org_id=_계획_org(요청, body.org_id),
+                     account_id=auth.검증된_account(요청))
 
 
 def _합성(body: 계획생성) -> str:
@@ -204,7 +206,7 @@ def 삭제(plan_id: int, org_id: str | None = None) -> dict:
         mock_data.mock_할일[:] = [t for t in mock_data.mock_할일 if t["plan_id"] != plan_id]
         return {"삭제": True, "plan_id": plan_id, "할일삭제": len(할일)}
 
-    조건, org인자 = _org조건(org_id, "p")
+    조건, org인자 = _계정조건(org_id, "p")
     # CASCADE 뒤에는 셀 수 없으므로 지우기 전에 센다
     행 = _질의(
         f"SELECT p.제목, (SELECT count(*) FROM tenant.plan_tasks t WHERE t.plan_id = p.plan_id) "
@@ -246,7 +248,7 @@ def _live_목록(org_id: str | None) -> list[dict]:
     반환 dict 의 키는 `models.계획요약` 필드와 같다. org_id 가 None 이면 게스트(org_id IS NULL)
     행만 본다.
     """
-    조건, 인자 = _org조건(org_id)
+    조건, 인자 = _계정조건(org_id)
     행 = _질의(f"""
         SELECT p.plan_id, p.제목, p.확정비목, p.금액, d.판정, p.집행예정일,
                p.updated_at, p.사업명, p.상태
@@ -267,7 +269,7 @@ def _live_목록(org_id: str | None) -> list[dict]:
 
 def _live_통계(org_id: str | None) -> dict:
     """같은 JOIN 한 번으로 탭별 건수 5개와 금액합계를 센다. 키는 `models.계획통계` 와 같다."""
-    조건, 인자 = _org조건(org_id)
+    조건, 인자 = _계정조건(org_id)
     행 = _질의(f"""
         SELECT
             count(*),
@@ -294,22 +296,26 @@ _생성_컬럼 = ("plan_id", "제목", "확정비목", "금액", "집행예정�
              "사업명", "상태", "질문원문", "거래처", "추가설명", "정규화", "latest_decision_id")
 
 
-def _live_생성(body: 계획생성, *, org_id: str | None) -> 계획상세:
+def _live_생성(body: 계획생성, *, org_id: str | None, account_id: str | None = None) -> 계획상세:
     """INSERT INTO tenant.expense_plans. 질문원문이 없으면 `_합성(body)` 을 쓴다.
 
-    org_id 는 호출자가 검증된 주체에서 정한 값이다(`_계획_org`). body.org_id 는 쓰지 않는다.
+    org_id·account_id 는 호출자가 검증된 주체에서 정한 값이다(`_계획_org`, auth.검증된_account).
+    body.org_id 는 쓰지 않는다. account_id 는 데모 세션·게스트면 None 이다.
     """
     제목 = body.제목 or body.품목
     질문원문 = body.질문원문 or _합성(body)
+    # 정규화 전에 임시저장한 계획도 입력값을 남긴다. 상세의 용도와 판정의 금지목록 대조가 정규화 값을 읽는다.
+    정규화 = body.정규화 or {"품목": body.품목, "용도": body.용도, "금액": body.금액,
+                       "거래처": body.거래처 or "", "질문원문": 질문원문}
     행 = _질의_저장(
         """
         INSERT INTO tenant.expense_plans
-            (org_id, 제목, 질문원문, 정규화, 사업명, 확정비목, 금액, 집행예정일, 거래처, 추가설명)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            (org_id, account_id, 제목, 질문원문, 정규화, 사업명, 확정비목, 금액, 집행예정일, 거래처, 추가설명)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING plan_id, 제목, 확정비목, 금액, 집행예정일, updated_at, created_at,
                   사업명, 상태, 질문원문, 거래처, 추가설명, 정규화, latest_decision_id
         """,
-        (org_id, 제목, 질문원문, _jsonb(body.정규화), body.사업명,
+        (org_id, account_id if org_id else None, 제목, 질문원문, _jsonb(정규화), body.사업명,
          body.확정비목, body.금액, body.집행예정일, body.거래처, body.추가설명),
         org_id,
     )
@@ -342,7 +348,7 @@ _계획할일_컬럼 = ("task_id", "plan_id", "출처", "code", "구분", "항�
 
 def _live_상세(plan_id: int, org_id: str | None) -> 계획상세:
     """계획, 최신 판정, plan_tasks 를 함께 돌려준다. 없거나 다른 기관 것이면 404."""
-    조건, org인자 = _org조건(org_id)
+    조건, org인자 = _계정조건(org_id)
     행 = _질의(f"""
         SELECT p.plan_id, p.제목, p.확정비목, p.금액, d.판정, p.집행예정일,
                p.updated_at, p.created_at, p.사업명, p.상태, p.질문원문,

@@ -5,7 +5,7 @@ POST /api/l3/upload 는 tenant.l3_documents 행을 만들고 원본을 저장한
 파싱은 백그라운드 작업(`백그라운드_파싱` → scripts/l3_parse.파싱)으로 실행한다. 프론트는
 GET /api/l3/{doc_id} 를 폴링하고, GET /api/l3/current 로 적용 중인 문서 목록을 본다.
 허용 형식은 PDF·HWPX·HWP 이고 파일 내용으로 형식을 확인한다. DOC·DOCX 는 415.
-파싱이 성공하면 이 기관의 tenant.judge_cache 행을 지운다(L3 가 바뀐 뒤 캐시가 답하지 않게).
+L3 가 바뀌면 캐시키의 l3_해시가 바뀌어 이전 판정 캐시가 답하지 않는다(response_cache.l3_해시).
 
 기관당 판정에 쓰는 L3 는 한 문서다. 새 문서의 파싱이 성공하면 이전 문서를 대체하고, 실패하면 이전 문서가
 계속 적용된다(scripts/l3_parse.적용문서_정리). 상태 응답의 메시지는 이 두 경우와 '적용 중인 규정 없음' 을
@@ -237,7 +237,7 @@ def 백그라운드_파싱(doc_id: str, org_id: str) -> None:
     """업로드 응답 뒤 백그라운드 작업으로 파서를 실행한다(202 + 상태 폴링 계약).
 
     `_common` 헬퍼를 거치지 않는 커넥션이라 GUC app.org_id 를 직접 설정한다. 설정하지 않으면
-    RLS 정책 때문에 0행이 된다. 파싱이 성공하면 같은 트랜잭션에서 이 기관의 judge_cache 를 지운다.
+    RLS 정책 때문에 0행이 된다. 파싱이 성공하면 같은 트랜잭션에서 계정 없는 judge_cache 행을 지운다.
     예외를 밖으로 던지지 않는다. 실패는 파싱품질='fail' 로 기록해 상태가 'pending' 으로 남지 않게 한다.
     파싱() 이 실패를 직접 기록하므로, 여기서는 파서 밖에서 난 예외만 `_실패_직접기록` 으로 남긴다.
     """
@@ -250,7 +250,8 @@ def 백그라운드_파싱(doc_id: str, org_id: str) -> None:
             with conn.cursor() as cur:
                 결과 = 파싱(cur, doc_id)
                 if 결과.get("ok", True):
-                    # L3 가 바뀌면 이 기관의 판정 캐시는 이전 근거로 답할 수 있다. 같은 트랜잭션에서 지운다.
+                    # 이 연결은 app.org_id 만 설정하므로 RLS 때문에 계정 없는 행(데모 세션)만 지워진다.
+                    # 계정별 행은 남지만 캐시키의 l3_해시가 바뀌어 이전 근거로 답하지 않는다.
                     cur.execute("DELETE FROM tenant.judge_cache WHERE org_id = %s", (str(org_id),))
             conn.commit()
         if not 결과.get("ok", True):

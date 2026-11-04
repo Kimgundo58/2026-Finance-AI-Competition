@@ -48,7 +48,7 @@ _log = logging.getLogger(__name__)
 
 # tenant.decisions 에 넣는 컬럼. decisions_저장 은 행의 키 중 이 목록에 있는 것만 넣는다.
 _decisions_컬럼: tuple[str, ...] = (
-    "org_id", "사업명", "기관id", "질문원문", "plan_id", "정규화", "비목", "금액", "판정",
+    "org_id", "account_id", "사업명", "기관id", "질문원문", "plan_id", "정규화", "비목", "금액", "판정",
     "신뢰등급", "요약", "규정버전", "인용", "해야할일", "전제", "참조관계", "미매핑전제",
     "검증사유", "검증코드", "처리단계", "실패단계", "지연ms", "모델", "검색스냅샷", "코퍼스버전",
 )
@@ -73,6 +73,7 @@ class _판정상태:
     dry: bool
     주입: str | None
     참조확장_사용: bool
+    account_id: Any = None
     t0: float = field(default_factory=time.time)
     지연: dict[str, int] = field(default_factory=dict)
     처리단계: list[str] = field(default_factory=list)
@@ -160,7 +161,8 @@ def _decisions_행(상태: _판정상태, 응답: dict) -> dict:
     검색 = 응답.get("검색") or {}
     return dict(
         # 기관id 는 corpus 문서의 발행 기관 컬럼이라 판정 행에는 쓰지 않는다
-        org_id=상태.org_id, 사업명=상태.사업명, 기관id=None, 질문원문=상태.질문,
+        org_id=상태.org_id, account_id=상태.account_id if 상태.org_id else None,
+        사업명=상태.사업명, 기관id=None, 질문원문=상태.질문,
         plan_id=상태.plan_id,
         정규화=json.dumps(응답.get("정규화") or {}, ensure_ascii=False),
         비목=응답.get("비목"),
@@ -189,7 +191,7 @@ def decisions_저장(cur, 행: dict) -> int | None:
     """`tenant.decisions` 에 한 건 넣고 decision_id 를 돌려준다.
 
     행의 키 중 _decisions_컬럼 에 있는 것만 넣는다. 넣을 것이 없으면 None. INSERT 오류는 그대로 올린다.
-    org_id 가 있는 행은 RLS 정책 때문에 커넥션의 GUC app.org_id 가 같은 값이어야 한다.
+    org_id 가 있는 행은 RLS 정책 때문에 커넥션의 GUC app.org_id·app.account_id 가 같은 값이어야 한다.
     """
     키 = [k for k in 행 if k in _decisions_컬럼]
     if not 키:
@@ -229,8 +231,10 @@ def _모델메타(정규화_호출수: int, 정규화_메타: dict, 판정_메�
 
 
 # 기업 프로필 값과 전제 확인
-def _프로필값_읽기(cur, org_id) -> tuple[str | None, dict | None]:
-    """테넌트 기업 프로필 값을 한 번 읽어 (프로필 요약문(B5), 값) 을 돌려준다.
+def _프로필값_읽기(cur, org_id, account_id=None) -> tuple[str | None, dict | None]:
+    """계정의 기업 프로필 값을 한 번 읽어 (프로필 요약문(B5), 값) 을 돌려준다.
+
+    프로필은 계정 단위다. org_id 와 account_id(데모 세션은 None)가 둘 다 맞는 행만 읽는다(RLS 와 별개로 코드에서도).
 
     프로필 요약문은 profile_agreements 의 협약 기간·현금 재원 네 값이다(없으면 '미입력'). 행이 없거나 조회가
     실패하면 None. 값은 None = 세 조회 모두 실패(모른다), {} = 프로필 값이 없다(게스트), 그 밖은 실제 값이다.
@@ -238,15 +242,17 @@ def _프로필값_읽기(cur, org_id) -> tuple[str | None, dict | None]:
     """
     if not org_id:
         return None, {}
+    계정 = str(account_id) if account_id else None
     값: dict = {}
     성공 = False
     프로필요약문 = None
     try:
         r = cur.execute("""SELECT 협약시작일, 협약종료일, 정부지원_현금, 자기부담_현금,
                                   과업범위요약
-                             FROM tenant.profile_agreements WHERE org_id=%s
+                             FROM tenant.profile_agreements
+                            WHERE org_id=%s AND account_id IS NOT DISTINCT FROM %s::uuid
                             ORDER BY updated_at DESC, profile_id LIMIT 1""",
-                        (org_id,)).fetchone()
+                        (org_id, 계정)).fetchone()
         성공 = True
         if r:
             이름 = ("협약시작일", "협약종료일", "정부지원(현금)", "자기부담(현금)")
@@ -262,8 +268,9 @@ def _프로필값_읽기(cur, org_id) -> tuple[str | None, dict | None]:
         try:
             행들 = cur.execute(
                 f"SELECT {', '.join('t.' + c for c in 컬럼)} FROM tenant.{테이블} t "
-                "JOIN tenant.profile_agreements pr USING (profile_id) WHERE pr.org_id=%s",
-                (org_id,)).fetchall()
+                "JOIN tenant.profile_agreements pr USING (profile_id) "
+                "WHERE pr.org_id=%s AND pr.account_id IS NOT DISTINCT FROM %s::uuid",
+                (org_id, 계정)).fetchall()
             성공 = True
             if len(행들) == 1:
                 값.update({k: v for k, v in zip(컬럼, 행들[0]) if v is not None})
@@ -482,7 +489,7 @@ def _프롬프트구성단계(상태: _판정상태) -> dict | None:
     # check_items 본문은 한 번만 읽어 프롬프트 구성(B5.5)과 검증(해야할일)에 같이 넘긴다
     상태.체크항목 = 체크항목_본문(set(상태.체크코드), conn=conn) if 상태.체크코드 else {}
     # 프로필 값도 한 번만 읽어 프로필 요약문(B5)과 전제 확인에 같이 쓴다
-    프로필요약문, 상태.프로필값 = _프로필값_읽기(cur, 상태.org_id)
+    프로필요약문, 상태.프로필값 = _프로필값_읽기(cur, 상태.org_id, 상태.account_id)
     검색결과 = 상태.검색결과
     상태.프롬프트, 상태.문장맵, 상태.참조관계 = 프롬프트_구성(
         cur, 상태.질문, 상태.정규화결과, l3=상태.l3본문 or None,
@@ -570,31 +577,36 @@ def _검증단계(상태: _판정상태, 사용자프로필값: dict | None) -> 
     return _종료(상태, 응답, 기록=상태.기록)
 
 
-def 판정(질문: str, *, 사업명: str | None = None, org_id=None, plan_id: int | None = None,
+def 판정(질문: str, *, 사업명: str | None = None, org_id=None, account_id=None,
+       plan_id: int | None = None,
        확정비목: str | None = None, 정규화결과: dict | None = None,
        사용자프로필값: dict | None = None,
        dry: bool = False, 기록: bool = True, 주입: str | None = None,
        참조확장_사용: bool = True) -> dict:
     """질문 하나를 판정해 응답 dict 를 돌려준다. 어떤 실패도 예외로 올리지 않고 판단불가로 반환한다.
 
-    서버 인자: `plan_id`(지출계획에 딸린 판정이면 decisions.plan_id), `확정비목`(사용자가 고른 비목으로 재판정),
+    서버 인자: `account_id`(토큰으로 검증된 계정. 프로필(B5)·decisions 는 계정 단위이고 L3 는 org 단위다. 데모 세션은
+    None), `plan_id`(지출계획에 딸린 판정이면 decisions.plan_id), `확정비목`(사용자가 고른 비목으로 재판정),
     `정규화결과`(이미 실행한 정규화 결과. 주면 정규화 LLM 을 다시 부르지 않는다), `사용자프로필값`(심층질문 답.
     프로필 값과 같은 컬럼명 키이며 DB 값보다 우선한다).
     평가용 인자: `dry`(LLM 없이 규칙 정규화와 프롬프트 구성까지만), `기록`(tenant.decisions 기록 여부),
     `주입`(장애 주입 'db'|'timeout'|'schema'|'empty'|'cite'), `참조확장_사용`(False 면 B3 을 넣지 않는다).
     부수 효과: `기록` 이면 게이트·정상 종료를 tenant.decisions 에 넣는다. 실패 종료는 기록하지 않는다.
     """
-    상태 = _판정상태(질문=질문, 사업명=사업명, org_id=org_id, plan_id=plan_id, 기록=기록,
+    상태 = _판정상태(질문=질문, 사업명=사업명, org_id=org_id, account_id=account_id,
+                   plan_id=plan_id, 기록=기록,
                    dry=dry, 주입=주입, 참조확장_사용=참조확장_사용)
     try:
         if 주입 == "db":
             raise 주입실패("DB 연결 실패(주입)")
         # autocommit: LLM 호출 동안 읽기 트랜잭션을 잡고 있으면 다른 세션의 DDL·VACUUM 이 막힌다
         상태.conn = db.connect(connect_timeout=5, autocommit=True)
-        # 새 커넥션에는 미들웨어의 GUC 가 없다. RLS 정책이 읽는 app.org_id 를 세션 레벨로 설정해야
-        # L3 조회와 decisions INSERT 가 RLS 정책에 의해 거부되지 않는다
+        # 새 커넥션에는 미들웨어의 GUC 가 없다. RLS 정책이 읽는 app.org_id·app.account_id 를 세션 레벨로
+        # 설정해야 L3 조회·프로필 조회·decisions INSERT 가 RLS 정책에 의해 거부되지 않는다
         if org_id:
-            상태.conn.execute("SELECT set_config('app.org_id', %s, false)", (str(org_id),))
+            상태.conn.execute("SELECT set_config('app.org_id', %s, false), "
+                             "set_config('app.account_id', %s, false)",
+                             (str(org_id), str(account_id) if account_id else ""))
     except Exception as e:                               # noqa: BLE001
         return _실패응답(상태, "DB", "데이터베이스에 연결할 수 없어 판정을 내리지 않았습니다.",
                       f"DB 연결 실패: {type(e).__name__}",

@@ -3,9 +3,10 @@
 
 server/main.py 와 모든 routes_*.py 가 import 한다. 라우터가 main.py 를 import 하면 순환 의존이
 생기므로 공용 정의를 여기에 둔다. 읽는 환경변수: SUDDOE_DSN, SUDDOE_MOCK.
-RLS 계약: tenant.* 의 RLS 정책은 org_id = tenant.current_org() 이고, current_org() 는 GUC
-app.org_id 를 읽는다. auth.OrgId주입 미들웨어가 검증된 org 를 컨텍스트 변수 현재_org 에 넣고,
-_질의/_실행/트랜잭션은 매 트랜잭션마다 app.org_id 를 트랜잭션 한정으로 설정한다.
+RLS 계약: tenant.* 의 RLS 정책은 org_id = tenant.current_org() 이고, 기업 데이터(프로필·지출계획·할일·
+판정·캐시)는 account_id IS NOT DISTINCT FROM tenant.current_account() 도 본다. 두 함수는 GUC app.org_id·
+app.account_id 를 읽는다. auth.OrgId주입 미들웨어가 검증된 org·계정을 컨텍스트 변수 현재_org·현재_account 에
+넣고, _질의/_실행/트랜잭션은 매 트랜잭션마다 두 GUC 를 트랜잭션 한정으로 설정한다.
 """
 from __future__ import annotations
 
@@ -72,27 +73,34 @@ if MOCK and _운영전용_환경변수:
 
 현재_org: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "suddoe_현재_org", default=None)
+# 로그인 계정(tenant.accounts.account_id). 데모 세션·게스트는 None 이다.
+현재_account: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "suddoe_현재_account", default=None)
 
 
 @contextlib.contextmanager
-def org_고정(org_id: str | None):
-    """HTTP 요청 밖(스크립트, 백그라운드 작업, 테스트)에서 현재_org 를 설정한다."""
+def org_고정(org_id: str | None, account_id: str | None = None):
+    """HTTP 요청 밖(스크립트, 백그라운드 작업, 테스트)에서 현재_org·현재_account 를 설정한다."""
     토큰 = 현재_org.set(str(org_id) if org_id else None)
+    계정토큰 = 현재_account.set(str(account_id) if org_id and account_id else None)
     try:
         yield
     finally:
+        현재_account.reset(계정토큰)
         현재_org.reset(토큰)
 
 
-def _rls_org_설정(conn_or_cur, org: str | None) -> None:
-    """열린 트랜잭션에 app.org_id 를 트랜잭션 한정으로 설정한다. org 가 없으면 아무것도 안 한다.
+def _rls_org_설정(conn_or_cur, org: str | None, account: str | None = None) -> None:
+    """열린 트랜잭션에 app.org_id·app.account_id 를 트랜잭션 한정으로 설정한다. org 가 없으면 아무것도 안 한다.
 
+    account 가 없으면 app.account_id 를 빈 값으로 설정한다(current_account() 가 NULL, 데모 세션 행만 보인다).
     SET LOCAL 은 바인딩 파라미터를 받지 않으므로 set_config(..., true) 를 쓴다. 세션 GUC
     (is_local=false)로 설정하면 커넥션을 재사용할 때 앞 요청의 org 가 남는다.
     """
     if org is None:
         return
-    conn_or_cur.execute("SELECT set_config('app.org_id', %s, true)", (str(org),))
+    conn_or_cur.execute("SELECT set_config('app.org_id', %s, true), set_config('app.account_id', %s, true)",
+                        (str(org), str(account) if account else ""))
 
 
 # ── DB ──────────────────────────────────────────────────────────────
@@ -121,7 +129,7 @@ def _질의(sql: str, 인자: tuple = (), *, 예외전파: bool = False) -> list
     try:
         import psycopg
         with psycopg.connect(DSN, connect_timeout=3) as conn:
-            _rls_org_설정(conn, 현재_org.get())          # 질의와 같은 트랜잭션이어야 한다
+            _rls_org_설정(conn, 현재_org.get(), 현재_account.get())   # 질의와 같은 트랜잭션이어야 한다
             return conn.execute(sql, 인자).fetchall()
     except Exception as e:                                    # noqa: BLE001
         if 예외전파:
@@ -139,7 +147,7 @@ def _실행(sql: str, 인자: tuple = (), *, 예외전파: bool = False) -> int:
     try:
         import psycopg
         with psycopg.connect(DSN, connect_timeout=3) as conn:
-            _rls_org_설정(conn, 현재_org.get())          # 쓰기와 같은 트랜잭션, 커밋 전
+            _rls_org_설정(conn, 현재_org.get(), 현재_account.get())   # 쓰기와 같은 트랜잭션, 커밋 전
             cur = conn.execute(sql, 인자)
             conn.commit()
             return cur.rowcount
@@ -150,19 +158,26 @@ def _실행(sql: str, 인자: tuple = (), *, 예외전파: bool = False) -> int:
         return -1
 
 
+_컨텍스트 = object()
+
+
 @contextlib.contextmanager
-def 트랜잭션(org_id: str | None = None) -> Iterator[Any]:
+def 트랜잭션(org_id: str | None = None, account_id: Any = _컨텍스트) -> Iterator[Any]:
     """커넥션 하나로 여러 문장을 한 트랜잭션에서 실행한다. psycopg 커서를 yield 한다.
 
-    org_id 를 넘기면 그 값을, 아니면 현재_org 컨텍스트 변수를 app.org_id 로 설정한다.
-    org_id 인자에는 검증된 값만 넘긴다. 블록이 정상 종료하면 커밋하고, 예외가 나면 롤백한 뒤
+    org_id 를 넘기면 그 값을, 아니면 현재_org 컨텍스트 변수를 app.org_id 로 설정한다. account_id 를
+    넘기지 않으면 org 가 현재_org 와 같을 때만 현재_account 를 쓰고, 다르면 계정 없음(None)으로 둔다.
+    두 인자에는 검증된 값만 넘긴다. 블록이 정상 종료하면 커밋하고, 예외가 나면 롤백한 뒤
     예외를 다시 던진다. RLS 적용 테이블에 여러 문장을 쓰는 새 코드는 이것을 쓴다.
     """
     import psycopg
+    org = org_id or 현재_org.get()
+    if account_id is _컨텍스트:
+        account_id = 현재_account.get() if org and str(org) == str(현재_org.get()) else None
     conn = psycopg.connect(DSN, connect_timeout=5)
     try:
         with conn.cursor() as cur:
-            _rls_org_설정(cur, org_id or 현재_org.get())
+            _rls_org_설정(cur, org, account_id)
             yield cur
         conn.commit()
     except BaseException:
@@ -182,6 +197,21 @@ def _org조건(org_id: str | None, 별칭: str = "p") -> tuple[str, tuple]:
     if org_id is None:
         return f"{별칭}.org_id IS NULL", ()
     return f"{별칭}.org_id = %s", (org_id,)
+
+
+def _계정조건(org_id: str | None, 별칭: str = "p", account_id: Any = _컨텍스트) -> tuple[str, tuple]:
+    """기업 데이터(계획·할일·판정·프로필·캐시) 행을 org 와 계정으로 거르는 WHERE 조각과 인자.
+
+    org_id 가 None 이면 게스트 행(org_id IS NULL)만 고른다. account_id 를 넘기지 않으면 현재_account
+    (미들웨어가 토큰에서 정한 계정)를 쓴다. 데모 세션은 계정이 없어 account_id IS NULL 행만 고른다.
+    RLS(account_isolation)와 별개로 코드에서도 거른다. 같은 기관의 다른 계정 행이 섞이면 유출이다.
+    """
+    if org_id is None:
+        return f"{별칭}.org_id IS NULL", ()
+    if account_id is _컨텍스트:
+        account_id = 현재_account.get()
+    return (f"{별칭}.org_id = %s AND {별칭}.account_id IS NOT DISTINCT FROM %s::uuid",
+            (org_id, str(account_id) if account_id else None))
 
 
 def _jsonb(v):
