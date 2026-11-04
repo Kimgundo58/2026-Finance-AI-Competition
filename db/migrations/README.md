@@ -55,6 +55,7 @@ docker rm -f suddoe-verify            # 익명 볼륨까지 지우려면 docker 
 | `2026-11-03_계정별_분리.sql` | 필수 | 기업 데이터(`profile_agreements`·`expense_plans`·`plan_tasks`·`decisions`·`judge_cache`)에 `account_id` 를 넣고 RLS 를 `account_isolation`(org + 계정)으로 바꾼다. 기존 행은 기관의 가장 먼저 만든 계정(같으면 email 순)에 붙인다. **api 를 멈춘 상태에서 적용하고 새 이미지로 띄운다** — 이전 코드는 `app.account_id` 를 설정하지 않아 계정 행을 못 읽고, 새로 쓰는 행이 계정 없이 남는다. 순서는 아래 |
 | `2026-11-03_계정별_분리_되돌리기.sql` | 되돌릴 때만 | 위 파일의 RLS 정책과 프로필 유일 키를 이전 정의로 되돌린다. 평소에는 실행하지 않는다 |
 | `2026-11-03_주석_정정.sql` | 선택(주석만) | `corpus.refs` 의 COMMENT 두 개를 고친다. 참조 확장 깊이 "깊이 3" → "깊이 1"(실제 값은 `scripts/retrieve.py` 의 `깊이 = 1`), 해결상태의 "(판단불가 예고)" → "(판단불가가 될 수 있음)". 스키마·데이터는 바꾸지 않는다 |
+| `2026-11-04_계정등록.sql` | 필수 | 가입한 계정을 기관에 등록하는 함수 `tenant.계정등록` 을 만든다(`POST /api/accounts`). 기존 행·정책은 바꾸지 않고 api 를 멈추지 않는다. 적용한 뒤 `./deploy.sh --force` 로 새 이미지를 띄운다. 프론트는 이 이미지가 뜬 뒤에 병합한다. 온보딩의 「다음」이 이 API 를 부르므로 먼저 병합하면 모든 사용자가 기관 선택 단계에서 멈춘다 |
 
 ### `2026-11-03_계정별_분리.sql` 적용 순서 (운영)
 
@@ -63,7 +64,7 @@ Actions image 가 끝난 뒤 `tmux new -s migrate` 안에서 아래 블록을 �
 api 가 멈춘 동안은 요청이 실패한다. 절차가 끝날 때까지 다른 PR 을 병합하지 않는다(`deploy.sh` 는 `origin/main` 을 배포한다).
 
 먼저 기존 행이 붙을 계정을 본다. 기관별 첫 계정이 의도와 다르면 실행하지 않는다.
-`docker compose exec -T db psql -U postgres -d suddoe -c "SELECT DISTINCT ON (org_id) org_id, email FROM tenant.accounts ORDER BY org_id, created_at, email"`
+`cd /opt/suddoe/deploy/ncp && docker compose exec -T db psql -U postgres -d suddoe -c "SELECT DISTINCT ON (org_id) org_id, email FROM tenant.accounts ORDER BY org_id, created_at, email"`
 
 ```bash
 (
@@ -91,7 +92,7 @@ nohup ./deploy.sh --force >> /var/log/suddoe-deploy.log 2>&1 < /dev/null &
 주의: 닫는 괄호 뒤에 `&&` 를 바로 붙이지 않는다. 그러면 bash 가 괄호 안의 `set -e` 를 무시해 실패해도 다음 줄로 넘어간다.
 
 확인(health 200 은 DB 를 보지 않으므로 아래를 전부 본다). 끝나면 자동 배포를 다시 켠다.
-- `SELECT account_id IS NULL, count(*) FROM tenant.expense_plans WHERE org_id='cfeba091-251a-5ae4-8cc9-88c6e6679440' GROUP BY 1` 에 NULL 행이 없다.
+- `cd /opt/suddoe/deploy/ncp && docker compose exec -T db psql -U postgres -d suddoe -c "SELECT account_id IS NULL, count(*) FROM tenant.expense_plans WHERE org_id='cfeba091-251a-5ae4-8cc9-88c6e6679440' GROUP BY 1"` 에 NULL 행이 없다.
 - 실제 판정 1건과 협약 정보 저장 1건이 성공하고, prototype@ssudo.kr 로 로그인해 계획 목록이 그대로 보인다.
 - `install -m 644 /opt/suddoe/deploy/ncp/suddoe-deploy.cron /etc/cron.d/suddoe-deploy`
 
@@ -121,9 +122,9 @@ docker compose up -d --no-build api
 )
 ```
 
-되돌린 뒤 `docker compose ps api` 가 healthy 이고 prototype@ssudo.kr 의 계획 목록이 보이는지 확인한다.
+되돌린 뒤 `cd /opt/suddoe/deploy/ncp && docker compose ps api` 가 healthy 이고 prototype@ssudo.kr 의 계획 목록이 보이는지 확인한다.
 
-되돌리기 블록이 `psql` 에서 멈추면 스키마는 새 정책 그대로다. `unhealthy` 뒤가 아니면 `suddoe-api:prod` 가 새 이미지이므로 `docker compose up -d --no-build api` 로 다시 띄우고 원인을 본다. `unhealthy` 뒤에는 이전 이미지라 띄우면 이전 코드가 새 정책 위에서 돈다. 띄우지 말고 원인을 풀어 되돌리기를 다시 실행한다.
+되돌리기 블록이 `psql` 에서 멈추면 스키마는 새 정책 그대로다. `unhealthy` 뒤가 아니면 `suddoe-api:prod` 가 새 이미지이므로 `cd /opt/suddoe/deploy/ncp && docker compose up -d --no-build api` 로 다시 띄우고 원인을 본다. `unhealthy` 뒤에는 이전 이미지라 띄우면 이전 코드가 새 정책 위에서 돈다. 띄우지 말고 원인을 풀어 되돌리기를 다시 실행한다.
 
 다시 적용할 때는 첫 블록을 처음부터 실행한다. 되돌린 동안 이전 코드가 쓴 행은 기관의 첫 계정에 배정된다. 두 번째 계정이 실제로 쓰고 있었다면 그 계정의 계획·판정이 첫 계정으로 옮겨지므로 먼저 행을 확인한다.
 

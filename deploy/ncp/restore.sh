@@ -124,6 +124,20 @@ SQL
 [ "$p" = "true/true/0" ] && ok "5 extensions USAGE, 계정찾기() EXECUTE (revoked from PUBLIC)" \
                          || fail "5 extensions USAGE / 계정찾기 EXECUTE / PUBLIC EXECUTE count = $p"
 
+# 5-a 계정등록(). 2026-11-04 이전 백업에는 함수가 없다. 복원은 막지 않고 마이그레이션을 다시 적용하라고 알린다.
+p=$(psql_admin -tA <<'SQL'
+select case when to_regprocedure('tenant.계정등록(text,uuid)') is null then 'missing' else
+       has_function_privilege('suddoe_app', 'tenant.계정등록(text,uuid)', 'EXECUTE')::text || '/' ||
+       (select count(*) from pg_proc p, aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+         where p.proname = '계정등록' and a.grantee = 0 and a.privilege_type = 'EXECUTE')::text end;
+SQL
+)
+case "$p" in
+  true/0)  ok "5-a 계정등록() EXECUTE (revoked from PUBLIC)" ;;
+  missing) echo "[WARN] 5-a 계정등록() is missing: apply db/migrations/2026-11-04_계정등록.sql or sign-ups get 503" ;;
+  *)       fail "5-a 계정등록 EXECUTE / PUBLIC EXECUTE count = $p" ;;
+esac
+
 # 5-b suddoe_app 으로 실제 쿼리 실행: 벡터 거리 연산(검색 경로)과 로그인 함수
 psql_app -tA >/dev/null <<'SQL' || fail "5-b suddoe_app: vector search query or 계정찾기() call failed"
 SELECT 1 - (embedding <=> embedding) FROM corpus.chunks WHERE embedding IS NOT NULL LIMIT 1;

@@ -157,6 +157,8 @@ def main() -> int:
     확인("창업활동비는 예비창업패키지에만", "창업활동비" not in v2["비목"] and len(v2["비목"]) == 9)
     p = c.get("/api/programs").json()
     확인("GET /api/programs — 8사업", len(p["사업"]) == 8, str(len(p["사업"])))
+    a = c.post("/api/accounts", json={"slug": "abc"})
+    확인("POST /api/accounts — 등록 응답 형식", a.status_code == 201 and set(a.json()) == {"기관명", "slug", "새계정"})
 
     print("\n[SSE]")
 
