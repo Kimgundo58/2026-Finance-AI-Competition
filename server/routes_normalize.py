@@ -92,7 +92,9 @@ def _live_정규화(body: 정규화요청) -> tuple[dict, bool]:
     out.pop("누락필드", None)
     out.pop("_출처", None)
     # 스키마를 지키지 않는 응답도 사업에 없는 비목을 넘기지 못하게 한다.
-    out["비목후보"] = [c for c in out.get("비목후보") or [] if c.get("비목") in 비목들]
+    후보 = out.get("비목후보")
+    out["비목후보"] = ([c for c in 후보 if isinstance(c, dict) and c.get("비목") in 비목들]
+                    if isinstance(후보, list) else [])
     out["심층질문"] = _심층질문_선별(body.사업명, out.get("비목후보"))
     return out, 실패
 
