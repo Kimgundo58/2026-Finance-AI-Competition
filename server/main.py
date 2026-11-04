@@ -69,6 +69,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[o for o in os.environ.get(
         "SUDDOE_CORS", "http://localhost:3000,http://localhost:5173").split(",") if o],
+    # 프론트 PR 미리보기 배포(주소가 PR마다 바뀜)와 로컬 개발 서버. 인증은 Bearer 토큰이라 출처를 열어도 토큰은 안 샌다.
+    allow_origin_regex=r"https://2026-finance-ai-competition-frontend-[a-z0-9-]+-team-9ea8\.vercel\.app|http://localhost:3000",
     # DELETE 가 없으면 브라우저의 사전 요청(OPTIONS)이 400 으로 막혀 실제 DELETE 요청이 서버에 닿지 않는다.
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
