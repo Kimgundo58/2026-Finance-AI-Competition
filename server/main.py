@@ -9,6 +9,7 @@
     catalog            GET  /api/vocab, /api/programs
     routes_normalize   POST /api/normalize (SSE)
     routes_judge       POST /api/judge (SSE)
+    routes_questions   POST /api/questions (판정 전 확인 질문)
     routes_profile     GET·PUT /api/profile
     routes_admin       GET /admin/status, /admin/queue · POST /admin/warmup (X-Admin-Token)
     routes_ingest      /admin/documents — L1·L2 규정 적재 (X-Admin-Token, SUDDOE_INGEST_DSN 없으면 503)
@@ -37,7 +38,7 @@ sys.path.insert(0, str(ROOT))               # `python server/main.py` 로 실행
 
 from server import (auth, catalog, routes_accounts, routes_admin, routes_ingest,  # noqa: E402
                     routes_judge, routes_l3, routes_normalize, routes_orgs,
-                    routes_plans, routes_profile, routes_tasks)
+                    routes_plans, routes_profile, routes_questions, routes_tasks)
 from server._common import MOCK, _정수_환경변수, 판정_ENUM  # noqa: E402
 
 app = FastAPI(title="써도돼요 API", version="0.1.0",
@@ -74,7 +75,8 @@ app.add_middleware(
 )
 
 for _router_모듈 in (routes_plans, routes_tasks, routes_l3, routes_orgs, routes_accounts, catalog,
-                    routes_normalize, routes_judge, routes_profile, routes_admin, routes_ingest):
+                    routes_normalize, routes_questions, routes_judge, routes_profile, routes_admin,
+                    routes_ingest):
     app.include_router(_router_모듈.router)
 
 

@@ -5,6 +5,7 @@ routes_judge 가 orchestrate.판정() 의 결과를 파이프라인결과_매핑
 인용·요약 내용은 새로 만들지 않는다. 요약의 문장 ID 를 인용 목록의 조문 표기로 바꾸고, 해야할일에
 check_items 의 구분·유형을 붙이고, 판단불가면 server/inquiry.py 로 문의 초안을 만든다(LLM 호출 없음).
 _사용자프로필값_구성 은 심층질문 답을 orchestrate.판정(사용자프로필값=) 입력으로 바꾼다.
+사용자답변 은 질문문·답만 내보낸다. 충족답·근거조문·할일은 서버 안에서만 쓴다(사용자답변_공개).
 이름을 바꾼 응답 키를 이전 이름으로도 보내는 호환 처리는 파일 끝 블록(구_판정키_포함)에 모아 둔다.
 """
 from __future__ import annotations
@@ -49,6 +50,7 @@ def 파이프라인결과_매핑(r: dict, body: 판정요청) -> dict:
         "규정버전": r.get("규정버전"),
         "참조관계": r.get("참조관계", []),
         "증빙목록": r.get("증빙목록") or [],
+        "사용자답변": 사용자답변_공개(r.get("사용자답변")),
         **({"문의초안": 문의초안} if 문의초안 else {}),
         **({"decision_id": r["decision_id"]} if r.get("decision_id") else {}),
         # 판정 파이프라인의 실패 경로(DB·LLM·검색 장애). 캐시 저장과 계획 연결을 막는다.
@@ -143,6 +145,18 @@ def _할일_보강(할일: list) -> list:
         m = 표.get(h.get("code")) if isinstance(h, dict) else None
         보강.append({**h, "구분": m[0], "유형": m[1]} if m else h)
     return 보강
+
+
+def 할일_공개(할일: list | None) -> list:
+    """해야할일 항목에서 내부 키 코드추정_제외 를 뺀다. 저장(persist)에는 원래 값을 쓰고 화면으로 나갈 때만 부른다."""
+    return [{k: v for k, v in h.items() if k != "코드추정_제외"} if isinstance(h, dict) else h
+            for h in 할일 or []]
+
+
+def 사용자답변_공개(사용자답변: list | None) -> list[dict]:
+    """화면으로 나가는 값만 남긴다. 판정 응답과 GET /api/plans/{id} 가 같이 쓴다."""
+    return [{"질문문": a.get("질문문"), "답": a.get("답")}
+            for a in 사용자답변 or [] if isinstance(a, dict)]
 
 
 # 심층질문 답

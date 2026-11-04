@@ -3,11 +3,12 @@
 
 orchestrate.판정() 을 워커 스레드에서 실행하고 judge_response 로 응답 계약에 맞춘 뒤, plan_id 가 있으면
 persist.판정_저장() 으로 계획에 연결한다. 응답은 response_cache 에 캐시한다.
+질문세트(POST /api/questions 의 키)와 답변이 오면 서버에 저장한 질문 문장과 답 값으로 사용자답변을 만들어 판정에 넣는다.
 이벤트 순서: 진행*3 → 판정 → 해야할일 → 인용 → 전제 → 참조관계 → (문의초안) → 결과 → 저장 → 완료.
 이벤트 이름과 순서는 프론트 계약이다. 참조관계 이벤트 바로 뒤에 같은 내용을 이전 이벤트 이름으로 한 번
 더 보낸다(한 릴리스 동안, judge_response 호환 블록). 예외·타임아웃·파이프라인 실패는 모두 판단불가로
 반환하고, 그 결과는 캐시하지 않으며 계획에도 연결하지 않는다.
-환경변수: SUDDOE_JUDGE_HEARTBEAT_SEC(12), SUDDOE_JUDGE_DEADLINE_SEC(180).
+환경변수: SUDDOE_JUDGE_HEARTBEAT_SEC(12), SUDDOE_JUDGE_DEADLINE_SEC(180), SUDDOE_JUDGE_ANSWERS(1, 0 이면 답변 미반영).
 """
 from __future__ import annotations
 
@@ -15,6 +16,7 @@ import concurrent.futures
 import contextvars
 import json
 import logging
+import os
 import time
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -23,7 +25,7 @@ from server import auth, inquiry, response_cache
 from server._common import MOCK, _정수_환경변수, _sse, _sse응답, 클라이언트_ip, 비목_ENUM
 from server.catalog import _비목_표준화, _사업명_표준화
 from server.judge_response import (_사용자프로필값_구성, 구_참조관계_이벤트, 구_판정키_포함,
-                                   파이프라인결과_매핑)
+                                   파이프라인결과_매핑, 할일_공개)
 from server.models import 판정요청
 from server.persist import 판정_저장
 from server.rate_limit import 제한
@@ -61,6 +63,9 @@ def judge(req: Request, body: 판정요청, mock: str | None = None,
     body.org_id = auth.검증된_org(req)
     # 계정도 토큰에서만 정한다. 계획·판정·프로필·캐시는 계정 단위다(L3 는 org 단위).
     account_id = auth.검증된_account(req)
+    # 저장 질문 목록이 판정 프롬프트 B6 에 들어가 확인 질문 답변과 섞이지 않게 뺀다. 표시 전용 값이라 키에서도 뺀다.
+    body.정규화 = {k: v for k, v in body.정규화.items() if k != "심층질문"}
+    답변_반영 = _답변_반영()
 
     k = response_cache.캐시키(
         # 계정을 키에 넣는다. 다른 계정의 응답(그 계정의 계획·판정 id·프로필 전제)이 나가면 안 된다.
@@ -68,6 +73,8 @@ def judge(req: Request, body: 판정요청, mock: str | None = None,
         json.dumps(body.정규화, ensure_ascii=False, sort_keys=True),
         body.특수관계.친족거래, body.특수관계.전직임직원업체,
         json.dumps([a.model_dump() for a in body.답변], ensure_ascii=False, sort_keys=True),
+        # 답변을 판정에 넣지 않는 동안(SUDDOE_JUDGE_ANSWERS=0)에는 답변을 넣은 옛 결과가 적중하지 않게 한다.
+        body.질문세트 if 답변_반영 else None,
         # L3 를 새로 올리거나 파싱이 끝나면 키가 바뀐다. 파싱 커밋 직전에 시작한 판정이 옛 L3 결과를
         # 캐시에 남겨도 이후 요청에는 적중하지 않는다(routes_l3 의 캐시 삭제와 함께 쓴다).
         response_cache.l3_해시(body.org_id),
@@ -78,6 +85,9 @@ def judge(req: Request, body: 판정요청, mock: str | None = None,
     캐시 = response_cache.조회(k, body.org_id, account_id)
     # 검색 전에 계산한다. 판정 도중 규정이 활성화되면 결과는 옛 해시로 저장되어 이후 요청에 적중하지 않는다.
     데이터버전해시 = response_cache.요청_해시()
+    # 미들웨어 컨텍스트(RLS GUC)가 있는 여기서 읽는다. 저장 질문을 읽지 못하면 판정에서 「가능」을 내지 않는다.
+    사용자답변, 답변유실 = (_사용자답변_읽기(body, account_id)
+                       if 답변_반영 and 캐시 is None and not MOCK else (None, False))
 
     def gen():
         for 단계, 설명 in (("검색", "관련 조항을 찾는 중"),
@@ -90,12 +100,12 @@ def judge(req: Request, body: 판정요청, mock: str | None = None,
             out = {k: v for k, v in 캐시.items() if k != "decision_id"}
             decision_id = None
         elif MOCK:
-            out = dict(mock_판정.get(mock or "가능", mock_판정["가능"]))
+            out = {"사용자답변": [], **mock_판정.get(mock or "가능", mock_판정["가능"])}
             decision_id = None
             response_cache.저장(k, out, 종류="judge", org=body.org_id, account=account_id,
                                데이터버전_해시=데이터버전해시)
         else:
-            out, 실패 = yield from _판정_실행(body, account_id)
+            out, 실패 = yield from _판정_실행(body, account_id, 사용자답변, 답변유실)
             # decision_id 를 캐시에 넣으면 다른 요청이 남의 판정 행을 자기 계획에 연결한다.
             decision_id = out.pop("decision_id", None)
             if not 실패:              # 일시적 장애의 판단불가를 캐시에 고정하지 않는다
@@ -109,6 +119,30 @@ def judge(req: Request, body: 판정요청, mock: str | None = None,
     return _sse응답(gen())
 
 
+def _답변_반영() -> bool:
+    """SUDDOE_JUDGE_ANSWERS=0 이면 답변을 판정에 넣지 않는다(되돌리기용)."""
+    return os.environ.get("SUDDOE_JUDGE_ANSWERS", "1") != "0"
+
+
+def _사용자답변_읽기(body: 판정요청, account_id: str | None) -> tuple[list[dict] | None, bool]:
+    """저장한 질문세트와 화면 답변으로 (사용자답변, 답변유실) 을 만든다. 프론트가 보낸 글은 쓰지 않는다.
+
+    질문세트와 답변이 왔는데 저장값을 못 읽으면(만료·재시작·다른 계정 키·DB 오류) 답변유실이다. 사용자가
+    「아니오」라고 답했을 수 있으므로 판정이 「가능」을 내지 못하게 한다. 화면에는 오류를 내지 않는다.
+    """
+    if not body.질문세트:
+        return None, False
+    try:
+        저장값 = response_cache.질문세트_조회(body.질문세트, body.org_id, account_id)
+        if isinstance(저장값, dict) and isinstance(저장값.get("질문"), list):
+            import question_generate
+            return (question_generate.답변_구성(저장값, [a.model_dump() for a in body.답변]) or None,
+                    False)
+    except Exception as e:                                    # noqa: BLE001
+        _log.warning("질문세트 읽기 실패: %s", type(e).__name__)
+    return None, bool(body.답변)
+
+
 def _판정_이벤트(out: dict):
     """판정 → 해야할일 → 인용 → 전제 → 참조관계 → (문의초안) → 결과 이벤트를 고정 순서로 yield 한다.
 
@@ -116,6 +150,7 @@ def _판정_이벤트(out: dict):
     쓰는 out 은 새 키만 가진다.
     """
     out = 구_판정키_포함(dict(out))  # 구 이름 호환(제거 예정: 다음 릴리스)
+    out["해야할일"] = 할일_공개(out.get("해야할일"))
     판정값 = {키: out.get(키) for 키 in ("판정", "요약", "신뢰등급", "규정버전")}
     판정값["버전스탬프"] = out.get("규정버전")  # 구 이름 호환(제거 예정: 다음 릴리스)
     yield _sse("판정", 판정값)
@@ -130,16 +165,17 @@ def _판정_이벤트(out: dict):
     yield _sse("결과", {k: v for k, v in out.items() if k != "증빙목록"})
 
 
-def _판정_실행(body: 판정요청, account_id: str | None):
+def _판정_실행(body: 판정요청, account_id: str | None, 사용자답변: list[dict] | None = None,
+            답변유실: bool = False):
     """_live_판정 을 워커 스레드에서 실행하고, 기다리는 동안 SSE keep-alive 주석을 yield 한다.
 
-    `out, 실패 = yield from _판정_실행(body, account_id)` 로 쓴다. 예외나 타임아웃은 판단불가 결과와
+    `out, 실패 = yield from _판정_실행(body, account_id, 사용자답변, 답변유실)` 로 쓴다. 예외나 타임아웃은 판단불가 결과와
     실패=True 를 돌려준다. 타임아웃이 지난 워커는 기다리지 않고 백그라운드에서 끝나게 둔다
     (판정 파이프라인은 그대로 decisions 행을 기록한다).
     """
     ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     # submit 은 컨텍스트 변수를 복사하지 않는다. 미들웨어가 설정한 현재_org 를 워커에 넘긴다.
-    future = ex.submit(contextvars.copy_context().run, _live_판정, body, account_id)
+    future = ex.submit(contextvars.copy_context().run, _live_판정, body, account_id, 사용자답변, 답변유실)
     만료시각 = time.monotonic() + _판정_타임아웃초
     try:
         while True:
@@ -169,7 +205,7 @@ def _실패_결과(body: 판정요청) -> dict:
     out = {"판정": "판단불가",
            "요약": "일시적인 오류로 판정하지 못했습니다. 잠시 후 다시 시도해 주세요.",
            "해야할일": [], "인용": [], "전제": [], "신뢰등급": None, "규정버전": None,
-           "참조관계": []}
+           "참조관계": [], "사용자답변": []}
     try:
         초안 = inquiry.문의초안(body.정규화, "판단불가", [], [], body.사업명)
     except Exception:                                         # noqa: BLE001
@@ -181,7 +217,8 @@ def _실패_결과(body: 판정요청) -> dict:
     return out
 
 
-def _live_판정(body: 판정요청, account_id: str | None = None) -> dict:
+def _live_판정(body: 판정요청, account_id: str | None = None, 사용자답변: list[dict] | None = None,
+             답변유실: bool = False) -> dict:
     """orchestrate.판정() 을 호출하고 응답 계약으로 바꾼다. 워커 스레드에서 실행된다."""
     import orchestrate
     # 질문 원문이 없을 때만 품목·용도·금액으로 문장을 재구성한다. 합성 문장(_합성_질문)을 다시
@@ -199,7 +236,8 @@ def _live_판정(body: 판정요청, account_id: str | None = None) -> dict:
                        plan_id=body.plan_id,
                        확정비목=body.확정비목 or None,
                        정규화결과=body.정규화,
-                       사용자프로필값=_사용자프로필값_구성(body.답변))
+                       사용자프로필값=_사용자프로필값_구성(body.답변),
+                       사용자답변=사용자답변, 답변유실=답변유실)
     return 파이프라인결과_매핑(r, body)
 
 

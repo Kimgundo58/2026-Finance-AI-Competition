@@ -57,15 +57,17 @@ ALTER TABLE corpus.item_alias
   UNIQUE NULLS NOT DISTINCT ("품목", "사업명");
 
 
--- decisions 3컬럼
+-- decisions 4컬럼
 -- 검증사유(사람이 읽는 문장)는 이미 있다. 검증코드는 기계가 집계하는 enum 배열이라
 -- 따로 둔다 — 문장을 파싱해 지표를 내면 문구가 바뀔 때마다 지표가 끊긴다.
 -- 처리단계 : 판정이 거친 단계를 + 로 이은 값 (정규화+검색+판정생성+검증, 금지목록일치, 캐시 등)
 -- 실패단계 : 판단불가로 처리된 단계. NULL 이면 정상 완료.
+-- 사용자답변 : 판정 전 확인 질문의 질문 문장과 답 값(예·아니오·모름) 목록. 질문 없이 판정하면 빈 배열.
 
 ALTER TABLE tenant.decisions ADD COLUMN IF NOT EXISTS "검증코드" TEXT[] NOT NULL DEFAULT '{}';
 ALTER TABLE tenant.decisions ADD COLUMN IF NOT EXISTS "처리단계" TEXT;
 ALTER TABLE tenant.decisions ADD COLUMN IF NOT EXISTS "실패단계" TEXT;
+ALTER TABLE tenant.decisions ADD COLUMN IF NOT EXISTS "사용자답변" JSONB NOT NULL DEFAULT '[]';
 
 -- 검증코드 허용 목록. 목록 밖의 코드는 거부해 오타가 지표를 갈라놓지 못하게 한다.
 -- 기준 목록은 scripts/llm_validate.py 의 검증코드_전체 이고, 이 CHECK 는 같은 순서로 맞춘다.
@@ -83,7 +85,8 @@ ALTER TABLE tenant.decisions
     'L3_ONLY_DOWNGRADE','TENANT_LEAK','DANGLING_WARN',
     'DOMAIN_WARN','PRECEDENCE_OVERRIDE',
     'TASK_STATE_UNSOURCED','TASK_STATE_MISMATCH',
-    'TASK_NUMBER_UNSOURCED','TASK_BASIS_NOT_IN_MAP'
+    'TASK_NUMBER_UNSOURCED','TASK_BASIS_NOT_IN_MAP',
+    'ANSWER_UNCONFIRMED'
   ]::text[]);
 
 CREATE INDEX IF NOT EXISTS "ix_decisions_처리단계" ON tenant.decisions ("처리단계");

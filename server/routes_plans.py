@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from ._common import MOCK, 탭_판정, _jsonb, _계정조건, _질의, _실행
-from .judge_response import 구_판정키_포함
+from .judge_response import 구_판정키_포함, 사용자답변_공개, 할일_공개
 from .models import 계획목록응답, 계획상세, 계획생성, 계획통계, 계획요약
 from . import auth, mock_data
 
@@ -339,7 +339,7 @@ _상세_컬럼 = ("plan_id", "제목", "확정비목", "금액", "판정", "집�
              "updated_at", "created_at", "사업명", "상태", "질문원문",
              "거래처", "추가설명", "정규화", "latest_decision_id",
              "요약", "해야할일", "인용", "전제", "신뢰등급", "규정버전",
-             "참조관계", "검증사유")
+             "참조관계", "검증사유", "사용자답변")
 
 # 응답 키 순서. DB 컬럼 plan_tasks.코드 는 응답 키 code 로 내보낸다.
 _계획할일_컬럼 = ("task_id", "plan_id", "출처", "code", "구분", "항목", "설명", "due_date",
@@ -354,7 +354,7 @@ def _live_상세(plan_id: int, org_id: str | None) -> 계획상세:
                p.updated_at, p.created_at, p.사업명, p.상태, p.질문원문,
                p.거래처, p.추가설명, p.정규화, p.latest_decision_id,
                d.요약, d.해야할일, d.인용, d.전제, d.신뢰등급, d.규정버전,
-               d.참조관계, d.검증사유
+               d.참조관계, d.검증사유, d."사용자답변"
         FROM tenant.expense_plans p
         LEFT JOIN tenant.decisions d ON d.decision_id = p.latest_decision_id
         WHERE p.plan_id = %s AND {조건}
@@ -367,7 +367,7 @@ def _live_상세(plan_id: int, org_id: str | None) -> 계획상세:
     판정상세 = None
     if r["latest_decision_id"] is not None:          # 판정을 받은 적이 있다
         판정상세 = {
-            "판정": r["판정"], "요약": r["요약"], "해야할일": r["해야할일"] or [],
+            "판정": r["판정"], "요약": r["요약"], "해야할일": 할일_공개(r["해야할일"]),
             "인용": r["인용"] or [], "전제": r["전제"] or [], "신뢰등급": r["신뢰등급"],
             "규정버전": r["규정버전"], "참조관계": r["참조관계"] or [],
             "검증사유": r["검증사유"] or [],
@@ -408,5 +408,5 @@ def _live_상세(plan_id: int, org_id: str | None) -> 계획상세:
         사업명=r["사업명"], 상태=r["상태"], 질문원문=r["질문원문"], 용도=정규화.get("용도"),
         거래처=r["거래처"], 추가설명=r["추가설명"], 정규화=정규화,
         latest_decision_id=r["latest_decision_id"],
-        판정상세=판정상세, 할일=할일,
+        판정상세=판정상세, 사용자답변=사용자답변_공개(r["사용자답변"]), 할일=할일,
     )
