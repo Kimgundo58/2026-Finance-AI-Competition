@@ -191,7 +191,8 @@ def _계정조회(email: str) -> tuple[str, str] | None:
     return (str(행[0][0]), str(행[0][1])) if 행 else None
 
 
-def _supabase해석(토큰: str) -> 주체:
+def _supabase이메일(토큰: str) -> str:
+    """Supabase 토큰의 서명·만료를 검증하고 email 클레임을 돌려준다. 등록 여부는 보지 않는다."""
     jwt = _pyjwt()
     try:
         본문 = jwt.decode(
@@ -208,6 +209,11 @@ def _supabase해석(토큰: str) -> 주체:
     email = (본문.get("email") or "").strip().lower()
     if not email:
         raise HTTPException(403, "토큰에 email 클레임이 없어 기관을 확인할 수 없습니다")
+    return email
+
+
+def _supabase해석(토큰: str) -> 주체:
+    email = _supabase이메일(토큰)
     계정 = _계정조회(email)
     if 계정 is None:
         # 토큰을 보낸 요청은 토큰으로만 판단한다. ?org_id= 로 폴백하지 않는다.
@@ -223,21 +229,36 @@ def _uuid인가(v) -> bool:
         return False
 
 
-def 토큰해석(authorization: str | None) -> 주체 | None:
-    """Authorization 헤더 -> 주체. 헤더가 없으면 None, 헤더가 있는데 검증에 실패하면 HTTPException."""
-    if not authorization:
-        return None
+def _베어러(authorization: str) -> tuple[str, str | None]:
+    """Authorization 헤더 -> (토큰, iss). iss 는 서명 검증 전 값이라 해석 경로를 고르는 데만 쓴다."""
     토큰종류, _, 토큰 = authorization.partition(" ")
     if 토큰종류.lower() != "bearer" or not 토큰.strip():
         raise HTTPException(401, "Authorization 헤더는 'Bearer <token>' 형식이어야 합니다")
     토큰 = 토큰.strip()
 
     jwt = _pyjwt()
-    try:                                    # 서명 검증 전 값이다. 해석 경로를 고르는 데만 쓴다
-        iss = jwt.decode(토큰, options={"verify_signature": False}).get("iss")
+    try:
+        return 토큰, jwt.decode(토큰, options={"verify_signature": False}).get("iss")
     except Exception:                                                   # noqa: BLE001
         raise HTTPException(401, "토큰을 읽을 수 없습니다")
+
+
+def 토큰해석(authorization: str | None) -> 주체 | None:
+    """Authorization 헤더 -> 주체. 헤더가 없으면 None, 헤더가 있는데 검증에 실패하면 HTTPException."""
+    if not authorization:
+        return None
+    토큰, iss = _베어러(authorization)
     return _데모해석(토큰) if iss == DEMO_ISS else _supabase해석(토큰)
+
+
+def 가입자_이메일(authorization: str | None) -> str:
+    """POST /api/accounts 전용. 서명이 맞는 Supabase 토큰의 email. 데모 토큰과 토큰 없는 요청은 거부한다."""
+    if not authorization:
+        raise HTTPException(401, "로그인이 필요합니다")
+    토큰, iss = _베어러(authorization)
+    if iss == DEMO_ISS:
+        raise HTTPException(403, "데모 세션은 계정을 등록할 수 없습니다")
+    return _supabase이메일(토큰)
 
 
 # ── 라우터용 헬퍼 ───────────────────────────────────────────────────
@@ -278,8 +299,9 @@ def 관리자_확인(x_admin_token: str | None = Header(default=None)) -> None:
 # BaseHTTPMiddleware 가 아니라 순수 ASGI 로 구현한다. 응답을 감싸지 않아 SSE 스트림을 깨지 않는다.
 
 # 인증 없이 통과시키는 경로(접두어 비교). /api/gpu/wake 는 프론트가 토큰 없이 호출하는 정적 응답이다.
+# /api/accounts 는 등록 전 계정이 부르는 경로라 라우트가 토큰을 직접 검증한다(routes_accounts).
 _인증제외_경로 = ("/api/health", "/api/orgs", "/api/demo/session", "/docs", "/openapi.json",
-                "/redoc", "/api/gpu/wake")
+                "/redoc", "/api/gpu/wake", "/api/accounts")
 
 
 class OrgId주입:

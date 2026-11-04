@@ -517,6 +517,7 @@ def _점검(결과: 점검결과) -> None:
                f"GET {읽음} · 행 {행수}개 · B5 {[b.replace(chr(10), ' / ') for b in b5들]}")
 
         _계정_분리_점검(결과, client, 데모세션, 업로드, 조문, 판정, 캡처, b5, 협약)
+        _가입_등록_점검(결과, client, 데모세션, 업로드, 현재문서)
     finally:
         l3_load.조문_조회, orchestrate.프롬프트_구성, orchestrate.판정 = (
             원래_조문조회, 원래_프롬프트, 원래_판정)
@@ -644,6 +645,80 @@ def _계정_분리_점검(결과: 점검결과, client, 데모세션, 업로드,
             c.execute("DELETE FROM tenant.decisions WHERE account_id IN "
                       "(SELECT account_id FROM tenant.accounts WHERE email = ANY(%s))", (list(이메일.values()),))
             c.execute("DELETE FROM tenant.accounts WHERE email = ANY(%s)", (list(이메일.values()),))
+
+
+def _가입_등록_점검(결과: 점검결과, client, 데모세션, 업로드, 현재문서) -> None:
+    """20: 회원가입 → 기관 선택(POST /api/accounts) → L3 업로드 → L3 조회.
+
+    임시 기관 두 곳을 소유자 롤로 만들고, Supabase 토큰 검증의 서명키 조회만 점검용 EC 키로 바꾼다.
+    등록은 suddoe_app 으로 tenant.계정등록 을 실제로 거친다. 만든 기관과 계정은 지운다.
+    """
+    import uuid as _uuid
+
+    import jwt
+    import psycopg
+    from cryptography.hazmat.primitives.asymmetric import ec
+
+    from server import _common, auth
+
+    접미 = secrets.token_hex(4)
+    이메일 = f"ux-signup-{접미}@ux-check.invalid"
+    기관 = {"A": str(_uuid.uuid4()), "B": str(_uuid.uuid4())}
+    이름 = {k: f"UX점검 {접미} {k}" for k in 기관}
+    키 = ec.generate_private_key(ec.SECP256R1())
+
+    def 토큰(email: str) -> dict:
+        값 = jwt.encode({"sub": str(_uuid.uuid4()), "email": email, "aud": "authenticated", "iss": "ux-check",
+                       "exp": int(time.time()) + 600}, 키, algorithm="ES256")
+        return {"Authorization": f"Bearer {값}"}
+
+    원래_서명키 = auth._서명키
+    auth._서명키 = lambda _토큰: 키.public_key()
+    try:
+        with psycopg.connect(OWNER_DSN, connect_timeout=5) as c:
+            for k, o in 기관.items():
+                c.execute("INSERT INTO tenant.orgs (org_id, 기관명, 사업명) VALUES (%s, %s, %s)",
+                          (o, 이름[k], ["예비창업패키지"]))
+
+        헤더 = 토큰(이메일)
+        데모헤더, 데모org = 데모세션()
+        slug_a, slug_b = auth.slug(기관["A"]), auth.slug(기관["B"])
+        등록전 = client.get("/api/plans", headers=헤더).status_code
+        토큰없음 = client.post("/api/accounts", json={"slug": slug_a}).status_code
+        데모토큰 = client.post("/api/accounts", json={"slug": slug_a}, headers=데모헤더).status_code
+        없는기관 = client.post("/api/accounts", json={"slug": "0" * 16}, headers=헤더).status_code
+        데모기관 = client.post("/api/accounts", json={"slug": auth.slug(데모org)}, headers=헤더).status_code
+
+        첫등록 = client.post("/api/accounts", json={"slug": slug_a}, headers=헤더)
+        등록후 = client.get("/api/plans", headers=헤더).status_code
+        코드, doc, 상태 = 업로드(헤더, 픽스처_파일명, _hwpx(픽스처_문단))
+        문서 = [d.get("doc_id") for d in 현재문서(헤더)]
+        다시 = client.post("/api/accounts", json={"slug": slug_b}, headers=헤더)
+        대문자 = client.post("/api/accounts", json={"slug": slug_b}, headers=토큰(이메일.upper()))
+        with psycopg.connect(OWNER_DSN, connect_timeout=5) as c:
+            행 = c.execute("SELECT org_id::text FROM tenant.accounts WHERE lower(email) = %s",
+                          (이메일,)).fetchall()
+        with psycopg.connect(_common.DSN, connect_timeout=5) as c:
+            직접읽기 = c.execute("SELECT count(*) FROM tenant.accounts").fetchone()[0]
+
+        현재기관 = {"기관명": 이름["A"], "slug": slug_a}
+        결과.기록(
+            "20 가입 → 기관 선택 → L3 업로드: 등록 전 403 · 등록 201 · 업로드 후 조회 · 기관 변경 불가",
+            등록전 == 403 and 토큰없음 == 401 and 데모토큰 == 403 and 없는기관 == 404 and 데모기관 == 404
+            and 첫등록.status_code == 201 and 첫등록.json() == {**현재기관, "새계정": True}
+            and 등록후 == 200 and 코드 == 202 and doc in 문서
+            and 다시.status_code == 200 and 다시.json() == {**현재기관, "새계정": False}
+            and 대문자.status_code == 200 and 대문자.json() == {**현재기관, "새계정": False}
+            and 행 == [(기관["A"],)] and 직접읽기 == 0,
+            f"등록 전 {등록전} · 토큰 없음 {토큰없음} · 데모 토큰 {데모토큰} · 없는 기관 {없는기관} · 데모 기관 {데모기관} · "
+            f"등록 {첫등록.status_code} {첫등록.json()} · 등록 후 {등록후} · 업로드 {코드} {상태.get('상태')} · "
+            f"현재 문서 {doc in 문서} · 재등록 {다시.status_code} {다시.json()} · 대문자 {대문자.status_code} · "
+            f"계정 행 {len(행)} · 앱 롤 직접 읽기 {직접읽기}")
+    finally:
+        auth._서명키 = 원래_서명키
+        with psycopg.connect(OWNER_DSN, connect_timeout=5) as c:
+            c.execute("DELETE FROM tenant.accounts WHERE lower(email) = %s", (이메일,))
+        _정리(list(기관.values()))
 
 
 def 실행() -> tuple[int, str]:

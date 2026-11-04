@@ -19,6 +19,10 @@ BEGIN
         REVOKE ALL ON FUNCTION tenant.계정찾기(text) FROM PUBLIC;
         GRANT EXECUTE ON FUNCTION tenant.계정찾기(text) TO suddoe_app;
     END IF;
+    IF to_regprocedure('tenant.계정등록(text,uuid)') IS NOT NULL THEN
+        REVOKE ALL ON FUNCTION tenant.계정등록(text, uuid) FROM PUBLIC;
+        GRANT EXECUTE ON FUNCTION tenant.계정등록(text, uuid) TO suddoe_app;
+    END IF;
 END
 $$;
 
@@ -66,7 +70,7 @@ ALTER ROLE suddoe_app SET search_path = corpus, tenant, extensions, public;
 --   2. 테이블 권한   corpus 의 모든 테이블에 SELECT, tenant 의 모든 테이블에 SELECT/INSERT/UPDATE/DELETE
 --   3. 기본 권한     select defaclobjtype from pg_default_acl;  -> r 두 개와 S 한 개
 --   4. eval 부재     select 1 from pg_namespace where nspname='eval';  -> 운영에서는 0행
---   5. 함수 권한     extensions USAGE, tenant.계정찾기(text) EXECUTE, PUBLIC EXECUTE 없음
+--   5. 함수 권한     extensions USAGE, tenant.계정찾기(text)·계정등록(text,uuid) EXECUTE, PUBLIC EXECUTE 없음
 --
 -- 권한 조회가 모두 통과해도 쓰기가 된다는 증거는 아니다. 최종 확인은 suddoe_app 으로 직접 INSERT 하는 것이다:
 --

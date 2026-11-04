@@ -35,7 +35,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))   # 판정 파이프라인 모듈(orchestrate·retrieve 등)을 바로 import 한다
 sys.path.insert(0, str(ROOT))               # `python server/main.py` 로 실행해도 server 패키지가 보이게
 
-from server import (auth, catalog, routes_admin, routes_ingest,  # noqa: E402
+from server import (auth, catalog, routes_accounts, routes_admin, routes_ingest,  # noqa: E402
                     routes_judge, routes_l3, routes_normalize, routes_orgs,
                     routes_plans, routes_profile, routes_tasks)
 from server._common import MOCK, _정수_환경변수, 판정_ENUM  # noqa: E402
@@ -73,7 +73,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-for _router_모듈 in (routes_plans, routes_tasks, routes_l3, routes_orgs, catalog,
+for _router_모듈 in (routes_plans, routes_tasks, routes_l3, routes_orgs, routes_accounts, catalog,
                     routes_normalize, routes_judge, routes_profile, routes_admin, routes_ingest):
     app.include_router(_router_모듈.router)
 

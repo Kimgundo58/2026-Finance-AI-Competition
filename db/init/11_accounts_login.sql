@@ -1,4 +1,5 @@
--- 로그인 조회 함수 tenant.계정찾기(email) 를 만든다. RLS 밖에서 실행되는 유일한 조회다.
+-- 로그인 조회 함수 tenant.계정찾기(email) 와 가입 등록 함수 tenant.계정등록(email, org_id) 를 만든다.
+-- tenant.accounts 를 RLS 밖에서 다루는 경로는 이 둘뿐이다.
 -- 실행 시점: init. 운영 DB 에 다시 적용할 때는 단일 트랜잭션으로 실행한다:
 --     psql "$DSN" --single-transaction -v ON_ERROR_STOP=1 -f db/init/11_accounts_login.sql
 --   자동커밋으로 한 문장씩 실행하다 중간에 실패하면 PUBLIC 에 EXECUTE 가 남은 SECURITY DEFINER 함수만
@@ -71,18 +72,58 @@ AS $$
 $$;
 
 COMMENT ON FUNCTION tenant.계정찾기(text) IS
-    '로그인 전용. 이메일 1건 → (org_id, account_id) 1행. RLS 를 우회하는 유일한 통로이므로 '
+    '로그인 전용. 이메일 1건 → (org_id, account_id) 1행. RLS 를 우회하는 조회 통로이므로 '
     '인자·반환을 절대 늘리지 마라 — 늘리는 순간 accounts 전건 열람이 된다.';
+
+
+-- 계정 등록 — 가입자 1명의 계정 1행을 만든다(POST /api/accounts). 2026-11-04_계정등록.sql 과 같은 내용이다.
+-- 이 시점에는 소속 org 가 없어 앱 롤이 accounts 에 직접 쓸 수 없다. 정책을 넓히지 않고 이 함수로 제한한다.
+-- 설계 조건:
+--   1. email 은 서버가 서명을 검증한 토큰에서 꺼낸 값만 넘긴다. 소문자가 아니거나 비어 있으면 0행이다
+--   2. 이미 있는 email 은 바꾸지 않는다. 이 함수로는 소속 기관을 옮길 수 없다
+--   3. 데모 기관에는 등록하지 않는다. 없는 기관이면 0행이다
+--   4. 반환은 그 email 의 1행뿐이다
+CREATE OR REPLACE FUNCTION tenant.계정등록(_email text, _org_id uuid)
+RETURNS TABLE (org_id uuid, account_id uuid)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, tenant
+AS $$
+BEGIN
+    IF _email IS NULL OR _email = '' OR _email <> lower(_email) THEN
+        RETURN;
+    END IF;
+
+    INSERT INTO tenant.accounts (org_id, email)
+    SELECT o.org_id, _email
+      FROM tenant.orgs AS o
+     WHERE o.org_id = _org_id
+       AND o.기관명 NOT LIKE '[데모] %'
+    ON CONFLICT (email) DO NOTHING;
+
+    RETURN QUERY
+    SELECT a.org_id, a.account_id
+      FROM tenant.accounts AS a
+     WHERE a.email = _email
+     LIMIT 1;
+END
+$$;
+
+COMMENT ON FUNCTION tenant.계정등록(text, uuid) IS
+    '가입 전용. 이메일 1건을 기관 1곳에 등록하고 그 1행을 돌려준다. 이미 있는 이메일은 바꾸지 않는다. '
+    'email 은 서명을 검증한 토큰에서 꺼낸 값만 넘긴다.';
 
 
 -- 실행 권한. CREATE FUNCTION 은 기본으로 PUBLIC 에 EXECUTE 를 준다. SECURITY DEFINER 함수에 이 권한이
 -- 남으면 누구나 계정 목록을 조회할 수 있으므로 PUBLIC 에서 먼저 회수한다. REVOKE 를 GRANT 뒤에 두면 방금 준 권한까지 회수된다.
 REVOKE ALL ON FUNCTION tenant.계정찾기(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION tenant.계정등록(text, uuid) FROM PUBLIC;
 
 DO $$
 BEGIN
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'suddoe_app') THEN
         GRANT EXECUTE ON FUNCTION tenant.계정찾기(text) TO suddoe_app;
+        GRANT EXECUTE ON FUNCTION tenant.계정등록(text, uuid) TO suddoe_app;
     END IF;
 END
 $$;
@@ -104,6 +145,12 @@ BEGIN
         RAISE EXCEPTION
             '함수 소유자(%)와 테이블 소유자(%)가 다르다. 이 함수는 0행만 반환한다. '
             'ALTER FUNCTION tenant.계정찾기(text) OWNER TO % 로 맞춘다.', _함수소유자, _테이블소유자, _테이블소유자;
+    END IF;
+
+    SELECT pg_get_userbyid(proowner) INTO _함수소유자
+      FROM pg_proc WHERE oid = 'tenant.계정등록(text,uuid)'::regprocedure;
+    IF _함수소유자 IS DISTINCT FROM _테이블소유자 THEN
+        RAISE EXCEPTION '계정등록 함수 소유자(%)와 테이블 소유자(%)가 다르다.', _함수소유자, _테이블소유자;
     END IF;
 
     RAISE NOTICE '사전 검사 통과: 소유자=%, FORCE RLS=off', _테이블소유자;
