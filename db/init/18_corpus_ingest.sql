@@ -65,7 +65,7 @@ GRANT MAINTAIN ON corpus.term_df TO suddoe_ingest;     -- REFRESH MATERIALIZED V
 -- REFRESH MATERIALIZED VIEW CONCURRENTLY 는 고유 인덱스가 있어야 한다. 활성화 중에도 검색이 term_df 를 읽을 수 있다.
 CREATE UNIQUE INDEX IF NOT EXISTS ux_term_df_term ON corpus.term_df (term);
 
--- 활성화 때 판정 캐시를 비운다. judge_cache 는 RLS(org_isolation) 라 정책 없이는 0행만 지워진다.
+-- 활성화 때 판정 캐시를 비운다. judge_cache 는 RLS(account_isolation) 라 정책 없이는 0행만 지워진다.
 GRANT DELETE ON tenant.judge_cache TO suddoe_ingest;
 DROP POLICY IF EXISTS ingest_cache_purge ON tenant.judge_cache;
 CREATE POLICY ingest_cache_purge ON tenant.judge_cache FOR DELETE TO suddoe_ingest USING (true);

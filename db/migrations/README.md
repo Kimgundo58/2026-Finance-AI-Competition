@@ -52,7 +52,80 @@ docker rm -f suddoe-verify            # 익명 볼륨까지 지우려면 docker 
 | `2026-11-02_룰473_사전심의.sql` | 보류 | 룰 473(모두의 창업 · 기계장치)의 한도 필드를 비운다. 측정에서 틀린 '가능'이 나와 적용하지 않는다. `-v apply=1` 없이 실행하면 아무것도 하지 않는다. 사유는 파일 머리말 |
 | `2026-11-03_l3_단일문서.sql` | 필수 | `tenant.l3_documents."실패사유"` 컬럼을 추가하고, 기관마다 active 이고 pass/warn 인 L3 를 최신 1건만 남긴다(나머지는 `superseded`, 행·조문은 남김). 코드 배포 전에 적용한다(컬럼이 없으면 파싱 결과 기록이 실패한다) |
 | `2026-11-03_l3_ocr.sql` | 필수 | `tenant.l3_documents.extraction` CHECK 에 `'ocr'` 을 더한다(스캔본을 CLOVA OCR 로 읽은 L3). 코드 배포 전에 적용한다(없으면 OCR 문서의 결과 기록이 실패한다) |
+| `2026-11-03_계정별_분리.sql` | 필수 | 기업 데이터(`profile_agreements`·`expense_plans`·`plan_tasks`·`decisions`·`judge_cache`)에 `account_id` 를 넣고 RLS 를 `account_isolation`(org + 계정)으로 바꾼다. 기존 행은 기관의 가장 먼저 만든 계정(같으면 email 순)에 붙인다. **api 를 멈춘 상태에서 적용하고 새 이미지로 띄운다** — 이전 코드는 `app.account_id` 를 설정하지 않아 계정 행을 못 읽고, 새로 쓰는 행이 계정 없이 남는다. 순서는 아래 |
+| `2026-11-03_계정별_분리_되돌리기.sql` | 되돌릴 때만 | 위 파일의 RLS 정책과 프로필 유일 키를 이전 정의로 되돌린다. 평소에는 실행하지 않는다 |
 | `2026-11-03_주석_정정.sql` | 선택(주석만) | `corpus.refs` 의 COMMENT 두 개를 고친다. 참조 확장 깊이 "깊이 3" → "깊이 1"(실제 값은 `scripts/retrieve.py` 의 `깊이 = 1`), 해결상태의 "(판단불가 예고)" → "(판단불가가 될 수 있음)". 스키마·데이터는 바꾸지 않는다 |
+
+### `2026-11-03_계정별_분리.sql` 적용 순서 (운영)
+
+병합하면 Actions 가 새 이미지를 올리고, 자동 배포는 이 파일 때문에 보류(hold)된다([8-8 CI/CD](../../docs/8_운영/8-8_CI_CD.md)).
+Actions image 가 끝난 뒤 `tmux new -s migrate` 안에서 아래 블록을 통째로 실행한다(SSH 가 끊기면 `tmux attach -t migrate`). 어느 줄이든 실패하면 거기서 멈추고 다음 줄을 실행하지 않는다.
+api 가 멈춘 동안은 요청이 실패한다. 절차가 끝날 때까지 다른 PR 을 병합하지 않는다(`deploy.sh` 는 `origin/main` 을 배포한다).
+
+먼저 기존 행이 붙을 계정을 본다. 기관별 첫 계정이 의도와 다르면 실행하지 않는다.
+`docker compose exec -T db psql -U postgres -d suddoe -c "SELECT DISTINCT ON (org_id) org_id, email FROM tenant.accounts ORDER BY org_id, created_at, email"`
+
+```bash
+(
+set -euo pipefail
+cd /opt/suddoe
+git pull --ff-only
+IMG=suddoe.kr.ncr.ntruss.com/suddoe-api:$(git rev-parse HEAD)
+docker pull -q "$IMG"                                                  # 이미지가 없으면 여기서 멈춘다
+[ "$(df -BG --output=avail / | tail -1 | tr -dc 0-9)" -ge 3 ] || { echo "중단: 디스크 여유 3GB 미만"; exit 1; }   # deploy.sh 기준. 모자라면 api 를 띄우지 못한다
+[ "$(docker image inspect -f '{{.Id}}' "$IMG")" != "$(docker image inspect -f '{{.Id}}' suddoe-api:prod)" ] || { echo "중단: 새 이미지가 실행 중인 이미지와 같다"; exit 1; }   # 같으면 deploy.sh 가 재시작하지 않는다
+rm -f /etc/cron.d/suddoe-deploy                                        # 자동 배포를 끈다. 되돌린 뒤 다시 적용할 때는 이미 없다
+flock /run/lock/suddoe-deploy.lock true                                # 실행 중인 --auto 가 끝나기를 기다린다
+cd deploy/ncp
+docker tag suddoe-api:prod suddoe-api:before-account-split             # 되돌릴 이미지
+docker compose stop api
+./backup.sh < /dev/null
+docker compose exec -T db psql -U postgres -d suddoe -v ON_ERROR_STOP=1 -f - \
+  < ../../db/migrations/2026-11-03_계정별_분리.sql                       # NOTICE: cfeba091 → prototype@ssudo.kr 확인
+echo "--- 계정별 분리 적용 후 배포 $(date '+%F %T') ---" >> /var/log/suddoe-deploy.log || true
+nohup ./deploy.sh --force >> /var/log/suddoe-deploy.log 2>&1 < /dev/null &
+)
+[ $? -eq 0 ] && tail -n 20 -f /var/log/suddoe-deploy.log               # 위 구분선 아래에 deployed <SHA> 가 나올 때까지
+```
+
+주의: 닫는 괄호 뒤에 `&&` 를 바로 붙이지 않는다. 그러면 bash 가 괄호 안의 `set -e` 를 무시해 실패해도 다음 줄로 넘어간다.
+
+확인(health 200 은 DB 를 보지 않으므로 아래를 전부 본다). 끝나면 자동 배포를 다시 켠다.
+- `SELECT account_id IS NULL, count(*) FROM tenant.expense_plans WHERE org_id='cfeba091-251a-5ae4-8cc9-88c6e6679440' GROUP BY 1` 에 NULL 행이 없다.
+- 실제 판정 1건과 협약 정보 저장 1건이 성공하고, prototype@ssudo.kr 로 로그인해 계획 목록이 그대로 보인다.
+- `install -m 644 /opt/suddoe/deploy/ncp/suddoe-deploy.cron /etc/cron.d/suddoe-deploy`
+
+실패했을 때(명령은 `cd /opt/suddoe/deploy/ncp` 에서 실행한다):
+- SSH 가 끊겼다: `tmux attach -t migrate` 로 블록이 아직 도는지 먼저 본다. `--force` 는 잠금을 잡지 않아 두 번 돌면 안 된다.
+- 블록이 `psql` 또는 그 앞에서 멈췄다: `docker compose exec -T db psql -U postgres -d suddoe -Atc "SELECT count(*) FROM pg_policies WHERE policyname='account_isolation'"` 로 적용 여부를 본다(`psql` 이 실패로 끝나도 커밋됐을 수 있다). 0 이면 적용되지 않았으니 `docker compose up -d --no-build api` 로 이전 이미지를 띄우고 자동 배포를 다시 켠 뒤 원인을 본다. 0 이 아니면 적용된 것이니 `./deploy.sh --force` 를 실행한다.
+- 로그가 `skip`·`image ... 없음` 또는 `git fetch`·`docker tag` 오류로 끝났다: api 가 멈춰 있고 스키마는 이미 바뀌었다. 원인을 풀고 `./deploy.sh --force` 를 다시 실행한다. 풀 수 없으면 되돌린다.
+- 로그가 `재시작하지 않았다` 또는 `docker compose up` 오류로 끝났다: `suddoe-api:prod` 는 이미 새 이미지라 `--force` 를 다시 실행해도 api 를 띄우지 않는다. `docker compose up -d --no-build api` 로 띄우고, healthy 가 되면 `./deploy.sh --force` 를 한 번 더 실행해 배포 기록(`deployed_sha`)을 남긴다. 이미지가 같아 재시작하지 않는다. 기록이 없으면 자동 배포를 켜도 뒤 커밋이 계속 hold 된다.
+- 로그가 `unhealthy` 다: `deploy.sh` 가 이전 코드로 되돌려 이전 코드가 새 정책 위에서 돈다. 바로 되돌린다.
+
+되돌리기(`restore.sh` 는 빈 DB 에만 복원하므로 덤프는 최후 수단이다). 자동 배포는 끈 채로 둔다. 켜 두면 다음 커밋이 hold 없이 새 코드를 되돌린 스키마 위에 올린다.
+
+```bash
+(
+set -euo pipefail
+rm -f /etc/cron.d/suddoe-deploy
+flock /run/lock/suddoe-deploy.lock true
+cd /opt/suddoe/deploy/ncp
+# 두 계정이 같은 사업명으로 저장했으면 되돌리기 SQL 이 멈추므로 api 를 멈추기 전에 본다
+dup=$(docker compose exec -T db psql -U postgres -d suddoe -Atc 'SELECT count(*) FROM (SELECT 1 FROM tenant.profile_agreements GROUP BY org_id, "사업명" HAVING count(*) > 1) d')
+[ "$dup" = 0 ] || { echo "중단: 같은 사업명의 협약 행이 계정별로 나뉜 조합 ${dup}건. 남길 행을 정한 뒤 다시 실행한다"; exit 1; }
+docker compose stop api
+docker compose exec -T db psql -U postgres -d suddoe -v ON_ERROR_STOP=1 -f - \
+  < ../../db/migrations/2026-11-03_계정별_분리_되돌리기.sql
+docker tag suddoe-api:before-account-split suddoe-api:prod
+docker compose up -d --no-build api
+)
+```
+
+되돌린 뒤 `docker compose ps api` 가 healthy 이고 prototype@ssudo.kr 의 계획 목록이 보이는지 확인한다.
+
+되돌리기 블록이 `psql` 에서 멈추면 스키마는 새 정책 그대로다. `unhealthy` 뒤가 아니면 `suddoe-api:prod` 가 새 이미지이므로 `docker compose up -d --no-build api` 로 다시 띄우고 원인을 본다. `unhealthy` 뒤에는 이전 이미지라 띄우면 이전 코드가 새 정책 위에서 돈다. 띄우지 말고 원인을 풀어 되돌리기를 다시 실행한다.
+
+다시 적용할 때는 첫 블록을 처음부터 실행한다. 되돌린 동안 이전 코드가 쓴 행은 기관의 첫 계정에 배정된다. 두 번째 계정이 실제로 쓰고 있었다면 그 계정의 계획·판정이 첫 계정으로 옮겨지므로 먼저 행을 확인한다.
 
 `item_alias`·`rules` 데이터는 `db/init` 시드가 없고 덤프로 옮긴다. 그래서 데이터 수정 마이그레이션은 `db/init` 을 고치지 않는다.
 

@@ -6,6 +6,7 @@ POST/PATCH /api/plans/{plan_id}/tasks, GET /api/tasks. 체크리스트와 캘린
 tenant.plan_tasks 의 같은 행이고 due_date 유무로만 나뉜다. mock 모드(SUDDOE_MOCK=1)에서는
 mock_data 를 쓰고, live 모드 구현은 `_live_*` 함수에 있다. 동기화는 출처='user' 행과
 사용자가 고친 due_date 를 덮지 않으며, DB 오류는 롤백 후 예외로 전파한다.
+할일은 계정 단위다. 소유 확인은 계획(expense_plans)의 org·계정으로 하고, 새 행은 계획의 org·계정을 그대로 쓴다.
 """
 from __future__ import annotations
 
@@ -17,7 +18,7 @@ from datetime import timedelta
 
 from fastapi import APIRouter, HTTPException, Query
 
-from ._common import MOCK, 할일구분_ENUM, 트랜잭션, _org조건, _질의, _실행
+from ._common import MOCK, 할일구분_ENUM, 트랜잭션, _계정조건, _질의, _실행
 from . import l3_deadline
 from .l3_deadline import 바이그램
 from .models import (할일, 할일동기화, 할일동기화응답, 할일목록응답, 할일생성, 할일수정)
@@ -299,7 +300,7 @@ def _동기화_준비(body: 할일동기화, 체크항목: dict[str, dict], l3�
     return 행들
 
 
-def _동기화_적용(cur, plan_id: int, 계획org, decision_id: int | None,
+def _동기화_적용(cur, plan_id: int, 계획org, 계획account, decision_id: int | None,
               행들: list[dict], 기존: list[tuple]) -> dict:
     """확정된 행을 plan_tasks 에 반영하고 건수를 돌려준다. 호출자의 트랜잭션 안에서 실행한다.
 
@@ -333,9 +334,9 @@ def _동기화_적용(cur, plan_id: int, 계획org, decision_id: int | None,
             생성 += 1
             cur.execute(
                 'INSERT INTO tenant.plan_tasks '
-                '(org_id, plan_id, decision_id, 출처, 코드, 구분, 항목, 설명, due_date, "유형") '
-                "VALUES (%s,%s,%s,'ai',%s,%s,%s,%s,%s,%s)",
-                (계획org, plan_id, decision_id, 행["코드"], 행["구분"], 행["항목"],
+                '(org_id, account_id, plan_id, decision_id, 출처, 코드, 구분, 항목, 설명, due_date, "유형") '
+                "VALUES (%s,%s,%s,%s,'ai',%s,%s,%s,%s,%s,%s)",
+                (계획org, 계획account, plan_id, decision_id, 행["코드"], 행["구분"], 행["항목"],
                  행["설명"], 행["due_date"], 행["유형"]),
             )
 
@@ -358,19 +359,22 @@ def _live_동기화(plan_id: int, body: 할일동기화, org_id: str | None = No
         return 동기화_실행(cur, plan_id, body, org_id)
 
 
-def 동기화_실행(cur, plan_id: int, body: 할일동기화, org_id: str | None) -> 할일동기화응답:
+def 동기화_실행(cur, plan_id: int, body: 할일동기화, org_id: str | None,
+             account_id=None) -> 할일동기화응답:
     """동기화 본체. 호출자의 트랜잭션(cur) 안에서 계획·기존 행·check_items·L3 조문을 읽고 쓴다.
 
     persist 는 판정-계획 연결과 같은 트랜잭션에서 이 함수를 불러, 할일 동기화가 실패하면 연결도 함께
-    롤백되게 한다. 계획이 없거나 다른 기관 것이면 HTTPException(404).
+    롤백되게 한다. 계획이 없거나 다른 기관·다른 계정 것이면 HTTPException(404).
+    account_id 를 넘기지 않으면 현재_account(토큰의 계정)를 쓴다.
     """
-    조건, org인자 = _org조건(org_id, "p")
-    cur.execute(f'SELECT p.org_id, p."집행예정일" FROM tenant.expense_plans p '
+    조건, org인자 = (_계정조건(org_id, "p") if account_id is None
+                  else _계정조건(org_id, "p", account_id))
+    cur.execute(f'SELECT p.org_id, p.account_id, p."집행예정일" FROM tenant.expense_plans p '
                 f'WHERE p.plan_id = %s AND {조건}', (plan_id, *org인자))
     계획 = cur.fetchone()
     if not 계획:
         raise HTTPException(404, f"지출계획 {plan_id} 을(를) 찾을 수 없습니다")
-    계획org, 집행예정일 = 계획
+    계획org, 계획account, 집행예정일 = 계획
 
     cur.execute('SELECT task_id, 출처, 코드, 항목, 날짜_사용자수정 '
                 'FROM tenant.plan_tasks WHERE plan_id = %s', (plan_id,))
@@ -380,7 +384,7 @@ def 동기화_실행(cur, plan_id: int, body: 할일동기화, org_id: str | Non
              if 집행예정일 is not None and 계획org else [])
 
     행들 = _동기화_준비(body, 체크항목, l3조문, 집행예정일)
-    건수 = _동기화_적용(cur, plan_id, 계획org, body.decision_id, 행들, 기존)
+    건수 = _동기화_적용(cur, plan_id, 계획org, 계획account, body.decision_id, 행들, 기존)
 
     코드매칭수 = sum(1 for 행 in 행들 if 행["코드"])
     return 할일동기화응답(
@@ -391,18 +395,19 @@ def 동기화_실행(cur, plan_id: int, body: 할일동기화, org_id: str | Non
 
 
 def _live_추가(plan_id: int, body: 할일생성, org_id: str | None = None) -> 할일:
-    조건, org인자 = _org조건(org_id, "p")
-    계획 = _질의(f'SELECT p.org_id FROM tenant.expense_plans p '
+    조건, org인자 = _계정조건(org_id, "p")
+    계획 = _질의(f'SELECT p.org_id, p.account_id FROM tenant.expense_plans p '
                 f'WHERE p.plan_id = %s AND {조건}', (plan_id, *org인자))
     if not 계획:
         raise HTTPException(404, f"지출계획 {plan_id} 을(를) 찾을 수 없습니다")
-    계획org = 계획[0][0]
+    계획org, 계획account = 계획[0]
     날짜수정 = body.due_date is not None
     행 = _질의(
         'INSERT INTO tenant.plan_tasks '
-        '(org_id, plan_id, 출처, 구분, 항목, 설명, due_date, "유형", 날짜_사용자수정) '
-        "VALUES (%s,%s,'user',%s,%s,%s,%s,%s,%s) RETURNING task_id",
-        (계획org, plan_id, body.구분, body.항목, body.설명, body.due_date, body.유형, 날짜수정),
+        '(org_id, account_id, plan_id, 출처, 구분, 항목, 설명, due_date, "유형", 날짜_사용자수정) '
+        "VALUES (%s,%s,%s,'user',%s,%s,%s,%s,%s,%s) RETURNING task_id",
+        (계획org, 계획account, plan_id, body.구분, body.항목, body.설명, body.due_date, body.유형,
+         날짜수정),
     )
     if not 행:
         raise HTTPException(500, "할일 생성에 실패했습니다")
@@ -410,10 +415,10 @@ def _live_추가(plan_id: int, body: 할일생성, org_id: str | None = None) ->
 
 
 def _live_수정(plan_id: int, task_id: int, body: 할일수정, org_id: str | None = None) -> 할일:
-    """할일 상태·날짜·유형을 고친다. 소유 확인은 할일의 org_id 가 아니라 계획(expense_plans.org_id)
+    """할일 상태·날짜·유형을 고친다. 소유 확인은 할일의 org_id 가 아니라 계획(expense_plans 의 org·계정)
     기준이다. `_live_추가`·`_live_동기화` 와 기준이 같아야 추가는 되는데 수정은 404 인 상황이 생기지 않는다.
     """
-    조건, org인자 = _org조건(org_id, "p")
+    조건, org인자 = _계정조건(org_id, "p")
     존재 = _질의(f'SELECT 1 FROM tenant.plan_tasks t '
                 f'JOIN tenant.expense_plans p ON p.plan_id = t.plan_id '
                 f'WHERE t.task_id = %s AND t.plan_id = %s AND {조건}',
@@ -442,8 +447,6 @@ def _live_수정(plan_id: int, task_id: int, body: 할일수정, org_id: str | N
 
 
 def _live_목록(org_id: str | None) -> list[dict]:
-    if org_id is None:
-        행 = _질의(_할일_SELECT + "WHERE t.org_id IS NULL")
-    else:
-        행 = _질의(_할일_SELECT + "WHERE t.org_id = %s", (org_id,))
+    조건, 인자 = _계정조건(org_id, "t")
+    행 = _질의(_할일_SELECT + f"WHERE {조건}", 인자)
     return [_행_할일(r) for r in 행]

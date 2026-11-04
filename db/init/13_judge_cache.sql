@@ -4,7 +4,7 @@
 -- 캐시 키를 넓게 잡지 않는다. (사업명, 비목) 이나 (품목, 비목, 사업명) 으로 묶으면 같은 키 아래
 -- 정답 판정이 다른 문항이 섞인다. 범위가 넓은 키는 적중률보다 캐시가 오답을 그대로 반환하는 것이 문제다.
 -- 판단불가는 안전한 실패지만 캐시가 만든 오답은 가장 나쁜 결과다.
--- key 는 server/response_cache.캐시키() 가 만든 sha256 이다. org_id, 사업명, 확정비목, 정규화 결과 전체(JSON),
+-- key 는 server/response_cache.캐시키() 가 만든 sha256 이다. org_id, account_id, 사업명, 확정비목, 정규화 결과 전체(JSON),
 -- 사용자 입력 필드, 기관 L3 문서 해시(response_cache.l3_해시, 판정만)이 해시 입력에 들어간다.
 -- 같은 질문이 반복될 때만 적중하는 것이 의도다.
 --
@@ -18,6 +18,8 @@
 CREATE TABLE IF NOT EXISTS tenant.judge_cache (
     key         TEXT PRIMARY KEY,        -- 캐시 키(sha256)
     org_id      UUID NOT NULL REFERENCES tenant.orgs(org_id) ON DELETE CASCADE,
+    -- NULL = 계정 없는 기관(데모 세션). 판정 응답은 계정의 계획·프로필에 묶이므로 계정마다 따로 둔다
+    account_id  UUID REFERENCES tenant.accounts(account_id) ON DELETE CASCADE,
     종류        TEXT NOT NULL CHECK (종류 IN ('normalize', 'judge')),
     value       JSONB NOT NULL,
     데이터버전_해시 TEXT NOT NULL,
@@ -29,8 +31,9 @@ CREATE INDEX IF NOT EXISTS ix_judge_cache_expires ON tenant.judge_cache (expires
 CREATE INDEX IF NOT EXISTS ix_judge_cache_org     ON tenant.judge_cache (org_id, 종류);
 
 ALTER TABLE tenant.judge_cache ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS org_isolation ON tenant.judge_cache;
-CREATE POLICY org_isolation ON tenant.judge_cache USING (org_id = tenant.current_org());
+DROP POLICY IF EXISTS account_isolation ON tenant.judge_cache;
+CREATE POLICY account_isolation ON tenant.judge_cache USING (
+    org_id = tenant.current_org() AND account_id IS NOT DISTINCT FROM tenant.current_account());
 
 -- 10b_app_grants.sql 의 ALTER DEFAULT PRIVILEGES 로 새 테이블도 권한을 받지만,
 -- 이 파일만 따로 실행하는 경우를 위해 명시적으로 한 번 더 부여한다(멱등).

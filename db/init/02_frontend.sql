@@ -48,6 +48,8 @@ COMMENT ON TABLE corpus.evidence_sources IS
 CREATE TABLE IF NOT EXISTS tenant.expense_plans (
     plan_id     BIGSERIAL PRIMARY KEY,
     org_id      UUID REFERENCES tenant.orgs(org_id) ON DELETE CASCADE,  -- NULL = 게스트
+    -- 계획을 만든 계정. NULL = 게스트 또는 계정 없는 기관(데모 세션)
+    account_id  UUID REFERENCES tenant.accounts(account_id) ON DELETE CASCADE,
     제목        TEXT,                         -- 목록의 "지출명". 정규화가 문장에서 뽑아 채운다
     질문원문    TEXT NOT NULL,                -- 목록 검색 대상
     정규화      JSONB,                        -- 정규화 단계 출력 전체
@@ -63,6 +65,7 @@ CREATE TABLE IF NOT EXISTS tenant.expense_plans (
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS ix_plans_org_time ON tenant.expense_plans (org_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS ix_plans_account_time ON tenant.expense_plans (org_id, account_id, updated_at DESC);
 
 COMMENT ON TABLE tenant.expense_plans IS
     '지출 계획. 상태는 진행(draft/judged)이지 판정이 아니다.';
@@ -74,6 +77,7 @@ COMMENT ON TABLE tenant.expense_plans IS
 CREATE TABLE IF NOT EXISTS tenant.plan_tasks (
     task_id     BIGSERIAL PRIMARY KEY,
     org_id      UUID REFERENCES tenant.orgs(org_id) ON DELETE CASCADE,  -- RLS 정책이 보는 컬럼
+    account_id  UUID REFERENCES tenant.accounts(account_id) ON DELETE CASCADE,  -- 계획의 계정과 같은 값
     plan_id     BIGINT REFERENCES tenant.expense_plans(plan_id) ON DELETE CASCADE,
                                               -- NULL = 계획과 무관한 사용자 일정
     decision_id BIGINT REFERENCES tenant.decisions(decision_id) ON DELETE SET NULL,
@@ -122,14 +126,16 @@ ALTER TABLE tenant.decisions ADD COLUMN IF NOT EXISTS 검증사유    TEXT[];
 ALTER TABLE tenant.decisions ADD COLUMN IF NOT EXISTS 미매핑전제  JSONB;
 
 
--- RLS — 신설 tenant 테이블 2개. 01_schema.sql 의 org_isolation 관례를 따른다.
+-- RLS — 신설 tenant 테이블 2개. 01_schema.sql 의 account_isolation 관례(기관과 계정이 둘 다 맞아야 보인다)를 따른다.
 ALTER TABLE tenant.expense_plans ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tenant.plan_tasks    ENABLE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS org_isolation ON tenant.expense_plans;
-DROP POLICY IF EXISTS org_isolation ON tenant.plan_tasks;
-CREATE POLICY org_isolation ON tenant.expense_plans USING (org_id = tenant.current_org());
-CREATE POLICY org_isolation ON tenant.plan_tasks    USING (org_id = tenant.current_org());
+DROP POLICY IF EXISTS account_isolation ON tenant.expense_plans;
+DROP POLICY IF EXISTS account_isolation ON tenant.plan_tasks;
+CREATE POLICY account_isolation ON tenant.expense_plans USING (
+    org_id = tenant.current_org() AND account_id IS NOT DISTINCT FROM tenant.current_account());
+CREATE POLICY account_isolation ON tenant.plan_tasks USING (
+    org_id = tenant.current_org() AND account_id IS NOT DISTINCT FROM tenant.current_account());
 
 
 -- updated_at 자동 갱신 트리거. 앱이 아니라 DB 가 기록한다.

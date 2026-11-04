@@ -39,6 +39,8 @@ push 키 권한을 레지스트리 하나로 좁힌 정책으로 바꾼다.
 2. 마이그레이션 적용([db/migrations/README.md](../../db/migrations/README.md)), compose·`.env` 변경 반영
 3. `cd deploy/ncp && ./deploy.sh --force`
 
+README 에 파일별 순서가 따로 있으면(예: 계정별 분리는 api 를 멈춘 사이에 적용) 그 순서를 따른다.
+
 디스크 여유가 기준보다 적으면 배포하지 않는다. 레지스트리 이미지가 서버에 없을 때(전체 6.5GB 를 받음) 8GB,
 있을 때(바뀐 레이어만 받음) 3GB 다. `docker builder prune` 과 지난 `rollback-*` 이미지 삭제로 공간을 만든다.
 

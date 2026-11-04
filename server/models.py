@@ -41,7 +41,7 @@ class 정규화요청(BaseModel):
     금액: float | None = None
     용도: str | None = None
     집행예정일: str | None = None
-    거래처: str | None = None          # 저장만 하고 판정에는 쓰지 않는다
+    거래처: str | None = None          # 정규화에 쓰지 않는다. 정규화 없이 저장한 계획은 기본 정규화에 들어가 프롬프트에 보인다
     추가설명: str | None = None        # 폼 필드에 없는 예외 상황 설명. 용도 뒤에 붙여 LLM 에 넘긴다
 
     # 자연어 경로 (골든셋 질문이 이 경로로 들어온다. 지우지 않는다)

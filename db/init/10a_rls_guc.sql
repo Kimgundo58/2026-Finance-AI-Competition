@@ -27,7 +27,8 @@ REVOKE ALL ON SCHEMA eval FROM suddoe_app;
 
 
 -- GUC 규약. 앱은 트랜잭션마다 app.org_id 를 설정하고, tenant.current_org() 는
--- request.jwt.claims -> app.org_id 순으로 읽는다.
+-- request.jwt.claims -> app.org_id 순으로 읽는다. 같은 트랜잭션에 app.account_id(로그인 계정)도 설정하고
+-- tenant.current_account() 가 같은 순서로 읽는다. 데모 세션은 계정이 없어 빈 값(NULL)이다.
 -- `SET LOCAL app.org_id = %s` 는 쓸 수 없다. SET 문은 바인딩 파라미터를 받지 않고, 문자열을 이어 붙이면 SQL 인젝션이 된다.
 -- `SELECT set_config('app.org_id', %s, true)` 를 쓴다. 세 번째 인자 true 가 트랜잭션 범위를 뜻한다.
 -- false(세션 범위)로 두면 커넥션을 재사용할 때 다음 요청이 앞 요청의 org 를 그대로 본다(TENANT_LEAK).

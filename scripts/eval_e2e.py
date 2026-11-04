@@ -130,6 +130,7 @@ def main() -> None:
     ap.add_argument("--q", help="질문 한 줄")
     ap.add_argument("--사업명")
     ap.add_argument("--org-id")
+    ap.add_argument("--account-id", help="계정 단위 데이터(프로필 B5·decisions)를 읽고 쓸 계정. 없으면 계정 없는 행")
     ap.add_argument("--dry", action="store_true", help="LLM 없이 프롬프트 구성까지만")
     ap.add_argument("--golden", action="store_true", help="골든셋 전체 실행")
     ap.add_argument("--limit", type=int)
@@ -164,7 +165,8 @@ def main() -> None:
 
     if not a.q:
         ap.error("--q · --golden · --fault 중 하나")
-    r = orchestrate.판정(a.q, 사업명=a.사업명, org_id=a.org_id, dry=a.dry, 기록=not a.no_log,
+    r = orchestrate.판정(a.q, 사업명=a.사업명, org_id=a.org_id, account_id=a.account_id,
+                       dry=a.dry, 기록=not a.no_log,
                        참조확장_사용=참조확장_사용)
     print(json.dumps(r, ensure_ascii=False, indent=2, default=str))
 

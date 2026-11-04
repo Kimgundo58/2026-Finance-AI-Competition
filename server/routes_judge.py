@@ -59,9 +59,12 @@ def judge(req: Request, body: 판정요청, mock: str | None = None,
     # 본문의 org_id 는 클라이언트가 보낸 검증되지 않은 값이라 버리고, 토큰으로 검증된 org 만
     # 쓴다(게스트는 None). 본문 값을 믿으면 남의 기관 L3·기업 프로필을 읽고 그 기관에 판정 행을 쓴다.
     body.org_id = auth.검증된_org(req)
+    # 계정도 토큰에서만 정한다. 계획·판정·프로필·캐시는 계정 단위다(L3 는 org 단위).
+    account_id = auth.검증된_account(req)
 
     k = response_cache.캐시키(
-        "judge", body.org_id, body.사업명, body.확정비목,
+        # 계정을 키에 넣는다. 다른 계정의 응답(그 계정의 계획·판정 id·프로필 전제)이 나가면 안 된다.
+        "judge", body.org_id, account_id, body.사업명, body.확정비목,
         json.dumps(body.정규화, ensure_ascii=False, sort_keys=True),
         body.특수관계.친족거래, body.특수관계.전직임직원업체,
         json.dumps([a.model_dump() for a in body.답변], ensure_ascii=False, sort_keys=True),
@@ -69,10 +72,10 @@ def judge(req: Request, body: 판정요청, mock: str | None = None,
         # 캐시에 남겨도 이후 요청에는 적중하지 않는다(routes_l3 의 캐시 삭제와 함께 쓴다).
         response_cache.l3_해시(body.org_id),
         # 협약 프로필(B5)을 PUT /api/profile 로 바꾸면 키가 바뀐다(routes_profile 의 캐시 삭제와 함께 쓴다).
-        response_cache.프로필_해시(body.org_id),
+        response_cache.프로필_해시(body.org_id, account_id),
         # ?mock= 은 mock 모드에서만 응답을 바꾼다. live 에서 키에 넣으면 캐시를 우회할 수 있다.
         *([mock] if MOCK else []))
-    캐시 = response_cache.조회(k, body.org_id)
+    캐시 = response_cache.조회(k, body.org_id, account_id)
     # 검색 전에 계산한다. 판정 도중 규정이 활성화되면 결과는 옛 해시로 저장되어 이후 요청에 적중하지 않는다.
     데이터버전해시 = response_cache.요청_해시()
 
@@ -89,15 +92,17 @@ def judge(req: Request, body: 판정요청, mock: str | None = None,
         elif MOCK:
             out = dict(mock_판정.get(mock or "가능", mock_판정["가능"]))
             decision_id = None
-            response_cache.저장(k, out, 종류="judge", org=body.org_id, 데이터버전_해시=데이터버전해시)
+            response_cache.저장(k, out, 종류="judge", org=body.org_id, account=account_id,
+                               데이터버전_해시=데이터버전해시)
         else:
-            out, 실패 = yield from _판정_실행(body)
+            out, 실패 = yield from _판정_실행(body, account_id)
             # decision_id 를 캐시에 넣으면 다른 요청이 남의 판정 행을 자기 계획에 연결한다.
             decision_id = out.pop("decision_id", None)
             if not 실패:              # 일시적 장애의 판단불가를 캐시에 고정하지 않는다
-                response_cache.저장(k, out, 종류="judge", org=body.org_id, 데이터버전_해시=데이터버전해시)
+                response_cache.저장(k, out, 종류="judge", org=body.org_id, account=account_id,
+                                   데이터버전_해시=데이터버전해시)
         yield from _판정_이벤트(out)
-        yield _sse("저장", _판정_저장_시도(body, out, decision_id,
+        yield _sse("저장", _판정_저장_시도(body, account_id, out, decision_id,
                                           캐시적중=캐시 is not None, 실패=실패))
         yield _sse("완료", {"캐시": 캐시 is not None})
 
@@ -125,16 +130,16 @@ def _판정_이벤트(out: dict):
     yield _sse("결과", {k: v for k, v in out.items() if k != "증빙목록"})
 
 
-def _판정_실행(body: 판정요청):
+def _판정_실행(body: 판정요청, account_id: str | None):
     """_live_판정 을 워커 스레드에서 실행하고, 기다리는 동안 SSE keep-alive 주석을 yield 한다.
 
-    `out, 실패 = yield from _판정_실행(body)` 로 쓴다. 예외나 타임아웃은 판단불가 결과와
+    `out, 실패 = yield from _판정_실행(body, account_id)` 로 쓴다. 예외나 타임아웃은 판단불가 결과와
     실패=True 를 돌려준다. 타임아웃이 지난 워커는 기다리지 않고 백그라운드에서 끝나게 둔다
     (판정 파이프라인은 그대로 decisions 행을 기록한다).
     """
     ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     # submit 은 컨텍스트 변수를 복사하지 않는다. 미들웨어가 설정한 현재_org 를 워커에 넘긴다.
-    future = ex.submit(contextvars.copy_context().run, _live_판정, body)
+    future = ex.submit(contextvars.copy_context().run, _live_판정, body, account_id)
     만료시각 = time.monotonic() + _판정_타임아웃초
     try:
         while True:
@@ -176,7 +181,7 @@ def _실패_결과(body: 판정요청) -> dict:
     return out
 
 
-def _live_판정(body: 판정요청) -> dict:
+def _live_판정(body: 판정요청, account_id: str | None = None) -> dict:
     """orchestrate.판정() 을 호출하고 응답 계약으로 바꾼다. 워커 스레드에서 실행된다."""
     import orchestrate
     # 질문 원문이 없을 때만 품목·용도·금액으로 문장을 재구성한다. 합성 문장(_합성_질문)을 다시
@@ -190,20 +195,21 @@ def _live_판정(body: 판정요청) -> dict:
         질문 = " ".join(조각) + (f" {금액}원" if 금액 else "")
     # 정규화결과를 넘겨 정규화 LLM 호출을 다시 하지 않는다. 확정비목이 있으면 그 비목으로 판정한다.
     # plan_id 를 넘기면 decisions 행이 처음부터 plan_id 를 갖는다.
-    r = orchestrate.판정(질문, 사업명=body.사업명, org_id=body.org_id, plan_id=body.plan_id,
+    r = orchestrate.판정(질문, 사업명=body.사업명, org_id=body.org_id, account_id=account_id,
+                       plan_id=body.plan_id,
                        확정비목=body.확정비목 or None,
                        정규화결과=body.정규화,
                        사용자프로필값=_사용자프로필값_구성(body.답변))
     return 파이프라인결과_매핑(r, body)
 
 
-def _판정_저장_시도(body: 판정요청, out: dict, decision_id: int | None, *,
+def _판정_저장_시도(body: 판정요청, account_id: str | None, out: dict, decision_id: int | None, *,
                    캐시적중: bool, 실패: bool) -> dict:
     """plan_id 가 있으면 판정을 계획에 연결한다. 저장 오류는 SSE 를 끊지 않고 사유로 돌려준다."""
     if body.plan_id is None:
         return {"저장": False, "사유": "plan_id 없음"}
     try:
         return 판정_저장(body.plan_id, body, out, body.org_id, decision_id=decision_id,
-                     캐시적중=캐시적중, 실패=실패)
+                     account_id=account_id, 캐시적중=캐시적중, 실패=실패)
     except Exception as e:                                    # noqa: BLE001
         return {"저장": False, "사유": f"저장 실패 ({type(e).__name__})"}
