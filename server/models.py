@@ -66,9 +66,22 @@ class 정규화요청(BaseModel):
 
 
 class 답변항목(BaseModel):
-    """/api/judge 가 받는 심층질문 답 한 건."""
+    """/api/judge 가 받는 답 한 건. code 는 심층질문 code 또는 확인 질문 id(Q1 등)다."""
     code: str
     값: Any
+
+
+# --- 확인 질문 (POST /api/questions) ---
+
+class 질문요청(BaseModel):
+    """판정 전 확인 질문 요청. org·계정은 토큰에서 정하므로 받지 않는다."""
+    사업명: str | None = None
+    확정비목: str
+    세부유형: str | None = None
+    품목: str | None = None
+    금액: float | None = None
+    용도: str | None = None
+    질문원문: str | None = Field(default=None, max_length=2000)
 
 
 # --- 판정 (POST /api/judge) ---
@@ -81,8 +94,10 @@ class 판정요청(BaseModel):
     plan_id: int | None = None         # 있으면 판정 후 expense_plans 에 연결한다
     특수관계: _특수관계 = Field(default_factory=_특수관계,
                              validation_alias=AliasChoices("특수관계", "f5"))  # 구 이름 호환(제거 예정: 다음 릴리스)
-    # 심층질문 답. 비어 있으면 orchestrate.판정() 이 사용자 답 없이 프로필값을 계산한다.
+    # 심층질문 답과 확인 질문 답. 비어 있으면 orchestrate.판정() 이 사용자 답 없이 프로필값을 계산한다.
     답변: list[답변항목] = Field(default_factory=list)
+    # POST /api/questions 가 돌려준 키. 서버에 저장한 질문 문장과 답 값만 판정에 넣는다.
+    질문세트: str | None = None
 
 
 # --- 할일 (plan_tasks) ---
@@ -219,6 +234,8 @@ class 계획상세(계획요약):
     latest_decision_id: int | None = None
     # 판정 전문 (요약·해야할일·인용·전제·신뢰등급·규정버전·참조관계·검증사유·문의초안)
     판정상세: dict[str, Any] | None = None
+    # 최신 판정에 반영한 확인 질문과 답 [{질문문, 답}]. 결과 화면의 「확인한 내용」과 같다
+    사용자답변: list[dict[str, Any]] = Field(default_factory=list)
     할일: list[_할일] = Field(default_factory=list)
     created_at: str | None = None
 

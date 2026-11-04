@@ -41,3 +41,6 @@ jobs:
 
       - name: rule_lookup self-test (DB 없음)
         run: python scripts/rule_lookup_check.py --self-test
+
+      - name: 확인 질문 self-test (DB·LLM 없음)
+        run: python scripts/question_check.py --self-test

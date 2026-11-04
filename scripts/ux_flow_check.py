@@ -30,6 +30,12 @@ FastAPI TestClient 로 서버를 프로세스 안에서 띄우고 로컬 DB 에 
      (게스트 PUT 은 401, 시작일 > 종료일은 422, 값을 바꾸면 캐시가 아니라 새 값으로 판정한다)
   19 같은 기관(org)의 두 계정은 협약 프로필·지출계획·판정·할일·판정 캐시를 따로 쓰고(판정 B5 도 자기 값),
      L3 는 기관 것을 같이 읽는다. Supabase 토큰은 점검용 EC 키로 서명하고 서명키 조회만 바꾼다
+  20 회원가입 → 기관 선택 → L3 업로드 경로 (등록 전 403, 기관 변경 불가)
+  21 LLM 이 막히면 /api/questions 는 오류 없이 200 · 상태 '실패' · 질문세트 저장 없음
+  22 저장된 질문세트와 답변이 판정 프롬프트 B5.7 에 들어가고(충족답 제외) 근거 조문이 인용 후보가 된다. 답변이 없으면 B5.7 이 없고,
+     모르는 질문세트·다른 기관 질문세트는 오류 없이 답변유실로 판정한다
+  23 LLM 이 「가능」을 내도 「모름」 답이면 조건부 · 해야할일과 plan_tasks 에 code 없이 저장 · 응답과 계획 상세에 내부 값 없음.
+     LLM 호출만 가짜로 바꾸고 판정 기록·계획 연결은 실제로 거친다
 
 실행:
   PYTHONIOENCODING=utf-8 python scripts/ux_flow_check.py           # 점검 실행
@@ -180,7 +186,8 @@ def _환경_준비(l3_dir: str) -> None:
     os.environ.setdefault("SUDDOE_DEMO_SECRET", secrets.token_hex(32))
     os.environ.setdefault("SUDDOE_SLUG_SECRET", secrets.token_hex(32))
     # OCR 은 점검 16 에서만 가짜로 켠다. 실제 키가 있어도 다른 점검은 OCR 없는 경로를 본다(과금 방지)
-    for k in ("SUDDOE_JWKS_URL", "SUDDOE_ADMIN_TOKEN", "SUDDOE_OCR_URL", "SUDDOE_OCR_SECRET"):
+    for k in ("SUDDOE_JWKS_URL", "SUDDOE_ADMIN_TOKEN", "SUDDOE_OCR_URL", "SUDDOE_OCR_SECRET",
+              "SUDDOE_JUDGE_ANSWERS"):
         os.environ.pop(k, None)
     for p in (str(ROOT / "scripts"), str(ROOT)):
         if p not in sys.path:
@@ -207,7 +214,7 @@ def _점검(결과: 점검결과) -> None:
     from server.main import app
 
     # 판정 파이프라인 계측: L3 조회·프롬프트를 기록하고, 판정은 dry 로 바꾸고, LLM 호출은 막는다
-    캡처: dict[str, list] = {"l3": [], "프롬프트": [], "판정": []}
+    캡처: dict[str, list] = {"l3": [], "프롬프트": [], "판정": [], "판정인자": []}
     원래_조문조회, 원래_프롬프트, 원래_판정 = (
         l3_load.조문_조회, orchestrate.프롬프트_구성, orchestrate.판정)
 
@@ -223,6 +230,7 @@ def _점검(결과: 점검결과) -> None:
 
     def 판정_dry(질문, **k):
         k.update(dry=True, 기록=False)
+        캡처["판정인자"].append(dict(k))
         r = 원래_판정(질문, **k)
         캡처["판정"].append((k.get("org_id"), r))
         return r
@@ -518,6 +526,7 @@ def _점검(결과: 점검결과) -> None:
 
         _계정_분리_점검(결과, client, 데모세션, 업로드, 조문, 판정, 캡처, b5, 협약)
         _가입_등록_점검(결과, client, 데모세션, 업로드, 현재문서)
+        _확인질문_점검(결과, client, 데모세션, 캡처, 원래_판정, 판정_dry, llm_금지)
     finally:
         l3_load.조문_조회, orchestrate.프롬프트_구성, orchestrate.판정 = (
             원래_조문조회, 원래_프롬프트, 원래_판정)
@@ -719,6 +728,140 @@ def _가입_등록_점검(결과: 점검결과, client, 데모세션, 업로드,
         with psycopg.connect(OWNER_DSN, connect_timeout=5) as c:
             c.execute("DELETE FROM tenant.accounts WHERE lower(email) = %s", (이메일,))
         _정리(list(기관.values()))
+
+
+def _확인질문_점검(결과: 점검결과, client, 데모세션, 캡처, 원래_판정, 판정_dry, llm_금지) -> None:
+    """21~23: 확인 질문 → 답변 → 판정 프롬프트 → 하향 → 해야할일·계획 재열람.
+
+    21 은 질문 LLM 만 막는다. 22 는 판정을 dry 로 둔 채 프롬프트를 본다. 23 은 판정 LLM 만 「가능」을 내는 가짜로 바꾼다.
+    질문세트는 저장 함수로 직접 넣는다. 실제 문장은 LLM 이 쓰므로 점검에서는 만들지 않는다.
+    """
+    import re
+
+    import orchestrate
+    import psycopg
+    import question_generate
+
+    from server import _common, response_cache
+
+    def 비우기() -> None:
+        for v in 캡처.values():
+            v.clear()
+
+    지출 = {"사업명": 판정_요청["사업명"], "확정비목": "재료비", "품목": 판정_요청["정규화"]["품목"],
+          "금액": 판정_요청["정규화"]["금액"], "용도": 판정_요청["정규화"]["용도"],
+          "질문원문": 판정_요청["정규화"]["질문원문"]}
+    헤더, org = 데모세션()
+    헤더2, _org2 = 데모세션()
+
+    원래_질문llm = question_generate.llm_호출
+    question_generate.llm_호출 = llm_금지
+    try:
+        r = client.post("/api/questions", json=지출, headers=헤더)
+    finally:
+        question_generate.llm_호출 = 원래_질문llm
+    with psycopg.connect(OWNER_DSN, connect_timeout=5) as c:
+        저장행 = c.execute("SELECT count(*) FROM tenant.judge_cache WHERE org_id = %s AND 종류 = 'questions'",
+                        (org,)).fetchone()[0]
+        조문행 = c.execute('SELECT a.article_id, a.doc_id, a."조번호" FROM corpus.doc_articles a '
+                        "JOIN corpus.documents d USING (doc_id) WHERE d.status = 'active' "
+                        'ORDER BY a.article_id LIMIT 1').fetchone()
+        청크행 = c.execute('SELECT c.chunk_id, c.doc_id, c."조번호", a.article_id FROM corpus.chunks c '
+                        'JOIN corpus.doc_articles a ON a.doc_id = c.doc_id AND a."조번호" = c."조번호" '
+                        "WHERE c.status = 'active' AND a.article_id <> %s ORDER BY c.chunk_id DESC LIMIT 1",
+                        (조문행[0],)).fetchone()
+    결과.기록("21 LLM 이 막히면 /api/questions 는 200 · 상태 '실패' · 질문세트 저장 없음",
+           r.status_code == 200 and r.json() == {"상태": "실패", "질문세트": None, "질문": []} and 저장행 == 0,
+           f"{r.status_code} {r.text[:200]} · 저장 행 {저장행}")
+
+    공개 = [{"질문문": "시제품 재료를 직접 사용하나요?", "답": "예"}, {"질문문": "대표자의 배우자가 판매자인가요?", "답": "모름"}]
+    저장값 = {"상태": "있음", "질문": [
+        {"id": "Q1", "질문문": 공개[0]["질문문"], "충족답": "예", "이유": "재료는 직접 사용해야 해요.",
+         "할일": "재료 사용처 확인", "근거": {},
+         "근거조문": {"종류": "article", "id": 조문행[0], "doc_id": 조문행[1], "조번호": 조문행[2]}},
+        {"id": "Q2", "질문문": 공개[1]["질문문"], "충족답": "아니오", "이유": "특수관계 거래는 제외돼요.",
+         "할일": "판매자와의 관계 확인", "근거": {},
+         "근거조문": {"종류": "chunk", "id": 청크행[0], "doc_id": 청크행[1], "조번호": 청크행[2]}}]}
+    세트 = secrets.token_hex(16)
+    with _common.org_고정(org):
+        response_cache.저장(세트, 저장값, 종류="questions", org=org, ttl초=3600)
+    답변 = [{"code": "Q1", "값": "예"}, {"code": "Q2", "값": "모름"}]
+
+    비우기()
+    client.post("/api/judge", json=판정_요청, headers=헤더)
+    답변없는_프롬프트 = 캡처["프롬프트"][-1][0] if 캡처["프롬프트"] else ""
+    비우기()
+    본문 = client.post("/api/judge", json=dict(판정_요청, 질문세트=세트, 답변=답변), headers=헤더).text
+    프롬프트, 문장맵 = (캡처["프롬프트"][-1][:2] if 캡처["프롬프트"] else ("", {}))
+    i = 프롬프트.find("## B5.7")
+    b57 = 프롬프트[i:프롬프트.find("\n## ", i + 1)] if i >= 0 else ""
+    인용후보 = {(v[0], v[1]) for v in 문장맵.values()}
+    화면 = (_sse_이벤트(본문, "결과") or {}).get("사용자답변")
+    내부값 = [x for x in ("충족답", "근거조문", "재료 사용처 확인") if x in 본문]
+    비우기()
+    모르는 = client.post("/api/judge", json=dict(판정_요청, 질문세트="없는질문세트", 답변=답변), headers=헤더)
+    모르는_인자 = 캡처["판정인자"][-1] if 캡처["판정인자"] else {}
+    모르는_프롬프트 = 캡처["프롬프트"][-1][0] if 캡처["프롬프트"] else ""
+    비우기()
+    남의 = client.post("/api/judge", json=dict(판정_요청, 질문세트=세트, 답변=답변), headers=헤더2)
+    남의_인자 = 캡처["판정인자"][-1] if 캡처["판정인자"] else {}
+    결과.기록(
+        "22 질문세트·답변이 B5.7 에 들어감 · 충족답 없음 · 근거 조문이 인용 후보 · 답변 없으면 B5.7 없음 · "
+        "모르는·다른 기관 질문세트는 답변유실",
+        bool(답변없는_프롬프트) and "B5.7" not in 답변없는_프롬프트
+        and all(f"질문: {a['질문문']} / 답: {a['답']}" in b57 for a in 공개) and "충족답" not in 프롬프트
+        and ("article", 조문행[0]) in 인용후보 and ("article", 청크행[3]) in 인용후보
+        and 화면 == 공개 and not 내부값
+        and 모르는.status_code == 200 and 모르는_인자.get("답변유실") is True and not 모르는_인자.get("사용자답변")
+        and "B5.7" not in 모르는_프롬프트
+        and 남의.status_code == 200 and 남의_인자.get("답변유실") is True,
+        f"답변 없는 프롬프트 {bool(답변없는_프롬프트)} · B5.7 {b57[:80]!r} · 근거 조문 후보 "
+        f"{('article', 조문행[0]) in 인용후보}/{('article', 청크행[3]) in 인용후보} · 화면 {화면} · 내부값 {내부값} · "
+        f"모르는 세트 {모르는.status_code} 유실={모르는_인자.get('답변유실')} · "
+        f"다른 기관 {남의.status_code} 유실={남의_인자.get('답변유실')}")
+
+    # 판정 LLM 이 「가능」을 낸다. 문장 번호는 프롬프트의 첫 번째 것을 쓴다(실제 인용 검증을 거친다)
+    def llm_가능(프롬프트_글, *_a, **_k):
+        첫문장 = re.search(r"\[(S\d+)\]", 프롬프트_글).group(1)
+        return ({"판정": "가능", "요약": "규정상 집행할 수 있습니다.", "해야할일": [], "인용": [첫문장], "전제": []},
+                {"지연ms": 0, "모델": "가짜"})
+
+    orchestrate.판정 = 원래_판정
+    orchestrate.llm_호출 = llm_가능
+    try:
+        계획 = client.post("/api/plans", headers=헤더, json={
+            "사업명": 판정_요청["사업명"], "품목": 지출["품목"], "금액": 지출["금액"], "용도": 지출["용도"],
+            "확정비목": "재료비", "정규화": 판정_요청["정규화"]})
+        plan_id = 계획.json().get("plan_id") if 계획.status_code == 201 else None
+        요청 = dict(판정_요청, plan_id=plan_id, 질문세트=세트, 답변=답변, 정규화=dict(판정_요청["정규화"], 품목="확인질문 필라멘트"))
+        본문 = client.post("/api/judge", json=요청, headers=헤더).text
+        다시 = client.post("/api/judge", json=요청, headers=헤더).text      # 캐시 응답도 내부 값 없이 같은 화면
+    finally:
+        orchestrate.판정, orchestrate.llm_호출 = 판정_dry, llm_금지
+    결과값 = _sse_이벤트(본문, "결과") or {}
+    다시값 = _sse_이벤트(다시, "결과") or {}
+    상세 = client.get(f"/api/plans/{plan_id}", headers=헤더).json() if plan_id else {}
+    with psycopg.connect(OWNER_DSN, connect_timeout=5) as c:
+        판정행 = c.execute('SELECT "판정", "검증코드", "사용자답변", "처리단계" FROM tenant.decisions '
+                        "WHERE plan_id = %s ORDER BY decision_id", (plan_id,)).fetchall()
+        할일행 = c.execute("SELECT 코드, 구분, 설명 FROM tenant.plan_tasks WHERE plan_id = %s AND 항목 = %s",
+                        (plan_id, "판매자와의 관계 확인")).fetchall()
+    모름항목 = [h for h in 결과값.get("해야할일", []) if h.get("항목") == "판매자와의 관계 확인"]
+    상세항목 = [h for h in (상세.get("판정상세") or {}).get("해야할일", []) if h.get("항목") == "판매자와의 관계 확인"]
+    내부값 = [x for x in ("충족답", "근거조문", "코드추정_제외") if x in 본문 or x in 다시 or x in json.dumps(상세, ensure_ascii=False)]
+    감사 = 판정행[0][2] if 판정행 else []
+    결과.기록(
+        "23 LLM 「가능」 + 「모름」 → 조건부 · 해야할일과 plan_tasks 에 code 없이 저장 · 감사 기록 · 화면·재열람에 내부 값 없음",
+        결과값.get("판정") == "조건부" and bool(판정행) and 판정행[0][0] == "조건부"
+        and bool({"ANSWER_UNCONFIRMED", "UNVERIFIED_RULE"} & set(판정행[0][1]))
+        and [a.get("충족답") for a in 감사] == ["예", "아니오"]
+        and len(모름항목) == 1 and 모름항목[0].get("구분") == "결제전" and not 모름항목[0].get("code")
+        and 할일행 == [(None, "결제전", "특수관계 거래는 제외돼요.")]
+        and 결과값.get("사용자답변") == 공개 and 다시값.get("사용자답변") == 공개
+        and 상세.get("사용자답변") == 공개 and len(상세항목) == 1 and not 내부값,
+        f"판정 {결과값.get('판정')} · 판정 행 {[(x[0], x[1], x[3]) for x in 판정행]} · 해야할일 {모름항목} · "
+        f"plan_tasks {할일행} · 화면 {결과값.get('사용자답변')} · 재요청 {다시값.get('사용자답변')} · "
+        f"계획 상세 {상세.get('사용자답변')} · 내부값 {내부값}")
 
 
 def 실행() -> tuple[int, str]:

@@ -25,7 +25,7 @@ _log = logging.getLogger(__name__)
 # 여기 없는 코드는 _검증기록 이 거부하고, CHECK 에 없는 코드는 INSERT 가 거부된다.
 # 판정 하향 코드뿐 아니라 경고(DANGLING_WARN·DOMAIN_WARN·CITE_PARAGRAPH_MISMATCH)와
 # 완화(PRECEDENCE_OVERRIDE: 불가→조건부)도 들어간다.
-# 마지막 4종(TASK_STATE_UNSOURCED, TASK_STATE_MISMATCH, TASK_NUMBER_UNSOURCED, TASK_BASIS_NOT_IN_MAP)은
+# TASK_ 로 시작하는 다음 4종(TASK_STATE_UNSOURCED, TASK_STATE_MISMATCH, TASK_NUMBER_UNSOURCED, TASK_BASIS_NOT_IN_MAP)은
 # 자유서술 해야할일 검사를 없앤 뒤로 내보내지 않는다. 저장된 행과 CHECK 에 남아 있어 목록에서 빼지 않는다.
 검증코드_전체: tuple[str, ...] = (
     "INVALID_JUDGMENT", "CITE_NOT_IN_MAP", "CITE_DB_MISSING", "CITE_PARAGRAPH_MISMATCH",
@@ -34,7 +34,7 @@ _log = logging.getLogger(__name__)
     "UNVERIFIED_RULE", "TASK_CODE_INVALID", "TASK_DB_MISSING", "L3_ONLY_DOWNGRADE",
     "TENANT_LEAK", "DANGLING_WARN", "DOMAIN_WARN", "PRECEDENCE_OVERRIDE",
     "TASK_STATE_UNSOURCED", "TASK_STATE_MISMATCH", "TASK_NUMBER_UNSOURCED",
-    "TASK_BASIS_NOT_IN_MAP",
+    "TASK_BASIS_NOT_IN_MAP", "ANSWER_UNCONFIRMED",
 )
 
 # 하향으로 판정이 LLM 의 판정과 달라졌을 때 LLM 요약 대신 쓰는 문장. LLM 요약은 LLM 이 낸
@@ -312,6 +312,8 @@ def _인용_검증(llm출력: dict, 문장맵: dict, 메타: dict[str, dict], �
     인용목록: list[인용] = []
     인용계층: list[str] = []
     유출: list[dict] = []
+    # 같은 항이 B2 청크와 B3 조문에 함께 있으면 문장 ID 가 둘이다. 둘 다 고르면 화면에 같은 인용이 두 번 나간다
+    이미: set[tuple] = set()
     # 같은 문장 ID 를 두 번 고르면 같은 조문이 두 번 나간다. 순서를 지키며 중복을 뺀다
     for s in dict.fromkeys(llm출력.get("인용") or []):
         if s not in 문장맵:
@@ -339,6 +341,10 @@ def _인용_검증(llm출력: dict, 문장맵: dict, 메타: dict[str, dict], �
         if m.get("domain") and m["domain"] != "창업지원사업":
             검증기록("DOMAIN_WARN",
                 f"인용 {s} 의 문서 domain='{m['domain']}' 이 창업지원사업이 아니다 → 경고")
+        키 = (m.get("doc_id"), m.get("조번호"), 항호 or m.get("원문"))
+        if 키 in 이미:
+            continue
+        이미.add(키)
         인용계층.append(m.get("layer") or ("L3" if 종류 == "l3" else "?"))
         인용목록.append(인용(문장ID=s, doc_id=m.get("doc_id"), 조번호=m.get("조번호"),
                           조제목=m.get("조제목"), 항호=항호,
@@ -411,10 +417,11 @@ def _신뢰등급(인용목록: list[인용], 미해결참조: Optional[list], �
 
 def _판정_하향(판정: str, 신뢰등급: Optional[str], 인용목록: list[인용], 인용계층: list[str],
             룰들: Optional[list[dict]], 룰: Optional[dict],
-            검증기록: _검증기록) -> tuple[str, Optional[str]]:
-    """룰 검수 상태·신뢰등급·인용 계층으로 판정을 하향한다. 반환 (판정, 신뢰등급).
+            검증기록: _검증기록, *, 사용자답변: Optional[list[dict]] = None,
+            답변유실: bool = False) -> tuple[str, Optional[str]]:
+    """룰 검수 상태·신뢰등급·인용 계층·사용자 답변으로 판정을 하향한다. 반환 (판정, 신뢰등급).
 
-    순서는 UNVERIFIED_RULE → B_GRADE_DOWNGRADE → L3_ONLY_DOWNGRADE → PRECEDENCE_OVERRIDE 이다.
+    순서는 UNVERIFIED_RULE → B_GRADE_DOWNGRADE → L3_ONLY_DOWNGRADE → PRECEDENCE_OVERRIDE → ANSWER_UNCONFIRMED 이다.
     어느 단계도 판정을 불가나 가능으로 올리지 않는다.
     """
     # corpus.rules.verified=false 인 룰만으로는 '가능' 을 내지 않는다
@@ -444,6 +451,13 @@ def _판정_하향(판정: str, 신뢰등급: Optional[str], 인용목록: list[
             and (룰 or {}).get("허용") in ("가능", "조건부")):
         검증기록("PRECEDENCE_OVERRIDE",
             f"L3 단독 '불가' 인데 우선 규정이 {'+'.join(반영계층)}({룰.get('허용')}) → 조건부로 전환")
+        판정 = "조건부"
+    # 요건을 충족하는 답이 아니거나(「아니오」·「모름」) 답변을 읽지 못했으면 '가능' 을 내지 않는다.
+    # 충족하는 답은 사용자 진술일 뿐이라 판정을 올리지 않는다
+    미확인 = sum(a.get("답") != a.get("충족답") for a in 사용자답변 or [])
+    if 판정 == "가능" and (미확인 or 답변유실):
+        검증기록("ANSWER_UNCONFIRMED",
+            f"'가능' 인데 요건 미확인 답변 {미확인}건·답변 유실 {답변유실} → 조건부로 하향")
         판정 = "조건부"
     return 판정, 신뢰등급
 
@@ -491,13 +505,16 @@ def 검증(llm출력: dict, 문장맵: dict, *,
          미해결참조: Optional[list] = None,
          룰: Optional[dict] = None,
          org_id=None,
-         conn=None) -> tuple[dict, list[str]]:
+         conn=None,
+         사용자답변: Optional[list[dict]] = None,
+         답변유실: bool = False) -> tuple[dict, list[str]]:
     """판정 호출 출력을 검증하고 필요하면 하향해 (최종 응답 dict, 검증사유 목록) 을 돌려준다.
 
     반환 dict 는 최종응답 필드에 `검증코드` 가 더해진 형태다. 판정이 하향되면 요약은 _하향_요약 고정 문구로
     바뀐다. `메타`·`프로필경로`·`체크항목` 을 주지 않으면 `conn`(없으면 새 커넥션)으로 DB 에서 읽는다.
     `룰들`·`룰` 은 B4 에 들어간 effective_rule 결과, `체크코드` 는 해야할일 code 허용 목록이다.
     `현재기관` 과 다른 기관id 를 가진 인용은 버리고 tenant.incidents 에 기록한다(부수 효과).
+    `사용자답변`·`답변유실` 은 확인 질문 결과다. 요건을 충족하는 답이 아니면 '가능' 을 조건부로 낮춘다.
     """
     검증기록 = _검증기록()
     메타 = 메타 if 메타 is not None else 문장ID_메타(문장맵, conn=conn, org_id=org_id)
@@ -521,7 +538,8 @@ def 검증(llm출력: dict, 문장맵: dict, *,
         검증기록("NO_CITATION", "인용 0건인데 판정이 판단불가가 아니다 → 판단불가")
         판정 = "판단불가"
     신뢰등급 = _신뢰등급(인용목록, 미해결참조, 검증기록)
-    판정, 신뢰등급 = _판정_하향(판정, 신뢰등급, 인용목록, 인용계층, 룰들, 룰, 검증기록)
+    판정, 신뢰등급 = _판정_하향(판정, 신뢰등급, 인용목록, 인용계층, 룰들, 룰, 검증기록,
+                         사용자답변=사용자답변, 답변유실=답변유실)
     해야할일 = _해야할일(llm출력, set(체크코드 or ()), 체크항목, 검증기록)
 
     # 규정버전은 인용된 문서의 version 만 모은다. 문장맵 전체를 쓰면 인용하지 않은 문서의 판본이 붙는다

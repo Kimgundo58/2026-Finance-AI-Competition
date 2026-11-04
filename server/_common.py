@@ -31,6 +31,11 @@ DSN = os.environ.get("SUDDOE_DSN", "postgresql://postgres:devpw@localhost:5432/s
 # mock 모드는 인증 미들웨어를 건너뛰고 고정된 '가능' 을 돌려주므로 기본값이 되면 안 된다.
 MOCK = os.environ.get("SUDDOE_MOCK", "0") == "1"
 
+
+def 답변_반영() -> bool:
+    """SUDDOE_JUDGE_ANSWERS=0 이면 확인 질문을 내지 않고 답변도 판정에 넣지 않는다(되돌리기용)."""
+    return os.environ.get("SUDDOE_JUDGE_ANSWERS", "1") != "0"
+
 # 운영 설정이 있는데 mock 모드면 배포 설정 실수다. 조용히 뜨지 않고 시작 시점에 실패시킨다.
 _운영전용_환경변수 = [k for k in ("SUDDOE_JWKS_URL", "SUDDOE_ADMIN_TOKEN")
                       if os.environ.get(k, "").strip()]

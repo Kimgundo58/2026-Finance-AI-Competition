@@ -1,10 +1,12 @@
 # -*- coding: utf-8 -*-
-"""정규화·판정 응답 캐시. 같은 입력이 다시 오면 LLM 을 부르지 않고 저장된 응답을 돌려준다.
+"""정규화·판정·확인 질문 응답 캐시. 같은 입력이 다시 오면 LLM 을 부르지 않고 저장된 응답을 돌려준다.
 
-/api/normalize·/api/judge 가 캐시키() 로 키를 만들고 조회(k, org, account)·저장(k, 값, 종류=, org=, account=) 를
+/api/normalize·/api/judge·/api/questions 가 캐시키() 로 키를 만들고 조회(k, org, account)·저장(k, 값, 종류=, org=, account=) 를
 부른다. 게스트(org 없음)는 프로세스 메모리(FIFO, 재시작하면 사라진다), 인증된 org 는 tenant.judge_cache 를 쓴다.
 DB 캐시 행은 계정 단위다(account_id, RLS account_isolation). 데모 세션은 계정이 없어 account_id 가 NULL 이다.
 두 캐시 모두 _데이터버전_해시()(코퍼스·룰·우선순위 규칙·체크항목·별칭 버전)가 저장 때와 같을 때만 적중한다.
+확인 질문은 키가 곧 질문세트이고 저장(ttl초=) 로 항목별 만료 시각을 준다. 질문세트_조회() 는 조회() 와 달리 일일
+카운트를 되돌리지 않는다. /api/questions 의 캐시 확인(카운트를 올리기 전)과 판정 요청 안의 조회가 쓴다.
 환경변수: SUDDOE_RESPONSE_CACHE_TTL(기본 900초), SUDDOE_RESPONSE_CACHE_MAX(메모리 항목 수, 기본 512),
 SUDDOE_DATA_VERSION_TTL(기본 300초). 이전 변수 이름도 한 릴리스 동안 읽는다.
 """
@@ -22,7 +24,7 @@ from server.rate_limit import 제한
 _TTL초 = _정수_환경변수("SUDDOE_RESPONSE_CACHE_TTL", 900, 구이름="SUDDOE_CACHE_TTL")  # 구 이름 호환(제거 예정: 다음 릴리스)
 _상한 = _정수_환경변수("SUDDOE_RESPONSE_CACHE_MAX", 512, 구이름="SUDDOE_CACHE_MAX")  # 구 이름 호환(제거 예정: 다음 릴리스)
 
-# 게스트용 메모리 캐시(키 -> (저장 시각, 데이터 버전 해시, 값))와 적중 수. AnyIO 워커 스레드가 동시에 바꾸므로
+# 게스트용 메모리 캐시(키 -> (만료 시각, 데이터 버전 해시, 값))와 적중 수. AnyIO 워커 스레드가 동시에 바꾸므로
 # _락 안에서만 다룬다.
 _메모리: dict[str, tuple[float, str, Any]] = {}
 _적중 = 0
@@ -82,13 +84,23 @@ def 조회(k: str, org: str | None, account: str | None = None) -> Any | None:
     return 값
 
 
+def 질문세트_조회(k: str, org: str | None, account: str | None = None) -> Any | None:
+    """저장된 질문세트 또는 None. 조회() 와 같은 기준으로 읽되 일일 판정 카운트를 되돌리지 않는다.
+
+    판정 요청 안에서 읽을 때 되돌리면 LLM 을 부른 그 판정이 카운트에서 빠진다. 다른 계정이 저장한 행은 읽지 않는다.
+    """
+    return _메모리_조회(k) if org is None else _db_조회(k, org, account)
+
+
 def 저장(k: str, 값: Any, *, 종류: str, org: str | None, account: str | None = None,
-         데이터버전_해시: str | None = None) -> None:
-    """응답을 저장한다. DB 쓰기 실패는 삼킨다(캐시는 판정 결과에 영향을 주지 않는다).
+         데이터버전_해시: str | None = None, ttl초: int | None = None) -> bool:
+    """응답을 저장하고 저장 여부를 돌려준다. DB 쓰기 실패는 삼킨다(캐시는 판정 결과에 영향을 주지 않는다).
 
     데이터버전_해시 는 요청 시작 때 요청_해시() 로 계산한 값을 넘긴다. 저장 시점에 다시 계산하면, 규정
     활성화 전에 시작해 옛 규정으로 판정한 결과가 새 해시로 저장되어 이후 요청에 적중한다.
+    ttl초 를 주지 않으면 SUDDOE_RESPONSE_CACHE_TTL 을 쓴다.
     """
+    ttl초 = _TTL초 if ttl초 is None else ttl초
     if 데이터버전_해시 is None:
         데이터버전_해시 = _게스트_해시() if org is None else _데이터버전_해시()
     if org is None:
@@ -96,17 +108,17 @@ def 저장(k: str, 값: Any, *, 종류: str, org: str | None, account: str | Non
         with _락:
             if len(_메모리) >= _상한:          # FIFO. LRU 까지는 필요 없다
                 _메모리.pop(next(iter(_메모리), None), None)
-            _메모리[k] = (time.time(), 해시, 값)
-        return
+            _메모리[k] = (time.time() + ttl초, 해시, 값)
+        return True
     # 같은 key 가 다른 계정 행이면 RLS 가 UPDATE 를 거부해 저장이 실패한다(캐시만 못 쓴다). 키에 계정이 들어가
     # 있어 정상 경로에서는 생기지 않는다.
-    _실행(
+    return _실행(
         'INSERT INTO tenant.judge_cache (key, org_id, account_id, 종류, value, 데이터버전_해시, expires_at) '
         'VALUES (%s,%s,%s,%s,%s,%s, now() + make_interval(secs => %s)) '
         'ON CONFLICT (key) DO UPDATE SET '
         '  value = EXCLUDED.value, 데이터버전_해시 = EXCLUDED.데이터버전_해시, '
         '  expires_at = EXCLUDED.expires_at, created_at = now()',
-        (k, org, account, 종류, _jsonb(값), 데이터버전_해시, _TTL초))
+        (k, org, account, 종류, _jsonb(값), 데이터버전_해시, ttl초)) >= 0
 
 
 def 요청_해시() -> str:
@@ -137,8 +149,8 @@ def _메모리_조회(k: str) -> Any | None:
         v = _메모리.get(k)
         if not v:
             return None
-        t, 저장해시, 값 = v
-        if time.time() - t > _TTL초 or 저장해시 != 해시:
+        만료시각, 저장해시, 값 = v
+        if time.time() > 만료시각 or 저장해시 != 해시:
             _메모리.pop(k, None)
             return None
         return 값

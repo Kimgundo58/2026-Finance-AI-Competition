@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """판정 파이프라인: 정규화 → 룰 조회 → 검색 → 프롬프트 구성 → 판정 호출 → 검증 → 전제 확인 → 저장.
 
-/api/judge(server/routes_judge._live_판정)가 판정(...) 을 부른다. LLM 호출은 정규화와 판정 두 번이고 나머지는 코드다.
+/api/judge(server/routes_judge._live_판정)가 판정(...) 을 부른다. 여기서 LLM 호출은 정규화와 판정 두 번이고 나머지는 코드다.
+확인 질문 LLM 은 판정 전에 /api/questions(question_generate)가 따로 부르고, 그 답을 사용자답변으로 받는다.
 게이트: A 금지목록 일치(즉시 불가, 판정 LLM 호출 없음), B 검색 결과 0건(판단불가), C 비목 후보 근접(1순위로
 판정하고 후보를 응답에 포함), D 정상. 공개: 판정(...), decisions_저장(cur, 행), 프로필값_경로키, 증빙_발급처, 코퍼스버전.
 불변 조건: 모든 실패(DB·타임아웃·스키마·검색 0건·인용 검증 실패·예외)는 판단불가로 반환한다. 쓰는 테이블: tenant.decisions.
@@ -51,6 +52,7 @@ _decisions_컬럼: tuple[str, ...] = (
     "org_id", "account_id", "사업명", "기관id", "질문원문", "plan_id", "정규화", "비목", "금액", "판정",
     "신뢰등급", "요약", "규정버전", "인용", "해야할일", "전제", "참조관계", "미매핑전제",
     "검증사유", "검증코드", "처리단계", "실패단계", "지연ms", "모델", "검색스냅샷", "코퍼스버전",
+    "사용자답변",
 )
 
 
@@ -74,6 +76,9 @@ class _판정상태:
     주입: str | None
     참조확장_사용: bool
     account_id: Any = None
+    # 확인 질문 답변(question_generate.답변_구성). 답변유실은 답이 왔는데 저장된 질문을 읽지 못한 경우다
+    사용자답변: list[dict] = field(default_factory=list)
+    답변유실: bool = False
     t0: float = field(default_factory=time.time)
     지연: dict[str, int] = field(default_factory=dict)
     처리단계: list[str] = field(default_factory=list)
@@ -141,8 +146,9 @@ def _종료(상태: _판정상태, 응답: dict, *, 기록: bool) -> dict:
 def _기록후종료(상태: _판정상태, 응답: dict, *, 기록: bool) -> dict:
     """`기록` 이면 tenant.decisions 에 한 건 넣고 decision_id 를 응답에 넣는다. 커넥션은 항상 닫는다.
 
-    기록 실패는 판정을 바꾸지 않고 검증사유에 남긴다.
+    기록 실패는 판정을 바꾸지 않고 검증사유에 남긴다. 모든 종료 경로가 지나므로 사용자답변도 여기서 넣는다.
     """
+    응답["사용자답변"] = 상태.사용자답변
     try:
         if 기록 and 상태.cur is not None:
             응답["decision_id"] = decisions_저장(상태.cur, _decisions_행(상태, 응답))
@@ -184,6 +190,8 @@ def _decisions_행(상태: _판정상태, 응답: dict) -> dict:
                            "최고유사도": 검색.get("최고유사도"),
                            "미해결참조": 검색.get("미해결참조") or []},
                           ensure_ascii=False, default=str),
+        # 충족답·근거조문까지 남긴다. 나중에 질문을 감사할 수 있어야 한다. 화면에는 질문문·답만 나간다
+        사용자답변=json.dumps(상태.사용자답변, ensure_ascii=False, default=str),
         코퍼스버전=코퍼스버전(상태.cur))
 
 
@@ -481,6 +489,31 @@ def _검색단계(상태: _판정상태) -> dict | None:
     return None
 
 
+def _답변_근거조문(cur, 사용자답변: list[dict], 검색_청크: list[int]) -> list[int]:
+    """사용자가 답한 질문의 근거 조문 article_id. 판정이 그 조문을 인용할 수 있게 B3 에 더한다.
+
+    청크는 doc_id·조번호로 조문을 찾는다. L3 는 B1 에 전체가 있어 더하지 않는다. 근거 항이 이미 B2 청크에
+    있어도 더하지 않는다(발췌는 줄을 다듬은 값이라 글자로 비교하지 않는다).
+    """
+    if not 사용자답변:
+        return []
+    cur.execute('SELECT doc_id, "조번호", "항호" FROM corpus.chunks WHERE chunk_id = ANY(%s)', (검색_청크,))
+    b2 = {tuple(r) for r in cur.fetchall()}
+    out: list[int] = []
+    for a in 사용자답변:
+        g, 근거 = a.get("근거조문") or {}, a.get("근거") or {}
+        조 = (근거.get("doc_id"), 근거.get("조번호"))
+        if (*조, 근거.get("항호") or None) in b2 or (*조, None) in b2:
+            continue
+        if g.get("종류") == "article" and g.get("id"):
+            out.append(g["id"])
+        elif g.get("종류") == "chunk":
+            cur.execute('SELECT article_id FROM corpus.doc_articles WHERE doc_id = %s AND "조번호" = %s',
+                        (g.get("doc_id"), g.get("조번호")))
+            out += [r[0] for r in cur.fetchall()]
+    return out
+
+
 def _프롬프트구성단계(상태: _판정상태) -> dict | None:
     cur, conn = 상태.cur, 상태.conn
     t = time.time()
@@ -491,12 +524,16 @@ def _프롬프트구성단계(상태: _판정상태) -> dict | None:
     # 프로필 값도 한 번만 읽어 프로필 요약문(B5)과 전제 확인에 같이 쓴다
     프로필요약문, 상태.프로필값 = _프로필값_읽기(cur, 상태.org_id, 상태.account_id)
     검색결과 = 상태.검색결과
+    참조확장 = (검색결과["참조확장"] or None) if 상태.참조확장_사용 else None
+    if 답변조문 := _답변_근거조문(cur, 상태.사용자답변, 검색결과["top5"]):
+        참조확장 = list(dict.fromkeys([*(참조확장 or []), *답변조문]))
     상태.프롬프트, 상태.문장맵, 상태.참조관계 = 프롬프트_구성(
         cur, 상태.질문, 상태.정규화결과, l3=상태.l3본문 or None,
         검색=검색결과["top5"] or None,
-        참조확장=(검색결과["참조확장"] or None) if 상태.참조확장_사용 else None,
+        참조확장=참조확장,
         룰결과=str(상태.룰["룰요약문"]) if 상태.룰 else None, 프로필요약=프로필요약문,
-        참조관계=검색결과["참조관계"], 체크코드=상태.체크코드, 체크항목=상태.체크항목)
+        참조관계=검색결과["참조관계"], 체크코드=상태.체크코드, 체크항목=상태.체크항목,
+        사용자답변=상태.사용자답변 or None)
     상태._지연기록("프롬프트구성", t)
     상태.처리단계.append("판정생성")
 
@@ -543,6 +580,13 @@ def _판정호출(상태: _판정상태) -> dict | None:
     return None
 
 
+def _모름_할일(사용자답변: list[dict]) -> list[dict]:
+    """「모름」 답마다 결제 전 확인 항목을 만든다. check_items code 가 없어 plan_tasks.코드 는 NULL 이고,
+    문구가 다른 항목으로 오매칭되지 않게 코드 추정을 막는다. 같은 문구는 한 번만 넣는다."""
+    문구 = {a["할일"]: a.get("이유") for a in 사용자답변 if a.get("답") == "모름" and a.get("할일")}
+    return [{"항목": 항목, "설명": 이유, "구분": "결제전", "코드추정_제외": True} for 항목, 이유 in 문구.items()]
+
+
 def _검증단계(상태: _판정상태, 사용자프로필값: dict | None) -> dict:
     t = time.time()
     org_id, 룰, 검색결과 = 상태.org_id, 상태.룰, 상태.검색결과
@@ -551,7 +595,9 @@ def _검증단계(상태: _판정상태, 사용자프로필값: dict | None) -> 
                   체크코드=상태.체크코드, 체크항목=상태.체크항목,
                   현재기관=str(org_id) if org_id else None, org_id=org_id,
                   conn=상태.conn, 사업명=상태.사업명,
-                  미해결참조=검색결과["미해결참조"], 룰=룰)
+                  미해결참조=검색결과["미해결참조"], 룰=룰,
+                  사용자답변=상태.사용자답변, 답변유실=상태.답변유실)
+    응답["해야할일"] = [*(응답.get("해야할일") or []), *_모름_할일(상태.사용자답변)]
     코드 = 응답.get("검증코드") or []
     상태._지연기록("검증", t)
     상태.처리단계.append("검증")
@@ -581,6 +627,7 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, account_id
        plan_id: int | None = None,
        확정비목: str | None = None, 정규화결과: dict | None = None,
        사용자프로필값: dict | None = None,
+       사용자답변: list[dict] | None = None, 답변유실: bool = False,
        dry: bool = False, 기록: bool = True, 주입: str | None = None,
        참조확장_사용: bool = True) -> dict:
     """질문 하나를 판정해 응답 dict 를 돌려준다. 어떤 실패도 예외로 올리지 않고 판단불가로 반환한다.
@@ -588,14 +635,16 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, account_id
     서버 인자: `account_id`(토큰으로 검증된 계정. 프로필(B5)·decisions 는 계정 단위이고 L3 는 org 단위다. 데모 세션은
     None), `plan_id`(지출계획에 딸린 판정이면 decisions.plan_id), `확정비목`(사용자가 고른 비목으로 재판정),
     `정규화결과`(이미 실행한 정규화 결과. 주면 정규화 LLM 을 다시 부르지 않는다), `사용자프로필값`(심층질문 답.
-    프로필 값과 같은 컬럼명 키이며 DB 값보다 우선한다).
+    프로필 값과 같은 컬럼명 키이며 DB 값보다 우선한다), `사용자답변`(확인 질문 답. 프롬프트 B5.7 과 검증 하향에 쓴다),
+    `답변유실`(답이 왔는데 저장된 질문을 읽지 못함. 「가능」을 내지 않는다).
     평가용 인자: `dry`(LLM 없이 규칙 정규화와 프롬프트 구성까지만), `기록`(tenant.decisions 기록 여부),
     `주입`(장애 주입 'db'|'timeout'|'schema'|'empty'|'cite'), `참조확장_사용`(False 면 B3 을 넣지 않는다).
     부수 효과: `기록` 이면 게이트·정상 종료를 tenant.decisions 에 넣는다. 실패 종료는 기록하지 않는다.
     """
     상태 = _판정상태(질문=질문, 사업명=사업명, org_id=org_id, account_id=account_id,
                    plan_id=plan_id, 기록=기록,
-                   dry=dry, 주입=주입, 참조확장_사용=참조확장_사용)
+                   dry=dry, 주입=주입, 참조확장_사용=참조확장_사용,
+                   사용자답변=list(사용자답변 or []), 답변유실=답변유실)
     try:
         if 주입 == "db":
             raise 주입실패("DB 연결 실패(주입)")

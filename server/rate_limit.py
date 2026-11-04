@@ -2,6 +2,7 @@
 """요청 제한: 서비스 운영 기간, 일일 판정 한도, IP 별 시간당 한도.
 
 /api/normalize·/api/judge 가 첫 줄에서 `제한.통과(ip)` 를 부르고, 막히면 429 를 낸다.
+/api/questions 는 캐시에 없을 때만 부르고, 막히면 오류 대신 상태 '실패'(200)로 답한다. 판정 요청이 자기 한도 오류를 낸다.
 환경변수: SUDDOE_DAILY_JUDGE_LIMIT(기본 2000), SUDDOE_IP_HOURLY_LIMIT(기본 60),
 SUDDOE_SERVICE_START·SUDDOE_SERVICE_END(ISO 시각, 비우면 기간 제한 없음). 이전 변수 이름도 한 릴리스 동안 읽는다.
 카운터는 프로세스 메모리에만 있어 재시작하면 초기화된다. AnyIO 워커 스레드가 동시에 부르므로 락 안에서만 바꾼다.

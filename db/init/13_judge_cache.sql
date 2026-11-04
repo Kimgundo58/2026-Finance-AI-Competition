@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS tenant.judge_cache (
     org_id      UUID NOT NULL REFERENCES tenant.orgs(org_id) ON DELETE CASCADE,
     -- NULL = 계정 없는 기관(데모 세션). 판정 응답은 계정의 계획·프로필에 묶이므로 계정마다 따로 둔다
     account_id  UUID REFERENCES tenant.accounts(account_id) ON DELETE CASCADE,
-    종류        TEXT NOT NULL CHECK (종류 IN ('normalize', 'judge')),
+    종류        TEXT NOT NULL CHECK (종류 IN ('normalize', 'judge', 'questions')),
     value       JSONB NOT NULL,
     데이터버전_해시 TEXT NOT NULL,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
