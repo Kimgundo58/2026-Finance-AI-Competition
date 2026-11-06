@@ -848,6 +848,8 @@ def _일정_점검(결과: 점검결과, client, 데모세션) -> None:
 
 def _지출일_점검(결과: 점검결과, client, 데모세션) -> None:
     """25: 예상 지출일을 바꾸면 연결 일정이 고른 대로 움직이고, 재점검 동기화 뒤에도 그 날짜가 남는지 본다."""
+    from datetime import date, timedelta
+
     import psycopg
 
     with _두_계정(데모세션) as (헤더, _org):
@@ -918,11 +920,30 @@ def _지출일_점검(결과: 점검결과, client, 데모세션) -> None:
         client.patch(f"/api/plans/{계획2}", headers=A, json={"집행예정일": None, "일정이동": False})
         비움 = not any(t["집행예정일_연동"] for t in 날짜(계획2).values())
 
+        # 지출일을 비웠다가 다시 넣으면 규정 기한이 있는 AI 행은 새 지출일로 다시 계산한다
+        계획4, ai4, _완료4, _사용자4 = 만들기("2026-12-20")
+        with psycopg.connect(OWNER_DSN, connect_timeout=5) as c:
+            코드, 오프셋 = c.execute(
+                "SELECT code, 기본_오프셋일 FROM corpus.check_items "
+                "WHERE 기한근거 = '규정근거' AND 기본_오프셋일 IS NOT NULL LIMIT 1").fetchone()
+            c.execute("UPDATE tenant.plan_tasks SET 코드 = %s WHERE task_id = %s", (코드, ai4))
+        client.patch(f"/api/plans/{계획4}", headers=A, json={"집행예정일": None, "일정이동": True})
+        client.patch(f"/api/plans/{계획4}", headers=A, json={"집행예정일": "2027-01-10", "일정이동": True})
+        기대 = (date(2027, 1, 10) + timedelta(days=오프셋)).isoformat()
+        다시계산 = 날짜(계획4)[ai4]["due_date"] == 기대
+
+        # 실제 지출을 등록한 뒤 예상 지출일을 바꿔도 완료한 집행 줄은 실제 지출일에 남고 한 줄이다
+        client.patch(f"/api/plans/{계획4}", headers=A, json={"실제지출일": "2027-01-05", "실제지출액": 90000})
+        client.patch(f"/api/plans/{계획4}", headers=A, json={"집행예정일": "2027-02-01", "일정이동": False})
+        완료줄 = [t for t in 날짜(계획4).values() if t["집행예정일_연동"]]
+        완료줄_유지 = len(완료줄) == 1 and 완료줄[0]["상태"] == "완료" and 완료줄[0]["due_date"] == "2027-01-05"
+
         결과.기록("25 예상 지출일: 집행 줄 생성 · 같이 옮기기 · 지출일만 · 완료 행 불변 · 재점검 뒤 유지 · 다른 계정 차단",
                집행줄_생김 and 일정에_보임 and 확인항목_제외 and 줄_날짜 == 409 and 줄_삭제 == 409 and 줄_상태 == 200
-               and B_수정 == 404 and 같이_맞음 and 지출일만_맞음 and 대조_지워짐 and 비움,
+               and B_수정 == 404 and 같이_맞음 and 지출일만_맞음 and 대조_지워짐 and 비움 and 다시계산 and 완료줄_유지,
                f"집행 줄 {집행줄_생김}/{일정에_보임}/{확인항목_제외} · 줄 날짜 {줄_날짜} 삭제 {줄_삭제} 상태 {줄_상태} · B {B_수정} · "
-               f"같이 {이동.status_code} {같이_상세} · 지출일만 {지출일만_맞음} · 표시 없으면 재점검이 날짜 지움 {대조_지워짐} · 비움 {비움}")
+               f"같이 {이동.status_code} {같이_상세} · 지출일만 {지출일만_맞음} · 표시 없으면 재점검이 날짜 지움 {대조_지워짐} · 비움 {비움} · "
+               f"다시 넣으면 재계산 {다시계산} · 완료 줄 유지 {완료줄_유지}")
 
 
 def _진행단계_점검(결과: 점검결과, client, 데모세션) -> None:
@@ -943,10 +964,11 @@ def _진행단계_점검(결과: 점검결과, client, 데모세션) -> None:
         만들기("견적 2", 유형="비교견적")
         사전 = 만들기("주관기관 확인", 유형="사전확인")
         만들기("세금계산서", 구분="결제후", 유형="증빙")
+        만들기("거래명세서", 유형="증빙")  # 구분을 안 고른 증빙도 증빙 단계다
         첫째, 첫_현재, _ = 칸()
         첫째_맞음 = (첫째["사전승인·확인"] == ("시작전", 0, 1) and 첫째["견적"] == ("시작전", 0, 2)
                   and 첫째["계약"] == ("항목없음", 0, 0) and 첫째["집행"] == ("항목없음", 0, 0)
-                  and 첫째["증빙"] == ("시작전", 0, 1) and 첫_현재 == "사전승인·확인")
+                  and 첫째["증빙"] == ("시작전", 0, 2) and 첫_현재 == "사전승인·확인")
 
         client.patch(f"/api/plans/{계획}/tasks/{사전}", headers=A, json={"상태": "완료"})
         client.patch(f"/api/plans/{계획}/tasks/{견적}", headers=A, json={"상태": "완료"})
@@ -972,7 +994,7 @@ def _진행단계_점검(결과: 점검결과, client, 데모세션) -> None:
         # 재점검이 사용자 행과 집행 줄을 지우지 않는다
         client.post(f"/api/plans/{계획}/tasks:sync", headers=A, json={"해야할일": []})
         넷째, _, _ = 칸()
-        재점검_유지 = 넷째["집행"] == ("완료", 1, 1) and 넷째["증빙"] == ("시작전", 0, 1)
+        재점검_유지 = 넷째["집행"] == ("완료", 1, 1) and 넷째["증빙"] == ("시작전", 0, 2)
 
         결과.기록("26 진행 단계: 할일에서 계산 · 상태를 바꾸면 달라짐 · 목록과 일치 · 실제 지출 등록 저장 · 집행 완료 · 재점검 유지",
                첫째_맞음 and 효과 and 목록_일치 and 반쪽 == 422 and 음수 == 422 and B_등록 == 404
@@ -1029,6 +1051,10 @@ def _첨부_점검(결과: 점검결과, client, 데모세션) -> None:
                    client.delete(f"/api/plans/{계획}/attachments/{aid}", headers=B).status_code,
                    올리기("남의.pdf", PDF, B).status_code)
             게스트 = client.post(f"/api/plans/{계획}/attachments", files={"파일": ("g.pdf", PDF)}).status_code
+            데모헤더, _ = 데모세션()
+            데모계획 = client.post("/api/plans", headers=데모헤더, json={
+                "사업명": 판정_요청["사업명"], "품목": "데모 첨부", "금액": 100000, "용도": "점검"}).json()["plan_id"]
+            데모 = 올리기("데모.pdf", PDF, 데모헤더, 데모계획).status_code
             잘못된id = client.get(f"/api/plans/{계획}/attachments/..%2F..%2Fetc", headers=A).status_code
 
             증빙 = 올리기("계산서.pdf", PDF, task_id=str(할일)).json()
@@ -1067,12 +1093,12 @@ def _첨부_점검(결과: 점검결과, client, 데모세션) -> None:
     결과.기록(
         "28 첨부: 저장·재조회·내려받기 바이트 일치 · 위장/형식/크기/개수 거부 · 다른 계정 404 · 게스트 401 · 증빙 연결 · 삭제 시 파일 삭제",
         r.status_code == 201 and 남음 and 바이트 and 디스크 and 위장 == 415 and 형식 == 415 and 큼 == 413 and 빈것 == 400
-        and 경로.get("원본파일명") == "악성.pdf" and 이미지 == 201 and 남의것 == (404, 404, 404) and 게스트 == 401
+        and 경로.get("원본파일명") == "악성.pdf" and 이미지 == 201 and 남의것 == (404, 404, 404) and 게스트 == 401 and 데모 == 401
         and 잘못된id == 404 and 다른항목 == 404 and 증빙_연결 and 체크풀어도_남음 and 항목사라짐
         and 공간부족 == 507 and 공간_파일그대로 and 상태들.count(201) == 7 and 상태들[-1] == 409 and 개수 == 10
         and 삭제 == 200 and 파일없어짐 and 재조회 == 404 and 계획삭제 == 200 and 비었음 and 행수 == 0,
         f"올림 {r.status_code} · 남음 {남음} · 바이트 {바이트} · 디스크 {디스크} · 위장 {위장} 형식 {형식} 큼 {큼} 빈것 {빈것} · "
-        f"경로 {경로.get('원본파일명')} · 이미지 {이미지} · 남의것 {남의것} · 게스트 {게스트} · 잘못된id {잘못된id} · "
+        f"경로 {경로.get('원본파일명')} · 이미지 {이미지} · 남의것 {남의것} · 게스트 {게스트} · 데모 {데모} · 잘못된id {잘못된id} · "
         f"다른항목 {다른항목} · 연결 {증빙_연결} 체크풀어도 {체크풀어도_남음} 항목사라짐 {항목사라짐} · 공간 {공간부족}/{공간_파일그대로} · "
         f"한도 {상태들} {개수} · 삭제 {삭제} {파일없어짐} {재조회} · 계획삭제 {계획삭제} {비었음} {행수}")
 

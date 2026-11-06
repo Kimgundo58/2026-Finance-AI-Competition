@@ -249,7 +249,7 @@ def _mock_실제지출(행: dict, body: 계획수정) -> None:
     연동 = next((t for t in mock_data.mock_할일
                 if t["plan_id"] == 행["plan_id"] and t.get("집행예정일_연동")), None)
     if 연동:
-        연동["상태"] = "완료"
+        연동["상태"], 연동["due_date"] = "완료", body.실제지출일.isoformat()
         return
     mock_data.mock_할일.append({
         "task_id": max((t["task_id"] for t in mock_data.mock_할일), default=0) + 1,
@@ -271,7 +271,8 @@ def _mock_지출일_변경(행: dict, body: 계획수정) -> None:
             mock_data.mock_할일.remove(연동)
         return
     if 연동:
-        연동["due_date"] = 새날짜.isoformat()
+        if 연동["상태"] != "완료":
+            연동["due_date"] = 새날짜.isoformat()
     else:
         mock_data.mock_할일.append({
             "task_id": max((t["task_id"] for t in mock_data.mock_할일), default=0) + 1,

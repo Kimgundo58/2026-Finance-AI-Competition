@@ -19,7 +19,7 @@ from pathlib import Path
 from fastapi import APIRouter, File, Form, HTTPException, Response, UploadFile
 from fastapi.responses import FileResponse
 
-from ._common import MOCK, 작성자표시, 트랜잭션, 현재_본인, 현재_org, _계정조건, _정수_환경변수, _질의
+from ._common import MOCK, 작성자표시, 트랜잭션, 현재_account, 현재_본인, 현재_org, _계정조건, _정수_환경변수, _질의
 from .file_format import 실제형식
 from .models import 첨부항목
 from . import mock_data
@@ -106,7 +106,8 @@ def 파일들_지우기(id목록: list[str]) -> None:
 def 첨부_올리기(plan_id: int, 파일: UploadFile = File(...), task_id: int | None = Form(None)) -> 첨부항목:
     """파일 하나를 저장한다. task_id 를 주면 그 증빙 항목에 묶인다."""
     org = 현재_org.get()
-    if not MOCK and org is None:
+    # 데모 세션도 막는다. 만료 정리(routes_orgs._만료데모_정리)는 DB 행만 지워 파일이 볼륨에 남는다.
+    if not MOCK and (org is None or 현재_account.get() is None):
         raise HTTPException(401, "로그인하면 파일을 저장할 수 있습니다.")
     이름, 확장자, 본문 = _파일_검사(파일)
     if MOCK:

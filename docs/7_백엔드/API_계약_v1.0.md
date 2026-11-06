@@ -213,7 +213,7 @@ O 동결 = 운영 서버까지 확정 · 🟡 mock = 응답 형식 확정, live 
 
 `POST`(multipart `파일`, 선택 `task_id`) 201 · `GET .../{attachment_id}` 내려받기(`Content-Disposition: attachment`) · `DELETE .../{attachment_id}`.
 
-- pdf·hwp·hwpx·jpg·png·xlsx·docx, 3MB 이하, 계획당 10개. 내용이 확장자와 다르면 415 · 크면 413. 게스트는 401.
+- pdf·hwp·hwpx·jpg·png·xlsx·docx, 3MB 이하, 계획당 10개. 내용이 확장자와 다르면 415 · 크면 413. 게스트와 데모 세션은 401.
 - 보관용이다. 파싱·LLM 에 넘기지 않아 판정에 영향이 없다. 다른 구성원이 올린 파일은 `작성자` 가 온다.
 
 ---
