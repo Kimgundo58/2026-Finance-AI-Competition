@@ -19,7 +19,7 @@ from datetime import timedelta
 
 from fastapi import APIRouter, HTTPException, Query
 
-from ._common import MOCK, 할일구분_ENUM, 트랜잭션, 현재_account, 현재_org, _계정조건, _질의, _실행
+from ._common import 작성자표시, 현재_본인, MOCK, 할일구분_ENUM, 트랜잭션, 현재_account, 현재_org, _계정조건, _질의, _실행
 from . import l3_deadline
 from .l3_deadline import 바이그램
 from .models import (할일, 할일동기화, 할일동기화응답, 할일목록응답, 할일생성, 할일수정)
@@ -174,9 +174,9 @@ def 일정_추가(body: 할일생성) -> 할일:
         raise HTTPException(401, "일정을 저장하려면 로그인이 필요합니다")
     행 = _질의(
         'INSERT INTO tenant.plan_tasks '
-        '(org_id, account_id, plan_id, 출처, 구분, 항목, 설명, due_date, "유형", 상태, 날짜_사용자수정) '
-        "VALUES (%s,%s,NULL,'user',%s,%s,%s,%s,%s,%s,%s) RETURNING task_id",
-        (org, 현재_account.get(), body.구분, body.항목, body.설명, body.due_date, body.유형, body.상태,
+        '(org_id, account_id, 작성_account_id, plan_id, 출처, 구분, 항목, 설명, due_date, "유형", 상태, 날짜_사용자수정) '
+        "VALUES (%s,%s,%s,NULL,'user',%s,%s,%s,%s,%s,%s,%s) RETURNING task_id",
+        (org, 현재_account.get(), 현재_본인.get(), body.구분, body.항목, body.설명, body.due_date, body.유형, body.상태,
          body.due_date is not None),
     )
     if not 행:
@@ -314,15 +314,18 @@ def 목록(
 # DB 컬럼 plan_tasks.코드 는 응답 키 code 로 내보낸다.
 _할일_SELECT = (
     'SELECT t.task_id, t.plan_id, t.출처, t.코드, t.구분, t.항목, t.설명, '
-    't.due_date, t."유형", t.날짜_사용자수정, t.상태, p.제목, t.집행예정일_연동 '
+    't.due_date, t."유형", t.날짜_사용자수정, t.상태, p.제목, t.집행예정일_연동, t.작성_account_id, w.email '
     'FROM tenant.plan_tasks t LEFT JOIN tenant.expense_plans p ON p.plan_id = t.plan_id '
+    'LEFT JOIN tenant.accounts w ON w.account_id = t.작성_account_id '
 )
 _할일_컬럼 = ("task_id", "plan_id", "출처", "code", "구분", "항목", "설명",
-             "due_date", "유형", "날짜_사용자수정", "상태", "계획제목", "집행예정일_연동")
+             "due_date", "유형", "날짜_사용자수정", "상태", "계획제목", "집행예정일_연동",
+             "작성_account_id", "작성자이메일")
 
 
 def _행_할일(행: tuple) -> dict:
     d = dict(zip(_할일_컬럼, 행))
+    d["작성자"] = 작성자표시(d.pop("작성_account_id"), d.pop("작성자이메일"))
     if d.get("due_date") is not None:
         d["due_date"] = d["due_date"].isoformat()
     return d
@@ -499,9 +502,9 @@ def _live_추가(plan_id: int, body: 할일생성, org_id: str | None = None) ->
     날짜수정 = body.due_date is not None
     행 = _질의(
         'INSERT INTO tenant.plan_tasks '
-        '(org_id, account_id, plan_id, 출처, 구분, 항목, 설명, due_date, "유형", 상태, 날짜_사용자수정) '
-        "VALUES (%s,%s,%s,'user',%s,%s,%s,%s,%s,%s,%s) RETURNING task_id",
-        (계획org, 계획account, plan_id, body.구분, body.항목, body.설명, body.due_date, body.유형,
+        '(org_id, account_id, 작성_account_id, plan_id, 출처, 구분, 항목, 설명, due_date, "유형", 상태, 날짜_사용자수정) '
+        "VALUES (%s,%s,%s,%s,'user',%s,%s,%s,%s,%s,%s,%s) RETURNING task_id",
+        (계획org, 계획account, 현재_본인.get(), plan_id, body.구분, body.항목, body.설명, body.due_date, body.유형,
          body.상태, 날짜수정),
     )
     if not 행:

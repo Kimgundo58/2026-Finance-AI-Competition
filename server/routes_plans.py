@@ -16,7 +16,7 @@ from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from ._common import MOCK, 탭_판정, 트랜잭션, _jsonb, _계정조건, _질의, _실행
+from ._common import 작성자표시, MOCK, 탭_판정, 트랜잭션, _jsonb, _계정조건, _질의, _실행
 from .judge_response import 구_판정키_포함, 사용자답변_공개, 할일_공개
 from .models import 계획목록응답, 계획상세, 계획생성, 계획수정, 계획통계, 계획요약
 from . import auth, mock_data, routes_attachments, routes_feedback, routes_tasks
@@ -458,7 +458,7 @@ _상세_컬럼 = ("plan_id", "제목", "확정비목", "금액", "판정", "집�
 
 # 응답 키 순서. DB 컬럼 plan_tasks.코드 는 응답 키 code 로 내보낸다.
 _계획할일_컬럼 = ("task_id", "plan_id", "출처", "code", "구분", "항목", "설명", "due_date",
-               "유형", "날짜_사용자수정", "상태", "집행예정일_연동")
+               "유형", "날짜_사용자수정", "상태", "집행예정일_연동", "작성_account_id", "작성자이메일")
 
 
 def _live_상세(plan_id: int, org_id: str | None) -> 계획상세:
@@ -504,8 +504,9 @@ def _live_상세(plan_id: int, org_id: str | None) -> 계획상세:
     할일행 = _질의(
         """
         SELECT task_id, plan_id, 출처, 코드, 구분, 항목, 설명, due_date,
-               "유형", 날짜_사용자수정, 상태, 집행예정일_연동
-        FROM tenant.plan_tasks WHERE plan_id = %s
+               "유형", 날짜_사용자수정, 상태, 집행예정일_연동, t.작성_account_id, w.email
+        FROM tenant.plan_tasks t LEFT JOIN tenant.accounts w ON w.account_id = t.작성_account_id
+        WHERE t.plan_id = %s
         """,
         (plan_id,),
     )
@@ -514,6 +515,7 @@ def _live_상세(plan_id: int, org_id: str | None) -> 계획상세:
         d = dict(zip(_계획할일_컬럼, t))
         d["due_date"] = _문자열(d["due_date"])
         d["계획제목"] = r["제목"]
+        d["작성자"] = 작성자표시(d.pop("작성_account_id"), d.pop("작성자이메일"))
         할일.append(d)
 
     return 계획상세(
@@ -525,6 +527,7 @@ def _live_상세(plan_id: int, org_id: str | None) -> 계획상세:
         latest_decision_id=r["latest_decision_id"],
         판정상세=판정상세, 사용자답변=사용자답변_공개(r["사용자답변"]), 할일=할일,
         내피드백=routes_feedback.내피드백_조회(r["latest_decision_id"]),
+        팀평가=routes_feedback.팀평가_조회(r["latest_decision_id"]),
         첨부=routes_attachments.계획_첨부목록(plan_id),
         실제지출일=_문자열(r["실제지출일"]), 실제지출액=_float변환(r["실제지출액"]),
         **routes_tasks.단계요약_계산([(t["구분"], t["유형"], t["상태"]) for t in 할일]),

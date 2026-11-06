@@ -63,6 +63,9 @@ docker rm -f suddoe-verify            # 익명 볼륨까지 지우려면 docker 
 | `2026-11-06_판정_피드백.sql` | 필수 | `tenant.decision_feedback`(맞았어요·틀렸어요) |
 | `2026-11-06_계획_첨부.sql` | 필수 | `tenant.plan_attachments`. 새 이미지를 띄우기 전에 볼륨 `plan_attachments` 가 든 `deploy/ncp/docker-compose.yml` 도 반영한다 |
 | `2026-11-06_L3_문서확인.sql` | 필수 | `파싱품질` 에 `review`, `l3_documents.검토결과`·`sha256`, `decisions.기준문서` |
+| `2026-11-06_팀.sql` | 필수 | `tenant.teams`, `accounts.team_id`, `plan_tasks.작성_account_id`, 팀 함수. 로그인이 `tenant.로그인주체` 를 부르므로 새 이미지보다 먼저 적용한다. 되돌리는 SQL 은 파일 머리말에 있다 |
+
+2026-11-06 파일 7개는 위 순서대로 코드 배포 전에 적용한다. api 를 멈추지 않는다. 적용한 뒤 `./deploy.sh --force`.
 
 ### `2026-11-03_계정별_분리.sql` 적용 순서 (운영)
 

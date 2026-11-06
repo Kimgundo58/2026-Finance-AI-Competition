@@ -83,6 +83,11 @@ if MOCK and _운영전용_환경변수:
     "suddoe_현재_account", default=None)
 
 
+# 실제로 로그인한 계정. 팀에 있으면 현재_account(데이터가 저장되는 대표 계정)와 다르다. 작성자 기록에 쓴다.
+현재_본인: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "suddoe_현재_본인", default=None)
+
+
 @contextlib.contextmanager
 def org_고정(org_id: str | None, account_id: str | None = None):
     """HTTP 요청 밖(스크립트, 백그라운드 작업, 테스트)에서 현재_org·현재_account 를 설정한다."""
@@ -106,6 +111,13 @@ def _rls_org_설정(conn_or_cur, org: str | None, account: str | None = None) ->
         return
     conn_or_cur.execute("SELECT set_config('app.org_id', %s, true), set_config('app.account_id', %s, true)",
                         (str(org), str(account) if account else ""))
+
+
+def 작성자표시(작성_account_id, 이메일: str | None) -> str | None:
+    """다른 구성원이 만든 항목에 보일 이름(이메일 앞부분). 내가 만들었거나 모르면 None 이라 팀이 없으면 안 보인다."""
+    if not 작성_account_id or not 이메일 or str(작성_account_id) == 현재_본인.get():
+        return None
+    return 이메일.split("@")[0]
 
 
 # ── DB ──────────────────────────────────────────────────────────────

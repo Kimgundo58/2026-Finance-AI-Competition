@@ -537,6 +537,7 @@ def _점검(결과: 점검결과) -> None:
         _피드백_점검(결과, client, 데모세션, 원래_판정, 판정_dry, llm_금지)
         _첨부_점검(결과, client, 데모세션)
         _세부기준_점검(결과, client, 데모세션, 업로드, 판정, 현재문서, 원래_판정, 판정_dry, llm_금지)
+        _팀_점검(결과, client, 데모세션, 원래_판정, 판정_dry, llm_금지)
     finally:
         l3_load.조문_조회, orchestrate.프롬프트_구성, orchestrate.판정 = (
             원래_조문조회, 원래_프롬프트, 원래_판정)
@@ -759,7 +760,7 @@ def _두_계정(데모세션):
     auth._서명키 = lambda _토큰: 키.public_key()
 
     def 헤더(k: str) -> dict:
-        토큰 = jwt.encode({"sub": str(_uuid.uuid4()), "email": 이메일[k], "aud": "authenticated",
+        토큰 = jwt.encode({"sub": str(_uuid.uuid4()), "email": 이메일.get(k, k), "aud": "authenticated",
                           "iss": "ux-check", "exp": int(time.time()) + 600}, 키, algorithm="ES256")
         return {"Authorization": f"Bearer {토큰}"}
 
@@ -1074,6 +1075,171 @@ def _첨부_점검(결과: 점검결과, client, 데모세션) -> None:
         f"경로 {경로.get('원본파일명')} · 이미지 {이미지} · 남의것 {남의것} · 게스트 {게스트} · 잘못된id {잘못된id} · "
         f"다른항목 {다른항목} · 연결 {증빙_연결} 체크풀어도 {체크풀어도_남음} 항목사라짐 {항목사라짐} · 공간 {공간부족}/{공간_파일그대로} · "
         f"한도 {상태들} {개수} · 삭제 {삭제} {파일없어짐} {재조회} · 계획삭제 {계획삭제} {비었음} {행수}")
+
+
+def _팀_점검(결과: 점검결과, client, 데모세션, 원래_판정, 판정_dry, llm_금지) -> None:
+    """30: 두 계정이 팀으로 같은 데이터를 보고, 나가면 개인 데이터로 돌아오며, 다른 기관·만료·틀린 코드를 거부하는지 본다."""
+    import re
+
+    import psycopg
+
+    import orchestrate
+    from server import routes_teams
+
+    문제: list[str] = []
+
+    def 확인(이름: str, 조건: bool, 값=None) -> None:
+        if not 조건:
+            문제.append(f"{이름}: {값}")
+
+    routes_teams._코드_제한._기록.clear()
+    접미 = secrets.token_hex(4)
+    with _두_계정(데모세션) as (헤더, org):
+        A, B = 헤더("A"), 헤더("B")
+        _, 다른org = 데모세션()
+        다른이메일, 새이메일 = f"ux-team-x-{접미}@ux-check.invalid", f"ux-team-new-{접미}@ux-check.invalid"
+        with psycopg.connect(OWNER_DSN, connect_timeout=5) as c:
+            c.execute("INSERT INTO tenant.accounts (org_id, email) VALUES (%s, %s)", (다른org, 다른이메일))
+
+        def 계획(헤더값: dict, 품목: str) -> int:
+            return client.post("/api/plans", headers=헤더값, json={
+                "사업명": 판정_요청["사업명"], "품목": 품목, "금액": 100000, "용도": "점검", "확정비목": "재료비",
+                "정규화": dict(판정_요청["정규화"], 품목=품목)}).json()["plan_id"]
+
+        def 계획들(헤더값: dict) -> set[int]:
+            return {x["plan_id"] for x in client.get("/api/plans", headers=헤더값).json().get("항목", [])}
+
+        def 팀(헤더값: dict) -> dict | None:
+            return client.get("/api/team", headers=헤더값).json().get("팀")
+
+        try:
+            pA, pB = 계획(A, "대표 계획"), 계획(B, "구성원 개인 계획")
+            확인("처음엔 각자", 계획들(A) == {pA} and 계획들(B) == {pB} and 팀(A) is None, (계획들(A), 계획들(B)))
+            확인("게스트 401", client.get("/api/team").status_code == 401)
+            데모, _ = 데모세션()
+            확인("데모 401", client.post("/api/team", headers=데모, json={"팀이름": "x", "사업명": "y"}).status_code == 401)
+
+            r = client.post("/api/team", headers=A, json={"팀이름": "점검팀", "사업명": "예비창업패키지"})
+            본문 = r.json().get("팀") or {}
+            코드 = 본문.get("초대코드")
+            확인("팀 만들기", r.status_code == 201 and 본문.get("내역할") == "대표" and bool(코드), r.text[:200])
+            확인("조회엔 코드 없음", (팀(A) or {}).get("초대코드") is None and bool((팀(A) or {}).get("초대코드_만료")))
+            확인("두 번 만들기 409", client.post("/api/team", headers=A, json={"팀이름": "둘", "사업명": "y"}).status_code == 409)
+            with psycopg.connect(OWNER_DSN, connect_timeout=5) as c:
+                저장값 = c.execute("SELECT 초대코드_해시 FROM tenant.teams t JOIN tenant.accounts a ON a.account_id = t.대표_account_id "
+                                "WHERE a.org_id = %s", (org,)).fetchone()[0]
+            확인("코드는 해시로만 저장", 코드 not in 저장값 and 코드.replace("-", "") not in 저장값 and len(저장값) == 64)
+            with psycopg.connect(APP_DSN, connect_timeout=5) as c:
+                c.execute("SELECT set_config('app.org_id', %s, true)", (org,))
+                try:
+                    직접 = c.execute("SELECT count(*) FROM tenant.teams").fetchone()[0]
+                except psycopg.errors.InsufficientPrivilege:
+                    직접 = "권한없음"
+            확인("앱 롤은 팀 표를 직접 못 읽음", 직접 == "권한없음", 직접)
+
+            확인("틀린 코드 404", client.post("/api/team/join", headers=B, json={"초대코드": "AAAA-AAAA"}).status_code == 404)
+            X = 헤더(다른이메일)
+            확인("다른 기관 403", client.post("/api/team/join", headers=X, json={"초대코드": 코드}).status_code == 403)
+            with psycopg.connect(OWNER_DSN, connect_timeout=5) as c:
+                c.execute("UPDATE tenant.teams SET 초대코드_만료 = now() - interval '1 minute' WHERE 초대코드_해시 = %s", (저장값,))
+            확인("만료 코드 404", client.post("/api/team/join", headers=B, json={"초대코드": 코드}).status_code == 404)
+            with psycopg.connect(OWNER_DSN, connect_timeout=5) as c:
+                c.execute("UPDATE tenant.teams SET 초대코드_만료 = now() + interval '1 day' WHERE 초대코드_해시 = %s", (저장값,))
+
+            # 소문자·기호 없이 입력해도 된다
+            r = client.post("/api/team/join", headers=B, json={"초대코드": 코드.replace("-", "").lower()})
+            확인("코드로 들어가기", r.status_code == 200 and (r.json().get("팀") or {}).get("내역할") == "구성원", r.text[:200])
+            확인("들어가면 팀 데이터만", 계획들(B) == {pA} and 계획들(A) == {pA}, (계획들(B), 계획들(A)))
+            구성원 = (팀(A) or {}).get("구성원") or []
+            확인("구성원 목록", len(구성원) == 2 and sum(m["대표"] for m in 구성원) == 1 and sum(m["나"] for m in 구성원) == 1, 구성원)
+            b계정 = next(m["account_id"] for m in 구성원 if not m["나"])
+            a계정 = next(m["account_id"] for m in 구성원 if m["나"])
+
+            # 공유와 작성자
+            일정 = client.post("/api/tasks", headers=B, json={"항목": "구성원이 만든 일정", "구분": "결제전"}).json()
+            A목록 = client.get("/api/tasks", headers=A).json().get("항목", [])
+            B목록 = client.get("/api/tasks", headers=B).json().get("항목", [])
+            A쪽 = next((t for t in A목록 if t["task_id"] == 일정.get("task_id")), {})
+            B쪽 = next((t for t in B목록 if t["task_id"] == 일정.get("task_id")), {})
+            확인("일정 공유·작성자", (A쪽.get("작성자") or "").startswith("ux-task-b-") and "@" not in A쪽.get("작성자", "@")
+               and "작성자" in B쪽 and B쪽.get("작성자") is None, (A쪽, B쪽))
+            첨부 = client.post(f"/api/plans/{pA}/attachments", headers=B,
+                             files={"파일": ("견적.pdf", _빈_pdf(), "application/octet-stream")})
+            A첨부 = client.get(f"/api/plans/{pA}", headers=A).json().get("첨부", [])
+            B첨부 = client.get(f"/api/plans/{pA}", headers=B).json().get("첨부", [])
+            확인("첨부 공유·작성자", 첨부.status_code == 201 and len(A첨부) == 1
+               and (A첨부[0].get("작성자") or "").startswith("ux-task-b-") and B첨부[0].get("작성자") is None,
+               (첨부.status_code, A첨부, B첨부))
+
+            # 판정·평가: 구성원의 판정이 대표 계정에 저장되어 함께 보이고, 평가는 사람별이다
+            def llm_가능(프롬프트_글, *_a, **_k):
+                첫문장 = re.search(r"\[(S\d+)\]", 프롬프트_글).group(1)
+                return ({"판정": "가능", "요약": "규정상 집행할 수 있습니다.", "해야할일": [], "인용": [첫문장], "전제": []},
+                        {"지연ms": 0, "모델": "가짜"})
+
+            요청 = dict(판정_요청, plan_id=pA, 정규화=dict(판정_요청["정규화"], 품목="팀 점검 필라멘트"))
+            orchestrate.판정, orchestrate.llm_호출 = 원래_판정, llm_가능
+            try:
+                client.post("/api/judge", json=요청, headers=B)
+            finally:
+                orchestrate.판정, orchestrate.llm_호출 = 판정_dry, llm_금지
+            상세A = client.get(f"/api/plans/{pA}", headers=A).json()
+            d = 상세A.get("latest_decision_id")
+            확인("구성원 판정을 대표가 봄", bool(d) and 상세A.get("판정") == "가능", 상세A.get("판정"))
+            client.put(f"/api/decisions/{d}/feedback", headers=B, json={"평가": "틀림", "이유": "근거가 다름"})
+            상세A = client.get(f"/api/plans/{pA}", headers=A).json()
+            상세B = client.get(f"/api/plans/{pA}", headers=B).json()
+            확인("평가는 사람별 · 다른 구성원 평가 보임", 상세A.get("내피드백") is None and 상세B.get("내피드백", {}).get("평가") == "틀림"
+               and 상세B.get("팀평가") == [] and len(상세A.get("팀평가") or []) == 1
+               and 상세A["팀평가"][0]["작성자"].startswith("ux-task-b-") and 상세A["팀평가"][0]["평가"] == "틀림",
+               (상세A.get("팀평가"), 상세B.get("내피드백")))
+            with psycopg.connect(OWNER_DSN, connect_timeout=5) as c:
+                c.execute("DELETE FROM tenant.decisions WHERE plan_id = %s", (pA,))
+
+            확인("구성원은 대표 기능 403",
+                 client.post("/api/team/invite-code", headers=B).status_code == 403
+                 and client.delete(f"/api/team/members/{a계정}", headers=B).status_code == 403, None)
+            확인("대표 자신은 내보내지 못함", client.delete(f"/api/team/members/{a계정}", headers=A).status_code == 409)
+            확인("구성원이 있으면 대표는 못 나감", client.post("/api/team/leave", headers=A).status_code == 409)
+            r = client.post("/api/team/invite-code", headers=A)
+            새코드 = (r.json().get("팀") or {}).get("초대코드")
+            확인("재발급하면 이전 코드는 무효", bool(새코드) and 새코드 != 코드
+               and client.post("/api/accounts/join", headers=헤더(새이메일), json={"초대코드": 코드}).status_code == 404, r.text[:200])
+
+            # 내보내면 개인 데이터로 돌아오고 팀 데이터는 대표에게 남는다
+            확인("내보내기", client.delete(f"/api/team/members/{b계정}", headers=A).status_code == 200)
+            확인("내보낸 뒤 개인 데이터", 계획들(B) == {pB} and 계획들(A) == {pA} and 팀(B) is None, (계획들(B), 계획들(A)))
+            확인("내보낸 뒤 팀 일정은 대표에게", any(t["task_id"] == 일정.get("task_id") for t in client.get("/api/tasks", headers=A).json().get("항목", []))
+               and not any(t["task_id"] == 일정.get("task_id") for t in client.get("/api/tasks", headers=B).json().get("항목", [])))
+            확인("내보낸 사람은 받았던 코드로 못 들어옴", client.post("/api/team/join", headers=B, json={"초대코드": 새코드}).status_code == 404)
+            새코드 = (client.post("/api/team/invite-code", headers=A).json().get("팀") or {}).get("초대코드")
+            client.post("/api/team/join", headers=B, json={"초대코드": 새코드})
+            확인("새 코드로 다시 들어가면 팀 데이터", 계획들(B) == {pA}, 계획들(B))
+            확인("구성원 나가기", client.post("/api/team/leave", headers=B).status_code == 200 and 계획들(B) == {pB})
+
+            # 새 가입자 등록
+            C = 헤더(새이메일)
+            확인("등록 전 403", client.get("/api/team", headers=C).status_code == 403)
+            r = client.post("/api/accounts/join", headers=C, json={"초대코드": 새코드})
+            확인("초대 코드로 등록", r.status_code == 201 and r.json().get("사업명") == "예비창업패키지" and r.json().get("팀이름") == "점검팀", r.text[:200])
+            확인("등록하면 바로 팀 데이터", 계획들(C) == {pA} and (팀(C) or {}).get("내역할") == "구성원", 계획들(C))
+            확인("이미 등록된 계정 409", client.post("/api/accounts/join", headers=B, json={"초대코드": 새코드}).status_code == 409)
+            확인("가입 등록은 데모 토큰 거부", client.post("/api/accounts/join", headers=데모, json={"초대코드": 새코드}).status_code == 403)
+            client.post("/api/team/leave", headers=C)
+
+            확인("혼자면 대표도 나감", client.post("/api/team/leave", headers=A).status_code == 200 and 팀(A) is None and 계획들(A) == {pA})
+
+            routes_teams._코드_제한._기록.clear()
+            막힘 = [client.post("/api/team/join", headers=B, json={"초대코드": "ZZZZ-ZZZZ"}).status_code for _ in range(11)]
+            확인("코드 시도 제한", 막힘[:10] == [404] * 10 and 막힘[10] == 429, 막힘)
+        finally:
+            routes_teams._코드_제한._기록.clear()
+            with psycopg.connect(OWNER_DSN, connect_timeout=5) as c:
+                c.execute("DELETE FROM tenant.plan_attachments WHERE org_id = %s", (org,))
+                c.execute("DELETE FROM tenant.accounts WHERE email = ANY(%s)", ([다른이메일, 새이메일],))
+
+    결과.기록("30 팀: 코드로 들어가면 같은 데이터 · 작성자 표시 · 나가면 개인 데이터 복귀 · 다른 기관·만료·틀린 코드 거부 · "
+           "코드는 해시만 · 시도 제한 · 새 가입자 등록", not 문제, " / ".join(문제)[:900])
 
 
 def _문서판별_적용(*_a, **_k):

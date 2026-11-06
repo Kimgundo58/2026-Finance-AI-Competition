@@ -87,6 +87,9 @@ def mock_통계() -> dict:
 # 계획 첨부 (attachment_id → 첨부항목 값 + plan_id·본문)
 mock_첨부: dict[str, dict] = {}
 
+# 팀 하나. routes_teams 의 mock 이 쓴다.
+mock_팀: dict[str, dict] = {}
+
 # 판정별 내 평가 (decision_id → 평가·이유·의견)
 mock_피드백: dict[int, dict] = {}
 

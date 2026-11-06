@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
-from ._common import MOCK, 현재_account, 현재_org, _계정조건, _질의
+from ._common import MOCK, 작성자표시, 현재_본인, 현재_org, _계정조건, _질의
 from .models import 판정피드백, 피드백입력
 from . import mock_data
 
@@ -18,7 +18,8 @@ _찾을수없음 = "점검 결과를 찾을 수 없습니다"
 
 
 def _계정값() -> str | None:
-    계정 = 현재_account.get()
+    # 평가는 팀이 아니라 사람별이다. 데이터 계정이 아니라 로그인한 본인을 쓴다
+    계정 = 현재_본인.get()
     return str(계정) if 계정 else None
 
 
@@ -34,6 +35,20 @@ def 내피드백_조회(decision_id: int | None) -> dict | None:
         f"WHERE f.decision_id = %s AND {조건} AND f.작성_account_id IS NOT DISTINCT FROM %s::uuid",
         (decision_id, *인자, _계정값()))
     return dict(zip(("평가", "이유", "의견"), 행[0])) if 행 else None
+
+
+def 팀평가_조회(decision_id: int | None) -> list[dict]:
+    """같은 판정에 다른 구성원이 남긴 평가. 팀이 없으면 빈 목록이다."""
+    if decision_id is None or MOCK:
+        return []
+    조건, 인자 = _계정조건(현재_org.get(), "f")
+    행 = _질의(
+        "SELECT f.작성_account_id, w.email, f.평가, f.이유, f.의견 FROM tenant.decision_feedback f "
+        "JOIN tenant.accounts w ON w.account_id = f.작성_account_id "
+        f"WHERE f.decision_id = %s AND {조건} ORDER BY f.created_at",
+        (decision_id, *인자))
+    return [{"작성자": 작성자표시(r[0], r[1]), "평가": r[2], "이유": r[3], "의견": r[4]}
+            for r in 행 if 작성자표시(r[0], r[1])]
 
 
 @router.put("/api/decisions/{decision_id}/feedback", response_model=판정피드백)

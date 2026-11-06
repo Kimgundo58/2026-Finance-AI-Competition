@@ -19,7 +19,7 @@ from pathlib import Path
 from fastapi import APIRouter, File, Form, HTTPException, Response, UploadFile
 from fastapi.responses import FileResponse
 
-from ._common import MOCK, 트랜잭션, 현재_account, 현재_org, _계정조건, _정수_환경변수, _질의
+from ._common import MOCK, 작성자표시, 트랜잭션, 현재_본인, 현재_org, _계정조건, _정수_환경변수, _질의
 from .file_format import 실제형식
 from .models import 첨부항목
 from . import mock_data
@@ -78,10 +78,12 @@ def 계획_첨부목록(plan_id: int) -> list[첨부항목]:
         return [첨부항목(**{k: v for k, v in 행.items() if k != "본문"})
                 for 행 in mock_data.mock_첨부.values() if 행["plan_id"] == plan_id]
     행들 = _질의(
-        "SELECT a.attachment_id::text, a.원본파일명, a.크기, a.task_id, a.created_at "
-        "FROM tenant.plan_attachments a WHERE a.plan_id = %s ORDER BY a.created_at, a.attachment_id",
+        "SELECT a.attachment_id::text, a.원본파일명, a.크기, a.task_id, a.created_at, a.올린_account_id, w.email "
+        "FROM tenant.plan_attachments a LEFT JOIN tenant.accounts w ON w.account_id = a.올린_account_id "
+        "WHERE a.plan_id = %s ORDER BY a.created_at, a.attachment_id",
         (plan_id,))
-    return [첨부항목(attachment_id=r[0], 원본파일명=r[1], 크기=r[2], task_id=r[3], created_at=r[4].isoformat())
+    return [첨부항목(attachment_id=r[0], 원본파일명=r[1], 크기=r[2], task_id=r[3], created_at=r[4].isoformat(),
+                     작성자=작성자표시(r[5], r[6]))
             for r in 행들]
 
 
@@ -136,7 +138,7 @@ def 첨부_올리기(plan_id: int, 파일: UploadFile = File(...), task_id: int 
             시각 = cur.execute(
                 "INSERT INTO tenant.plan_attachments (attachment_id, org_id, account_id, 올린_account_id, plan_id, "
                 "task_id, 원본파일명, 확장자, 크기) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING created_at",
-                (첨부id, 행[0], 행[1], 현재_account.get(), plan_id, task_id, 이름, 확장자, len(본문))).fetchone()[0]
+                (첨부id, 행[0], 행[1], 현재_본인.get(), plan_id, task_id, 이름, 확장자, len(본문))).fetchone()[0]
     except BaseException:
         임시.unlink(missing_ok=True)
         경로.unlink(missing_ok=True)

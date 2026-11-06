@@ -166,7 +166,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/server__models__________3"
+         "$ref": "#/components/schemas/server__models__________5"
         }
        }
       }
@@ -850,7 +850,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/server__models__________4"
+         "$ref": "#/components/schemas/server__models__________6"
         }
        }
       }
@@ -1576,7 +1576,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/server__models__________6"
+         "$ref": "#/components/schemas/server__models__________8"
         }
        }
       }
@@ -1752,7 +1752,252 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/server__models_______-Output"
+         "$ref": "#/components/schemas/server__models_________4"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/team": {
+   "get": {
+    "tags": [
+     "팀"
+    ],
+    "summary": "내팀",
+    "operationId": "내팀_api_team_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/server__models_______3"
+        }
+       }
+      }
+     }
+    }
+   },
+   "post": {
+    "tags": [
+     "팀"
+    ],
+    "summary": "팀 만들기",
+    "operationId": "팀_만들기_api_team_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/server__models__________1"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/server__models_______3"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/team/invite-code": {
+   "post": {
+    "tags": [
+     "팀"
+    ],
+    "summary": "초대코드 재발급",
+    "operationId": "초대코드_재발급_api_team_invite_code_post",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/server__models_______3"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/team/join": {
+   "post": {
+    "tags": [
+     "팀"
+    ],
+    "summary": "팀 들어가기",
+    "operationId": "팀_들어가기_api_team_join_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/server__models__________2"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/server__models_______3"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/team/leave": {
+   "post": {
+    "tags": [
+     "팀"
+    ],
+    "summary": "팀 나가기",
+    "operationId": "팀_나가기_api_team_leave_post",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/server__models_______3"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/team/members/{account_id}": {
+   "delete": {
+    "tags": [
+     "팀"
+    ],
+    "summary": "팀원 내보내기",
+    "operationId": "팀원_내보내기_api_team_members__account_id__delete",
+    "parameters": [
+     {
+      "name": "account_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Account Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/server__models_______3"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/accounts/join": {
+   "post": {
+    "tags": [
+     "팀"
+    ],
+    "summary": "초대코드로 등록",
+    "description": "온보딩의 「초대 코드가 있어요」. 인증 미들웨어 밖이라 토큰을 직접 검증한다(routes_accounts 와 같다).",
+    "operationId": "초대코드로_등록_api_accounts_join_post",
+    "parameters": [
+     {
+      "name": "authorization",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Authorization"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/server__models__________2"
+       }
+      }
+     }
+    },
+    "responses": {
+     "201": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/server__routes_teams________"
         }
        }
       }
@@ -1796,7 +2041,7 @@
      "content": {
       "application/json": {
        "schema": {
-        "$ref": "#/components/schemas/___"
+        "$ref": "#/components/schemas/___-Input"
        }
       }
      },
@@ -3023,6 +3268,17 @@
       ],
       "title": "계획제목"
      },
+     "작성자": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "작성자"
+     },
      "집행예정일_연동": {
       "type": "boolean",
       "title": "집행예정일 연동",
@@ -3049,21 +3305,21 @@
     ],
     "title": "할일"
    },
-   "___": {
+   "___-Input": {
     "properties": {
      "협약": {
       "$ref": "#/components/schemas/server__models________9"
      },
      "집행내역": {
       "items": {
-       "$ref": "#/components/schemas/server__models__________1"
+       "$ref": "#/components/schemas/server__models__________3"
       },
       "type": "array",
       "title": "집행내역"
      },
      "참여인력": {
       "items": {
-       "$ref": "#/components/schemas/server__models__________2"
+       "$ref": "#/components/schemas/server__models__________4"
       },
       "type": "array",
       "title": "참여인력"
@@ -3122,33 +3378,32 @@
     ],
     "title": "할일동기화응답"
    },
-   "server__models_______-Output": {
+   "server__models_______2": {
     "properties": {
-     "평가": {
+     "팀이름": {
+      "type": "string",
+      "title": "팀이름"
+     },
+     "사업명": {
+      "type": "string",
+      "title": "사업명"
+     },
+     "내역할": {
       "type": "string",
       "enum": [
-       "맞음",
-       "틀림"
+       "대표",
+       "구성원"
       ],
-      "title": "평가"
+      "title": "내역할"
      },
-     "이유": {
-      "anyOf": [
-       {
-        "type": "string",
-        "enum": [
-         "판정이 다름",
-         "근거가 다름",
-         "기타"
-        ]
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "이유"
+     "구성원": {
+      "items": {
+       "$ref": "#/components/schemas/server__models________16"
+      },
+      "type": "array",
+      "title": "구성원"
      },
-     "의견": {
+     "초대코드": {
       "anyOf": [
        {
         "type": "string"
@@ -3157,14 +3412,43 @@
         "type": "null"
        }
       ],
-      "title": "의견"
+      "title": "초대코드"
+     },
+     "초대코드_만료": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "초대코드 만료"
      }
     },
     "type": "object",
     "required": [
-     "평가"
+     "팀이름",
+     "사업명",
+     "내역할"
     ],
-    "title": "판정피드백"
+    "title": "팀정보"
+   },
+   "server__models_______3": {
+    "properties": {
+     "팀": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/server__models_______2"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     }
+    },
+    "type": "object",
+    "title": "팀응답"
    },
    "server__models________1": {
     "properties": {
@@ -3536,6 +3820,17 @@
        }
       ],
       "title": "Created At"
+     },
+     "작성자": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "작성자"
      }
     },
     "type": "object",
@@ -3767,12 +4062,19 @@
      "내피드백": {
       "anyOf": [
        {
-        "$ref": "#/components/schemas/server__models_______-Output"
+        "$ref": "#/components/schemas/server__models_________4"
        },
        {
         "type": "null"
        }
       ]
+     },
+     "팀평가": {
+      "items": {
+       "$ref": "#/components/schemas/server__models_________5"
+      },
+      "type": "array",
+      "title": "팀평가"
      },
      "첨부": {
       "items": {
@@ -3843,7 +4145,7 @@
      },
      "우선순위규칙목록": {
       "items": {
-       "$ref": "#/components/schemas/server__models__________5"
+       "$ref": "#/components/schemas/server__models__________7"
       },
       "type": "array",
       "title": "우선순위규칙목록"
@@ -3867,6 +4169,34 @@
      "비목계통"
     ],
     "title": "사업정보"
+   },
+   "server__models________16": {
+    "properties": {
+     "account_id": {
+      "type": "string",
+      "title": "Account Id"
+     },
+     "이메일": {
+      "type": "string",
+      "title": "이메일"
+     },
+     "나": {
+      "type": "boolean",
+      "title": "나",
+      "default": false
+     },
+     "대표": {
+      "type": "boolean",
+      "title": "대표",
+      "default": false
+     }
+    },
+    "type": "object",
+    "required": [
+     "account_id",
+     "이메일"
+    ],
+    "title": "팀구성원"
    },
    "server__models________2": {
     "properties": {
@@ -4483,7 +4813,138 @@
     ],
     "title": "피드백입력"
    },
+   "server__models_________4": {
+    "properties": {
+     "평가": {
+      "type": "string",
+      "enum": [
+       "맞음",
+       "틀림"
+      ],
+      "title": "평가"
+     },
+     "이유": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "판정이 다름",
+         "근거가 다름",
+         "기타"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "이유"
+     },
+     "의견": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "의견"
+     }
+    },
+    "type": "object",
+    "required": [
+     "평가"
+    ],
+    "title": "판정피드백"
+   },
+   "server__models_________5": {
+    "properties": {
+     "작성자": {
+      "type": "string",
+      "title": "작성자"
+     },
+     "평가": {
+      "type": "string",
+      "enum": [
+       "맞음",
+       "틀림"
+      ],
+      "title": "평가"
+     },
+     "이유": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "판정이 다름",
+         "근거가 다름",
+         "기타"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "이유"
+     },
+     "의견": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "의견"
+     }
+    },
+    "type": "object",
+    "required": [
+     "작성자",
+     "평가"
+    ],
+    "title": "팀평가항목",
+    "description": "같은 판정에 다른 구성원이 남긴 평가."
+   },
    "server__models__________1": {
+    "properties": {
+     "팀이름": {
+      "type": "string",
+      "maxLength": 40,
+      "minLength": 1,
+      "title": "팀이름"
+     },
+     "사업명": {
+      "type": "string",
+      "maxLength": 100,
+      "minLength": 1,
+      "title": "사업명"
+     }
+    },
+    "type": "object",
+    "required": [
+     "팀이름",
+     "사업명"
+    ],
+    "title": "팀만들기입력"
+   },
+   "server__models__________2": {
+    "properties": {
+     "초대코드": {
+      "type": "string",
+      "maxLength": 20,
+      "minLength": 1,
+      "title": "초대코드"
+     }
+    },
+    "type": "object",
+    "required": [
+     "초대코드"
+    ],
+    "title": "초대코드입력"
+   },
+   "server__models__________3": {
     "properties": {
      "비목": {
       "type": "string",
@@ -4543,7 +5004,7 @@
     ],
     "title": "집행내역항목"
    },
-   "server__models__________2": {
+   "server__models__________4": {
     "properties": {
      "역할": {
       "type": "string",
@@ -4588,7 +5049,7 @@
     ],
     "title": "참여인력항목"
    },
-   "server__models__________3": {
+   "server__models__________5": {
     "properties": {
      "통계": {
       "$ref": "#/components/schemas/server__models________10"
@@ -4619,7 +5080,7 @@
     "type": "object",
     "title": "계획목록응답"
    },
-   "server__models__________4": {
+   "server__models__________6": {
     "properties": {
      "건수": {
       "type": "integer",
@@ -4637,7 +5098,7 @@
     "type": "object",
     "title": "할일목록응답"
    },
-   "server__models__________5": {
+   "server__models__________7": {
     "properties": {
      "우선계층": {
       "type": "string",
@@ -4695,7 +5156,7 @@
     "title": "우선순위규칙",
     "description": "corpus.precedence_rules 한 행. L1/L2/L3 중 어느 계층이 우선하는지."
    },
-   "server__models__________6": {
+   "server__models__________8": {
     "properties": {
      "사업": {
       "items": {
@@ -5458,6 +5919,35 @@
      "slug"
     ],
     "title": "데모세션응답"
+   },
+   "server__routes_teams________": {
+    "properties": {
+     "기관명": {
+      "type": "string",
+      "title": "기관명"
+     },
+     "slug": {
+      "type": "string",
+      "title": "Slug"
+     },
+     "팀이름": {
+      "type": "string",
+      "title": "팀이름"
+     },
+     "사업명": {
+      "type": "string",
+      "title": "사업명",
+      "description": "이 팀의 사업. 화면은 이 사업으로 판정을 요청한다"
+     }
+    },
+    "type": "object",
+    "required": [
+     "기관명",
+     "slug",
+     "팀이름",
+     "사업명"
+    ],
+    "title": "초대등록응답"
    }
   }
  }
