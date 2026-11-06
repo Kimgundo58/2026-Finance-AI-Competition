@@ -13,15 +13,14 @@ L3 가 바뀌면 캐시키의 l3_해시가 바뀌어 이전 판정 캐시가 답
 """
 from __future__ import annotations
 
-import io
 import logging
 import uuid
-import zipfile
 
 from fastapi import (APIRouter, BackgroundTasks, File, Form, HTTPException,
                      Request, UploadFile)
 
 from ._common import DSN, MOCK, _org조건, _질의, _실행
+from .file_format import 실제형식
 from .models import L3업로드응답, L3현재문서, L3현재문서목록응답
 from . import auth, mock_data
 
@@ -61,33 +60,6 @@ _실패_기본안내 = "다시 올려 주세요."
 _표시_품질_SQL = (f"CASE WHEN d.\"파싱품질\" = 'pending' "
                 f"AND d.created_at < now() - interval '{_중단_판정_분} minutes' "
                 f"THEN 'fail' ELSE d.\"파싱품질\" END")
-
-
-def 실제형식(본문: bytes) -> str:
-    """파일 내용으로 실제 형식을 판별한다. 확장자는 신뢰하지 않는다.
-
-    ZIP 계열(HWPX·XLSX·DOCX·PPTX)은 매직바이트가 같아 내부 항목 이름으로 구분한다.
-    OLE 헤더는 구형 HWP·DOC·XLS 가 공유하므로 'hwp' 판정이 확정은 아니다.
-    """
-    if 본문[:5] == b"%PDF-":
-        return "pdf"
-    if 본문[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
-        return "hwp"                       # OLE 복합문서 (구형 HWP·DOC·XLS 공통)
-    if 본문[:4] == b"PK\x03\x04":
-        try:
-            이름들 = zipfile.ZipFile(io.BytesIO(본문)).namelist()
-        except (zipfile.BadZipFile, OSError):
-            return "손상된zip"
-        if any(n.startswith("Contents/") for n in 이름들):
-            return "hwpx"
-        if any(n.startswith("xl/") for n in 이름들):
-            return "xlsx"
-        if any(n.startswith("word/") for n in 이름들):
-            return "docx"
-        if any(n.startswith("ppt/") for n in 이름들):
-            return "pptx"
-        return "zip"
-    return "알수없음"
 
 
 def _업로드_org(요청: Request, 요청_org_id: str | None) -> str:

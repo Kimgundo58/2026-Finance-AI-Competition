@@ -61,6 +61,7 @@ docker rm -f suddoe-verify            # 익명 볼륨까지 지우려면 docker 
 | `2026-11-06_집행줄.sql` | 필수 | `plan_tasks.집행예정일_연동` 을 더하고, 지출일이 있는 계획마다 집행 줄 1행을 채운다 |
 | `2026-11-06_실제지출.sql` | 필수 | `expense_plans.실제지출일`·`실제지출액` |
 | `2026-11-06_판정_피드백.sql` | 필수 | `tenant.decision_feedback`(맞았어요·틀렸어요) |
+| `2026-11-06_계획_첨부.sql` | 필수 | `tenant.plan_attachments`. 새 이미지를 띄우기 전에 볼륨 `plan_attachments` 가 든 `deploy/ncp/docker-compose.yml` 도 반영한다 |
 
 ### `2026-11-03_계정별_분리.sql` 적용 순서 (운영)
 

@@ -418,6 +418,18 @@ def main() -> int:
          c.put("/api/decisions/101/feedback", json={"평가": "맞음", "이유": "기타"}).json()["이유"] is None)
     확인("없는 판정은 404", c.put("/api/decisions/999999/feedback", json={"평가": "맞음"}).status_code == 404)
 
+    첨부응답 = c.post(f"/api/plans/{계획번호}/attachments", files={"파일": ("견적서.pdf", b"%PDF-1.4 x", "application/pdf")})
+    첨부id = 첨부응답.json().get("attachment_id") if 첨부응답.status_code == 201 else None
+    확인("첨부를 올리면 계획 상세에 나온다", 첨부응답.status_code == 201 and any(
+        a["attachment_id"] == 첨부id for a in c.get(f"/api/plans/{계획번호}").json()["첨부"]), 첨부응답.text[:80])
+    받은 = c.get(f"/api/plans/{계획번호}/attachments/{첨부id}")
+    확인("첨부 내려받기는 attachment·nosniff", 받은.content == b"%PDF-1.4 x" and "attachment" in 받은.headers.get(
+        "content-disposition", "") and 받은.headers.get("x-content-type-options") == "nosniff")
+    확인("내용이 다른 첨부는 415", c.post(f"/api/plans/{계획번호}/attachments", files={
+        "파일": ("가짜.pdf", b"not a pdf", "application/pdf")}).status_code == 415)
+    확인("첨부 삭제", c.delete(f"/api/plans/{계획번호}/attachments/{첨부id}").status_code == 200
+         and c.get(f"/api/plans/{계획번호}/attachments/{첨부id}").status_code == 404)
+
     q = c.get("/admin/queue", headers=관리).json()
     확인("/admin/queue 가 재검수 큐를 준다",
          "요약" in q and "항목" in q and "상태별" in q, f"대기 {q.get('전체')}건")

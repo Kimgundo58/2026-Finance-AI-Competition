@@ -261,6 +261,15 @@ class 계획목록응답(BaseModel):
     항목: list[계획요약] = Field(default_factory=list)
 
 
+class 첨부항목(BaseModel):
+    attachment_id: str
+    원본파일명: str
+    크기: int
+    # 증빙 항목에 올린 파일이면 그 항목의 task_id
+    task_id: int | None = None
+    created_at: str | None = None
+
+
 class 판정피드백(BaseModel):
     평가: Literal["맞음", "틀림"]
     이유: Literal["판정이 다름", "근거가 다름", "기타"] | None = None
@@ -295,6 +304,7 @@ class 계획상세(계획요약):
     사용자답변: list[dict[str, Any]] = Field(default_factory=list)
     # 지금 계정이 최신 판정에 남긴 평가. 재점검하면 새 판정이라 비어 있다
     내피드백: 판정피드백 | None = None
+    첨부: list[첨부항목] = Field(default_factory=list)
     할일: list[_할일] = Field(default_factory=list)
     created_at: str | None = None
 
