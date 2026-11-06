@@ -97,6 +97,11 @@ class _모음:
         return (문서, 조번호, 키) in self.표
 
 
+def 문서_표시명(schema: dict | None) -> dict[str, str]:
+    """doc_id → 화면에 쓰는 문서 이름."""
+    return {(schema or {}).get("문서키", {}).get(k): v for k, v in ((schema or {}).get("문서 표시명") or {}).items()}
+
+
 def _헤더(표시명: str | None, 조번호: str | None, 조제목: str | None) -> str:
     머리 = " ".join(x for x in (표시명, 조번호_표시(조번호)) if x)
     return f"{머리}({조제목})" if 조제목 else 머리
@@ -198,7 +203,7 @@ def 문맥_구성(cur, *, 근거행: list[dict], 대상노드: set[str] | list[s
     근거행은 ontology_lookup.근거_조문 결과다. `대상노드` 는 대상 · 상위 노드(L3 연결 판단). `l3` 항목의 `concept_ids` 는
     None = 미연결, [] = 확인했고 해당 세목 없음.
     """
-    표시명 = {(schema or {}).get("문서키", {}).get(k): v for k, v in ((schema or {}).get("문서 표시명") or {}).items()}
+    표시명 = 문서_표시명(schema)
     모음 = _모음()
     조문 = _조문_읽기(cur, sorted({r["article_id"] for r in 근거행 if r.get("article_id") is not None}))
     _l3_넣기(모음, l3 or [], set(대상노드 or ()))

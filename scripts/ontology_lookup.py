@@ -27,7 +27,7 @@ from _lib import paths  # noqa: E402
 
 ROOT = paths.ensure_on_path()
 
-from ontology_norm import 조문ID_풀이  # noqa: E402
+from ontology_norm import 조문ID_풀이, 조번호_표시  # noqa: E402
 from rule_lookup import _norm  # noqa: E402
 
 모든비목 = "비목:창업/*"
@@ -321,9 +321,9 @@ def 근거경로_문장(경로: list[str], schema: dict) -> str:
             if not 이름:
                 continue                            # 내부 문서키를 화면에 내지 않는다
             항호 = 풀이["항호"] or ""
-            글 = f"{이름} {풀이['조번호']}" + (" " + 항호.replace("/", " ").strip() if 항호.startswith("/") else 항호)
+            글 = f"{이름} {조번호_표시(풀이['조번호'])}" + (" " + 항호.replace("/", " ").strip() if 항호.startswith("/") else 항호)
         elif i.startswith("미특정:"):
-            글 = f"{i.split(':', 1)[1]}(조문 미특정)"
+            글 = i.split(":", 1)[1]                 # 규정이 조를 적지 않았다. 법령 이름만 낸다
         else:
             continue
         if not 조각 or 조각[-1] != 글:
