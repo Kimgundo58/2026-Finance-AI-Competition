@@ -532,6 +532,7 @@ def _점검(결과: 점검결과) -> None:
         _지출일_점검(결과, client, 데모세션)
         _진행단계_점검(결과, client, 데모세션)
         _피드백_점검(결과, client, 데모세션, 원래_판정, 판정_dry, llm_금지)
+        _첨부_점검(결과, client, 데모세션)
     finally:
         l3_load.조문_조회, orchestrate.프롬프트_구성, orchestrate.판정 = (
             원래_조문조회, 원래_프롬프트, 원래_판정)
@@ -973,6 +974,102 @@ def _진행단계_점검(결과: 점검결과, client, 데모세션) -> None:
                and 등록_맞음 and 줄_완료 and 목록_유지 and 재점검_유지,
                f"처음 {첫째_맞음} · 변경 효과 {효과} {둘째} · 목록 {목록_일치} · 반쪽 {반쪽} 음수 {음수} B {B_등록} · "
                f"등록 {등록_맞음} · 집행 줄 {줄_완료} · 목록 유지 {목록_유지} · 재점검 {재점검_유지}")
+
+
+def _첨부_점검(결과: 점검결과, client, 데모세션) -> None:
+    """28: 첨부를 올리면 새로 읽어도 남고 같은 바이트로 내려받으며, 위장 파일·한도·다른 계정을 막고, 계획을 지우면 파일도 지운다."""
+    import psycopg
+
+    PDF = b"%PDF-1.4 ux check \xea\xb2\xac\xec\xa0\x81"
+
+    def 파일수(폴더: str) -> int:
+        return len(os.listdir(폴더))
+
+    with tempfile.TemporaryDirectory() as 폴더, _두_계정(데모세션) as (헤더, _org):
+        이전_폴더 = os.environ.get("SUDDOE_ATTACH_DIR")
+        os.environ["SUDDOE_ATTACH_DIR"] = 폴더
+        try:
+            A, B = 헤더("A"), 헤더("B")
+            계획 = client.post("/api/plans", headers=A, json={
+                "사업명": 판정_요청["사업명"], "품목": "첨부 점검", "금액": 100000, "용도": "점검"}).json()["plan_id"]
+            다른계획 = client.post("/api/plans", headers=A, json={
+                "사업명": 판정_요청["사업명"], "품목": "첨부 점검2", "금액": 100000, "용도": "점검"}).json()["plan_id"]
+            할일 = client.post(f"/api/plans/{계획}/tasks", headers=A, json={"항목": "세금계산서", "구분": "결제후"}).json()["task_id"]
+            다른할일 = client.post(f"/api/plans/{다른계획}/tasks", headers=A, json={"항목": "다른 항목"}).json()["task_id"]
+
+            def 올리기(이름, 내용, 헤더값=A, plan=계획, **form):
+                return client.post(f"/api/plans/{plan}/attachments", headers=헤더값, files={"파일": (이름, 내용)}, data=form)
+
+            def 첨부목록() -> list[dict]:
+                return client.get(f"/api/plans/{계획}", headers=A).json()["첨부"]
+
+            r = 올리기("견적서 최종.pdf", PDF)
+            첫 = r.json() if r.status_code == 201 else {}
+            aid = 첫.get("attachment_id")
+            남음 = [a["원본파일명"] for a in 첨부목록()] == ["견적서 최종.pdf"]
+            받음 = client.get(f"/api/plans/{계획}/attachments/{aid}", headers=A)
+            바이트 = 받음.content == PDF and "attachment" in 받음.headers.get("content-disposition", "") \
+                and 받음.headers.get("x-content-type-options") == "nosniff" \
+                and 받음.headers.get("content-type") == "application/octet-stream"
+            디스크 = os.listdir(폴더) == [aid]
+            위장 = 올리기("가짜.pdf", b"MZ not pdf").status_code
+            형식 = 올리기("실행.exe", b"MZ").status_code
+            큼 = 올리기("큰파일.pdf", b"%PDF-" + b"0" * (3 * 1024 * 1024)).status_code
+            빈것 = 올리기("빈.pdf", b"").status_code
+            경로 = 올리기("../../악성.pdf", PDF).json()
+            client.delete(f"/api/plans/{계획}/attachments/{경로['attachment_id']}", headers=A)
+            이미지 = 올리기("사진.jpeg", b"\xff\xd8\xff\xe0 x").status_code
+
+            남의것 = (client.get(f"/api/plans/{계획}/attachments/{aid}", headers=B).status_code,
+                   client.delete(f"/api/plans/{계획}/attachments/{aid}", headers=B).status_code,
+                   올리기("남의.pdf", PDF, B).status_code)
+            게스트 = client.post(f"/api/plans/{계획}/attachments", files={"파일": ("g.pdf", PDF)}).status_code
+            잘못된id = client.get(f"/api/plans/{계획}/attachments/..%2F..%2Fetc", headers=A).status_code
+
+            증빙 = 올리기("계산서.pdf", PDF, task_id=str(할일)).json()
+            다른항목 = 올리기("x.pdf", PDF, task_id=str(다른할일)).status_code
+            증빙_연결 = next(a["task_id"] for a in 첨부목록() if a["attachment_id"] == 증빙["attachment_id"]) == 할일
+            client.patch(f"/api/plans/{계획}/tasks/{할일}", headers=A, json={"상태": "완료"})
+            client.patch(f"/api/plans/{계획}/tasks/{할일}", headers=A, json={"상태": "준비필요"})
+            체크풀어도_남음 = any(a["attachment_id"] == 증빙["attachment_id"] for a in 첨부목록())
+            with psycopg.connect(OWNER_DSN, connect_timeout=5) as c:
+                c.execute("DELETE FROM tenant.plan_tasks WHERE task_id = %s", (할일,))
+            항목사라짐 = next(a["task_id"] for a in 첨부목록() if a["attachment_id"] == 증빙["attachment_id"]) is None
+
+            os.environ["SUDDOE_ATTACH_MIN_FREE_MB"] = str(10 ** 12)
+            전 = 파일수(폴더)
+            공간부족 = 올리기("공간.pdf", PDF).status_code
+            공간_파일그대로 = 파일수(폴더) == 전
+            os.environ.pop("SUDDOE_ATTACH_MIN_FREE_MB", None)
+
+            상태들 = [올리기(f"한도{i}.pdf", PDF).status_code for i in range(8)]
+            개수 = len(첨부목록())
+
+            삭제 = client.delete(f"/api/plans/{계획}/attachments/{aid}", headers=A).status_code
+            파일없어짐 = aid not in os.listdir(폴더)
+            재조회 = client.get(f"/api/plans/{계획}/attachments/{aid}", headers=A).status_code
+            계획삭제 = client.delete(f"/api/plans/{계획}", headers=A).status_code
+            비었음 = 파일수(폴더) == 0
+            with psycopg.connect(OWNER_DSN, connect_timeout=5) as c:
+                행수 = c.execute("SELECT count(*) FROM tenant.plan_attachments WHERE plan_id = %s", (계획,)).fetchone()[0]
+        finally:
+            if 이전_폴더 is None:
+                os.environ.pop("SUDDOE_ATTACH_DIR", None)
+            else:
+                os.environ["SUDDOE_ATTACH_DIR"] = 이전_폴더
+            os.environ.pop("SUDDOE_ATTACH_MIN_FREE_MB", None)
+
+    결과.기록(
+        "28 첨부: 저장·재조회·내려받기 바이트 일치 · 위장/형식/크기/개수 거부 · 다른 계정 404 · 게스트 401 · 증빙 연결 · 삭제 시 파일 삭제",
+        r.status_code == 201 and 남음 and 바이트 and 디스크 and 위장 == 415 and 형식 == 415 and 큼 == 413 and 빈것 == 400
+        and 경로.get("원본파일명") == "악성.pdf" and 이미지 == 201 and 남의것 == (404, 404, 404) and 게스트 == 401
+        and 잘못된id == 404 and 다른항목 == 404 and 증빙_연결 and 체크풀어도_남음 and 항목사라짐
+        and 공간부족 == 507 and 공간_파일그대로 and 상태들.count(201) == 7 and 상태들[-1] == 409 and 개수 == 10
+        and 삭제 == 200 and 파일없어짐 and 재조회 == 404 and 계획삭제 == 200 and 비었음 and 행수 == 0,
+        f"올림 {r.status_code} · 남음 {남음} · 바이트 {바이트} · 디스크 {디스크} · 위장 {위장} 형식 {형식} 큼 {큼} 빈것 {빈것} · "
+        f"경로 {경로.get('원본파일명')} · 이미지 {이미지} · 남의것 {남의것} · 게스트 {게스트} · 잘못된id {잘못된id} · "
+        f"다른항목 {다른항목} · 연결 {증빙_연결} 체크풀어도 {체크풀어도_남음} 항목사라짐 {항목사라짐} · 공간 {공간부족}/{공간_파일그대로} · "
+        f"한도 {상태들} {개수} · 삭제 {삭제} {파일없어짐} {재조회} · 계획삭제 {계획삭제} {비었음} {행수}")
 
 
 def _피드백_점검(결과: 점검결과, client, 데모세션, 원래_판정, 판정_dry, llm_금지) -> None:

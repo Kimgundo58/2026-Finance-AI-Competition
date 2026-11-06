@@ -205,7 +205,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/server__models________13"
+         "$ref": "#/components/schemas/server__models________14"
         }
        }
       }
@@ -263,7 +263,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/server__models________13"
+         "$ref": "#/components/schemas/server__models________14"
         }
        }
       }
@@ -330,7 +330,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/server__models________13"
+         "$ref": "#/components/schemas/server__models________14"
         }
        }
       }
@@ -352,7 +352,7 @@
      "지출계획"
     ],
     "summary": "삭제",
-    "description": "지출계획 하나를 지운다. 요청한 org 의 계획만 지워진다.\n\nFK 설정상 plan_tasks 는 CASCADE 로 같이 삭제되고, decisions 는 SET NULL 로 연결만 끊긴다\n(판정 기록은 감사 기록으로 남긴다). 되돌릴 수 없으므로 같이 지워진 할일 건수를 반환한다.",
+    "description": "지출계획 하나를 지운다. 요청한 org 의 계획만 지워진다.\n\nFK 설정상 plan_tasks·plan_attachments 는 CASCADE 로 같이 삭제되고(첨부 파일도 지운다), decisions 는 SET NULL 로 연결만 끊긴다\n(판정 기록은 감사 기록으로 남긴다). 되돌릴 수 없으므로 같이 지워진 할일 건수를 반환한다.",
     "operationId": "삭제_api_plans__plan_id__delete",
     "parameters": [
      {
@@ -390,6 +390,159 @@
          "type": "object",
          "additionalProperties": true,
          "title": "Response 삭제 Api Plans  Plan Id  Delete"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/plans/{plan_id}/attachments": {
+   "post": {
+    "tags": [
+     "첨부파일"
+    ],
+    "summary": "첨부 올리기",
+    "description": "파일 하나를 저장한다. task_id 를 주면 그 증빙 항목에 묶인다.",
+    "operationId": "첨부_올리기_api_plans__plan_id__attachments_post",
+    "parameters": [
+     {
+      "name": "plan_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "integer",
+       "title": "Plan Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "multipart/form-data": {
+       "schema": {
+        "$ref": "#/components/schemas/Body________api_plans__plan_id__attachments_post"
+       }
+      }
+     }
+    },
+    "responses": {
+     "201": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/server__models________13"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/plans/{plan_id}/attachments/{attachment_id}": {
+   "get": {
+    "tags": [
+     "첨부파일"
+    ],
+    "summary": "첨부 받기",
+    "operationId": "첨부_받기_api_plans__plan_id__attachments__attachment_id__get",
+    "parameters": [
+     {
+      "name": "plan_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "integer",
+       "title": "Plan Id"
+      }
+     },
+     {
+      "name": "attachment_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Attachment Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   },
+   "delete": {
+    "tags": [
+     "첨부파일"
+    ],
+    "summary": "첨부 삭제",
+    "operationId": "첨부_삭제_api_plans__plan_id__attachments__attachment_id__delete",
+    "parameters": [
+     {
+      "name": "plan_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "integer",
+       "title": "Plan Id"
+      }
+     },
+     {
+      "name": "attachment_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Attachment Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response 첨부 삭제 Api Plans  Plan Id  Attachments  Attachment Id  Delete"
         }
        }
       }
@@ -2277,6 +2430,31 @@
  },
  "components": {
   "schemas": {
+   "Body________api_plans__plan_id__attachments_post": {
+    "properties": {
+     "파일": {
+      "type": "string",
+      "contentMediaType": "application/octet-stream",
+      "title": "파일"
+     },
+     "task_id": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Task Id"
+     }
+    },
+    "type": "object",
+    "required": [
+     "파일"
+    ],
+    "title": "Body_첨부_올리기_api_plans__plan_id__attachments_post"
+   },
    "Body_____api_l3_upload_post": {
     "properties": {
      "파일": {
@@ -3181,6 +3359,51 @@
    },
    "server__models________13": {
     "properties": {
+     "attachment_id": {
+      "type": "string",
+      "title": "Attachment Id"
+     },
+     "원본파일명": {
+      "type": "string",
+      "title": "원본파일명"
+     },
+     "크기": {
+      "type": "integer",
+      "title": "크기"
+     },
+     "task_id": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Task Id"
+     },
+     "created_at": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Created At"
+     }
+    },
+    "type": "object",
+    "required": [
+     "attachment_id",
+     "원본파일명",
+     "크기"
+    ],
+    "title": "첨부항목"
+   },
+   "server__models________14": {
+    "properties": {
      "plan_id": {
       "type": "integer",
       "title": "Plan Id"
@@ -3407,6 +3630,13 @@
        }
       ]
      },
+     "첨부": {
+      "items": {
+       "$ref": "#/components/schemas/server__models________13"
+      },
+      "type": "array",
+      "title": "첨부"
+     },
      "할일": {
       "items": {
        "$ref": "#/components/schemas/__"
@@ -3432,7 +3662,7 @@
     ],
     "title": "계획상세"
    },
-   "server__models________14": {
+   "server__models________15": {
     "properties": {
      "사업명": {
       "type": "string",
@@ -4325,7 +4555,7 @@
     "properties": {
      "사업": {
       "items": {
-       "$ref": "#/components/schemas/server__models________14"
+       "$ref": "#/components/schemas/server__models________15"
       },
       "type": "array",
       "title": "사업"

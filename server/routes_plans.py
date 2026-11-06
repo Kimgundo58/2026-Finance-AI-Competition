@@ -19,7 +19,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from ._common import MOCK, 탭_판정, 트랜잭션, _jsonb, _계정조건, _질의, _실행
 from .judge_response import 구_판정키_포함, 사용자답변_공개, 할일_공개
 from .models import 계획목록응답, 계획상세, 계획생성, 계획수정, 계획통계, 계획요약
-from . import auth, mock_data, routes_feedback, routes_tasks
+from . import auth, mock_data, routes_attachments, routes_feedback, routes_tasks
 
 router = APIRouter(prefix="/api/plans", tags=["지출계획"])
 
@@ -207,6 +207,7 @@ def 상세(plan_id: int, org_id: str | None = None) -> 계획상세:
         # 생성() 이 만든 행에는 '정규화' 키가 있고 시드 데이터에는 없어서 병합해 넘긴다
         return 계획상세(**{**행, "정규화": 행.get("정규화") or {}}, 할일=할일, 판정상세=None,
                        내피드백=routes_feedback.내피드백_조회(행.get("latest_decision_id")),
+                       첨부=routes_attachments.계획_첨부목록(plan_id),
                        **routes_tasks.단계요약_계산([(t["구분"], t["유형"], t["상태"]) for t in 할일]))
     return _live_상세(plan_id, org_id)
 
@@ -290,7 +291,7 @@ def _mock_지출일_변경(행: dict, body: 계획수정) -> None:
 def 삭제(plan_id: int, org_id: str | None = None) -> dict:
     """지출계획 하나를 지운다. 요청한 org 의 계획만 지워진다.
 
-    FK 설정상 plan_tasks 는 CASCADE 로 같이 삭제되고, decisions 는 SET NULL 로 연결만 끊긴다
+    FK 설정상 plan_tasks·plan_attachments 는 CASCADE 로 같이 삭제되고(첨부 파일도 지운다), decisions 는 SET NULL 로 연결만 끊긴다
     (판정 기록은 감사 기록으로 남긴다). 되돌릴 수 없으므로 같이 지워진 할일 건수를 반환한다.
     """
     if MOCK:
@@ -300,6 +301,8 @@ def 삭제(plan_id: int, org_id: str | None = None) -> dict:
             raise HTTPException(404, f"지출계획 {plan_id} 을(를) 찾을 수 없습니다")
         할일 = [t for t in mock_data.mock_할일 if t["plan_id"] == plan_id]
         mock_data.mock_할일[:] = [t for t in mock_data.mock_할일 if t["plan_id"] != plan_id]
+        for 첨부id in [k for k, v in mock_data.mock_첨부.items() if v["plan_id"] == plan_id]:
+            del mock_data.mock_첨부[첨부id]
         return {"삭제": True, "plan_id": plan_id, "할일삭제": len(할일)}
 
     조건, org인자 = _계정조건(org_id, "p")
@@ -312,10 +315,12 @@ def 삭제(plan_id: int, org_id: str | None = None) -> dict:
         # 다른 org 의 계획이어도 404 다. 403 을 주면 id 존재 여부가 드러난다
         raise HTTPException(404, f"지출계획 {plan_id} 을(를) 찾을 수 없습니다")
     제목, 할일수 = 행[0]
+    첨부파일 = routes_attachments.계획_첨부id(plan_id)
     n = _실행(f"DELETE FROM tenant.expense_plans p WHERE p.plan_id = %s AND {조건}",
              (plan_id, *org인자))
     if n != 1:
         raise HTTPException(404, f"지출계획 {plan_id} 을(를) 찾을 수 없습니다")
+    routes_attachments.파일들_지우기(첨부파일)     # 행은 CASCADE 로 지워졌다
     _log.info("지출계획 삭제 plan_id=%s 제목=%r 할일 %d건 동반삭제", plan_id, 제목, 할일수)
     return {"삭제": True, "plan_id": plan_id, "제목": 제목, "할일삭제": 할일수}
 
@@ -520,6 +525,7 @@ def _live_상세(plan_id: int, org_id: str | None) -> 계획상세:
         latest_decision_id=r["latest_decision_id"],
         판정상세=판정상세, 사용자답변=사용자답변_공개(r["사용자답변"]), 할일=할일,
         내피드백=routes_feedback.내피드백_조회(r["latest_decision_id"]),
+        첨부=routes_attachments.계획_첨부목록(plan_id),
         실제지출일=_문자열(r["실제지출일"]), 실제지출액=_float변환(r["실제지출액"]),
         **routes_tasks.단계요약_계산([(t["구분"], t["유형"], t["상태"]) for t in 할일]),
     )
