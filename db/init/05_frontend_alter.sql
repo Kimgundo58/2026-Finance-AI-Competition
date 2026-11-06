@@ -67,7 +67,7 @@ BEGIN
     ALTER TABLE tenant.l3_documents DROP CONSTRAINT IF EXISTS l3_documents_파싱품질_check;
     ALTER TABLE tenant.l3_documents
         ADD CONSTRAINT l3_documents_파싱품질_check
-        CHECK ("파싱품질" IN ('pending','pass','warn','fail'));
+        CHECK ("파싱품질" IN ('pending','pass','warn','fail','review'));
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
@@ -80,3 +80,11 @@ COMMENT ON COLUMN tenant.l3_documents."파싱품질" IS
 -- expense_plans.질문원문 NOT NULL 은 유지한다. 폼 경로는 폼 값을 문장으로 합성해 채운다.
 --   합성 문장을 다시 LLM 입력으로 쓰지 않는다. 필드→문장→필드 왕복은 정보를 잃는다.
 -- expense_plans.용도·하위항목 은 정규화 JSONB 안에 두고 컬럼으로 따로 빼지 않는다.
+
+-- 올린 문서가 세부기준이 맞는지 판별한 결과와 같은 파일 재사용용 해시(scripts/l3_doc_check.py). 'review' 는 사용자 확인 대기다.
+ALTER TABLE tenant.l3_documents
+    ADD COLUMN IF NOT EXISTS "검토결과" JSONB,
+    ADD COLUMN IF NOT EXISTS sha256 TEXT;
+CREATE INDEX IF NOT EXISTS ix_l3_documents_sha ON tenant.l3_documents (org_id, sha256);
+-- 판정이 어떤 기준 문서로 점검했는가(화면 안내용). 상태·문서명만 둔다.
+ALTER TABLE tenant.decisions ADD COLUMN IF NOT EXISTS "기준문서" JSONB;

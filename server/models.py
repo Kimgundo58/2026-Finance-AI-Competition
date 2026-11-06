@@ -316,13 +316,16 @@ class L3업로드응답(BaseModel):
     파일명: str
     확장자: str
     # 업로드 요청은 접수까지만 하고 202 를 돌려준다. 파싱은 백그라운드 작업이 한다.
-    상태: Literal["파싱대기", "파싱중", "완료", "실패"] = "파싱대기"
+    # 확인필요: 다 읽었지만 세부기준이 맞는지 사용자 확인을 기다린다. 적용안함: 사용자가 쓰지 않기로 했다.
+    상태: Literal["파싱대기", "파싱중", "완료", "실패", "확인필요", "적용안함"] = "파싱대기"
     조_건수: int | None = None
     # 등록된 규정에서 찾지 못한 상위 규정 참조. 업로드 실패 안내에 쓴다
     미해결참조: list[dict[str, Any]] = Field(default_factory=list)
     메시지: str | None = None
     # 상태가 '완료' 여도 warn(조문은 추출했지만 품질이 낮음)과 pass 를 프론트가 구분할 수 있게 한다
-    파싱품질: Literal["pending", "pass", "warn", "fail"] | None = None
+    파싱품질: Literal["pending", "pass", "warn", "fail", "review"] | None = None
+    # 확인필요일 때 사용자에게 보여 줄 이유
+    검토이유: str | None = None
     # 실패 분류 코드(스캔본·보호문서·조문없음·중단 등). 실패가 아니면 null. 안내 문구는 메시지에 있다
     실패사유: str | None = None
     # 이 기관이 지금 판정에 쓰는 L3 문서 이름(이 문서일 수도 있다). 없으면 null — 상위 규정만으로 판정한다
@@ -346,8 +349,10 @@ class L3현재문서(BaseModel):
     시행일: str | None = None
     # created_at 값. 시행일이 대부분 NULL 이라 화면에는 이 값을 표시한다
     등록일: str | None = None
-    파싱품질: Literal["pending", "pass", "warn", "fail"] | None = None
+    파싱품질: Literal["pending", "pass", "warn", "fail", "review"] | None = None
     조_건수: int = 0
+    # 파싱품질이 review 일 때 사용자에게 보여 줄 이유
+    검토이유: str | None = None
     # 텍스트를 얻은 방식(l3_documents.extraction). 'ocr' 이면 스캔본을 OCR 로 읽은 문서다
     추출방식: str | None = None
 

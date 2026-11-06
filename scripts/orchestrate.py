@@ -52,7 +52,7 @@ _decisions_컬럼: tuple[str, ...] = (
     "org_id", "account_id", "사업명", "기관id", "질문원문", "plan_id", "정규화", "비목", "금액", "판정",
     "신뢰등급", "요약", "규정버전", "인용", "해야할일", "전제", "참조관계", "미매핑전제",
     "검증사유", "검증코드", "처리단계", "실패단계", "지연ms", "모델", "검색스냅샷", "코퍼스버전",
-    "사용자답변",
+    "사용자답변", "기준문서",
 )
 
 
@@ -150,6 +150,8 @@ def _기록후종료(상태: _판정상태, 응답: dict, *, 기록: bool) -> di
     """
     응답["사용자답변"] = 상태.사용자답변
     try:
+        if 상태.cur is not None:
+            응답["기준문서"] = l3_load.기준문서_상태(상태.cur, 상태.org_id)
         if 기록 and 상태.cur is not None:
             응답["decision_id"] = decisions_저장(상태.cur, _decisions_행(상태, 응답))
     except Exception as e:                               # noqa: BLE001
@@ -192,6 +194,7 @@ def _decisions_행(상태: _판정상태, 응답: dict) -> dict:
                           ensure_ascii=False, default=str),
         # 충족답·근거조문까지 남긴다. 나중에 질문을 감사할 수 있어야 한다. 화면에는 질문문·답만 나간다
         사용자답변=json.dumps(상태.사용자답변, ensure_ascii=False, default=str),
+        기준문서=json.dumps(응답.get("기준문서"), ensure_ascii=False),
         코퍼스버전=코퍼스버전(상태.cur))
 
 

@@ -62,6 +62,7 @@ docker rm -f suddoe-verify            # 익명 볼륨까지 지우려면 docker 
 | `2026-11-06_실제지출.sql` | 필수 | `expense_plans.실제지출일`·`실제지출액` |
 | `2026-11-06_판정_피드백.sql` | 필수 | `tenant.decision_feedback`(맞았어요·틀렸어요) |
 | `2026-11-06_계획_첨부.sql` | 필수 | `tenant.plan_attachments`. 새 이미지를 띄우기 전에 볼륨 `plan_attachments` 가 든 `deploy/ncp/docker-compose.yml` 도 반영한다 |
+| `2026-11-06_L3_문서확인.sql` | 필수 | `파싱품질` 에 `review`, `l3_documents.검토결과`·`sha256`, `decisions.기준문서` |
 
 ### `2026-11-03_계정별_분리.sql` 적용 순서 (운영)
 
