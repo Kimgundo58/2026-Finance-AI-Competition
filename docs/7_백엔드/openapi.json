@@ -1223,6 +1223,124 @@
     }
    }
   },
+  "/api/l3/{doc_id}/confirm": {
+   "post": {
+    "tags": [
+     "L3 업로드"
+    ],
+    "summary": "적용 확인",
+    "description": "확인을 기다리는 문서를 사용자가 세부기준으로 쓰기로 했다. 이 문서가 판정 기준이 되고 이전 문서는 내려간다.",
+    "operationId": "적용_확인_api_l3__doc_id__confirm_post",
+    "parameters": [
+     {
+      "name": "doc_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Doc Id"
+      }
+     },
+     {
+      "name": "org_id",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Org Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/L3_____"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/l3/{doc_id}/reject": {
+   "post": {
+    "tags": [
+     "L3 업로드"
+    ],
+    "summary": "적용 거절",
+    "description": "확인을 기다리는 문서를 쓰지 않기로 했다. 판정 기준은 그대로다.",
+    "operationId": "적용_거절_api_l3__doc_id__reject_post",
+    "parameters": [
+     {
+      "name": "doc_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Doc Id"
+      }
+     },
+     {
+      "name": "org_id",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Org Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/L3_____"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
   "/api/orgs": {
    "get": {
     "tags": [
@@ -2555,7 +2673,8 @@
          "pending",
          "pass",
          "warn",
-         "fail"
+         "fail",
+         "review"
         ]
        },
        {
@@ -2568,6 +2687,17 @@
       "type": "integer",
       "title": "조 건수",
       "default": 0
+     },
+     "검토이유": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "검토이유"
      },
      "추출방식": {
       "anyOf": [
@@ -2609,7 +2739,9 @@
        "파싱대기",
        "파싱중",
        "완료",
-       "실패"
+       "실패",
+       "확인필요",
+       "적용안함"
       ],
       "title": "상태",
       "default": "파싱대기"
@@ -2652,7 +2784,8 @@
          "pending",
          "pass",
          "warn",
-         "fail"
+         "fail",
+         "review"
         ]
        },
        {
@@ -2660,6 +2793,17 @@
        }
       ],
       "title": "파싱품질"
+     },
+     "검토이유": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "검토이유"
      },
      "실패사유": {
       "anyOf": [

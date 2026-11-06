@@ -127,5 +127,6 @@ def _캐시판정_행(body, out: dict, org_id: str | None, account_id: str | Non
         참조관계=json.dumps(out.get("참조관계") or [], ensure_ascii=False, default=str),
         # 캐시 응답에는 화면 값(질문문·답)만 있다. 계획을 다시 열어도 「확인한 내용」이 보이게 남긴다.
         사용자답변=json.dumps(out.get("사용자답변") or [], ensure_ascii=False),
+        기준문서=json.dumps(out.get("기준문서"), ensure_ascii=False),
         검증코드=[], 처리단계="캐시",
     )

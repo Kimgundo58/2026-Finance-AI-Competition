@@ -5,7 +5,8 @@ server/routes_l3.백그라운드_파싱 이 업로드 응답 뒤 백그라운드
 파싱(cur, doc_id) -> {ok, 파싱품질, 조_건수, 미해결참조수, strategy, flags, 사유} 와 원본경로/L3_저장소.
 tenant.l3_documents 의 파싱품질·미해결참조수·실패사유를 갱신한다. 호출자는 GUC app.org_id 를 설정한
 트랜잭션 안에서 불러야 한다(RLS). 항상 지키는 조건: 조 0건은 실패이고, 파싱품질은 'pending' 에서 항상
-pass/warn/fail 로 바뀐다. 텍스트 레이어가 없는 PDF(스캔본)는 CLOVA OCR 이 설정돼 있으면(clova_ocr.설정됨)
+pass/warn/fail/review 로 바뀐다. 읽은 문서는 l3_doc_check 가 세부기준이 맞는지 보고, 아니면 'review' 로 두어
+사용자 확인을 기다린다(판정에 쓰지 않는다). 텍스트 레이어가 없는 PDF(스캔본)는 CLOVA OCR 이 설정돼 있으면(clova_ocr.설정됨)
 OCR 로 다시 읽고 extraction='ocr', 파싱품질 warn 으로 기록한다. 설정이 없으면 실패(스캔본)로 기록한다.
 기관당 판정에 쓰는 L3 는 한 문서다. 파싱이 성공하면 같은 기관의 이전 문서를 superseded 로 바꾸고,
 실패하면 이전 문서를 그대로 둔다(`적용문서_정리`).
@@ -15,6 +16,7 @@ OCR 로 다시 읽고 extraction='ocr', 파싱품질 warn 으로 기록한다. �
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import re
 import traceback
@@ -22,6 +24,7 @@ import uuid
 from pathlib import Path
 
 import clova_ocr
+import l3_doc_check
 import l3_load
 from _lib import db
 from article_split import split_articles, validate
@@ -153,7 +156,7 @@ def _기관_정리_잠금(cur, org_id) -> None:
     cur.execute("SELECT pg_advisory_xact_lock(hashtext('l3_적용문서'), hashtext(%s))", (str(org_id),))
 
 
-def 적용문서_정리(cur, doc_id: str, org_id, 성공: bool) -> None:
+def 적용문서_정리(cur, doc_id: str, org_id, 성공: bool, 확인대기: bool = False) -> None:
     """기관당 판정에 쓰는 L3 를 한 문서로 맞춘다. 파싱 결과를 기록한 같은 트랜잭션에서 부른다.
 
     규칙은 '나중에 올린(created_at) 문서가 이긴다' 이다.
@@ -164,11 +167,12 @@ def 적용문서_정리(cur, doc_id: str, org_id, 성공: bool) -> None:
     실패: 판정에 쓰는 이전 규정은 그대로 둔다. 이 문서보다 나중에 올린 문서가 이미 결과(성공·실패)를 냈으면 이 문서를
       superseded 로 바꾼다. 아니면 이 문서보다 먼저 실패한 문서와 파싱이 끊겨 `중단_판정_분` 넘게 'pending' 으로
       남은 문서만 superseded 로 바꿔 최근 실패 1건만 남긴다(아직 파싱 중인 이전 업로드는 건드리지 않는다).
+    확인대기('review'): 실패처럼 판정에 쓰는 이전 규정을 그대로 두고, 이전 확인 대기 문서도 내려 하나만 남긴다.
     판정(l3_load._조문들)은 status='active' 이고 pass/warn 인 문서만 읽으므로 이 함수가 곧 '어느 규정으로
     판정하는가' 를 정한다.
     """
     _기관_정리_잠금(cur, org_id)
-    이후_결과 = ("pass", "warn") if 성공 else ("pass", "warn", "fail")
+    이후_결과 = ("pass", "warn") if 성공 else ("pass", "warn", "fail", "review")
     이후_있음 = cur.execute(
         "SELECT 1 FROM tenant.l3_documents n WHERE n.org_id=%s AND n.doc_id<>%s "
         "   AND n.status='active' AND n.\"파싱품질\" = ANY(%s) "
@@ -181,10 +185,14 @@ def 적용문서_정리(cur, doc_id: str, org_id, 성공: bool) -> None:
     조건 = ("org_id=%s AND doc_id<>%s AND status='active' "
           "AND created_at <= (SELECT created_at FROM tenant.l3_documents WHERE doc_id=%s)")
     if not 성공:
+        내릴품질 = "\"파싱품질\" IN ('fail','review')" if 확인대기 else "\"파싱품질\"='fail'"
         cur.execute("UPDATE tenant.l3_documents SET status='superseded' "
-                    f"WHERE {조건} AND (\"파싱품질\"='fail' OR (\"파싱품질\"='pending' "
+                    f"WHERE {조건} AND ({내릴품질} OR (\"파싱품질\"='pending' "
                     f"AND created_at < now() - interval '{중단_판정_분} minutes'))",
                     (org_id, doc_id, doc_id))
+        if 확인대기:      # 파싱이 오래 걸려 다른 업로드의 정리에서 내려갔어도 사용자에게 물을 수 있게 되돌린다
+            cur.execute("UPDATE tenant.l3_documents SET status='active' "
+                        "WHERE doc_id=%s AND status<>'active'", (doc_id,))
         return
     cur.execute("UPDATE tenant.l3_documents SET status='active' "
                 "WHERE doc_id=%s AND status<>'active'", (doc_id,))
@@ -206,20 +214,23 @@ def 파싱(cur, doc_id: str) -> dict:
     상태를 쓰지 않고 {ok: False, 사유} 를 돌려준다. 재파싱에 대비해 기존 조문을 지우고 다시 넣는다.
     """
     row = cur.execute(
-        "SELECT org_id, \"원본파일명\" FROM tenant.l3_documents WHERE doc_id=%s",
+        "SELECT org_id, \"원본파일명\", status, \"파싱품질\", \"검토결과\" FROM tenant.l3_documents WHERE doc_id=%s",
         (doc_id,)).fetchone()
     if not row:
         return {"ok": False, "사유": f"l3_documents 에 doc_id={doc_id} 없음"}
-    org_id, 원본파일명 = row
+    org_id, 원본파일명, 이전상태, 이전품질, 이전검토 = row
+    # 이미 판정에 쓰는 문서를 다시 파싱할 때는 묻지 않는다. LLM 실패로 기관의 기준이 사라지면 안 된다
+    적용중 = 이전상태 == "active" and 이전품질 in ("pass", "warn")
 
     추출방식: str | None = None      # OCR 로 읽으면 'ocr'. None 이면 업로드 때 기록한 값을 둔다
 
     def _결과_기록(파싱품질: str, 조_건수: int = 0, 미해결참조수: int = 0, **부가) -> dict:
         성공 = 파싱품질 in ("pass", "warn")
+        확인대기 = 파싱품질 == "review"
         _기관_정리_잠금(cur, org_id)          # `_상태_기록` 의 행 잠금보다 먼저 잡는다(교착 방지)
-        _상태_기록(cur, doc_id, 파싱품질, 미해결참조수, None if 성공 else 부가.get("실패사유"), 추출방식)
-        적용문서_정리(cur, doc_id, org_id, 성공)
-        return {"ok": 성공, "파싱품질": 파싱품질, "조_건수": 조_건수, "미해결참조수": 미해결참조수,
+        _상태_기록(cur, doc_id, 파싱품질, 미해결참조수, None if 성공 or 확인대기 else 부가.get("실패사유"), 추출방식)
+        적용문서_정리(cur, doc_id, org_id, 성공, 확인대기)
+        return {"ok": 성공 or 확인대기, "파싱품질": 파싱품질, "조_건수": 조_건수, "미해결참조수": 미해결참조수,
                 "추출방식": 추출방식, **부가}
 
     경로 = 원본경로(doc_id, _확장자(원본파일명))
@@ -261,7 +272,18 @@ def 파싱(cur, doc_id: str) -> dict:
     if 추출방식 == "ocr":
         # OCR 은 금액·조번호를 잘못 읽을 수 있다. 항상 warn 으로 두고, 인용 신뢰등급은 B 가 된다(llm_validate)
         flags.append("OCR:스캔본 문자 인식")
-    return _결과_기록("warn" if flags else "pass", 조_건수=len(arts),
+    품질 = "warn" if flags else "pass"
+
+    # 읽었다고 세부기준인 것은 아니다. 스캔본은 위에서 OCR 로 읽은 글자로 판별한다
+    sha = hashlib.sha256(경로.read_bytes()).hexdigest()
+    판별 = ({**(이전검토 or {}), "결과": "적용"} if 적용중
+          else l3_doc_check.문서_판별(cur, doc_id, org_id, 원본파일명, raw_text, arts, strategy, sha))
+    # 사용자가 이 문서로 적용하면 품질을 되돌릴 수 있게 남긴다
+    판별 = {**판별, "원래품질": 품질}
+    _기관_정리_잠금(cur, org_id)          # 아래 행 잠금보다 먼저 잡는다(교착 방지)
+    cur.execute('UPDATE tenant.l3_documents SET "검토결과"=%s, sha256=%s WHERE doc_id=%s',
+                (l3_doc_check.검토결과_json(판별), sha, doc_id))
+    return _결과_기록(품질 if 판별["결과"] == "적용" else "review", 조_건수=len(arts),
                   미해결참조수=_미해결참조_수(cur, arts), strategy=strategy, flags=flags)
 
 

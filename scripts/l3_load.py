@@ -390,6 +390,26 @@ def _조문들(cur, org_id: str) -> list[dict[str, Any]]:
     return [dict(zip(keys, r)) for r in rows if 사업비관련장(r[4])]
 
 
+def 기준문서_상태(cur, org_id) -> dict:
+    """이번 판정이 어떤 기준 문서를 썼는가(화면 안내용). 판정 값에는 쓰지 않는다.
+
+    상태: 적용(문서명) · 없음 · 읽기실패(대기문서명, 있으면 기존 문서명) · 확인대기(대기문서명, 있으면 기존 문서명).
+    """
+    if not org_id:
+        return {"상태": "없음", "문서명": None}
+    행 = cur.execute(
+        'SELECT "원본파일명", "파싱품질" FROM tenant.l3_documents WHERE org_id=%s AND status=\'active\' '
+        "ORDER BY created_at DESC", (org_id,)).fetchall()
+    적용 = next((이름 for 이름, 품질 in 행 if 품질 in ("pass", "warn")), None)
+    확인 = next((이름 for 이름, 품질 in 행 if 품질 == "review"), None)
+    실패 = next((이름 for 이름, 품질 in 행 if 품질 == "fail"), None)
+    if 확인:
+        return {"상태": "확인대기", "문서명": 적용, "대기문서명": 확인}
+    if 실패:
+        return {"상태": "읽기실패", "문서명": 적용, "대기문서명": 실패}
+    return {"상태": "적용" if 적용 else "없음", "문서명": 적용}
+
+
 def 조문_조회(cur, org_id: str, 비목: str | None = None) -> list[dict[str, Any]]:
     """현재 기관의 L3 조문을 검색 없이 전부 돌려준다. org_id 가 없거나 잘못되면 [].
 
