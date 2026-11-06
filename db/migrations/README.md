@@ -60,6 +60,7 @@ docker rm -f suddoe-verify            # 익명 볼륨까지 지우려면 docker 
 | `2026-11-06_온톨로지.sql` | 필수 | 룰 · 온톨로지 재설계용이다. `corpus.concepts`·`concept_labels`·`concept_relations`·`norms`·`provenance`, `tenant.l3_articles.concept_ids`, `decisions."경로"`, 검증코드 `ONTOLOGY_BAN`·`LIMIT_EXCEEDED`·`VAT_BASIS_UNKNOWN`, `suddoe_app` 읽기 · `suddoe_ingest` 쓰기 권한을 더한다. **코드 배포 전에 적용한다**(새 코드의 데이터 버전 해시가 새 테이블을 읽는다). 옛 코드는 영향이 없어 api 를 멈추지 않는다 |
 | `2026-11-06_운영요령_참조정리.sql` | 필수(데이터) | 모두의 창업 · 지침 제14차의 운영요령 참조 41행을 superseded 복사본에서 active 문서로 옮긴다. 조번호가 active 에 없으면 멈춘다. superseded 행은 지우지 않는다. api 를 멈추지 않는다 |
 | `2026-11-06_모두의창업_참조_태그_보정.sql` | 필수(데이터) | 모두의 창업의 쉼표 열거 참조 13행 추가, 제30조 재매핑 · 제41 · 43조 붙임 정정, 제46 · 50 · 52조 적용대상을 공통으로 고친다. 원문 문구와 도착 조제목이 다르면 멈춘다. refs 행 수가 바뀌어 판정 캐시가 무효화된다. api 를 멈추지 않는다 |
+| `2026-11-07_현행판_참조이동.sql` | 필수(데이터) | P0-6 · P0-7 문서 10건을 `corpus_restored_load.py` 로 적재한 **뒤에** 실행한다(새 판이 active 가 아니면 멈춘다). active 문서에서 옛 판으로 가는 참조를 새 판으로 옮기고, 모두의 창업 제2조26 → 제3자 지침 제5 · 6조를 풀고, 운영요령 제19조 → 집행지침 문서 단위 행을 넣고, 판정 캐시를 비운다. 운영 순서는 `ontology/수집/P0-6_P0-7_기록.md`. api 를 멈추지 않는다 |
 
 ### `2026-11-03_계정별_분리.sql` 적용 순서 (운영)
 

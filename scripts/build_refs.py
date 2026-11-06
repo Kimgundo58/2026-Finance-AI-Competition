@@ -382,9 +382,9 @@ def scan(text: str, doc_id: str, corpus: dict[str, str],
                             edges.append(e2)
                         continue
                 elif target == "요령":
-                    # 「중소기업창업 지원사업 운영요령」(중기부고시 2024-101). 코퍼스에 있다.
+                    # 「중소기업창업 지원사업 운영요령」(중기부고시 제2026-82호, ontology/수집/판대조.md). 코퍼스에 있다.
                     e.update(해결상태="resolved",
-                             dst_doc_id="L1_중소기업창업지원사업운영요령_20241206")
+                             dst_doc_id="L1_중소기업창업지원사업운영요령_20261008")
                 elif target in ("관리기준", "기준"):
                     # 자기 문서 내부 참조 ("본 관리기준 제N조")
                     e.update(관계="인용", 해결상태="resolved", dst_doc_id=doc_id,
