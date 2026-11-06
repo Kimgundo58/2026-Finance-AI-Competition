@@ -19,7 +19,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from ._common import MOCK, 탭_판정, 트랜잭션, _jsonb, _계정조건, _질의, _실행
 from .judge_response import 구_판정키_포함, 사용자답변_공개, 할일_공개
 from .models import 계획목록응답, 계획상세, 계획생성, 계획수정, 계획통계, 계획요약
-from . import auth, mock_data, routes_tasks
+from . import auth, mock_data, routes_feedback, routes_tasks
 
 router = APIRouter(prefix="/api/plans", tags=["지출계획"])
 
@@ -206,6 +206,7 @@ def 상세(plan_id: int, org_id: str | None = None) -> 계획상세:
         할일 = [t for t in mock_data.mock_할일 if t["plan_id"] == plan_id]
         # 생성() 이 만든 행에는 '정규화' 키가 있고 시드 데이터에는 없어서 병합해 넘긴다
         return 계획상세(**{**행, "정규화": 행.get("정규화") or {}}, 할일=할일, 판정상세=None,
+                       내피드백=routes_feedback.내피드백_조회(행.get("latest_decision_id")),
                        **routes_tasks.단계요약_계산([(t["구분"], t["유형"], t["상태"]) for t in 할일]))
     return _live_상세(plan_id, org_id)
 
@@ -518,6 +519,7 @@ def _live_상세(plan_id: int, org_id: str | None) -> 계획상세:
         거래처=r["거래처"], 추가설명=r["추가설명"], 정규화=정규화,
         latest_decision_id=r["latest_decision_id"],
         판정상세=판정상세, 사용자답변=사용자답변_공개(r["사용자답변"]), 할일=할일,
+        내피드백=routes_feedback.내피드백_조회(r["latest_decision_id"]),
         실제지출일=_문자열(r["실제지출일"]), 실제지출액=_float변환(r["실제지출액"]),
         **routes_tasks.단계요약_계산([(t["구분"], t["유형"], t["상태"]) for t in 할일]),
     )

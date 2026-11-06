@@ -12,6 +12,7 @@
     routes_questions   POST /api/questions (판정 전 확인 질문)
     routes_profile     GET·PUT /api/profile
     routes_admin       GET /admin/status, /admin/queue · POST /admin/warmup (X-Admin-Token)
+    routes_feedback    PUT /api/decisions/{id}/feedback (맞았어요·틀렸어요), 틀렸어요 목록은 routes_admin GET /admin/feedback
     routes_ingest      /admin/documents — L1·L2 규정 적재 (X-Admin-Token, SUDDOE_INGEST_DSN 없으면 503)
     routes_plans · routes_tasks · routes_l3 · routes_orgs   지출계획·할일·기관 자체규정(L3)·기관 목록
 
@@ -36,7 +37,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))   # 판정 파이프라인 모듈(orchestrate·retrieve 등)을 바로 import 한다
 sys.path.insert(0, str(ROOT))               # `python server/main.py` 로 실행해도 server 패키지가 보이게
 
-from server import (auth, catalog, routes_accounts, routes_admin, routes_ingest,  # noqa: E402
+from server import (auth, catalog, routes_accounts, routes_admin, routes_feedback, routes_ingest,  # noqa: E402
                     routes_judge, routes_l3, routes_normalize, routes_orgs,
                     routes_plans, routes_profile, routes_questions, routes_tasks)
 from server._common import MOCK, _정수_환경변수, 판정_ENUM  # noqa: E402
@@ -77,8 +78,8 @@ app.add_middleware(
 )
 
 for _router_모듈 in (routes_plans, routes_tasks, routes_l3, routes_orgs, routes_accounts, catalog,
-                    routes_normalize, routes_questions, routes_judge, routes_profile, routes_admin,
-                    routes_ingest):
+                    routes_normalize, routes_questions, routes_judge, routes_feedback, routes_profile,
+                    routes_admin, routes_ingest):
     app.include_router(_router_모듈.router)
 
 

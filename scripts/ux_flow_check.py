@@ -531,6 +531,7 @@ def _점검(결과: 점검결과) -> None:
         _일정_점검(결과, client, 데모세션)
         _지출일_점검(결과, client, 데모세션)
         _진행단계_점검(결과, client, 데모세션)
+        _피드백_점검(결과, client, 데모세션, 원래_판정, 판정_dry, llm_금지)
     finally:
         l3_load.조문_조회, orchestrate.프롬프트_구성, orchestrate.판정 = (
             원래_조문조회, 원래_프롬프트, 원래_판정)
@@ -972,6 +973,87 @@ def _진행단계_점검(결과: 점검결과, client, 데모세션) -> None:
                and 등록_맞음 and 줄_완료 and 목록_유지 and 재점검_유지,
                f"처음 {첫째_맞음} · 변경 효과 {효과} {둘째} · 목록 {목록_일치} · 반쪽 {반쪽} 음수 {음수} B {B_등록} · "
                f"등록 {등록_맞음} · 집행 줄 {줄_완료} · 목록 유지 {목록_유지} · 재점검 {재점검_유지}")
+
+
+def _피드백_점검(결과: 점검결과, client, 데모세션, 원래_판정, 판정_dry, llm_금지) -> None:
+    """27: 맞았어요·틀렸어요가 저장·재조회되고, 재점검하면 비며, 다른 계정이 못 건드리고, 관리 조회에 나오는지 본다."""
+    import re
+
+    import psycopg
+
+    import orchestrate
+
+    def llm_가능(프롬프트_글, *_a, **_k):
+        첫문장 = re.search(r"\[(S\d+)\]", 프롬프트_글).group(1)
+        return ({"판정": "가능", "요약": "규정상 집행할 수 있습니다.", "해야할일": [], "인용": [첫문장], "전제": []},
+                {"지연ms": 0, "모델": "가짜"})
+
+    with _두_계정(데모세션) as (헤더, _org):
+        A, B = 헤더("A"), 헤더("B")
+        계획 = client.post("/api/plans", headers=A, json={
+            "사업명": 판정_요청["사업명"], "품목": "피드백 점검", "금액": 400000, "용도": "점검",
+            "확정비목": "재료비", "정규화": 판정_요청["정규화"]}).json()["plan_id"]
+        요청 = dict(판정_요청, plan_id=계획, 정규화=dict(판정_요청["정규화"], 품목="피드백 점검 필라멘트"))
+
+        def 상세() -> dict:
+            return client.get(f"/api/plans/{계획}", headers=A).json()
+
+        def 평가(id_, 헤더값: dict | None = None, **값):
+            return client.put(f"/api/decisions/{id_}/feedback", headers=헤더값 if 헤더값 else A, json=값)
+
+        orchestrate.판정, orchestrate.llm_호출 = 원래_판정, llm_가능
+        try:
+            본문 = client.post("/api/judge", json=요청, headers=A).text
+            저장 = _sse_이벤트(본문, "저장") or {}
+            첫판정 = 상세()
+            d1 = 첫판정["latest_decision_id"]
+            처음엔_비어있음 = 첫판정["내피드백"] is None
+
+            맞음 = 평가(d1, 평가="맞음", 이유="기타", 의견="버려질 값").json()
+            맞음_재조회 = 상세()["내피드백"]
+            이유없음 = 평가(d1, 평가="틀림").status_code
+            틀림 = 평가(d1, 평가="틀림", 이유="근거가 다름", 의견=" 조문이 달라요 ").status_code
+            틀림_재조회 = 상세()["내피드백"]
+
+            게스트 = client.put(f"/api/decisions/{d1}/feedback", json={"평가": "맞음"}).status_code
+            남의것 = 평가(d1, B, 평가="맞음").status_code
+            없는것 = 평가(999999999, 평가="맞음").status_code
+            with psycopg.connect(OWNER_DSN, connect_timeout=5) as c:
+                행수 = c.execute("SELECT count(*) FROM tenant.decision_feedback WHERE decision_id = %s",
+                              (d1,)).fetchone()[0]
+
+            os.environ["SUDDOE_ADMIN_TOKEN"] = "ux-check-admin"
+            try:
+                토큰없음 = client.get("/admin/feedback").status_code
+                관리 = client.get("/admin/feedback", headers={"X-Admin-Token": "ux-check-admin"}).json()
+            finally:
+                os.environ.pop("SUDDOE_ADMIN_TOKEN", None)
+            관리행 = next((h for h in 관리.get("항목", []) if h["decision_id"] == d1), None)
+
+            # 재점검: 캐시 적중이어도 계획에는 새 판정 행이 붙는다
+            client.post("/api/judge", json=요청, headers=A)
+            재점검 = 상세()
+            d2 = 재점검["latest_decision_id"]
+            새판정_저장 = 평가(d2, 평가="맞음").status_code
+            최신_맞음 = 상세()["내피드백"]
+        finally:
+            orchestrate.판정, orchestrate.llm_호출 = 판정_dry, llm_금지
+            with psycopg.connect(OWNER_DSN, connect_timeout=5) as c:
+                c.execute("DELETE FROM tenant.decisions WHERE plan_id = %s", (계획,))
+
+    결과.기록(
+        "27 맞았어요·틀렸어요 저장·재조회·변경 · 재점검하면 비어 있음 · 다른 계정 404 · 게스트 401 · 관리 조회는 틀렸어요만",
+        저장.get("decision_id") == d1 and 처음엔_비어있음
+        and 맞음.get("평가") == "맞음" and 맞음.get("이유") is None and 맞음_재조회 == {"평가": "맞음", "이유": None, "의견": None}
+        and 이유없음 == 422 and 틀림 == 200
+        and 틀림_재조회 == {"평가": "틀림", "이유": "근거가 다름", "의견": "조문이 달라요"} and 행수 == 1
+        and 게스트 == 401 and 남의것 == 404 and 없는것 == 404
+        and 토큰없음 == 403 and bool(관리행) and 관리행["이유"] == "근거가 다름" and 관리행["판정"] == "가능"
+        and bool(관리행["질문원문"]) and not any("account" in k or "email" in k for k in 관리행)
+        and d2 != d1 and 재점검["내피드백"] is None and 새판정_저장 == 200 and 최신_맞음["평가"] == "맞음",
+        f"저장 {저장.get('decision_id')}/{d1} · 맞음 {맞음_재조회} · 틀림 {틀림_재조회} · 행수 {행수} · "
+        f"게스트 {게스트} 남의것 {남의것} 없는것 {없는것} · 토큰없음 {토큰없음} 관리행 {관리행} · "
+        f"재점검 {d2} {재점검.get('내피드백')}")
 
 
 def _확인질문_점검(결과: 점검결과, client, 데모세션, 캡처, 원래_판정, 판정_dry, llm_금지) -> None:

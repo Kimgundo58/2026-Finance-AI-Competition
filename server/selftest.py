@@ -146,7 +146,7 @@ def main() -> int:
     """계약 셀프테스트. 실패 건수가 있으면 1 을 돌려준다."""
     from fastapi.testclient import TestClient
 
-    from server import inquiry, response_cache, routes_judge
+    from server import inquiry, mock_data, response_cache, routes_judge
     from server._common import MOCK, 판정_ENUM
     from server.judge_response import 파이프라인결과_매핑
     from server.main import app
@@ -405,6 +405,18 @@ def main() -> int:
     확인("캐시 응답이 첫 응답과 같다", e1["결과"][0] == e2["결과"][0])
     확인("캐시 적중 수가 /admin/status 에 나온다",
          c.get("/admin/status", headers=관리).json()["캐시"]["적중"] > 0)
+
+    확인("/admin/feedback 는 토큰 없이 403", c.get("/admin/feedback").status_code == 403)
+    확인("/admin/feedback 는 토큰이 맞으면 목록을 준다", "항목" in c.get("/admin/feedback", headers=관리).json())
+    평가 = c.put("/api/decisions/101/feedback", json={"평가": "틀림", "이유": "기타", "의견": " 메모 "})
+    계획번호 = next(p["plan_id"] for p in mock_data.mock_계획 if p["latest_decision_id"] == 101)
+    확인("평가를 저장하면 계획 상세에 돌아온다",
+         평가.status_code == 200 and c.get(f"/api/plans/{계획번호}").json()["내피드백"]
+         == {"평가": "틀림", "이유": "기타", "의견": "메모"}, 평가.text[:80])
+    확인("틀렸어요에 이유가 없으면 422", c.put("/api/decisions/101/feedback", json={"평가": "틀림"}).status_code == 422)
+    확인("맞았어요는 이유를 지운다",
+         c.put("/api/decisions/101/feedback", json={"평가": "맞음", "이유": "기타"}).json()["이유"] is None)
+    확인("없는 판정은 404", c.put("/api/decisions/999999/feedback", json={"평가": "맞음"}).status_code == 404)
 
     q = c.get("/admin/queue", headers=관리).json()
     확인("/admin/queue 가 재검수 큐를 준다",
