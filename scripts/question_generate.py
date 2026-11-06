@@ -319,7 +319,8 @@ def _새경로_준비(cur, 입력: dict, org_id) -> dict:
     """
     사업명 = 입력.get("사업명")
     게이트입력 = orchestrate.게이트_입력(입력.get("금액"), 입력.get("부가세구분"), None)
-    조회 = orchestrate.온톨로지_조회(cur, 사업명, 입력["비목"], 입력.get("확정세목"), 게이트입력, 확정=True)
+    조회 = orchestrate.온톨로지_조회(cur, 사업명, 입력["비목"], 입력.get("확정세목"), 게이트입력, 확정=True,
+                               품목=입력.get("품목"))
     if 조회["게이트"].get("종류") in ("금지", "한도초과"):
         return {"바로": "코드판정"}
     l3 = l3_load.조문_연결조회(cur, org_id) if org_id else []

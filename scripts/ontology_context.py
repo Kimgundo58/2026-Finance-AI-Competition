@@ -264,8 +264,8 @@ def 규범_요약(규범결과: dict, 게이트결과: dict, *, 분류표시: st
     return "\n".join(줄) if 줄 else None
 
 
-def 근거경로들(근거행: list[dict], schema: dict) -> list[str]:
-    """화면 "근거 경로" 문장. 경로가 있는 것을 먼저 쓰고, 다른 문장에 포함된 문장은 뺀다."""
+def 근거경로들(근거행: list[dict], schema: dict, 상한: int | None = 3) -> list[str]:
+    """화면 "근거 경로" 문장. 경로가 있는 것을 먼저 쓰고, 다른 문장에 포함된 문장은 뺀다. 화면에는 상한까지만 낸다."""
     from ontology_lookup import 근거경로_문장
 
     문장들: list[str] = []
@@ -278,7 +278,7 @@ def 근거경로들(근거행: list[dict], schema: dict) -> list[str]:
     for s in 문장들:
         if not any(s == t or f"{s} →" in f"{t} →" for t in 남김):
             남김.append(s)
-    return 남김
+    return 남김[:상한] if 상한 else 남김
 
 
 def 코드판정_문장맵(cur, 규범: dict) -> dict:

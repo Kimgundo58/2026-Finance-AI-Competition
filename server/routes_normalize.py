@@ -10,7 +10,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 
 from server import auth, response_cache
-from server._common import MOCK, _sse, _sse응답, 구키_추가, 온톨로지_사업, 클라이언트_ip
+from server._common import MOCK, _sse, _sse응답, 구키_추가, 비목_ENUM, 온톨로지_사업, 클라이언트_ip
 from server.catalog import _사업_비목, _사업명_표준화, _심층질문마스터
 from server.models import 정규화요청
 from server.rate_limit import 제한
@@ -119,7 +119,8 @@ def _온톨로지_정규화(body: 정규화요청) -> tuple[dict, bool] | None:
         cur = c.cursor()
         if not ontology_lookup.새경로_대상(cur, body.사업명):
             return None
-        레이블 = ontology_lookup.레이블_목록(cur, body.사업명)
+        # 제33조① 6호(전문기관장이 인정하는 비목)처럼 화면 10종에 없는 비목은 고를 칸이 없어 후보에서 뺀다
+        레이블 = [x for x in ontology_lookup.레이블_목록(cur, body.사업명) if x["비목"] in 비목_ENUM]
         폼 = not (body.질문 and body.질문.strip())
         용도 = body.용도 or ""
         if 폼 and body.추가설명:

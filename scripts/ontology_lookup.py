@@ -45,16 +45,20 @@ def _스키마() -> dict:
     return json.loads(_스키마_경로.read_text(encoding="utf-8"))
 
 
-def 노드_결정(cur, 표현: str, 사업: str | None) -> list[dict]:
-    """rule_lookup._norm 으로 정규화 → 별칭 정확 일치. 사업한정이 있으면 그것만, 없으면 공통. 없으면 빈 목록."""
+def _별칭_일치(cur, 표현: str, 사업: str | None) -> list[tuple]:
     키 = _norm(표현 or "")
     if not 키:
         return []
-    행들 = cur.execute(
+    return cur.execute(
         """SELECT c.concept_id, c.종류, c.pref_label, c.정의, c.적용사업, c.검수단계, l.적용사업 IS NULL AS 공통
              FROM corpus.concept_labels l JOIN corpus.concepts c USING (concept_id)
             WHERE l.정규화 = %s AND (l.적용사업 IS NULL OR l.적용사업 = %s)
             ORDER BY 공통, c.concept_id""", (키, 사업)).fetchall()
+
+
+def 노드_결정(cur, 표현: str, 사업: str | None) -> list[dict]:
+    """rule_lookup._norm 으로 정규화 → 별칭 정확 일치. 사업한정이 있으면 그것만, 없으면 공통. 없으면 빈 목록."""
+    행들 = _별칭_일치(cur, 표현, 사업)
     사업한정 = [r for r in 행들 if not r[6]]
     return [{"concept_id": r[0], "종류": r[1], "pref_label": r[2], "정의": r[3], "적용사업": r[4], "검수단계": r[5]}
             for r in (사업한정 or 행들)]
@@ -216,6 +220,10 @@ def 근거_조문(cur, 규범들: list[dict], 깊이: int = 3, 대상_id: str | 
             시작.setdefault(i, 출처)
 
     for n in 규범들:
+        if n.get("종류") == "우선순위":
+            # 제33조② 처럼 모든 비목의 준용을 나열한 조문에서 시작하면 다른 비목의 조까지 퍼진다.
+            # 그 조문은 대상 비목의 조(지침 제42조)를 dst 로 가질 때 경로 앞에 붙는다
+            continue
         for g in n.get("근거") or []:
             시작_넣기(g["doc_id"], g["조번호"], g["항호"], "규범근거")
     if 대상_id:
@@ -326,7 +334,8 @@ def 근거경로_문장(경로: list[str], schema: dict) -> str:
 def 레이블_목록(cur, 사업명: str | None) -> list[dict]:
     """질의 변환 · 분류 확인 화면에 쓰는 분류 목록 [{표시문, 비목, 세목, 별칭:[]}]. 내부 ID 를 넣지 않는다.
 
-    사업이 `사용` 관계로 쓰는 비목과 그 아래 세목만 낸다. 사업키를 모르면 빈 목록이다.
+    사업이 `사용` 관계로 쓰는 비목과 그 아래 세목만 낸다. `사용` 의 src 는 `사업:<사업키>` 이거나 그 사업에 적용되는
+    개념(절차:시제품제작@모두의창업 · 절차:창업활동자금@모두의창업)이다. 사업키를 모르면 빈 목록이다.
     """
     사업키 = next((k for k, v in (_스키마().get("사업키") or {}).items() if v == 사업명), None)
     if not 사업키:
@@ -335,8 +344,7 @@ def 레이블_목록(cur, 사업명: str | None) -> list[dict]:
     행들 = cur.execute(
         """SELECT b.concept_id, b.pref_label, NULL::text, NULL::text
              FROM corpus.concept_relations r JOIN corpus.concepts b ON b.concept_id = r.dst_id
-            WHERE r.관계 = '사용' AND r.src_id = %(사업id)s AND b.종류 = '비목'
-              AND (r.적용사업 IS NULL OR r.적용사업 = ANY(%(사업들)s))
+            WHERE r.관계 = '사용' AND b.종류 = '비목' AND (r.src_id = %(사업id)s OR r.적용사업 = ANY(%(사업들)s))
            UNION ALL
            SELECT s.concept_id, b.pref_label, s.pref_label, b.concept_id
              FROM corpus.concept_relations r
@@ -344,8 +352,7 @@ def 레이블_목록(cur, 사업명: str | None) -> list[dict]:
              JOIN corpus.concept_relations h ON h.관계 = '상위' AND h.dst_id = b.concept_id
                   AND (h.적용사업 IS NULL OR h.적용사업 = ANY(%(사업들)s))
              JOIN corpus.concepts s ON s.concept_id = h.src_id AND s.종류 = '세목'
-            WHERE r.관계 = '사용' AND r.src_id = %(사업id)s AND b.종류 = '비목'
-              AND (r.적용사업 IS NULL OR r.적용사업 = ANY(%(사업들)s))
+            WHERE r.관계 = '사용' AND b.종류 = '비목' AND (r.src_id = %(사업id)s OR r.적용사업 = ANY(%(사업들)s))
             ORDER BY 2, 3 NULLS FIRST""", {"사업id": f"사업:{사업키}", "사업들": 사업들}).fetchall()
     별칭: dict[str, list[str]] = {}
     for cid, 글 in cur.execute("""SELECT concept_id, alt_label FROM corpus.concept_labels
@@ -357,12 +364,15 @@ def 레이블_목록(cur, 사업명: str | None) -> list[dict]:
 
 
 def 별칭_후보(cur, 표현: str | None, 사업명: str | None, 레이블: list[dict]) -> list[dict]:
-    """품목 표현의 별칭 정확 일치 → 그 노드(품목이면 가장 가까운 상위 세목 · 비목)의 분류 후보. 없으면 빈 목록."""
+    """품목 표현의 별칭 정확 일치 → 그 노드(품목이면 가장 가까운 상위 세목 · 비목)의 분류 후보. 없으면 빈 목록.
+
+    사업 한정과 공통이 같은 이름이면(외주용역비: 창업활동자금 세목과 공통 비목) 둘 다 후보로 내고 사용자가 고른다.
+    """
     표 = {x["노드"]: x for x in 레이블}
     사업들 = [사업명] if 사업명 else []
     out: list[dict] = []
-    for 행 in 노드_결정(cur, 표현 or "", 사업명):
-        차례 = [행["concept_id"], *(p for _, p in _상위_경로(cur, 행["concept_id"], 사업들))]
+    for 행 in _별칭_일치(cur, 표현 or "", 사업명):
+        차례 = [행[0], *(p for _, p in _상위_경로(cur, 행[0], 사업들))]
         x = next((표[i] for i in 차례 if i in 표), None)
         if x and all(o["표시문"] != x["표시문"] for o in out):
             out.append({"비목": x["비목"], "세목": x["세목"], "표시문": x["표시문"], "신뢰도": 1.0})
@@ -388,6 +398,18 @@ def 대상_노드(cur, 사업명: str | None, 비목: str, 세목: str | None = 
     if 행 is None:
         raise LookupError(f"{비목} 아래에 없는 세목: {세목}")
     return {"대상_id": 행[0], "비목_id": 비목_id, "표시문": f"{비목} > {세목}", "비목": 비목, "세목": 세목}
+
+
+def 품목_노드(cur, 사업명: str | None, 표현: str | None, 확정_id: str) -> str | None:
+    """품목 표현이 별칭과 정확히 일치하고 사용자가 확정한 노드 아래에 있으면 그 품목 노드(5-6 ① 노드 결정).
+
+    확정 노드 밖의 일치는 쓰지 않는다. 금지 일치가 잘못된 불가가 되면 안 되므로 유사 일치도 하지 않는다.
+    """
+    사업들 = [사업명] if 사업명 else []
+    for 행 in 노드_결정(cur, 표현 or "", 사업명):
+        if 행["종류"] == "품목" and 확정_id in {p for _, p in _상위_경로(cur, 행["concept_id"], 사업들)}:
+            return 행["concept_id"]
+    return None
 
 
 def 하위_제약_있음(cur, 사업명: str | None, 대상_id: str) -> bool:

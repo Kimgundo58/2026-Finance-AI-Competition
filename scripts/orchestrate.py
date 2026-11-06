@@ -58,7 +58,7 @@ _decisions_컬럼: tuple[str, ...] = (
     "org_id", "account_id", "사업명", "기관id", "질문원문", "plan_id", "정규화", "비목", "금액", "판정",
     "신뢰등급", "요약", "규정버전", "인용", "해야할일", "전제", "참조관계", "미매핑전제",
     "검증사유", "검증코드", "처리단계", "실패단계", "지연ms", "모델", "검색스냅샷", "코퍼스버전",
-    "사용자답변", "경로",
+    "사용자답변", "경로", "온톨로지결과",
 )
 
 
@@ -208,7 +208,10 @@ def _decisions_행(상태: _판정상태, 응답: dict) -> dict:
         # 충족답·근거조문까지 남긴다. 나중에 질문을 감사할 수 있어야 한다. 화면에는 질문문·답만 나간다
         사용자답변=json.dumps(상태.사용자답변, ensure_ascii=False, default=str),
         코퍼스버전=코퍼스버전(상태.cur),
-        경로="온톨로지" if 상태.새경로 else "옛")
+        경로="온톨로지" if 상태.새경로 else "옛",
+        # 계획을 다시 열 때 결과 화면에 그대로 보여 줄 값(server/routes_plans.py _live_상세)
+        온톨로지결과=json.dumps({k: 응답.get(k) for k in ("분류", "근거경로", "코드판정", "조건", "용어풀이")},
+                          ensure_ascii=False, default=str) if 상태.새경로 else None)
 
 
 def decisions_저장(cur, 행: dict) -> int | None:
@@ -646,17 +649,23 @@ def 게이트_입력(금액, 부가세구분: str | None, 추가입력값: dict 
     return {"금액": 금액, "부가세구분": 부가세구분 or "모름", **값}
 
 
-def 온톨로지_조회(cur, 사업명: str | None, 비목: str, 세목: str | None, 입력: dict, *, 확정: bool) -> dict:
-    """대상 노드 → 적용 규범 → 근거 조문 → 코드 게이트. 판정과 질문 생성이 같은 값을 쓴다. 조회 오류는 그대로 올린다."""
+def 온톨로지_조회(cur, 사업명: str | None, 비목: str, 세목: str | None, 입력: dict, *, 확정: bool,
+              품목: str | None = None) -> dict:
+    """대상 노드 → 적용 규범 → 근거 조문 → 코드 게이트. 판정과 질문 생성이 같은 값을 쓴다. 조회 오류는 그대로 올린다.
+
+    품목 표현이 확정 노드 아래 품목과 정확히 일치하면 그 품목을 시작 노드로 삼는다(품목 금지 · 상위 규범 상속).
+    """
     대상 = ontology_lookup.대상_노드(cur, 사업명, 비목, 세목)
-    적용 = ontology_lookup.적용_규범(cur, 사업명, 대상["대상_id"])
-    근거행 = ontology_lookup.근거_조문(cur, 적용["규범"], 3, 대상["대상_id"], 사업=사업명)
+    품목_id = ontology_lookup.품목_노드(cur, 사업명, 품목, 대상["대상_id"]) if 확정 else None
+    시작 = 품목_id or 대상["대상_id"]
+    적용 = ontology_lookup.적용_규범(cur, 사업명, 시작)
+    근거행 = ontology_lookup.근거_조문(cur, 적용["규범"], 3, 시작, 사업=사업명)
     실효 = [n for n in 적용["규범"] if n["종류"] != "우선순위"]
     위임만 = not 실효 and ontology_lookup.위임_있음(근거행)
-    세목미정 = 확정 and not 세목 and ontology_lookup.하위_제약_있음(cur, 사업명, 대상["대상_id"])
+    세목미정 = 확정 and not 세목 and not 품목_id and ontology_lookup.하위_제약_있음(cur, 사업명, 대상["대상_id"])
     게이트결과 = ontology_gate.게이트(적용["규범"], 입력, 확정=확정, 세목표시=세목,
                               우선순위_적용=적용["우선순위_적용"], 위임만=위임만, 세목미정=세목미정)
-    노드들 = {대상["대상_id"], *(p for _, p in 적용["경로"]), ontology_lookup.모든비목}
+    노드들 = {시작, *(p for _, p in 적용["경로"]), ontology_lookup.모든비목}
     return {"대상": 대상, "적용": 적용, "근거행": 근거행, "게이트": 게이트결과, "노드들": 노드들}
 
 
@@ -689,7 +698,12 @@ def _온톨로지단계(상태: _판정상태) -> dict | None:
     상태.비목 = 비목
     입력 = 게이트_입력(상태.정규화결과.get("금액"), 상태.부가세구분, 상태.추가입력값)
     if 비목:
-        상태.온톨로지 = 온톨로지_조회(상태.cur, 상태.사업명, 비목, 세목, 입력, 확정=확정)
+        try:
+            상태.온톨로지 = 온톨로지_조회(상태.cur, 상태.사업명, 비목, 세목, 입력, 확정=확정,
+                                      품목=상태.정규화결과.get("품목"))
+        except LookupError as e:
+            return _실패응답(상태, "온톨로지", "고른 분류를 규정에서 찾지 못해 판정을 내리지 않았습니다. 분류를 다시 골라 주세요.",
+                          f"온톨로지 조회 실패: {e}")
         상태.게이트결과 = 상태.온톨로지["게이트"]
     else:
         상태.게이트결과 = ontology_gate.게이트([], 입력, 확정=False)
@@ -807,7 +821,7 @@ def _새_프롬프트단계(상태: _판정상태) -> dict | None:
                    프롬프트길이=len(상태.프롬프트), 문장맵_크기=len(상태.문장맵),
                    문장맵={k: list(v) for k, v in 상태.문장맵.items()},
                    b4=bool(b4), b1=len(상태.l3본문), 참조확장사용=상태.참조확장_사용, 경로="온톨로지",
-                   근거경로=ontology_context.근거경로들(상태.온톨로지["근거행"], ontology_lookup._스키마()),
+                   근거경로=ontology_context.근거경로들(상태.온톨로지["근거행"], ontology_lookup._스키마(), 상한=None),
                    조건=상태.게이트결과.get("조건") or [], 분류=_표시_분류(대상),
                    문맥요약={k: 상태.문맥[k] for k in ("항목수", "글자수", "빠진수", "온톨로지항목수")},
                    지연ms=상태.지연_총(), 모델={"호출수": 0})
@@ -818,9 +832,26 @@ def _새_프롬프트단계(상태: _판정상태) -> dict | None:
 _시점_구분 = {"집행 전": "결제전", "집행전": "결제전", "기한": "결제전", "집행 후": "결제후", "집행후": "결제후"}
 
 
-def _조건_할일(조건들: list[dict]) -> list[dict]:
+def _증빙_안내(cur, 조건들: list[dict]) -> dict[str, str]:
+    """의무의 증빙 노드 → 「세금계산서: 국세청 홈택스」 형식 설명. 발급처를 아는 증빙만 적는다.
+
+    증빙 목록은 택일(세금계산서 또는 카드 영수증)을 담지 못해 할일을 증빙별로 나누지 않는다. 필수 여부는 의무 문장이 말한다.
+    """
+    ids = sorted({i for c in 조건들 for i in c.get("증빙") or []})
+    if not ids:
+        return {}
+    발급처 = dict(cur.execute(
+        """SELECT c.concept_id, c.pref_label || ': ' || e."발급처"
+             FROM corpus.concepts c JOIN corpus.evidence_sources e ON e."증빙명" = c.pref_label
+            WHERE c.concept_id = ANY(%s) AND e."발급처" IS NOT NULL""", (ids,)).fetchall())
+    return {c["문장"]: " · ".join(발급처[i] for i in c.get("증빙") or [] if i in 발급처)
+            for c in 조건들 if any(i in 발급처 for i in c.get("증빙") or [])}
+
+
+def _조건_할일(조건들: list[dict], 증빙안내: dict[str, str] | None = None) -> list[dict]:
     """코드 게이트의 조건 → 해야할일 항목. check_items code 가 없어 코드 추정을 막는다(_모름_할일 과 같다)."""
-    return [{"항목": c["문장"], "설명": None, "구분": _시점_구분.get(c.get("시점") or "", "결제전"), "코드추정_제외": True}
+    return [{"항목": c["문장"], "설명": (증빙안내 or {}).get(c["문장"]),
+             "구분": _시점_구분.get(c.get("시점") or "", "결제전"), "코드추정_제외": True}
             for c in 조건들 if c.get("구분") in ("의무", "금지조건", "한도예외", "위임", "두기준", "미확정규범")]
 
 
@@ -843,7 +874,7 @@ def _새_검증단계(상태: _판정상태, 사용자프로필값: dict | None)
         사유.append("코드 결과(의무 · 입력 비움 · 미확정 규범 · 위임) → '가능' 을 조건부로 하향")
         상태.처리단계.append("코드상한")
     조건 = g.get("조건") or []
-    할일 = _조건_할일(조건) if 응답.get("판정") != "불가" else []
+    할일 = _조건_할일(조건, _증빙_안내(상태.cur, 조건)) if 응답.get("판정") != "불가" else []
     응답["해야할일"] = [*(응답.get("해야할일") or []), *할일, *_모름_할일(상태.사용자답변)]
     코드 = 응답.get("검증코드") or []
     상태._지연기록("검증", t)
