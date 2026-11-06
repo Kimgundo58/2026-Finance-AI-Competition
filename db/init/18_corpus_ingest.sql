@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS corpus.ingest_jobs (
     version       TEXT NOT NULL,
     적용대상      TEXT NOT NULL DEFAULT '공통' CHECK (적용대상 IN ('주관기관','창업기업','공통')),
     원본파일명    TEXT NOT NULL,
-    파일형식      TEXT NOT NULL CHECK (파일형식 IN ('pdf','hwp','hwpx','docx','xml')),
+    파일형식      TEXT NOT NULL CHECK (파일형식 IN ('pdf','hwp','hwpx','docx','xml','html')),
     저장경로      TEXT,                             -- 파싱이 끝나면 NULL (원본은 지운다)
     상태          TEXT NOT NULL DEFAULT 'parsing' CHECK (상태 IN ('parsing','done','failed')),
     실패사유      TEXT,

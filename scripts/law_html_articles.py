@@ -5,9 +5,10 @@
 OPEN API(DRF)는 신청자 이메일 ID(OC)를 보내야 해서, 현행 판 정렬(P0-7)은 공개 본문 페이지를 원본으로 삼는다.
 결과 JSON 은 scripts/corpus_restored_load.py 의 입력이다. 형식은 text_extract.extract_xml 과 같다:
 조번호 "제N조" · "제N조의M", 조제목, 본문(줄 나눔은 항 · 호 · 목). 부칙은 넣지 않는다(XML 경로와 같다).
-별표는 --옛판-별표 로 넘긴 옛 판 본문과 개정 표기가 같으면 옛 본문을 쓰고, 다르면 --별표-글 파일의 글을 쓴다.
+이 스크립트는 조만 만든다. 별표와 메타(대조 · 확인)는 ontology/수집/조문/*.json 에 손으로 붙인 것이라 다시 만들 수 없다.
+그래서 --out 이 이미 있으면 덮어쓰지 않고 멈춘다. 새 판을 받으면 다른 경로에 만들어 기존 JSON 과 비교한다.
 
-실행: PYTHONIOENCODING=utf-8 python scripts/law_html_articles.py --html <본문.html> --out <조문.json> [--대조 <옛 doc_id>]
+실행: PYTHONIOENCODING=utf-8 python scripts/law_html_articles.py --html <본문.html> --out <새 경로.json> [--대조 <옛 doc_id>]
 받은 파일은 데이터로만 읽는다.
 """
 from __future__ import annotations
@@ -136,6 +137,9 @@ def main() -> int:
     ap.add_argument("--out", required=True)
     ap.add_argument("--대조", help="옛 판 doc_id (DB 읽기)")
     a = ap.parse_args()
+    if Path(a.out).exists():
+        print(f"{a.out} 이 이미 있다. 별표 · 메타를 손으로 붙인 파일일 수 있어 덮어쓰지 않는다. 다른 경로를 쓴다.", file=sys.stderr)
+        return 2
     s = Path(a.html).read_text(encoding="utf-8")
     조문, 체크 = 조문_읽기(s)
     if len(조문) != 체크:
