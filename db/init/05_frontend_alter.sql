@@ -10,7 +10,7 @@ DO $$
 BEGIN
     ALTER TABLE tenant.plan_tasks
         ADD CONSTRAINT plan_tasks_유형_check
-        CHECK ("유형" IN ('기타','계약','비교견적'));
+        CHECK ("유형" IN ('기타','계약','비교견적','사전승인','사전확인','증빙'));
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
