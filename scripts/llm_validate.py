@@ -85,6 +85,8 @@ def 프로필_경로집합(*, conn=None) -> set[str]:
 
 _항마커 = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳"
 _RE_조 = re.compile(r"제\d+조")
+# 다음 장 표제가 앞 조 본문 끝에 붙어 있는 문서가 있다(bm25_index._장_매핑 이 이 표제로 장을 읽는다). 인용 원문에서만 뗀다.
+_RE_끝_장표제 = re.compile(r"\n\s*제\s*\d+\s*장[^\n]{0,40}\s*$")
 
 
 def _항_추출(본문: str, 항호: str | None) -> tuple[str, str]:
@@ -246,6 +248,7 @@ def _메타_행(종류: str, 행: tuple, 항호: str | None) -> dict:
     """
     _, doc, 조, 제목, h, ver, ex, 본문, 기관, dom, lay, 파일명 = 행
     원문, 범위 = _항_추출(본문 or "", 항호)
+    원문 = _RE_끝_장표제.sub("", 원문)
     if 종류 == "l3":
         return dict(doc_id=_l3표시명(파일명) or doc, 조번호=_조번호_표시(조), 조제목=제목,
                     원문=원문, 원문범위=범위, version=ver, extraction=ex, 항호_DB=None,
@@ -356,7 +359,8 @@ def _인용_검증(llm출력: dict, 문장맵: dict, 메타: dict[str, dict], �
         인용계층.append(m.get("layer") or ("L3" if 종류 == "l3" else "?"))
         인용목록.append(인용(문장ID=s, doc_id=m.get("doc_id"), 조번호=m.get("조번호"),
                           조제목=m.get("조제목"),
-                          항호=항호[1:].replace("/", " ") if (항호 or "").startswith("/") else 항호,
+                          # 문장맵 키의 `#2` · `항1~①` 은 내부 위치 표기다. 화면에는 항 기호만 낸다. `_항_추출` 은 문장맵 값을 그대로 쓴다.
+                          항호=항호[1:].replace("/", " ") if (항호 or "").startswith("/") else _항호_표시(항호),
                           원문=m.get("원문"), 원문범위=m.get("원문범위"),
                           version=m.get("version"), extraction=m.get("extraction")))
     return 인용목록, 인용계층, 유출
