@@ -23,8 +23,9 @@ _log = logging.getLogger(__name__)
 
 # 검증코드의 기준 목록. tenant.decisions 의 decisions_검증코드_check 와 같은 순서·같은 집합이어야 한다.
 # 여기 없는 코드는 _검증기록 이 거부하고, CHECK 에 없는 코드는 INSERT 가 거부된다.
-# 판정 하향 코드뿐 아니라 경고(DANGLING_WARN·DOMAIN_WARN·CITE_PARAGRAPH_MISMATCH)와
-# 완화(PRECEDENCE_OVERRIDE: 불가→조건부)도 들어간다.
+# 판정 하향 코드뿐 아니라 경고(DANGLING_WARN·DOMAIN_WARN·CITE_PARAGRAPH_MISMATCH)도 들어간다.
+# PRECEDENCE_OVERRIDE 는 코드가 판정을 올리던 경로라 없앴다(2026-11-06 결정). 저장된 행과 CHECK 에 남아 있어 목록에서 빼지 않는다.
+# ONTOLOGY_BAN · LIMIT_EXCEEDED · VAT_BASIS_UNKNOWN 은 온톨로지 경로의 코드 판정이 붙인다(scripts/ontology_gate.py).
 # TASK_ 로 시작하는 다음 4종(TASK_STATE_UNSOURCED, TASK_STATE_MISMATCH, TASK_NUMBER_UNSOURCED, TASK_BASIS_NOT_IN_MAP)은
 # 자유서술 해야할일 검사를 없앤 뒤로 내보내지 않는다. 저장된 행과 CHECK 에 남아 있어 목록에서 빼지 않는다.
 검증코드_전체: tuple[str, ...] = (
@@ -35,6 +36,7 @@ _log = logging.getLogger(__name__)
     "TENANT_LEAK", "DANGLING_WARN", "DOMAIN_WARN", "PRECEDENCE_OVERRIDE",
     "TASK_STATE_UNSOURCED", "TASK_STATE_MISMATCH", "TASK_NUMBER_UNSOURCED",
     "TASK_BASIS_NOT_IN_MAP", "ANSWER_UNCONFIRMED",
+    "ONTOLOGY_BAN", "LIMIT_EXCEEDED", "VAT_BASIS_UNKNOWN",
 )
 
 # 하향으로 판정이 LLM 의 판정과 달라졌을 때 LLM 요약 대신 쓰는 문장. LLM 요약은 LLM 이 낸
@@ -416,12 +418,12 @@ def _신뢰등급(인용목록: list[인용], 미해결참조: Optional[list], �
 
 
 def _판정_하향(판정: str, 신뢰등급: Optional[str], 인용목록: list[인용], 인용계층: list[str],
-            룰들: Optional[list[dict]], 룰: Optional[dict],
+            룰들: Optional[list[dict]],
             검증기록: _검증기록, *, 사용자답변: Optional[list[dict]] = None,
             답변유실: bool = False) -> tuple[str, Optional[str]]:
     """룰 검수 상태·신뢰등급·인용 계층·사용자 답변으로 판정을 하향한다. 반환 (판정, 신뢰등급).
 
-    순서는 UNVERIFIED_RULE → B_GRADE_DOWNGRADE → L3_ONLY_DOWNGRADE → PRECEDENCE_OVERRIDE → ANSWER_UNCONFIRMED 이다.
+    순서는 UNVERIFIED_RULE → B_GRADE_DOWNGRADE → L3_ONLY_DOWNGRADE → ANSWER_UNCONFIRMED 이다.
     어느 단계도 판정을 불가나 가능으로 올리지 않는다.
     """
     # corpus.rules.verified=false 인 룰만으로는 '가능' 을 내지 않는다
@@ -439,19 +441,6 @@ def _판정_하향(판정: str, 신뢰등급: Optional[str], 인용목록: list[
         판정 = "조건부"
         if 신뢰등급 == "A":
             신뢰등급 = "B"
-    # 여러 사업이 적용범위 조에서 L2 가 L3 에 우선한다고 정한다. L3 단독 근거의 '불가' 가 우선 규정의
-    # 결론과 다르면 바꾸되, L1·L2 인용이 없으므로 '조건부' 까지만 올린다.
-    # 적용계층은 'L1+L2' 같은 결합값일 수 있어 리스트인 적용계층_목록 을 우선 본다.
-    # L3 가 병합에 들어간 사업(적용계층_목록 에 L3 포함)은 L3 가 우선 규정의 일부라 바꾸지 않는다.
-    # 이 경우 룰.허용 은 한도 비교 전 값이라, L3 한도를 넘어 나온 '불가' 를 조건부로 되돌리게 된다.
-    반영계층 = list((룰 or {}).get("적용계층_목록") or
-                 str((룰 or {}).get("적용계층") or "").split("+"))
-    if (판정 == "불가" and 인용계층 and all(x == "L3" for x in 인용계층)
-            and any(x in ("L1", "L2") for x in 반영계층) and "L3" not in 반영계층
-            and (룰 or {}).get("허용") in ("가능", "조건부")):
-        검증기록("PRECEDENCE_OVERRIDE",
-            f"L3 단독 '불가' 인데 우선 규정이 {'+'.join(반영계층)}({룰.get('허용')}) → 조건부로 전환")
-        판정 = "조건부"
     # 요건을 충족하는 답이 아니거나(「아니오」·「모름」) 답변을 읽지 못했으면 '가능' 을 내지 않는다.
     # 충족하는 답은 사용자 진술일 뿐이라 판정을 올리지 않는다
     미확인 = sum(a.get("답") != a.get("충족답") for a in 사용자답변 or [])
@@ -503,7 +492,6 @@ def 검증(llm출력: dict, 문장맵: dict, *,
          현재기관: Optional[str] = None,
          사업명: Optional[str] = None,
          미해결참조: Optional[list] = None,
-         룰: Optional[dict] = None,
          org_id=None,
          conn=None,
          사용자답변: Optional[list[dict]] = None,
@@ -512,7 +500,7 @@ def 검증(llm출력: dict, 문장맵: dict, *,
 
     반환 dict 는 최종응답 필드에 `검증코드` 가 더해진 형태다. 판정이 하향되면 요약은 _하향_요약 고정 문구로
     바뀐다. `메타`·`프로필경로`·`체크항목` 을 주지 않으면 `conn`(없으면 새 커넥션)으로 DB 에서 읽는다.
-    `룰들`·`룰` 은 B4 에 들어간 effective_rule 결과, `체크코드` 는 해야할일 code 허용 목록이다.
+    `룰들` 은 B4 에 들어간 effective_rule 결과, `체크코드` 는 해야할일 code 허용 목록이다.
     `현재기관` 과 다른 기관id 를 가진 인용은 버리고 tenant.incidents 에 기록한다(부수 효과).
     `사용자답변`·`답변유실` 은 확인 질문 결과다. 요건을 충족하는 답이 아니면 '가능' 을 조건부로 낮춘다.
     """
@@ -538,7 +526,7 @@ def 검증(llm출력: dict, 문장맵: dict, *,
         검증기록("NO_CITATION", "인용 0건인데 판정이 판단불가가 아니다 → 판단불가")
         판정 = "판단불가"
     신뢰등급 = _신뢰등급(인용목록, 미해결참조, 검증기록)
-    판정, 신뢰등급 = _판정_하향(판정, 신뢰등급, 인용목록, 인용계층, 룰들, 룰, 검증기록,
+    판정, 신뢰등급 = _판정_하향(판정, 신뢰등급, 인용목록, 인용계층, 룰들, 검증기록,
                          사용자답변=사용자답변, 답변유실=답변유실)
     해야할일 = _해야할일(llm출력, set(체크코드 or ()), 체크항목, 검증기록)
 

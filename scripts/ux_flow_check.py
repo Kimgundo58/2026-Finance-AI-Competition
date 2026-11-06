@@ -465,7 +465,7 @@ def _점검(결과: 점검결과) -> None:
         기록 = llm_validate._검증기록()
         인용들 = [인용(문장ID="S01", extraction=메타.get("S01", {}).get("extraction"))]
         등급 = llm_validate._신뢰등급(인용들, None, 기록)
-        하향, _ = llm_validate._판정_하향("가능", 등급, 인용들, ["L1", "L3"], None, None, 기록)
+        하향, _ = llm_validate._판정_하향("가능", 등급, 인용들, ["L1", "L3"], None, 기록)
         결과.기록("16 OCR 설정 시 스캔본 → OCR 로 '완료'(warn·ocr) · 판정이 읽음 · 인용한 '가능' 은 조건부",
                ocr_상태.get("상태") == "완료" and ocr_상태.get("조_건수") == 픽스처_조_건수
                and ocr_상태.get("파싱품질") == "warn" and ocr_상태.get("추출방식") == "ocr"
