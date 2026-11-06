@@ -198,7 +198,7 @@ def 복원본_읽기(폴더: Path) -> dict[str, str]:
     for md in sorted((Path(폴더) / "추출").rglob("입력_원문.md")):
         현재: str | None = None
         for 줄 in md.read_text(encoding="utf-8").splitlines():
-            m = re.match(r"^###\s+(조:\S+)", 줄)
+            m = re.match(r"^###\s+(조:\S.*?)\s*$", 줄)   # `조:지침#부칙 제1조` 처럼 ID 안에 공백이 있다
             if m:
                 현재 = m.group(1)
                 out.setdefault(현재, "")
@@ -1072,7 +1072,29 @@ def _자체시험() -> int:
         실패수 += 1
         print(f"실패: --no-db 동작: {결과.오류} / {결과.건너뜀}")
 
-    전체 = len(사례) + 3
+    # 부칙: DB 조번호가 `부칙 제1조` 또는 `부칙` 이다(5-8b 조문 ID = 조번호 + 항호)
+    부칙_사례 = {"조:지침#부칙 제1조": ("부칙 제1조", None), "조:지침#부칙 제2조①": ("부칙 제2조", "①"),
+             "조:팁스#부칙": ("부칙", None), "조:지침#제36조①": ("제36조", "①"), "조:지침#별지2/가/나": ("별지2", "/가/나")}
+    틀림 = {k: 조문ID_풀이(k) for k, v in 부칙_사례.items()
+          if (조문ID_풀이(k)["조번호"], 조문ID_풀이(k)["항호"]) != v}
+    if not 틀림:
+        print("통과: 부칙 조문 ID 는 부칙 제N조 · 부칙 둘 다 조번호로 풀린다")
+    else:
+        실패수 += 1
+        print(f"실패: 부칙 조문 ID 풀이: {틀림}")
+
+    with tempfile.TemporaryDirectory() as 임시:
+        md = Path(임시) / "추출" / "묶음" / "입력_원문.md"
+        md.parent.mkdir(parents=True)
+        md.write_text("### 조:지침#부칙 제1조\n<!-- 부칙 제1조 -->\n첫째 부칙\n\n### 조:지침#부칙 제2조\n둘째 부칙\n", encoding="utf-8")
+        복원 = 복원본_읽기(Path(임시))
+    if "첫째" in 복원.get("조:지침#부칙 제1조", "") and "둘째" in 복원.get("조:지침#부칙 제2조", "") and "조:지침#부칙" not in 복원:
+        print("통과: 복원본은 공백 있는 조문 ID 를 끊지 않는다")
+    else:
+        실패수 += 1
+        print(f"실패: 복원본 부칙 블록: {복원}")
+
+    전체 = len(사례) + 5
     print(f"selftest: {전체 - 실패수}/{전체} 통과")
     return 1 if 실패수 else 0
 

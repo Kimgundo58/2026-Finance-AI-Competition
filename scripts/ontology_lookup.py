@@ -7,6 +7,7 @@ L3 는 여기서 다루지 않는다. 읽는 테이블: corpus.concepts · conce
 documents · doc_articles.
 
     python scripts/ontology_lookup.py --cq-test ontology/테스트/능력질문.json     # 전부 일치해야 0 으로 끝난다(DB 필요)
+    python scripts/ontology_lookup.py --self-test   # 조문 ID 풀이 · 근거 경로 문장 · 조 단위 식(식은 DB 필요, 없으면 건너뜀)
 """
 from __future__ import annotations
 
@@ -35,8 +36,8 @@ from rule_lookup import _norm  # noqa: E402
 _스키마_경로 = ROOT / "ontology" / "schema.json"
 
 # 조문 ID 에서 항 · 호 · 표 · 별지 행을 뗀 조 단위 ID. 조 전체를 준용한 관계가 그 조의 항에도 걸리게 한다.
-_조단위_식 = (r"regexp_replace({0}, '^(조:[^#]+#(?:제[0-9]+조(?:의[0-9]+)?|(?:별지|별표|붙임|부칙)\s*[0-9]*"
-             r"|(?:참고[0-9]+-)?p[0-9]+-[0-9]+)).*$', '\1')")
+_조단위_식 = (r"regexp_replace({0}, '^(조:[^#]+#(?:제[0-9]+조(?:의[0-9]+)?|(?:별지|별표|붙임)\s*[0-9]*"
+             r"|부칙(?:\s*제[0-9]+조(?:의[0-9]+)?)?|(?:참고[0-9]+-)?p[0-9]+-[0-9]+)).*$', '\1')")
 
 
 @functools.lru_cache(maxsize=1)
@@ -527,10 +528,46 @@ def CQ_시험(cur, 파일: Path | str, schema: dict | None = None) -> int:
     return 틀림수
 
 
+def _자체시험() -> int:
+    표 = {"문서 표시명": {"지침": "지침", "모두의창업": "모두의 창업"}}
+    t: list[tuple[str, bool]] = []
+    t.append(("부칙 제1조 ID 왕복",
+              _조문ID_만들기("문서", "부칙 제1조", None, {"문서": "지침"}) == "조:지침#부칙 제1조"
+              and 조문ID_풀이("조:지침#부칙 제1조")["조번호"] == "부칙 제1조"))
+    t.append(("근거 경로에 부칙 제1조로 읽힌다",
+              근거경로_문장(["조:지침#부칙 제2조", "미특정:사업별 세부관리기준"], 표) == "지침 부칙 제2조 → 사업별 세부관리기준"))
+    t.append(("근거 경로: 부칙만 있는 조, 항까지 있는 부칙",
+              근거경로_문장(["조:모두의창업#부칙", "조:지침#부칙 제1조①"], 표) == "모두의 창업 부칙 → 지침 부칙 제1조①"))
+    # 조 단위 식은 SQL 이라 Postgres 로 돌린다. 테이블은 읽지 않는다
+    사례 = {"조:지침#부칙 제1조": "조:지침#부칙 제1조", "조:지침#부칙 제2조①": "조:지침#부칙 제2조",
+          "조:지침#부칙 제1조의2①": "조:지침#부칙 제1조의2", "조:팁스#부칙": "조:팁스#부칙",
+          "조:지침#제36조①": "조:지침#제36조", "조:지침#제29조의2②": "조:지침#제29조의2",
+          "조:모두의창업#별지2/지급수수료/정의": "조:모두의창업#별지2", "조:안내책자#참고2-p29-1": "조:안내책자#참고2-p29-1"}
+    try:
+        from _lib import db
+        with db.connect(connect_timeout=3, autocommit=True) as conn:
+            식 = _조단위_식.format("%s::text")
+            실제 = {k: conn.execute(f"SELECT {식}", (k,)).fetchone()[0] for k in 사례}
+        for k, v in 사례.items():
+            t.append((f"조 단위 식 {k} → {v}", 실제[k] == v))
+    except Exception as e:  # noqa: BLE001 - CI 에는 DB 가 없다
+        print(f"건너뜀: 조 단위 식(DB 없음: {type(e).__name__})")
+    실패 = [x for x, ok in t if not ok]
+    for x, ok in t:
+        print("ok  " if ok else "FAIL", x)
+    print(f"selftest: {len(t) - len(실패)}/{len(t)} 통과")
+    return 1 if 실패 else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="온톨로지 조회 · 능력 질문 테스트")
-    p.add_argument("--cq-test", required=True, help="능력 질문 JSON 경로")
+    p.add_argument("--cq-test", help="능력 질문 JSON 경로")
+    p.add_argument("--self-test", action="store_true")
     a = p.parse_args(argv)
+    if a.self_test:
+        return _자체시험()
+    if not a.cq_test:
+        p.error("--cq-test 또는 --self-test 가 필요하다")
     from _lib import db
     with db.connect(autocommit=True) as conn:
         with conn.cursor() as cur:
