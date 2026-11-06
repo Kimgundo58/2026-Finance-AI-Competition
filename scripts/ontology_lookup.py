@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """온톨로지 조회 함수(읽기 전용, docs/5_룰/5-8_저장과_조회.md). 판정 · 질문 생성의 새 경로가 쓴다.
 
-노드_결정 · 적용_규범 · 근거_조문 · 새경로_대상 · 근거경로_문장. 쓰지 않는다. 어떤 예외도 호출자에게 그대로 올린다
+노드_결정 · 품목_노드 · 경로밖_품목 · 경로밖_규범 · 세목_한도_있음 · 적용_규범 · 근거_조문 · 새경로_대상 · 근거경로_문장. 쓰지 않는다. 어떤 예외도 호출자에게 그대로 올린다
 (호출자 orchestrate 가 판단불가로 바꾼다). 없는 노드 ID 는 LookupError 다.
 L3 는 여기서 다루지 않는다. 읽는 테이블: corpus.concepts · concept_labels · concept_relations · norms · provenance ·
 documents · doc_articles.
@@ -59,11 +59,12 @@ def _별칭_일치(cur, 표현: str, 사업: str | None) -> list[tuple]:
 
 
 def 노드_결정(cur, 표현: str, 사업: str | None) -> list[dict]:
-    """rule_lookup._norm 으로 정규화 → 별칭 정확 일치. 사업한정이 있으면 그것만, 없으면 공통. 없으면 빈 목록."""
-    행들 = _별칭_일치(cur, 표현, 사업)
-    사업한정 = [r for r in 행들 if not r[6]]
+    """rule_lookup._norm 으로 정규화 → 별칭 정확 일치. 사업한정을 먼저, 공통을 뒤에 전부 돌려준다. 없으면 빈 목록.
+
+    사업한정이 공통을 가리면 재료비로 고른 귀금속이 공통 품목에 닿지 못한다. 어느 노드를 쓸지는 호출자가 확정 경로 안에서 고른다.
+    """
     return [{"concept_id": r[0], "종류": r[1], "pref_label": r[2], "정의": r[3], "적용사업": r[4], "검수단계": r[5]}
-            for r in (사업한정 or 행들)]
+            for r in _별칭_일치(cur, 표현, 사업)]
 
 
 def _상위_경로(cur, 대상_id: str, 사업들: list[str]) -> list[tuple[str, str]]:
@@ -204,6 +205,7 @@ def 근거_조문(cur, 규범들: list[dict], 깊이: int = 3, 대상_id: str | 
     반환 [{doc_id, 조번호, 항호, article_id, 깊이, 출처, 경로:[조문 ID...]}]. 출처는 규범근거 · 개념근거 · 준용 · 위임 ·
     준용_앞 · 위임_앞. 활성 문서에 없거나 조문을 특정하지 못한 대상은 article_id 가 None 이고 `건너뜀` 에 사유가 있다
     (호출자는 article_id 가 있는 행만 문맥에 넣는다). 경로에는 그대로 남는다.
+    확정 노드에서 시작한 행에는 `우선경로` · `경로순위`(0 = 대상 노드, 커질수록 상위)가 더 있다. 화면 "근거 경로" 가 먼저 쓴다.
     관계의 적용사업은 사업 또는 규범들의 적용사업으로 거른다. 둘 다 없으면 공통 관계만 본다.
     """
     schema = _스키마()
@@ -211,31 +213,46 @@ def 근거_조문(cur, 규범들: list[dict], 깊이: int = 3, 대상_id: str | 
     사업들 = sorted({n["적용사업"] for n in 규범들 if n.get("적용사업")} | ({사업} if 사업 else set()))
 
     시작: dict[str, str] = {}                       # 조문 ID → 출처
+    시작순위: dict[str, int] = {}                   # 조문 ID → 확정 노드에서 얼마나 가까운가. 공통(`비목:창업/*`)에서만 온 조문은 없다
     건너뛴_시작: list[dict] = []
 
-    def 시작_넣기(doc_id: str, 조번호: str, 항호: str | None, 출처: str) -> None:
+    def 시작_넣기(doc_id: str, 조번호: str, 항호: str | None, 출처: str, 순위: int | None) -> None:
         i = _조문ID_만들기(doc_id, 조번호, 항호, 키표)
         if i is None:
             건너뛴_시작.append({"doc_id": doc_id, "조번호": 조번호, "항호": 항호, "article_id": None, "깊이": 0,
                              "출처": 출처, "경로": [f"{doc_id}#{조번호}{항호 or ''}"], "건너뜀": "문서키 없음"})
-        else:
-            시작.setdefault(i, 출처)
+            return
+        시작.setdefault(i, 출처)
+        if 순위 is not None and 순위 < 시작순위.get(i, 순위 + 1):
+            시작순위[i] = 순위
+
+    사슬노드: list[str] = []
+    if 대상_id:
+        _노드_확인(cur, 대상_id)
+        사슬노드 = list(dict.fromkeys([대상_id, *(p for _, p in _상위_경로(cur, 대상_id, 사업들))]))
+    노드순위 = {v: i for i, v in enumerate(사슬노드)}
+
+    def 규범_순위(n: dict) -> int | None:
+        대상들 = n.get("대상") or []
+        가까움 = [노드순위[v] for v in 대상들 if v in 노드순위]
+        if 가까움:
+            return min(가까움)
+        return None if 모든비목 in 대상들 else len(사슬노드)     # 사슬 밖 대상(경로 밖 품목 규범)은 확정 노드 뒤, 공통 앞
 
     for n in 규범들:
         if n.get("종류") == "우선순위":
             # 제33조② 처럼 모든 비목의 준용을 나열한 조문에서 시작하면 다른 비목의 조까지 퍼진다.
             # 그 조문은 대상 비목의 조(지침 제42조)를 dst 로 가질 때 경로 앞에 붙는다
             continue
+        순위 = 규범_순위(n)
         for g in n.get("근거") or []:
-            시작_넣기(g["doc_id"], g["조번호"], g["항호"], "규범근거")
+            시작_넣기(g["doc_id"], g["조번호"], g["항호"], "규범근거", 순위)
     if 대상_id:
-        _노드_확인(cur, 대상_id)
-        노드들 = [대상_id, *{p for _, p in _상위_경로(cur, 대상_id, 사업들)}]
         for r in cur.execute(
-                """SELECT DISTINCT doc_id, 조번호, 항호 FROM corpus.provenance
+                """SELECT DISTINCT doc_id, 조번호, 항호, owner_id FROM corpus.provenance
                     WHERE owner_kind = '개념' AND owner_id = ANY(%s)
-                    ORDER BY doc_id, 조번호, 항호""", (노드들,)).fetchall():
-            시작_넣기(r[0], r[1], r[2], "개념근거")
+                    ORDER BY doc_id, 조번호, 항호, owner_id""", (사슬노드,)).fetchall():
+            시작_넣기(r[0], r[1], r[2], "개념근거", 노드순위[r[3]])
 
     시작목록 = sorted(시작)
     조단위_시작 = _조단위_식.format("시작.id")
@@ -281,31 +298,43 @@ def 근거_조문(cur, 규범들: list[dict], 깊이: int = 3, 대상_id: str | 
 
     결과: dict[str, dict] = {}
 
-    def 넣기(i: str, 깊이값: int, 출처: str, 경로: list[str]) -> None:
+    def 우선경로_적기(행: dict, 경로: list[str], 순위: int | None) -> None:
+        """확정 노드에서 시작한 경로 중 가장 가깝고 긴 것을 화면 "근거 경로" 용으로 남긴다. 공통 규범에서만 온 행에는 없다."""
+        if 순위 is None:
+            return
+        현재 = 행.get("경로순위")
+        if 현재 is None or 순위 < 현재 or (순위 == 현재 and len(경로) > len(행["우선경로"])):
+            행.update(경로순위=순위, 우선경로=경로)
+
+    def 넣기(i: str, 깊이값: int, 출처: str, 경로: list[str], 순위: int | None = None) -> None:
         if i in 결과:
             # 시작 조문이 사슬로도 닿으면 깊이 · 출처는 그대로 두고 화면 "근거 경로" 에 더 긴 경로를 쓴다
             if len(경로) > len(결과[i]["경로"]):
                 결과[i]["경로"] = 경로
+            우선경로_적기(결과[i], 경로, 순위)
             return
         v = 정보[i]
         행 = {"doc_id": v["doc_id"], "조번호": v["조번호"], "항호": v["항호"], "article_id": v["article_id"],
              "깊이": 깊이값, "출처": 출처, "경로": 경로}
         if v["건너뜀"]:
             행["건너뜀"] = v["건너뜀"]
+        우선경로_적기(행, 경로, 순위)
         결과[i] = 행
 
     for s in 시작목록:
-        넣기(s, 0, 시작[s], 앞_경로(s))
+        넣기(s, 0, 시작[s], 앞_경로(s), 시작순위.get(s))
     for src, 출처 in sorted(앞_출처.items()):
         넣기(src, 0, 출처, [src])
     끝: list[dict] = []
     for 시작id, dst, 관계, d, 경로 in 사슬:
         전체경로 = ([앞[시작id]] if 시작id in 앞 else []) + list(경로)
         if dst.startswith("조:"):
-            넣기(dst, d, 관계, 전체경로)
+            넣기(dst, d, 관계, 전체경로, 시작순위.get(시작id))
         else:                                       # 미특정 · 행위자(위임). 조문이 아니라 문맥에 넣지 못한다
-            끝.append({"doc_id": None, "조번호": None, "항호": None, "article_id": None, "깊이": d, "출처": 관계,
-                      "경로": 전체경로, "건너뜀": "조문 미특정" if dst.startswith("미특정") else "조문 아님"})
+            행 = {"doc_id": None, "조번호": None, "항호": None, "article_id": None, "깊이": d, "출처": 관계,
+                 "경로": 전체경로, "건너뜀": "조문 미특정" if dst.startswith("미특정") else "조문 아님"}
+            우선경로_적기(행, 전체경로, 시작순위.get(시작id))
+            끝.append(행)
     return [*건너뛴_시작, *결과.values(), *끝]
 
 
@@ -405,7 +434,7 @@ def 대상_노드(cur, 사업명: str | None, 비목: str, 세목: str | None = 
 def 품목_노드(cur, 사업명: str | None, 표현: str | None, 확정_id: str) -> str | None:
     """품목 표현이 별칭과 정확히 일치하고 사용자가 확정한 노드 아래에 있으면 그 품목 노드(5-6 ① 노드 결정).
 
-    확정 노드 밖의 일치는 쓰지 않는다. 금지 일치가 잘못된 불가가 되면 안 되므로 유사 일치도 하지 않는다.
+    확정 노드 밖의 일치는 시작 노드로 쓰지 않는다(`경로밖_품목`). 금지 일치가 잘못된 불가가 되면 안 되므로 유사 일치도 하지 않는다.
     """
     사업들 = [사업명] if 사업명 else []
     for 행 in 노드_결정(cur, 표현 or "", 사업명):
@@ -414,18 +443,43 @@ def 품목_노드(cur, 사업명: str | None, 표현: str | None, 확정_id: str
     return None
 
 
-def 하위_제약_있음(cur, 사업명: str | None, 대상_id: str) -> bool:
-    """대상 아래 노드에 금지 · 한도 · 임계값 규범이 있나. 비목만 확정했을 때 세목을 고르라고 알리는 데 쓴다."""
+def 경로밖_품목(cur, 사업명: str | None, 표현: str | None, 비목_id: str) -> list[str]:
+    """품목 표현이 별칭과 정확히 일치하는데 확정 경로 밖인 품목 노드. 확정 세목과 같은 비목 또는 모든 비목(`비목:창업/*`) 아래만.
+
+    `품목_노드` 가 None 일 때 부른다. 이 노드의 규범은 코드 불가를 내지 않고(5-6 ③ 확정 노드) 판정 문맥과 조건 문장에만 쓴다.
+    다른 비목 아래 품목은 다른 자금의 기준일 수 있어 넣지 않는다.
+    """
+    사업들 = [사업명] if 사업명 else []
+    return [행["concept_id"] for 행 in 노드_결정(cur, 표현 or "", 사업명)
+            if 행["종류"] == "품목" and {비목_id, 모든비목} & {p for _, p in _상위_경로(cur, 행["concept_id"], 사업들)}]
+
+
+def 경로밖_규범(cur, 사업명: str | None, 품목들: list[str], 적용: dict) -> list[dict]:
+    """경로 밖 품목에 걸린 규범 중 이미 적용 규범에 있는 것과 우선순위를 뺀 것. 그 품목의 상위 묶음 노드 규범도 포함한다."""
+    이미 = {n["norm_id"] for n in 적용["규범"]}
+    out: list[dict] = []
+    for p in 품목들:
+        for n in 적용_규범(cur, 사업명, p)["규범"]:
+            if n["종류"] != "우선순위" and n["norm_id"] not in 이미:
+                이미.add(n["norm_id"])
+                out.append(n)
+    return out
+
+
+def 세목_한도_있음(cur, 사업명: str | None, 대상_id: str) -> bool:
+    """대상 아래 세목 노드에 한도 규범이 있나. 비목만 확정했을 때 세목을 고르라고 알리는 데 쓴다(품목은 세지 않는다)."""
     사업들 = [사업명] if 사업명 else []
     행 = cur.execute(
         """WITH RECURSIVE 하위(id, 방문) AS (
              SELECT r.src_id, ARRAY[r.dst_id, r.src_id] FROM corpus.concept_relations r
+               JOIN corpus.concepts c ON c.concept_id = r.src_id AND c.종류 = '세목'
               WHERE r.관계 = '상위' AND r.dst_id = %(대상)s AND (r.적용사업 IS NULL OR r.적용사업 = ANY(%(사업들)s))
              UNION ALL
              SELECT r.src_id, h.방문 || r.src_id FROM 하위 h JOIN corpus.concept_relations r ON r.dst_id = h.id
+               JOIN corpus.concepts c ON c.concept_id = r.src_id AND c.종류 = '세목'
               WHERE r.관계 = '상위' AND (r.적용사업 IS NULL OR r.적용사업 = ANY(%(사업들)s)) AND NOT r.src_id = ANY(h.방문))
            SELECT 1 FROM corpus.norms n
-            WHERE n.종류 IN ('금지', '한도', '임계값') AND (n.적용사업 IS NULL OR n.적용사업 = ANY(%(사업들)s))
+            WHERE n.종류 = '한도' AND (n.적용사업 IS NULL OR n.적용사업 = ANY(%(사업들)s))
               AND n.대상 && (SELECT array_agg(id) FROM 하위) LIMIT 1""", {"대상": 대상_id, "사업들": 사업들}).fetchone()
     return 행 is not None
 
@@ -552,6 +606,31 @@ def _자체시험() -> int:
             실제 = {k: conn.execute(f"SELECT {식}", (k,)).fetchone()[0] for k in 사례}
         for k, v in 사례.items():
             t.append((f"조 단위 식 {k} → {v}", 실제[k] == v))
+        # 품목 · 세목 경로(적재된 온톨로지가 있을 때만). 1-1 · 2-5 · 3-6 · 2-2
+        with db.connect(connect_timeout=3, autocommit=True) as conn:
+            cur = conn.cursor()
+            사업 = "모두의 창업 프로젝트"
+            if cur.execute("SELECT 1 FROM corpus.concepts WHERE concept_id = '품목:창업활동자금/키보드@모두의창업'").fetchone():
+                재료구입 = 대상_노드(cur, 사업, "창업활동비", "재료구입비")
+                t.append(("노드_결정: 사업한정 먼저, 공통도 돌려준다", [r["concept_id"] for r in 노드_결정(cur, "귀금속", 사업)]
+                          == ["품목:창업활동자금/귀금속@모두의창업", "품목:창업/귀금속"]))
+                t.append(("품목_노드: 공통 비목으로 고르면 공통 품목", 품목_노드(cur, 사업, "귀금속", "비목:창업/재료비") == "품목:창업/귀금속"))
+                t.append(("품목_노드: 세목 밖 품목은 시작 노드가 아니다", 품목_노드(cur, 사업, "키보드", 재료구입["대상_id"]) is None))
+                밖 = 경로밖_품목(cur, 사업, "키보드", 재료구입["비목_id"])
+                t.append(("경로밖_품목: 같은 비목 아래 품목", 밖 == ["품목:창업활동자금/키보드@모두의창업"]))
+                t.append(("경로밖_품목: 다른 비목 아래 품목은 넣지 않는다", 경로밖_품목(cur, 사업, "키보드", "비목:창업/기계장치") == []))
+                t.append(("경로밖_품목: 모든 비목 아래 품목은 넣는다", 경로밖_품목(cur, 사업, "부채 상환", "비목:창업/재료비") == ["품목:창업/부채상환"]))
+                적용 = 적용_규범(cur, 사업, 재료구입["대상_id"])
+                t.append(("경로밖_규범: 품목 금지를 가져오고 우선순위 · 이미 있는 규범은 뺀다",
+                          (lambda ns: any(n["종류"] == "금지" and "키보드" in str(n["근거"]) for n in ns)
+                           and not any(n["종류"] == "우선순위" or n["norm_id"] in {m["norm_id"] for m in 적용["규범"]} for n in ns))
+                          (경로밖_규범(cur, 사업, 밖, 적용))))
+                t.append(("세목_한도_있음: 한도 있는 세목이 있는 비목만", 세목_한도_있음(cur, 사업, "비목:창업/지급수수료")
+                          and not 세목_한도_있음(cur, 사업, "비목:창업/기계장치") and not 세목_한도_있음(cur, 사업, "비목:창업/재료비")))
+                행들 = 근거_조문(cur, 적용_규범(cur, 사업, "비목:창업/재료비")["규범"], 3, "비목:창업/재료비", 사업=사업)
+                우선 = [r for r in 행들 if r.get("우선경로")]
+                t.append(("근거_조문: 확정 노드에서 시작한 행에만 우선경로 · 공통 행은 없음", bool(우선) and len(우선) < len(행들)
+                          and all(r["경로순위"] == 0 for r in 우선 if any("제37조" in p for p in r["우선경로"]))))
     except Exception as e:  # noqa: BLE001 - CI 에는 DB 가 없다
         print(f"건너뜀: 조 단위 식(DB 없음: {type(e).__name__})")
     실패 = [x for x, ok in t if not ok]
