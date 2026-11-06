@@ -46,6 +46,7 @@ FastAPI TestClient 로 서버를 프로세스 안에서 띄우고 로컬 DB 에 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import io
 import json
@@ -527,6 +528,7 @@ def _점검(결과: 점검결과) -> None:
         _계정_분리_점검(결과, client, 데모세션, 업로드, 조문, 판정, 캡처, b5, 협약)
         _가입_등록_점검(결과, client, 데모세션, 업로드, 현재문서)
         _확인질문_점검(결과, client, 데모세션, 캡처, 원래_판정, 판정_dry, llm_금지)
+        _일정_점검(결과, client, 데모세션)
     finally:
         l3_load.조문_조회, orchestrate.프롬프트_구성, orchestrate.판정 = (
             원래_조문조회, 원래_프롬프트, 원래_판정)
@@ -728,6 +730,111 @@ def _가입_등록_점검(결과: 점검결과, client, 데모세션, 업로드,
         with psycopg.connect(OWNER_DSN, connect_timeout=5) as c:
             c.execute("DELETE FROM tenant.accounts WHERE lower(email) = %s", (이메일,))
         _정리(list(기관.values()))
+
+
+@contextlib.contextmanager
+def _두_계정(데모세션):
+    """같은 데모 기관의 계정 A·B 토큰 헤더를 만든다. 서명키 조회만 점검용 키로 바꾸고 토큰 → 계정 경로는 실제로 거친다."""
+    import uuid as _uuid
+
+    import jwt
+    import psycopg
+    from cryptography.hazmat.primitives.asymmetric import ec
+
+    from server import auth
+
+    _, org = 데모세션()
+    접미 = secrets.token_hex(4)
+    이메일 = {"A": f"ux-task-a-{접미}@ux-check.invalid", "B": f"ux-task-b-{접미}@ux-check.invalid"}
+    키 = ec.generate_private_key(ec.SECP256R1())
+    원래_서명키 = auth._서명키
+    auth._서명키 = lambda _토큰: 키.public_key()
+
+    def 헤더(k: str) -> dict:
+        토큰 = jwt.encode({"sub": str(_uuid.uuid4()), "email": 이메일[k], "aud": "authenticated",
+                          "iss": "ux-check", "exp": int(time.time()) + 600}, 키, algorithm="ES256")
+        return {"Authorization": f"Bearer {토큰}"}
+
+    try:
+        with psycopg.connect(OWNER_DSN, connect_timeout=5) as c:
+            for e in 이메일.values():
+                c.execute("INSERT INTO tenant.accounts (org_id, email) VALUES (%s, %s)", (org, e))
+        yield 헤더, org
+    finally:
+        auth._서명키 = 원래_서명키
+        with psycopg.connect(OWNER_DSN, connect_timeout=5) as c:
+            c.execute("DELETE FROM tenant.plan_tasks WHERE org_id = %s", (org,))
+            c.execute("DELETE FROM tenant.expense_plans WHERE org_id = %s", (org,))
+            c.execute("DELETE FROM tenant.accounts WHERE org_id = %s", (org,))
+
+
+def _일정_점검(결과: 점검결과, client, 데모세션) -> None:
+    """24: 집행 일정 화면에서 직접 만든 일정이 서버에 남는지, 계정 밖으로 새지 않는지, AI 행이 보호되는지 본다."""
+    import psycopg
+
+    def 일정(헤더: dict, **쿼리) -> dict:
+        return {t["task_id"]: t for t in client.get("/api/tasks", headers=헤더, params=쿼리).json()["항목"]}
+
+    with _두_계정(데모세션) as (헤더, org):
+        A, B = 헤더("A"), 헤더("B")
+        게스트 = client.post("/api/tasks", json={"항목": "게스트 일정"}).status_code
+        r = client.post("/api/tasks", headers=A, json={
+            "항목": "사무실 임대차 확인", "설명": "메모", "due_date": "2026-12-01", "유형": "사전승인", "상태": "완료"})
+        만든 = r.json() if r.status_code == 201 else {}
+        tid = 만든.get("task_id")
+        생성됨 = (r.status_code == 201 and 만든.get("plan_id") is None and 만든.get("출처") == "user"
+                and 만든.get("유형") == "사전승인" and 만든.get("상태") == "완료")
+        잘못된_날짜 = client.post("/api/tasks", headers=A, json={"항목": "x", "due_date": "내일"}).status_code
+
+        A가_봄, B가_봄 = tid in 일정(A), tid in 일정(B)
+        B_수정 = client.patch(f"/api/tasks/{tid}", headers=B, json={"항목": "침범"}).status_code
+        B_삭제 = client.delete(f"/api/tasks/{tid}", headers=B).status_code
+
+        client.patch(f"/api/tasks/{tid}", headers=A, json={
+            "항목": "임대차 재확인", "설명": None, "상태": "준비필요", "유형": "증빙", "due_date": "2026-12-05"})
+        고침 = 일정(A)[tid]
+        고침_맞음 = (고침["항목"] == "임대차 재확인" and 고침["설명"] is None and 고침["상태"] == "준비필요"
+                  and 고침["유형"] == "증빙" and 고침["due_date"] == "2026-12-05")
+
+        client.patch(f"/api/tasks/{tid}", headers=A, json={"due_date": None})
+        날짜없음 = 일정(A)[tid]["due_date"] is None
+        캘린더제외 = tid not in 일정(A, 일정만="true")
+
+        # 계획에 묶인 행: 사용자 행은 지워지고, AI 행은 지워지지 않고 제목도 못 바꾸며 비운 날짜는 재점검이 다시 채우지 않는다
+        계획 = client.post("/api/plans", headers=A, json={
+            "사업명": 판정_요청["사업명"], "품목": "일정점검 품목", "금액": 100000, "용도": "점검",
+            "집행예정일": "2026-12-20"}).json().get("plan_id")
+        사용자행 = client.post(f"/api/plans/{계획}/tasks", headers=A, json={"항목": "직접 추가"}).json()["task_id"]
+        with psycopg.connect(OWNER_DSN, connect_timeout=5) as c:
+            ai행 = c.execute(
+                "INSERT INTO tenant.plan_tasks (org_id, account_id, plan_id, 출처, 구분, 항목, due_date) "
+                "SELECT org_id, account_id, plan_id, 'ai', '결제전', '점검 항목', '2026-12-10' "
+                "FROM tenant.expense_plans WHERE plan_id = %s RETURNING task_id", (계획,)).fetchone()[0]
+        ai_삭제 = client.delete(f"/api/tasks/{ai행}", headers=A).status_code
+        ai_제목 = client.patch(f"/api/tasks/{ai행}", headers=A, json={"항목": "바꿈"}).status_code
+        ai_날짜 = client.patch(f"/api/tasks/{ai행}", headers=A, json={"due_date": None}).status_code
+        client.post(f"/api/plans/{계획}/tasks:sync", headers=A, json={
+            "해야할일": [{"항목": "점검 항목", "구분": "결제전"}]})
+        재점검후 = 일정(A)[ai행]
+        재점검_보존 = 재점검후["due_date"] is None and 재점검후["날짜_사용자수정"] is True
+        사용자_삭제 = client.delete(f"/api/tasks/{사용자행}", headers=A).status_code
+        사용자_없어짐 = 사용자행 not in 일정(A)
+        내일정_남음 = tid in 일정(A)
+        client.delete(f"/api/plans/{계획}", headers=A)
+        계획삭제후_남음 = tid in 일정(A)
+        내_삭제 = client.delete(f"/api/tasks/{tid}", headers=A).status_code
+        없어짐 = tid not in 일정(A)
+
+        결과.기록("24 직접 만든 일정: 계획 없이 저장 · 수정 · 날짜 비우기 · 삭제 · 다른 계정 차단 · AI 행 보호 · 재점검 뒤 유지",
+               게스트 == 401 and 생성됨 and 잘못된_날짜 == 422 and A가_봄 and not B가_봄
+               and B_수정 == 404 and B_삭제 == 404 and 고침_맞음 and 날짜없음 and 캘린더제외
+               and ai_삭제 == 409 and ai_제목 == 409 and ai_날짜 == 200 and 재점검_보존
+               and 사용자_삭제 == 200 and 사용자_없어짐 and 내일정_남음 and 계획삭제후_남음
+               and 내_삭제 == 200 and 없어짐,
+               f"게스트 {게스트} · 생성 {r.status_code}/{생성됨} · 잘못된 날짜 {잘못된_날짜} · A 봄 {A가_봄} B 봄 {B가_봄} · "
+               f"B 수정 {B_수정} 삭제 {B_삭제} · 수정 {고침_맞음} · 날짜 비움 {날짜없음} · 캘린더 제외 {캘린더제외} · "
+               f"AI 삭제 {ai_삭제} 제목 {ai_제목} 날짜 {ai_날짜} 재점검 보존 {재점검_보존} · 사용자 행 삭제 {사용자_삭제}/{사용자_없어짐} · "
+               f"계획 삭제 뒤 일정 {계획삭제후_남음} · 내 삭제 {내_삭제}/{없어짐}")
 
 
 def _확인질문_점검(결과: 점검결과, client, 데모세션, 캡처, 원래_판정, 판정_dry, llm_금지) -> None:

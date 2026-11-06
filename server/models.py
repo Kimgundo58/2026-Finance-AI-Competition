@@ -13,6 +13,7 @@
 """
 from __future__ import annotations
 
+from datetime import date
 from typing import Any, Literal
 
 from pydantic import AliasChoices, BaseModel, Field, computed_field, model_validator
@@ -103,6 +104,10 @@ class 판정요청(BaseModel):
 # --- 할일 (plan_tasks) ---
 # 체크리스트와 캘린더는 같은 테이블의 같은 행이다. due_date 가 있으면 캘린더에도 표시한다.
 
+할일유형 = Literal["기타", "계약", "비교견적", "사전승인", "사전확인", "증빙"]
+할일상태 = Literal["준비필요", "집행예정", "완료"]
+
+
 class 할일(BaseModel):
     task_id: int
     plan_id: int | None = None         # null 이면 계획과 무관한 사용자 일정
@@ -113,9 +118,9 @@ class 할일(BaseModel):
     항목: str
     설명: str | None = None
     due_date: str | None = None        # null 이면 체크리스트에만, 값이 있으면 캘린더에도 표시
-    유형: Literal["기타", "계약", "비교견적"] = "기타"
+    유형: 할일유형 = "기타"
     날짜_사용자수정: bool = False
-    상태: Literal["준비필요", "집행예정", "완료"] = "준비필요"
+    상태: 할일상태 = "준비필요"
     계획제목: str | None = None        # 캘린더 행에 연결된 지출계획 제목
 
     @computed_field  # 구 이름 호환(제거 예정: 다음 릴리스)
@@ -126,18 +131,22 @@ class 할일(BaseModel):
 
 class 할일생성(BaseModel):
     """사용자가 직접 추가하는 할일. 출처는 서버가 'user' 로 고정한다(재판정해도 바뀌지 않는다)."""
-    항목: str
-    설명: str | None = None
+    항목: str = Field(min_length=1, max_length=300)
+    설명: str | None = Field(default=None, max_length=2000)
     구분: Literal["결제전", "결제후", "집행"] = "결제전"
-    due_date: str | None = None
-    유형: Literal["기타", "계약", "비교견적"] = "기타"
+    due_date: date | None = None
+    유형: 할일유형 = "기타"
+    상태: 할일상태 = "준비필요"
 
 
 class 할일수정(BaseModel):
-    """할일 상태 변경·날짜 지정. 보낸 필드만 바뀐다."""
-    상태: Literal["준비필요", "집행예정", "완료"] | None = None
-    due_date: str | None = None
-    유형: Literal["기타", "계약", "비교견적"] | None = None
+    """할일 수정. 보낸 필드만 바뀐다. due_date 를 null 로 보내면 날짜를 비운다(날짜 미정으로 옮긴다)."""
+    항목: str | None = Field(default=None, min_length=1, max_length=300)
+    설명: str | None = Field(default=None, max_length=2000)
+    구분: Literal["결제전", "결제후", "집행"] | None = None
+    상태: 할일상태 | None = None
+    due_date: date | None = None
+    유형: 할일유형 | None = None
 
 
 class 할일동기화(BaseModel):

@@ -477,61 +477,26 @@
     }
    }
   },
-  "/api/plans/{plan_id}/tasks/{task_id}": {
-   "patch": {
+  "/api/tasks": {
+   "post": {
     "tags": [
      "할일"
     ],
-    "summary": "수정",
-    "operationId": "수정_api_plans__plan_id__tasks__task_id__patch",
-    "parameters": [
-     {
-      "name": "plan_id",
-      "in": "path",
-      "required": true,
-      "schema": {
-       "type": "integer",
-       "title": "Plan Id"
-      }
-     },
-     {
-      "name": "task_id",
-      "in": "path",
-      "required": true,
-      "schema": {
-       "type": "integer",
-       "title": "Task Id"
-      }
-     },
-     {
-      "name": "org_id",
-      "in": "query",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "Org Id"
-      }
-     }
-    ],
+    "summary": "일정 추가",
+    "description": "지출계획에 묶이지 않은 사용자 일정을 만든다(plan_id NULL). 소유자는 토큰의 기관·계정이다.",
+    "operationId": "일정_추가_api_tasks_post",
     "requestBody": {
      "required": true,
      "content": {
       "application/json": {
        "schema": {
-        "$ref": "#/components/schemas/server__models________3"
+        "$ref": "#/components/schemas/server__models________2"
        }
       }
      }
     },
     "responses": {
-     "200": {
+     "201": {
       "description": "Successful Response",
       "content": {
        "application/json": {
@@ -552,9 +517,7 @@
       }
      }
     }
-   }
-  },
-  "/api/tasks": {
+   },
    "get": {
     "tags": [
      "할일"
@@ -668,6 +631,211 @@
        "application/json": {
         "schema": {
          "$ref": "#/components/schemas/server__models__________4"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/plans/{plan_id}/tasks/{task_id}": {
+   "patch": {
+    "tags": [
+     "할일"
+    ],
+    "summary": "수정",
+    "operationId": "수정_api_plans__plan_id__tasks__task_id__patch",
+    "parameters": [
+     {
+      "name": "plan_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "integer",
+       "title": "Plan Id"
+      }
+     },
+     {
+      "name": "task_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "integer",
+       "title": "Task Id"
+      }
+     },
+     {
+      "name": "org_id",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Org Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/server__models________3"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/__"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/tasks/{task_id}": {
+   "patch": {
+    "tags": [
+     "할일"
+    ],
+    "summary": "일정 수정",
+    "description": "집행 일정 화면의 수정. 계획이 없는 일정도 같은 경로를 쓴다.",
+    "operationId": "일정_수정_api_tasks__task_id__patch",
+    "parameters": [
+     {
+      "name": "task_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "integer",
+       "title": "Task Id"
+      }
+     },
+     {
+      "name": "org_id",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Org Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/server__models________3"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/__"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   },
+   "delete": {
+    "tags": [
+     "할일"
+    ],
+    "summary": "일정 삭제",
+    "description": "규정 점검이 만든 행은 지우지 않는다. 지워도 다음 점검이 다시 만들어 사용자가 혼란스럽다.",
+    "operationId": "일정_삭제_api_tasks__task_id__delete",
+    "parameters": [
+     {
+      "name": "task_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "integer",
+       "title": "Task Id"
+      }
+     },
+     {
+      "name": "org_id",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Org Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response 일정 삭제 Api Tasks  Task Id  Delete"
         }
        }
       }
@@ -2310,7 +2478,10 @@
       "enum": [
        "기타",
        "계약",
-       "비교견적"
+       "비교견적",
+       "사전승인",
+       "사전확인",
+       "증빙"
       ],
       "title": "유형",
       "default": "기타"
@@ -2985,12 +3156,15 @@
     "properties": {
      "항목": {
       "type": "string",
+      "maxLength": 300,
+      "minLength": 1,
       "title": "항목"
      },
      "설명": {
       "anyOf": [
        {
-        "type": "string"
+        "type": "string",
+        "maxLength": 2000
        },
        {
         "type": "null"
@@ -3011,7 +3185,8 @@
      "due_date": {
       "anyOf": [
        {
-        "type": "string"
+        "type": "string",
+        "format": "date"
        },
        {
         "type": "null"
@@ -3024,10 +3199,23 @@
       "enum": [
        "기타",
        "계약",
-       "비교견적"
+       "비교견적",
+       "사전승인",
+       "사전확인",
+       "증빙"
       ],
       "title": "유형",
       "default": "기타"
+     },
+     "상태": {
+      "type": "string",
+      "enum": [
+       "준비필요",
+       "집행예정",
+       "완료"
+      ],
+      "title": "상태",
+      "default": "준비필요"
      }
     },
     "type": "object",
@@ -3039,6 +3227,47 @@
    },
    "server__models________3": {
     "properties": {
+     "항목": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 300,
+        "minLength": 1
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "항목"
+     },
+     "설명": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 2000
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "설명"
+     },
+     "구분": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "결제전",
+         "결제후",
+         "집행"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "구분"
+     },
      "상태": {
       "anyOf": [
        {
@@ -3058,7 +3287,8 @@
      "due_date": {
       "anyOf": [
        {
-        "type": "string"
+        "type": "string",
+        "format": "date"
        },
        {
         "type": "null"
@@ -3073,7 +3303,10 @@
         "enum": [
          "기타",
          "계약",
-         "비교견적"
+         "비교견적",
+         "사전승인",
+         "사전확인",
+         "증빙"
         ]
        },
        {
@@ -3085,7 +3318,7 @@
     },
     "type": "object",
     "title": "할일수정",
-    "description": "할일 상태 변경·날짜 지정. 보낸 필드만 바뀐다."
+    "description": "할일 수정. 보낸 필드만 바뀐다. due_date 를 null 로 보내면 날짜를 비운다(날짜 미정으로 옮긴다)."
    },
    "server__models________4": {
     "properties": {
