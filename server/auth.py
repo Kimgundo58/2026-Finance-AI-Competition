@@ -70,7 +70,8 @@ class 주체:
     org_id: str | None
     출처: str                    # 'token' | 'demo' | 'param' | 'none'
     email: str | None = None
-    account_id: str | None = None    # Supabase 토큰일 때만 있다. 데모 세션·게스트는 None
+    account_id: str | None = None    # 데이터 계정. 팀이 있으면 대표 계정이다. 데모 세션·게스트는 None
+    본인_account_id: str | None = None  # 실제 로그인한 계정. 팀 조작과 작성자 기록에 쓴다
 
     @property
     def 검증됨(self) -> bool:
@@ -191,6 +192,17 @@ def _계정조회(email: str) -> tuple[str, str] | None:
     return (str(행[0][0]), str(행[0][1])) if 행 else None
 
 
+def _로그인주체(email: str) -> tuple[str, str, str] | None:
+    """email -> (org_id, 본인_account_id, 데이터 account_id). 팀이 없으면 두 계정이 같다. 미등록이면 None."""
+    try:
+        행 = _질의("SELECT org_id, 본인_account_id, account_id FROM tenant.로그인주체(%s)",
+                   (email,), 예외전파=True)
+    except Exception as e:                                    # noqa: BLE001
+        로그.exception("계정 조회 실패(DB 오류). 미등록 계정(403)과 구분해 503 으로 응답한다")
+        raise HTTPException(503, "계정 확인에 실패했습니다. 잠시 후 다시 시도해 주세요") from e
+    return (str(행[0][0]), str(행[0][1]), str(행[0][2])) if 행 else None
+
+
 def _supabase이메일(토큰: str) -> str:
     """Supabase 토큰의 서명·만료를 검증하고 email 클레임을 돌려준다. 등록 여부는 보지 않는다."""
     jwt = _pyjwt()
@@ -214,11 +226,11 @@ def _supabase이메일(토큰: str) -> str:
 
 def _supabase해석(토큰: str) -> 주체:
     email = _supabase이메일(토큰)
-    계정 = _계정조회(email)
+    계정 = _로그인주체(email)
     if 계정 is None:
         # 토큰을 보낸 요청은 토큰으로만 판단한다. ?org_id= 로 폴백하지 않는다.
         raise HTTPException(403, "등록되지 않은 계정입니다")
-    return 주체(org_id=계정[0], 출처="token", email=email, account_id=계정[1])
+    return 주체(org_id=계정[0], 출처="token", email=email, 본인_account_id=계정[1], account_id=계정[2])
 
 
 def _uuid인가(v) -> bool:
@@ -349,9 +361,11 @@ class OrgId주입:
         검증 = 주 is not None and 주.검증됨 and bool(주.org_id)
         토큰 = _common.현재_org.set(str(주.org_id) if 검증 else None)
         계정토큰 = _common.현재_account.set(str(주.account_id) if 검증 and 주.account_id else None)
+        본인토큰 = _common.현재_본인.set(str(주.본인_account_id) if 검증 and 주.본인_account_id else None)
         try:
             return await self.app(scope, receive, send)
         finally:
+            _common.현재_본인.reset(본인토큰)
             _common.현재_account.reset(계정토큰)
             _common.현재_org.reset(토큰)
 

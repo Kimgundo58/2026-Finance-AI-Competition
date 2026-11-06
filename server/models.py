@@ -122,6 +122,7 @@ class 할일(BaseModel):
     날짜_사용자수정: bool = False
     상태: 할일상태 = "준비필요"
     계획제목: str | None = None        # 캘린더 행에 연결된 지출계획 제목
+    작성자: str | None = None          # 다른 구성원이 만든 일정이면 이메일 앞부분
     집행예정일_연동: bool = False      # true 면 이 행의 due_date 는 계획의 집행예정일과 같다(계획 수정으로만 바뀐다)
 
     @computed_field  # 구 이름 호환(제거 예정: 다음 릴리스)
@@ -268,9 +269,49 @@ class 첨부항목(BaseModel):
     # 증빙 항목에 올린 파일이면 그 항목의 task_id
     task_id: int | None = None
     created_at: str | None = None
+    # 다른 구성원이 올렸으면 이메일 앞부분
+    작성자: str | None = None
+
+
+class 팀구성원(BaseModel):
+    account_id: str
+    이메일: str
+    나: bool = False
+    대표: bool = False
+
+
+class 팀정보(BaseModel):
+    팀이름: str
+    사업명: str
+    내역할: Literal["대표", "구성원"]
+    구성원: list[팀구성원] = Field(default_factory=list)
+    # 만들거나 재발급한 응답에만 있다. 서버는 해시만 저장해 다시 보여 줄 수 없다.
+    초대코드: str | None = None
+    초대코드_만료: str | None = None
+
+
+class 팀응답(BaseModel):
+    팀: 팀정보 | None = None
+
+
+class 팀만들기입력(BaseModel):
+    팀이름: str = Field(min_length=1, max_length=40)
+    사업명: str = Field(min_length=1, max_length=100)
+
+
+class 초대코드입력(BaseModel):
+    초대코드: str = Field(min_length=1, max_length=20)
 
 
 class 판정피드백(BaseModel):
+    평가: Literal["맞음", "틀림"]
+    이유: Literal["판정이 다름", "근거가 다름", "기타"] | None = None
+    의견: str | None = None
+
+
+class 팀평가항목(BaseModel):
+    """같은 판정에 다른 구성원이 남긴 평가."""
+    작성자: str
     평가: Literal["맞음", "틀림"]
     이유: Literal["판정이 다름", "근거가 다름", "기타"] | None = None
     의견: str | None = None
@@ -304,6 +345,7 @@ class 계획상세(계획요약):
     사용자답변: list[dict[str, Any]] = Field(default_factory=list)
     # 지금 계정이 최신 판정에 남긴 평가. 재점검하면 새 판정이라 비어 있다
     내피드백: 판정피드백 | None = None
+    팀평가: list[팀평가항목] = Field(default_factory=list)
     첨부: list[첨부항목] = Field(default_factory=list)
     할일: list[_할일] = Field(default_factory=list)
     created_at: str | None = None
