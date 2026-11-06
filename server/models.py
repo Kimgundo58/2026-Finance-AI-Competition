@@ -205,6 +205,22 @@ class 계획수정(BaseModel):
     """지출계획 수정. 보낸 필드만 바뀐다. 집행예정일을 null 로 보내면 지출일을 비운다."""
     집행예정일: date | None = None
     일정이동: bool = False             # true 면 완료 안 된 연결 일정을 지출일과 같은 일수만큼 옮긴다
+    실제지출일: date | None = None     # 실제 지출 등록. 실제지출액과 함께 보내고 집행 단계를 완료로 만든다
+    실제지출액: float | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def _실제지출_같이(self) -> "계획수정":
+        if (self.실제지출일 is None) != (self.실제지출액 is None):
+            raise ValueError("실제 지출일과 지출액은 함께 보내야 합니다")
+        return self
+
+
+class 단계항목(BaseModel):
+    """지출 건의 진행 단계 한 칸. plan_tasks 에서 계산하고 저장하지 않는다."""
+    단계: Literal["사전승인·확인", "견적", "계약", "집행", "증빙"]
+    상태: Literal["완료", "진행중", "시작전", "항목없음"]
+    완료: int = 0
+    전체: int = 0
 
 
 class 계획요약(BaseModel):
@@ -218,6 +234,10 @@ class 계획요약(BaseModel):
     updated_at: str | None = None      # 최근 수정일
     사업명: str | None = None
     상태: Literal["draft", "judged"] = "draft"   # 진행 상태이지 판정 값이 아니다
+    실제지출일: str | None = None
+    실제지출액: float | None = None
+    단계요약: list[단계항목] = Field(default_factory=list)
+    현재단계: str | None = None        # 완료 안 된 첫 단계. 항목이 없거나 전부 끝났으면 null
 
 
 class 계획통계(BaseModel):
