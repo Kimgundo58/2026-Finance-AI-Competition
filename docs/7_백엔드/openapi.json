@@ -1118,7 +1118,7 @@
   "/api/questions": {
    "post": {
     "summary": "Questions",
-    "description": "응답: {상태: 있음|없음|바로판정|실패, 질문세트, 질문: [{id, 질문문, 이유, 선택지, 근거}]}.",
+    "description": "응답: {상태: 있음|없음|바로판정|실패, 질문세트, 질문: [{id, 질문문, 이유, 선택지, 근거}], 추가입력, 용어풀이}.",
     "operationId": "questions_api_questions_post",
     "requestBody": {
      "content": {
@@ -3121,6 +3121,33 @@
       "type": "string",
       "title": "확정비목"
      },
+     "확정세목": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "확정세목"
+     },
+     "부가세구분": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "포함",
+         "공급가액",
+         "모름"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "부가세구분"
+     },
      "세부유형": {
       "anyOf": [
        {
@@ -3274,6 +3301,38 @@
        }
       ],
       "title": "질문세트"
+     },
+     "확정세목": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "확정세목"
+     },
+     "추가입력값": {
+      "additionalProperties": true,
+      "type": "object",
+      "title": "추가입력값"
+     },
+     "부가세구분": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "포함",
+         "공급가액",
+         "모름"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "부가세구분"
      }
     },
     "type": "object",
@@ -3470,6 +3529,22 @@
        }
       ],
       "title": "사업명"
+     },
+     "부가세구분": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "포함",
+         "공급가액",
+         "모름"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "부가세구분"
      },
      "특수관계": {
       "$ref": "#/components/schemas/server__models________4"
