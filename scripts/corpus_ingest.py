@@ -218,25 +218,32 @@ def _실패_기록(dsn: str, doc_id: str, 사유: str, 저장경로: str | None 
         _log.exception("실패 상태를 기록하지 못했다 doc_id=%s", doc_id)
 
 
-def _준비(작업: dict) -> dict:
+def _준비(작업: dict, *, 복원조문: list[dict] | None = None) -> dict:
     """DB 에 쓰기 전의 계산 전부: 추출, 조문 분할, 품질 판정, 적용대상 태깅, 청크, 임베딩.
 
     반환: {조문, 전략, 추출방식, 품질, 경고, 청크}. staged 로 둘 수 없으면 _적재실패.
+    `복원조문` 을 주면 파일을 읽지 않고 그 조문을 쓴다(scripts/corpus_restored_load.py). 조 구조가 없는 안내 책자처럼
+    PDF 와 대조해 쪽 · 소제목 단위로 복원한 문서다. 대조를 끝낸 입력이라 품질은 high 로 둔다.
     """
     from article_split import is_deleted, validate
 
     doc_id, layer = 작업["doc_id"], 작업["layer"]
-    조문, 전략, 추출방식 = _조문_추출(Path(작업["저장경로"]))
-    v = validate(조문, 전략)
-    if not v["ok"]:
-        raise _적재실패(f"조문을 하나도 찾지 못했습니다 (분할 전략 {전략}).")
+    if 복원조문 is not None:
+        if not 복원조문:
+            raise _적재실패("복원 조문이 비어 있습니다.")
+        조문, 전략, 추출방식, 품질, 경고 = [dict(a) for a in 복원조문], "복원본", "native", "high", []
+    else:
+        조문, 전략, 추출방식 = _조문_추출(Path(작업["저장경로"]))
+        v = validate(조문, 전략)
+        if not v["ok"]:
+            raise _적재실패(f"조문을 하나도 찾지 못했습니다 (분할 전략 {전략}).")
 
-    # 품질 기준은 기존 코퍼스와 같다: validate 가 low 로 보는 문서(단락·장 단위 분할, 조 5개 미만)는 low.
-    # 조번호 역전·빈 조 과다도 low 로 둔다. 조 경계나 본문 추출을 믿을 수 없다는 신호다.
-    # low 문서는 검색 필터(parse_quality='high')에 걸리지 않고, 활성화도 거부된다.
-    품질 = ("low" if v["quality"] == "low"
-            or any(f.startswith(("조번호역전:", "빈조과다:")) for f in v["flags"]) else "high")
-    경고 = list(v["flags"])
+        # 품질 기준은 기존 코퍼스와 같다: validate 가 low 로 보는 문서(단락·장 단위 분할, 조 5개 미만)는 low.
+        # 조번호 역전·빈 조 과다도 low 로 둔다. 조 경계나 본문 추출을 믿을 수 없다는 신호다.
+        # low 문서는 검색 필터(parse_quality='high')에 걸리지 않고, 활성화도 거부된다.
+        품질 = ("low" if v["quality"] == "low"
+                or any(f.startswith(("조번호역전:", "빈조과다:")) for f in v["flags"]) else "high")
+        경고 = list(v["flags"])
     # 범위 판정은 운영자가 입력한 문서명이 아니라 표준 사업명으로 한다. 별칭으로 올려도 같은 구간이 빠진다.
     조문, 범위밖_수 = _범위밖_제거(f"{작업['사업명'] or ''} {doc_id}", 조문)
     if 범위밖_수:
@@ -244,7 +251,12 @@ def _준비(작업: dict) -> dict:
     경고 += _조번호_중복_정리(조문)
     for a in 조문:
         a["삭제"] = is_deleted(a)
-    경고 += _적용대상_태깅(조문, layer=layer, 문서명=작업["문서명"], 기본값=작업["적용대상"])
+    if 복원조문 is not None:
+        # 책자는 조 제목이 "지원 개요" 같은 소제목이라 조별 태깅이 미정이 된다. 문서 전체가 같은 대상이다
+        for a in 조문:
+            a["적용대상"] = 작업["적용대상"]
+    else:
+        경고 += _적용대상_태깅(조문, layer=layer, 문서명=작업["문서명"], 기본값=작업["적용대상"])
 
     사업 = [작업["사업명"]] if 작업["사업명"] else None
     청크, 표_제외 = _청크_만들기(조문, layer=layer, 사업=사업, doc_id=doc_id)

@@ -18,6 +18,7 @@ from typing import Iterable, Optional
 
 from _lib import db
 from llm_schema import 판정_ENUM, 미충족시_ENUM, 인용, 전제, 최종응답
+from ontology_norm import 별지_행_내용, 조번호_표시 as 쪽_표시
 
 _log = logging.getLogger(__name__)
 
@@ -94,6 +95,10 @@ def _항_추출(본문: str, 항호: str | None) -> tuple[str, str]:
         return "", "없음"
     if not 항호:
         return 본문, "조전체"
+    # 온톨로지 후보의 별지 표 행(`/지급수수료/유의사항`). 표 칸을 이어 붙인 값이라 본문의 부분 문자열이 아닐 수 있다
+    if 항호.startswith("/"):
+        내용 = 별지_행_내용(본문, 항호)
+        return (내용, "표행") if 내용 else (본문, "조전체(항호 미발견)")
     # 한 조 안에 같은 항 기호가 두 번 나오는 문서가 있어 `①#2` 처럼 몇 번째인지가 붙어 온다
     기호, _, 순 = 항호.partition("#")
     차례 = int(순) if 순.isdigit() else 1
@@ -202,7 +207,7 @@ def _조번호_표시(조번호: str | None) -> str | None:
     if not 조번호:
         return 조번호
     m = _단락번호.match(조번호.strip())
-    return f"{int(m.group(1))}번째 항목" if m else 조번호
+    return f"{int(m.group(1))}번째 항목" if m else 쪽_표시(조번호)
 
 
 # 문장맵 종류별 메타 조회. 세 쿼리 모두 같은 12개 컬럼을 같은 순서로 돌려준다:
@@ -244,7 +249,7 @@ def _메타_행(종류: str, 행: tuple, 항호: str | None) -> dict:
         return dict(doc_id=_l3표시명(파일명) or doc, 조번호=_조번호_표시(조), 조제목=제목,
                     원문=원문, 원문범위=범위, version=ver, extraction=ex, 항호_DB=None,
                     기관id=기관, domain=dom, layer=lay)
-    return dict(doc_id=doc, 조번호=조, 조제목=_조제목_표시(조, 제목), 원문=원문,
+    return dict(doc_id=doc, 조번호=_조번호_표시(조), 조번호_DB=조, 조제목=_조제목_표시(조, 제목), 원문=원문,
                 원문범위="청크" if 종류 == "chunk" and 범위 == "조전체" else 범위,
                 version=ver, extraction=ex, 항호_DB=_항호_표시(h),
                 기관id=기관, domain=dom, layer=lay)
@@ -349,7 +354,8 @@ def _인용_검증(llm출력: dict, 문장맵: dict, 메타: dict[str, dict], �
         이미.add(키)
         인용계층.append(m.get("layer") or ("L3" if 종류 == "l3" else "?"))
         인용목록.append(인용(문장ID=s, doc_id=m.get("doc_id"), 조번호=m.get("조번호"),
-                          조제목=m.get("조제목"), 항호=항호,
+                          조제목=m.get("조제목"),
+                          항호=항호[1:].replace("/", " ") if (항호 or "").startswith("/") else 항호,
                           원문=m.get("원문"), 원문범위=m.get("원문범위"),
                           version=m.get("version"), extraction=m.get("extraction")))
     return 인용목록, 인용계층, 유출

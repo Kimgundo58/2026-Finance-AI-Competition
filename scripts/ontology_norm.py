@@ -74,3 +74,47 @@ def 개념ID_풀이(개념ID: str) -> dict:
     if "@" in 경로:
         경로, 사업키 = 경로.rsplit("@", 1)
     return {"종류": 종류, "경로": 경로, "이름": 경로.rsplit("/", 1)[-1], "사업키": 사업키}
+
+
+def _칸이름(s: str) -> str:
+    return re.sub(r"\s+", "", s or "")
+
+
+def 별지_행(본문: str) -> list[tuple[str, str]]:
+    """별지 마크다운 표를 (`<비목>/<칸>`, 내용) 으로 푼다. 첫 칸이 비면 앞 비목, 둘째 칸이 비면 앞 칸의 이어짐이다."""
+    행: dict[str, list[str]] = {}
+    비목, 칸 = "", ""
+    for 줄 in 본문.splitlines():
+        if not 줄.lstrip().startswith("|"):
+            continue
+        셀 = [c.strip() for c in 줄.strip().strip("|").split("|")]
+        if set("".join(셀)) <= set("-: "):
+            continue
+        if len(셀) < 3 or 셀[0] == "비목":
+            continue
+        a, b, 내용 = 셀[0], 셀[1], " | ".join(셀[2:])
+        if a:
+            비목, 칸 = _칸이름(a), ""
+        if b:
+            칸 = _칸이름(b)
+        if not 내용:
+            continue
+        키 = f"{비목}/{칸}" if 칸 else 비목
+        행.setdefault(키, []).append(내용)
+    return [(k, " ".join(v)) for k, v in 행.items()]
+
+
+def 별지_행_내용(본문: str, 항호: str) -> str | None:
+    """조문 ID 의 별지 행 키(`/지급수수료/유의사항`)에 해당하는 칸 내용. 없으면 None."""
+    키 = (항호 or "").lstrip("/")
+    return dict(별지_행(본문 or "")).get(키)
+
+
+def 조번호_표시(조번호: str | None) -> str | None:
+    """화면에 낼 조번호. 쪽 단위로 복원한 문서의 내부 표기(`p9-1`, `참고2-p29-1`)를 쪽 표기로 바꾼다."""
+    if not 조번호:
+        return 조번호
+    m = re.fullmatch(r"(?:(참고\d+)-)?p(\d+)-\d+", 조번호.strip())
+    if not m:
+        return 조번호
+    return f"{m.group(1)} {m.group(2)}쪽" if m.group(1) else f"{m.group(2)}쪽"

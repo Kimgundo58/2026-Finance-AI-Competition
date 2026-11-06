@@ -22,6 +22,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _lib import db  # noqa: E402
+from ontology_norm import 별지_행  # noqa: E402
 
 저장소 = Path(__file__).resolve().parent.parent
 _항기호 = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳"
@@ -56,34 +57,6 @@ def _호_나누기(조각: str) -> list[tuple[str | None, str]]:
         끝 = 자리[k + 1].start() if k + 1 < len(자리) else len(조각)
         out.append((f"{m.group(1)}호", 조각[m.start():끝].strip()))
     return out
-
-
-def _칸이름(s: str) -> str:
-    return re.sub(r"\s+", "", s or "")
-
-
-def 별지_행(본문: str) -> list[tuple[str, str]]:
-    """별지 마크다운 표를 (`<비목>/<칸>`, 내용) 으로 푼다. 첫 칸이 비면 앞 비목, 둘째 칸이 비면 앞 칸의 이어짐이다."""
-    행: dict[str, list[str]] = {}
-    비목, 칸 = "", ""
-    for 줄 in 본문.splitlines():
-        if not 줄.lstrip().startswith("|"):
-            continue
-        셀 = [c.strip() for c in 줄.strip().strip("|").split("|")]
-        if set("".join(셀)) <= set("-: "):
-            continue
-        if len(셀) < 3 or 셀[0] == "비목":
-            continue
-        a, b, 내용 = 셀[0], 셀[1], " | ".join(셀[2:])
-        if a:
-            비목, 칸 = _칸이름(a), ""
-        if b:
-            칸 = _칸이름(b)
-        if not 내용:
-            continue
-        키 = f"{비목}/{칸}" if 칸 else 비목
-        행.setdefault(키, []).append(내용)
-    return [(k, " ".join(v)) for k, v in 행.items()]
 
 
 def 블록_만들기(문서키: str, 조번호: str, 조제목: str | None, 본문: str, *, 호분할: bool = False,

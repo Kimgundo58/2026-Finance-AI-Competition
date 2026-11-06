@@ -386,7 +386,7 @@ def 질문생성(입력: dict, *, org_id=None, account_id=None, 모델: str | No
                      "근거": {"doc_id": 조.get("doc_id"), "조번호": 조.get("조번호"), "조제목": 조.get("조제목"),
                             "항호": (항호 or 조.get("항호_DB") or "").split("#")[0], "원문": 발췌},
                      "근거조문": {"종류": 종류, "id": _id, "doc_id": 조.get("doc_id"),
-                                "조번호": 조.get("조번호")}})
+                                "조번호": 조.get("조번호_DB") or 조.get("조번호")}})
     return {"상태": "있음" if 항목들 else "없음", "질문": 항목들, "메타": 메타}
 
 
