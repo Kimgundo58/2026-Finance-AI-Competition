@@ -6,7 +6,11 @@
 `eval.golden_chunks` 고정 매핑에서 읽는다. `--기록` 일 때만 `eval.runs`/`eval.run_items` 에 쓴다.
 지표: hit@k(정답 청크가 상위 k 안에 있는가), MRR(첫 정답 순위의 역수 평균). 사업 필터 기본값은 운영 판정 경로와 같다.
 
+세트를 고르지 않으면 정답셋 v2 행은 읽지 않는다(기존 문항만). `--세트 v2_dev` 는 v2 문항을 읽고, 정답을 결정 근거 조문으로 잡아
+근거 단위 · 문항 단위 포함률(상위 5 + 참조 확장)을 함께 낸다. 결정 근거가 L3 기관 규정뿐인 문항은 run 에 평가 제외로 남긴다. v2 문항 본문은 출력하지 않는다.
+
 실행: PYTHONIOENCODING=utf-8 python scripts/eval_retrieval.py --k 20 [--overlap] [--필터비교] [--dangling] [--참조확장] [--진단]
+      PYTHONIOENCODING=utf-8 python scripts/eval_retrieval.py --세트 v2_dev --사업 "모두의 창업 프로젝트" --k 20 --기록
 """
 from __future__ import annotations
 
@@ -22,7 +26,7 @@ from typing import NamedTuple
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _lib import db  # noqa: E402
 import retrieve  # noqa: E402
-from eval_store import 평가용_사업명  # noqa: E402
+from eval_store import 기존세트_SQL, 평가용_사업명  # noqa: E402
 
 
 class 문항(NamedTuple):
@@ -32,6 +36,8 @@ class 문항(NamedTuple):
     정답: set[int]          # 정답 chunk_id 집합
     사업명: str | None      # 골든셋 원표기. 검색에는 평가용_사업명() 으로 바꿔 넘긴다
     근거: list[dict]        # eval.golden_set.정답근거
+    결정조문: frozenset[int] = frozenset()   # v2: 결정 근거의 article_id
+    L3: bool = False        # v2: 기관 규정 반사실 문항
 
 
 @dataclass
@@ -109,8 +115,8 @@ def 골든셋_불러오기(cur, gold_chunks: bool) -> tuple[list[문항], list[�
     반환: (평가할 문항, 정답을 못 찾아 제외한 문항, 원문 부분일치로 정답을 찾은 gold_id 집합).
     제외한 문항은 출력으로 알린다 — 말없이 빼면 지표가 부풀려진다. 평가할 문항이 0건이면 종료한다.
     """
-    cur.execute("""SELECT gold_id, 세트, 질문, 정답근거, 사업명 FROM eval.golden_set
-                    WHERE 정답근거 IS NOT NULL ORDER BY gold_id""")
+    cur.execute(f"""SELECT gold_id, 세트, 질문, 정답근거, 사업명 FROM eval.golden_set
+                     WHERE 정답근거 IS NOT NULL AND {기존세트_SQL} ORDER BY gold_id""")
     rows = cur.fetchall()
 
     데이터, 정답미확인 = [], []
@@ -133,6 +139,43 @@ def 골든셋_불러오기(cur, gold_chunks: bool) -> tuple[list[문항], list[�
     if not 데이터:
         sys.exit("정답 청크를 하나도 못 찾았다. 매칭 규칙을 고칠 것.")
     return 데이터, 정답미확인, 부분일치
+
+
+def v2_불러오기(cur, 세트: str, 사업: str | None, L3: str) -> tuple[list[문항], list[문항]]:
+    """v2 문항을 읽는다. 정답 = 결정 근거의 조문과 그 청크(근거 단위가 조라서 원문 부분일치를 쓰지 않는다).
+
+    반환: (평가할 문항, 평가 제외 문항). 평가 제외는 결정 근거가 L3 가상 규정뿐이어서 검색으로 찾을 조문이 없는 문항이다.
+    L3 는 검색하지 않고 org 별로 통째로 넣으므로(retrieve.py FILTER) 이 문항은 L3 연결 org 경로에서 따로 잰다.
+    문항 본문은 출력하지 않는다(docs/5_룰/5-9_검증과_측정.md).
+    """
+    조건, 인자 = "세트 = %s", [세트]
+    if 사업:
+        조건 += " AND 사업명 = %s"
+        인자.append(사업)
+    if L3 != "전체":
+        조건 += " AND coalesce((문항메타->>'L3')::boolean, false) = %s"
+        인자.append(L3 == "만")
+    cur.execute(f"""SELECT gold_id, 세트, 질문, 정답근거, 사업명, coalesce((문항메타->>'L3')::boolean, false)
+                      FROM eval.golden_set WHERE {조건} ORDER BY gold_id""", 인자)
+    rows = cur.fetchall()
+    if not rows:
+        sys.exit(f"세트 {세트!r} (사업 {사업!r}) 문항이 없다. scripts/golden_v2_load.py 를 먼저 실행한다.")
+
+    데이터, 제외 = [], []
+    for gid, 이름, q, 근거, 사업명, l3 in rows:
+        결정 = [g for g in 근거 or [] if "결정" in (g.get("역할") or "")]
+        cur.execute("""SELECT a.article_id FROM corpus.doc_articles a
+                         JOIN unnest(%s::text[], %s::text[]) AS k(doc_id, 조번호)
+                           ON a.doc_id = k.doc_id AND a.조번호 = k.조번호""",
+                    ([g["doc_id"] for g in 결정], [g["조번호"] for g in 결정]))
+        조문 = frozenset(r[0] for r in cur.fetchall())
+        cur.execute("SELECT chunk_id FROM corpus.chunks WHERE article_id = ANY(%s)", (list(조문),))
+        정답 = {r[0] for r in cur.fetchall()}
+        (데이터 if 조문 else 제외).append(문항(gid, 이름, q, 정답, 사업명, 근거, 조문, l3))
+    print(f"세트 {세트}{f' · 사업 {사업}' if 사업 else ''}: {len(rows)}문항 · 평가 {len(데이터)} · 평가 제외(결정 근거가 코퍼스에 없음) {len(제외)}")
+    if not 데이터:
+        sys.exit("평가할 문항이 없다.")
+    return 데이터, 제외
 
 
 # ── 검색 실행 ────────────────────────────────────────────────────────────────
@@ -160,7 +203,7 @@ def 검색_실행(cur, 데이터: list[문항], a) -> 검색결과:
             cur.execute("SELECT article_id FROM corpus.chunks WHERE chunk_id = ANY(%s)",
                         (top5,))
             top5_조문 = [r[0] for r in cur.fetchall()]
-            결과.참조확장.append((top5_조문, top5_조문 + 확장조문, 정답조문(cur, d.근거)))
+            결과.참조확장.append((top5_조문, top5_조문 + 확장조문, set(d.결정조문) or 정답조문(cur, d.근거)))
     return 결과
 
 
@@ -349,10 +392,37 @@ def 필터진단(cur, chunk_ids: list[int]) -> None:
             print(f"      {이름:16} 에서 {n}건 탈락")
 
 
-def 결과_기록(데이터: list[문항], 결과: 검색결과, a, ks: list[int]) -> None:
+def 근거단위_포함률(데이터: list[문항], 결과: 검색결과) -> dict:
+    """결정 근거 포함률(상위 5 + 참조 확장). 근거 단위 = 조문, 문항 단위 = 그 문항의 결정 근거 전부 포함."""
+    def 묶음(idx: list[int]) -> dict:
+        분모 = sum(len(데이터[i].결정조문) for i in idx)
+        상위5, 확장, 문항전부 = 0, 0, 0
+        for i in idx:
+            top5, 합, 정답 = 결과.참조확장[i]
+            상위5 += len(set(top5) & 정답)
+            확장 += len(set(합) & 정답)
+            문항전부 += 정답 <= set(합)
+        return {"문항": len(idx), "근거": 분모, "상위5": 상위5, "상위5_확장": 확장, "문항전부": 문항전부,
+                "근거단위_pct": round(확장 / 분모 * 100, 1) if 분모 else None,
+                "문항단위_pct": round(문항전부 / len(idx) * 100, 1) if idx else None}
+    전체 = list(range(len(데이터)))
+    return {"전체": 묶음(전체), "L3아님": 묶음([i for i in 전체 if not 데이터[i].L3]),
+            "L3": 묶음([i for i in 전체 if 데이터[i].L3])}
+
+
+def 보고_근거단위(포함: dict) -> None:
+    print("\n[결정 근거 포함률] 상위 5 + 참조 확장 (근거 단위 = 조문, 문항 단위 = 결정 근거 전부)")
+    for 이름, g in 포함.items():
+        if g["문항"]:
+            print(f"  {이름:6} {g['문항']:3}문항 · 근거 {g['근거']:3}개 · 상위5 {g['상위5']:3} · 상위5+확장 {g['상위5_확장']:3} "
+                  f"({g['근거단위_pct']}%) · 문항 전부 {g['문항전부']:3} ({g['문항단위_pct']}%)")
+
+
+def 결과_기록(데이터: list[문항], 결과: 검색결과, a, ks: list[int], 평가제외: list[문항] | None = None) -> None:
     """(--기록) 지표와 문항별 hit@5 를 `eval_store.기록()` 으로 eval.runs / eval.run_items 에 쓴다.
 
     `설정` 은 이 숫자가 어떤 조건에서 나왔는지 답할 수 있는 유일한 필드라 반드시 채운다.
+    `--세트` 면 문항별 결정 조문과 포함 조문, 평가 제외 문항(적중 NULL)도 남긴다. 문항 본문은 남기지 않는다.
     """
     import eval_store
     지표들 = {f"{이름}.{k}": v
@@ -363,6 +433,30 @@ def 결과_기록(데이터: list[문항], 결과: 검색결과, a, ks: list[int
         지표들["겹침률_top20"] = sum(결과.겹침) / len(결과.겹침) / 20 * 100
     필터 = "on" if a.사업필터 else "off"
     정답출처 = "golden_chunks" if a.gold_chunks else "원문부분일치"
+    if a.세트:
+        지표들["결정근거"] = 근거단위_포함률(데이터, 결과)
+        제외수 = len(평가제외 or [])
+        run_id = eval_store.기록(
+            {"종류": "retrieval",
+             "설정": {"검색기": "dense+BM25 -> RRF", "세트": a.세트, "사업": a.사업, "L3": a.L3,
+                      "W_DENSE": retrieve.W_DENSE, "W_SPARSE": retrieve.W_SPARSE,
+                      "RRF_K": retrieve.RRF_K, "후보K": a.k, "참조확장깊이": retrieve.깊이,
+                      "사업필터": bool(a.사업필터), "질의": "대화.첫질문", "정답출처": "결정 근거 조문",
+                      "임베딩": "KURE-v1/cpu"},
+             "문항수": len(데이터) + 제외수, "지표": 지표들,
+             "라벨": f"eval_retrieval 세트={a.세트} 사업={a.사업 or '전체'} L3={a.L3} 사업필터={필터}",
+             "비고": (f"조건: 세트={a.세트} · 사업={a.사업 or '전체'} · L3={a.L3} · 평가 {len(데이터)}문항 + 평가 제외 {제외수}문항 · "
+                      "질의=첫질문 · 라벨은 AI, 사람 미검수. 세트가 다른 run 과 hit@k 를 직접 비교하지 않는다.")},
+            [{"gold_id": d.gold_id, "예측": "hit" if any(c in r[1] for c in r[0][:5]) else "miss",
+              "정답": "hit", "적중": any(c in r[1] for c in r[0][:5]),
+              "원출력": {"top5": r[0][:5], "세트": d.세트, "L3": d.L3, "결정조문": sorted(d.결정조문),
+                         "상위5조문": sorted(set(x[0])), "포함조문": sorted(set(x[1]) & x[2])}}
+             for d, r, x in zip(데이터, 결과.rrf, 결과.참조확장)]
+            + [{"gold_id": d.gold_id, "예측": "평가제외", "정답": "hit", "적중": None,
+                "원출력": {"세트": d.세트, "L3": d.L3, "사유": "결정 근거가 코퍼스에 없음(L3 가상 규정)"}}
+               for d in 평가제외 or []])
+        print(f"\n[기록] eval.runs run_id={run_id} (종류=retrieval, {len(데이터) + 제외수}문항 연결)")
+        return
     run_id = eval_store.기록(
         {"종류": "retrieval",
          "설정": {"검색기": "dense+BM25 -> RRF",
@@ -423,14 +517,26 @@ def main() -> None:
                     help="top-5 청크에서 출발한 미해결 참조 — 검증코드 DANGLING_WARN 이 붙을 수 있는 문항")
     ap.add_argument("--참조확장", dest="참조확장", action="store_true",
                     help="top-5 + 참조 확장까지 합쳤을 때의 조 단위 커버리지")
+    ap.add_argument("--세트", choices=("v2_dev", "v2_test"), default=None,
+                    help="정답셋 v2 를 읽는다(golden_v2_load.py 로 적재). 없으면 기존 문항만 읽는다")
+    ap.add_argument("--사업", default=None, help="(--세트) 이 사업 문항만")
+    ap.add_argument("--L3", choices=("전체", "제외", "만"), default="전체", help="(--세트) L3 문항 포함 여부")
     a = ap.parse_args()
+    if a.gold_chunks and a.세트:
+        ap.error("--세트 는 --gold-chunks 와 같이 쓸 수 없다")
+    if a.세트:
+        a.참조확장 = True       # v2 포함률은 상위 5 + 참조 확장 기준이다
     # 검색 깊이(a.k)보다 큰 k 는 hit@a.k 와 같아 의미가 없고, 같은 k 가 두 번 들어가면 표에 열이 겹친다
     ks = sorted({k for k in (1, 5, 10, 20) if k <= a.k} | {a.k})
 
     # 읽기 전용이라도 트랜잭션을 열어 두면 다른 세션의 DDL 과 락 대기가 생길 수 있어 autocommit 으로 연다.
     with db.connect(autocommit=True) as conn:
         cur = conn.cursor()
-        데이터, 정답미확인, 부분일치 = 골든셋_불러오기(cur, a.gold_chunks)
+        if a.세트:
+            데이터, 정답미확인 = v2_불러오기(cur, a.세트, a.사업, a.L3)
+            부분일치: set[int] = set()
+        else:
+            데이터, 정답미확인, 부분일치 = 골든셋_불러오기(cur, a.gold_chunks)
         결과 = 검색_실행(cur, 데이터, a)
         보고_기본표(데이터, 결과, 부분일치, a, ks)
         if a.dangling:
@@ -440,8 +546,10 @@ def main() -> None:
             보고_겹침(결과.겹침)
         if a.진단:
             보고_진단(cur, 데이터, 결과, a, 정답미확인)
+        if a.세트:
+            보고_근거단위(근거단위_포함률(데이터, 결과))
         if a.기록:
-            결과_기록(데이터, 결과, a, ks)
+            결과_기록(데이터, 결과, a, ks, 정답미확인 if a.세트 else None)
         if a.참조확장:
             보고_참조확장(결과.참조확장)
 

@@ -532,7 +532,8 @@ def _audit() -> int:
                 자기일치_집계["자기일치"] += 1
 
         골든셋 = {"일치": 0, "조건부금지_일치": 0, "전체": 0, "일치목록": []}
-        cur.execute("SELECT gold_id, 사업명, 질문, 정답판정, 비목 FROM eval.golden_set ORDER BY gold_id")
+        from eval_store import 기존세트_SQL
+        cur.execute(f"SELECT gold_id, 사업명, 질문, 정답판정, 비목 FROM eval.golden_set WHERE {기존세트_SQL} ORDER BY gold_id")
         for gold_id, 사업명, 질문, 정답, 비목 in cur.fetchall():
             골든셋["전체"] += 1
             r = rl.금지후보(cur, 질문, None, 사업명, 비목)

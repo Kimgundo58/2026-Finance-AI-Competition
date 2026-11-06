@@ -24,7 +24,7 @@ paths.ensure_on_path()
 import orchestrate  # noqa: E402
 import retrieve  # noqa: E402
 from assemble_context import 프롬프트_버전  # noqa: E402
-from eval_store import 평가용_사업명  # noqa: E402
+from eval_store import 기존세트_SQL, 평가용_사업명  # noqa: E402
 
 _log = logging.getLogger(__name__)
 
@@ -72,7 +72,7 @@ def _golden_실행(a: argparse.Namespace, 참조확장_사용: bool) -> list[dic
             "table_schema='eval' AND table_name='golden_set'").fetchall()}
         적용 = "적용범위" if "적용범위" in 컬럼 else "NULL::text"
         rows = conn.execute(f"SELECT gold_id, 세트, 질문, 사업명, 정답판정, {적용} "
-                            "FROM eval.golden_set ORDER BY gold_id").fetchall()
+                            f"FROM eval.golden_set WHERE {기존세트_SQL} ORDER BY gold_id").fetchall()
     if a.limit:
         rows = rows[:a.limit]
     out = []

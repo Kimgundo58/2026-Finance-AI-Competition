@@ -19,6 +19,9 @@ from _lib import db                                                   # noqa: E4
 
 _종류 = ("e2e", "retrieval", "judge")
 
+# 정답셋 v2(세트 v2_dev · v2_test, golden_v2_load.py)는 기존 문항과 섞지 않는다. 세트를 고르지 않은 평가는 이 조건으로 읽는다.
+기존세트_SQL = "left(세트, 3) <> 'v2_'"
+
 
 def 코퍼스버전(cur) -> str:
     """코퍼스 전체 상태를 한 문자열로 압축한다 — (청크수, 임베딩수, refs수, doc수, 최대 chunk_id) 해시."""

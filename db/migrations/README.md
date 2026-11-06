@@ -58,6 +58,8 @@ docker rm -f suddoe-verify            # 익명 볼륨까지 지우려면 docker 
 | `2026-11-04_계정등록.sql` | 필수 | 가입한 계정을 기관에 등록하는 함수 `tenant.계정등록` 을 만든다(`POST /api/accounts`). 기존 행·정책은 바꾸지 않고 api 를 멈추지 않는다. 적용한 뒤 `./deploy.sh --force` 로 새 이미지를 띄운다. 프론트는 이 이미지가 뜬 뒤에 병합한다. 온보딩의 「다음」이 이 API 를 부르므로 먼저 병합하면 모든 사용자가 기관 선택 단계에서 멈춘다 |
 | `2026-11-04_확인질문.sql` | 필수 | 판정 전 확인 질문용이다. `judge_cache` 종류에 `questions`, `decisions."사용자답변"`, 검증코드 `ANSWER_UNCONFIRMED` 를 더하고, `corpus.refs` 의 「지침 제40조」 5행을 고친다(4행은 14차 제43조 여비, 초격차 제10차 참고2 1행은 14차 제40조). 고칠 행이 5행도 0행도 아니면 멈춘다. 코드 배포 전에 적용하고 api 를 멈추지 않는다 |
 | `2026-11-06_온톨로지.sql` | 필수 | 룰 · 온톨로지 재설계용이다. `corpus.concepts`·`concept_labels`·`concept_relations`·`norms`·`provenance`, `tenant.l3_articles.concept_ids`, `decisions."경로"`, 검증코드 `ONTOLOGY_BAN`·`LIMIT_EXCEEDED`·`VAT_BASIS_UNKNOWN`, `suddoe_app` 읽기 · `suddoe_ingest` 쓰기 권한을 더한다. **코드 배포 전에 적용한다**(새 코드의 데이터 버전 해시가 새 테이블을 읽는다). 옛 코드는 영향이 없어 api 를 멈추지 않는다 |
+| `2026-11-06_운영요령_참조정리.sql` | 필수(데이터) | 모두의 창업 · 지침 제14차의 운영요령 참조 41행을 superseded 복사본에서 active 문서로 옮긴다. 조번호가 active 에 없으면 멈춘다. superseded 행은 지우지 않는다. api 를 멈추지 않는다 |
+| `2026-11-06_모두의창업_참조_태그_보정.sql` | 필수(데이터) | 모두의 창업의 쉼표 열거 참조 13행 추가, 제30조 재매핑 · 제41 · 43조 붙임 정정, 제46 · 50 · 52조 적용대상을 공통으로 고친다. 원문 문구와 도착 조제목이 다르면 멈춘다. refs 행 수가 바뀌어 판정 캐시가 무효화된다. api 를 멈추지 않는다 |
 
 ### `2026-11-03_계정별_분리.sql` 적용 순서 (운영)
 

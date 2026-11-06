@@ -51,6 +51,14 @@ PATTERNS = [
 }
 # 14차 조번호로 쓴 문서. 「지침 제40조」가 14차 제40조(특허권 등 무형자산 취득비)라 옮기지 않는다.
 지침_제40조_14차표기_문서 = {"초격차 스타트업 프로젝트 세부관리기준(제10차)"}
+# 모든 지침 조번호를 14차로 쓴 문서(doc_id 앞부분). 원문 근거: 모두의 창업 제30조(회의비) → 「지침 제33조」는 14차 회의비,
+# 제33조②의 비목 목록 → 14차 제37·38·40·42·43·45조. 옛 판 표로 옮기면 틀린 조가 된다.
+지침_14차표기_문서접두 = ("모두의 창업 프로젝트 세부관리기준",)
+
+# 쉼표로 이어진 조: 「지침 제37조, 제38조」. 공백을 지운 사본에서 앞 참조 바로 뒤를 본다.
+RE_열거 = re.compile(r"(?:[,·ㆍ]|및|또는)제(\d+)조(?:의(\d+))?(?:제\d+항)?")
+# 모두의 창업 제25조③: 「지침 제29조 … 제33조에 따르되, 제34조에 따라 지침에서 정하지 않은」의 제34조도 지침이다.
+RE_열거_이어짐 = re.compile(r"에따르되,제(\d+)조(?:의(\d+))?에따라지침에서")
 
 
 # ── 문서별 약칭 사전 ────────────────────────────────────────────────────
@@ -129,7 +137,10 @@ def load_corpus_names() -> dict[str, str]:
     names: dict[str, str] = {}
     try:
         with db.connect(connect_timeout=5) as conn:
-            for (doc_id,) in conn.execute("SELECT doc_id FROM corpus.documents").fetchall():
+            # 같은 제명으로 정규화되는 문서가 여럿이면 active 를 먼저 등록한다. setdefault 라 먼저 온 쪽이 남는다.
+            # 순서가 없으면 운영요령 참조가 superseded 복사본으로 가서 참조 확장에서 빠진다.
+            for (doc_id,) in conn.execute("SELECT doc_id FROM corpus.documents "
+                                          "ORDER BY (status = 'active') DESC, doc_id").fetchall():
                 # doc_id 는 `L1_<제명>_<날짜>` 또는 제명 그대로다. 둘 다 제명으로 변환해 등록한다.
                 제명 = doc_id[3:] if doc_id.startswith("L1_") else doc_id
                 if len(제명) > 9 and 제명[-8:].isdigit() and 제명[-9] == "_":
@@ -250,6 +261,35 @@ def _약칭_해결(e: dict, 토큰: str, 약칭표: dict[str, str], corpus: dict
                  해결근거=f'약칭 "{토큰}" → 「{정식}」 — 코퍼스에 없는 규정')
 
 
+def _지침_조_해결(e: dict, 조: str, doc_id: str) -> None:
+    """지침 조번호를 14차로 해결한다. 옛 판 조번호로 쓴 문서는 조제목으로 옮긴다(remapped)."""
+    if not doc_id.startswith(지침_14차표기_문서접두):
+        for 판, tbl in 지침_조제목.items():
+            if 조 == "40" and doc_id in 지침_제40조_14차표기_문서:
+                continue
+            if 판 != "제14차" and 조 in tbl:
+                현행 = [k for k, v in 지침_조제목["제14차"].items() if v == tbl[조]]
+                if 현행:
+                    e.update(해결상태="remapped",
+                             # 약칭이 아니라 실제 doc_id 를 쓴다 (위 주석)
+                             dst_doc_id=지침_DOCID,
+                             dst_조번호=f"제{현행[0]}조",
+                             해결근거=f"{판} 조번호로 표기됨 → 조제목 '{tbl[조]}' 로 재매칭")
+                    return
+    e.update(해결상태="resolved", dst_doc_id=지침_DOCID)
+
+
+def _지침_열거(sq: str, 끝: int) -> list[str]:
+    """「지침 제37조」 바로 뒤에 이어진 조 번호들 ('38', '29의2' …). 앞 참조가 끝난 위치(공백 없는 사본)부터 본다."""
+    out: list[str] = []
+    while (m := RE_열거.match(sq, 끝)):
+        out.append(m.group(1) + (f"의{m.group(2)}" if m.group(2) else ""))
+        끝 = m.end()
+    if (m := RE_열거_이어짐.match(sq, 끝)):
+        out.append(m.group(1) + (f"의{m.group(2)}" if m.group(2) else ""))
+    return out
+
+
 def scan(text: str, doc_id: str, corpus: dict[str, str],
          src_조번호: str = "문서전체", 약칭표: dict[str, str] | None = None,
          동적: list | None = None) -> list[dict]:
@@ -261,6 +301,13 @@ def scan(text: str, doc_id: str, corpus: dict[str, str],
     def 원문(m) -> str:
         a, b = imap[m.start()], imap[m.end() - 1] + 1
         return re.sub(r"\s+", " ", t[a:b])
+
+    def 지침의_붙임(m) -> bool:
+        """「지침의 붙임 제1호」인가. 통합관리지침 자신과 「운영지침의 붙임」처럼 앞에 글자가 더 붙은 말은 제외한다."""
+        if m.group(1) != "붙임" or "통합관리지침" in doc_id or not sq.endswith("지침의", 0, m.start()):
+            return False
+        i = imap[m.start() - 3]
+        return i == 0 or not ("가" <= t[i - 1] <= "힣")
 
     # 범위 패턴을 먼저 매칭한다. "법 제28조부터 제31조까지" 는 조 패턴에도
     # "법 제28조" 로 걸려서, 순서를 안 잡으면 같은 참조가 엣지 두 개가 된다.
@@ -300,8 +347,10 @@ def scan(text: str, doc_id: str, corpus: dict[str, str],
                         e["해결근거"] = f'문서 자체 정의 「{정식}」(이하 "{m.group(1).strip()}") 로 해결'
                 e.update(관계="인용", dst_doc_id=path, 해결상태=st)
             elif kind == "별표":
-                e.update(관계="별표참조", dst_doc_id=doc_id,
-                         dst_조번호=f"{m.group(1)}{m.group(2)}", 해결상태="resolved")
+                # 「지침의 붙임 제1호」는 자기 문서가 아니라 지침의 붙임이다.
+                e.update(관계="별표참조", dst_doc_id=지침_DOCID if 지침의_붙임(m) else doc_id,
+                         dst_조번호=f"{m.group(1)}{m.group(2)}", 해결상태="resolved",
+                         해결근거="본문 표기 「지침의 붙임」" if 지침의_붙임(m) else None)
             elif kind == "미규정위임":
                 # `resolved` 가 아니다 — "정하지 아니한 사항은 상위 규정에 따른다" 는
                 # 어느 조인지 지목하지 않아 dst 가 비어 있다. 누락이 아니라
@@ -319,20 +368,19 @@ def scan(text: str, doc_id: str, corpus: dict[str, str],
                     continue
                 # 지침 참조는 판본 어긋남을 검사한다.
                 if target == "지침":
-                    for 판, tbl in 지침_조제목.items():
-                        if 조 == "40" and doc_id in 지침_제40조_14차표기_문서:
-                            continue
-                        if 판 != "제14차" and 조 in tbl:
-                            현행 = [k for k, v in 지침_조제목["제14차"].items() if v == tbl[조]]
-                            if 현행:
-                                e.update(해결상태="remapped",
-                                         # 약칭이 아니라 실제 doc_id 를 쓴다 (위 주석)
-                                         dst_doc_id=지침_DOCID,
-                                         dst_조번호=f"제{현행[0]}조",
-                                         해결근거=f"{판} 조번호로 표기됨 → 조제목 '{tbl[조]}' 로 재매칭")
-                                break
-                    else:
-                        e.update(해결상태="resolved", dst_doc_id=지침_DOCID)
+                    _지침_조_해결(e, 조, doc_id)
+                    if kind == "조":
+                        edges.append(e)
+                        for 이어진조 in _지침_열거(sq, m.end()):
+                            표기 = f"지침 제{이어진조}조"
+                            if ("조", 표기) in seen:
+                                continue
+                            seen.add(("조", 표기))
+                            e2 = {**e, "참조문자열": 표기, "dst_조번호": f"제{이어진조}조",
+                                  "해결근거": "쉼표로 이어진 조 표기"}
+                            _지침_조_해결(e2, 이어진조, doc_id)
+                            edges.append(e2)
+                        continue
                 elif target == "요령":
                     # 「중소기업창업 지원사업 운영요령」(중기부고시 2024-101). 코퍼스에 있다.
                     e.update(해결상태="resolved",
