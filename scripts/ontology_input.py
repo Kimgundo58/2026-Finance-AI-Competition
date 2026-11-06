@@ -29,6 +29,7 @@ _항기호 = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳"
 _RE_항 = re.compile(f"[{_항기호}]")
 _RE_페이지 = re.compile(r"(?m)^\s*-\s*\d{1,3}\s*-\s*$\n?")
 _RE_호 = re.compile(r"(?m)^(\d{1,2})\.\s")
+_RE_조 = re.compile(r"제\d+조")
 
 
 def _항_나누기(본문: str) -> list[tuple[str | None, str]]:
@@ -70,7 +71,7 @@ def 블록_만들기(문서키: str, 조번호: str, 조제목: str | None, 본�
         행 = 별지_행(본문)
         if 행:
             return [{"id": f"조:{문서키}#{조번호}/{k}", "머리": 머리, "본문": v, "원문결함": False} for k, v in 행]
-    if not 조번호.startswith("제"):             # 책자 · 붙임 등 항 번호가 조문 번호가 아닌 문서
+    if not _RE_조.match(조번호):                # 책자 · 붙임 · 편 단위 문서처럼 항 번호가 조문 번호가 아닌 문서
         return [{"id": f"조:{문서키}#{조번호}", "머리": 머리, "본문": 본문.strip(), "원문결함": False}]
     out = []
     for 항, 조각 in _항_나누기(_RE_페이지.sub("", 본문)):
