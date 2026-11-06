@@ -86,6 +86,16 @@ def _덮어쓰기_읽기(문서키: str) -> dict:
     return json.loads(p.read_text(encoding="utf-8")).get("덮어쓰기") or {}
 
 
+def 기존노드() -> list[str]:
+    """이전 묶음에서 확정돼 원천 JSON 에 들어간 개념 ID 목록(5-7b). 새 묶음이 같은 개념을 다시 만들지 않게 한다."""
+    ids: set[str] = set()
+    for 파일 in sorted((저장소 / "ontology").glob("*.json")):
+        if 파일.name == "schema.json":
+            continue
+        ids.update(c["id"] for c in json.loads(파일.read_text(encoding="utf-8")).get("개념") or [])
+    return sorted(ids)
+
+
 def 만들기(폴더: Path) -> dict:
     명세 = json.loads((폴더 / "입력_명세.json").read_text(encoding="utf-8"))
     스키마 = json.loads((저장소 / "ontology" / "schema.json").read_text(encoding="utf-8"))
@@ -125,7 +135,7 @@ def 만들기(폴더: Path) -> dict:
         ensure_ascii=False, indent=1), encoding="utf-8")
     기존 = 폴더 / "입력_기존노드.json"
     if not 기존.exists():
-        기존.write_text("[]\n", encoding="utf-8")
+        기존.write_text(json.dumps(기존노드(), ensure_ascii=False, indent=0) + "\n", encoding="utf-8")
     return {"블록": len(블록), "조문ID": [b["id"] for b in 블록]}
 
 

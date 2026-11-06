@@ -68,7 +68,8 @@ def _고른_조각(본문: str, 항호: str | None) -> list[tuple[str | None, st
         if 내용:
             return [(키, 내용)]
     elif 키:
-        고름 = [(k, c) for k, c in _조_조각(본문) if k == 키]
+        # 표 안의 항 기호와 겹치면 키가 `③` · `③#2` 로 갈린다(제35조 표-4). 어느 쪽이 본문인지 모르므로 둘 다 넣는다
+        고름 = [(k, c) for k, c in _조_조각(본문) if (k or "").split("#")[0] == 키]
         if 고름:
             return 고름
     return _조_조각(본문)
@@ -234,6 +235,7 @@ def _발췌(n: dict, 칸: str | None = None) -> str:
 def 규범_요약(규범결과: dict, 게이트결과: dict, *, 분류표시: str | None = None, 확정: bool = False, l3있음: bool = False) -> str | None:
     """B4 문장. 코드가 비교를 끝낸 결과와 규범을 평문으로 적는다. 내부 ID 를 넣지 않는다."""
     규범들 = 규범결과.get("규범") or []
+    제외 = set(게이트결과.get("제외규범") or [])
     쓴 = set(게이트결과.get("쓴규범") or [])
     조건구분 = {c["문장"]: c.get("구분") for c in 게이트결과.get("조건") or []}
     줄: list[str] = []
@@ -241,7 +243,7 @@ def 규범_요약(규범결과: dict, 게이트결과: dict, *, 분류표시: st
         줄.append(f"분류: {분류표시} ({'사용자가 확정함' if 확정 else '추천값, 사용자 확정 전'})")
     for n in 규범들:
         종류, 글 = n.get("종류"), _발췌(n, "수치") or _발췌(n)
-        if 종류 == "우선순위" or not 글:
+        if 종류 == "우선순위" or not 글 or n.get("norm_id") in 제외:
             continue
         if not n.get("verified") or n.get("해석미결"):
             줄.append(f"- 확정되지 않은 {종류} 규정: 「{글}」 코드가 비교하지 않았다. 원문을 읽고 판단한다.")
@@ -358,6 +360,8 @@ def _자체시험() -> int:
     t.append(("같은 조 · 항은 한 번만(검색 청크 제42조① 빠짐)", 글들.count("① 지침 본문") == 1 and [i[0] for i in 전체 if i[3] == "① 지침 본문"] == ["article"]))
     t.append(("온톨로지에 없는 검색 청크는 B3", m["블록"][-1][1][0][3] == "검색 조문"))
     t.append(("미특정 행은 문맥에 안 들어가고 예외도 없다", m["항목수"] == len(전체)))
+    표겹침 = "① 본문 하나\n표: ① 칸 ② 칸 ③ 칸\n② 본문 둘\n③ 본문 셋"
+    t.append(("표 안 기호와 겹치는 항은 본문까지 고른다", any("본문 셋" in c for _, c in _고른_조각(표겹침, "③"))))
     t.append(("헤더는 문서 표시명", any(i[2] == "모두의 창업 제36조(지급수수료)" for i in 전체)))
     짧음 = 문맥_구성(cur, 근거행=행들, 대상노드=set(), 검색={"top5": [100, 101]}, schema=표, 상한=60)
     t.append(("상한 초과: 뒤에서 뺀다(검색 먼저)", 짧음["빠진수"] > 0 and "검색 조문" not in [i[3] for _, 항목 in 짧음["블록"] for i in 항목]))
