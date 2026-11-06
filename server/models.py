@@ -261,6 +261,27 @@ class 계획목록응답(BaseModel):
     항목: list[계획요약] = Field(default_factory=list)
 
 
+class 판정피드백(BaseModel):
+    평가: Literal["맞음", "틀림"]
+    이유: Literal["판정이 다름", "근거가 다름", "기타"] | None = None
+    의견: str | None = None
+
+
+class 피드백입력(판정피드백):
+    의견: str | None = Field(default=None, max_length=1000)
+
+    @model_validator(mode="after")
+    def _평가별_정리(self):
+        """맞았어요에는 이유·의견을 남기지 않고, 틀렸어요에는 이유가 있어야 한다."""
+        if self.평가 == "맞음":
+            self.이유 = self.의견 = None
+        elif self.이유 is None:
+            raise ValueError("틀렸어요에는 이유가 필요합니다")
+        else:
+            self.의견 = (self.의견 or "").strip() or None
+        return self
+
+
 class 계획상세(계획요약):
     질문원문: str | None = None
     용도: str | None = None
@@ -272,6 +293,8 @@ class 계획상세(계획요약):
     판정상세: dict[str, Any] | None = None
     # 최신 판정에 반영한 확인 질문과 답 [{질문문, 답}]. 결과 화면의 「확인한 내용」과 같다
     사용자답변: list[dict[str, Any]] = Field(default_factory=list)
+    # 지금 계정이 최신 판정에 남긴 평가. 재점검하면 새 판정이라 비어 있다
+    내피드백: 판정피드백 | None = None
     할일: list[_할일] = Field(default_factory=list)
     created_at: str | None = None
 

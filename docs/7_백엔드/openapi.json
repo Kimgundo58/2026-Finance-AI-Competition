@@ -1446,6 +1446,59 @@
     }
    }
   },
+  "/api/decisions/{decision_id}/feedback": {
+   "put": {
+    "tags": [
+     "판정 피드백"
+    ],
+    "summary": "피드백 저장",
+    "description": "내 평가를 저장한다. 같은 판정에 다시 보내면 바꾼다.",
+    "operationId": "피드백_저장_api_decisions__decision_id__feedback_put",
+    "parameters": [
+     {
+      "name": "decision_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "integer",
+       "title": "Decision Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/server__models_________3"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/server__models_______-Output"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
   "/api/profile": {
    "get": {
     "summary": "Profile Get",
@@ -1535,6 +1588,75 @@
          "type": "object",
          "additionalProperties": true,
          "title": "Response Admin Status Admin Status Get"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/admin/feedback": {
+   "get": {
+    "summary": "Admin Feedback",
+    "description": "사용자가 「틀렸어요」로 표시한 판정(최신순, 최대 200건). 기관을 넘어 읽어야 해서 DB 함수를 거친다.",
+    "operationId": "admin_feedback_admin_feedback_get",
+    "parameters": [
+     {
+      "name": "limit",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "default": 50,
+       "title": "Limit"
+      }
+     },
+     {
+      "name": "offset",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "default": 0,
+       "title": "Offset"
+      }
+     },
+     {
+      "name": "x-admin-token",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Admin-Token"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response Admin Feedback Admin Feedback Get"
         }
        }
       }
@@ -2090,7 +2212,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/_____-Output"
+         "$ref": "#/components/schemas/server__routes_ingest_______-Output"
         }
        }
       }
@@ -2628,71 +2750,6 @@
     "type": "object",
     "title": "프로필"
    },
-   "_____-Output": {
-    "properties": {
-     "doc_id": {
-      "type": "string",
-      "title": "Doc Id"
-     },
-     "상태": {
-      "type": "string",
-      "title": "상태"
-     },
-     "이전판_doc_id": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "이전판 Doc Id"
-     },
-     "retrieval_scope": {
-      "type": "string",
-      "title": "Retrieval Scope"
-     },
-     "이전판_청크_삭제": {
-      "type": "integer",
-      "title": "이전판 청크 삭제"
-     },
-     "판정캐시_삭제": {
-      "type": "integer",
-      "title": "판정캐시 삭제"
-     },
-     "경고": {
-      "items": {
-       "type": "string"
-      },
-      "type": "array",
-      "title": "경고",
-      "default": []
-     },
-     "대체한_doc_id": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "대체한 Doc Id",
-      "readOnly": true
-     }
-    },
-    "type": "object",
-    "required": [
-     "doc_id",
-     "상태",
-     "retrieval_scope",
-     "이전판_청크_삭제",
-     "판정캐시_삭제",
-     "대체한_doc_id"
-    ],
-    "title": "활성화응답"
-   },
    "_______": {
     "properties": {
      "생성": {
@@ -2742,6 +2799,50 @@
      "코드미상"
     ],
     "title": "할일동기화응답"
+   },
+   "server__models_______-Output": {
+    "properties": {
+     "평가": {
+      "type": "string",
+      "enum": [
+       "맞음",
+       "틀림"
+      ],
+      "title": "평가"
+     },
+     "이유": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "판정이 다름",
+         "근거가 다름",
+         "기타"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "이유"
+     },
+     "의견": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "의견"
+     }
+    },
+    "type": "object",
+    "required": [
+     "평가"
+    ],
+    "title": "판정피드백"
    },
    "server__models________1": {
     "properties": {
@@ -3295,6 +3396,16 @@
       },
       "type": "array",
       "title": "사용자답변"
+     },
+     "내피드백": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/server__models_______-Output"
+       },
+       {
+        "type": "null"
+       }
+      ]
      },
      "할일": {
       "items": {
@@ -3953,6 +4064,51 @@
     "type": "object",
     "title": "정규화요청"
    },
+   "server__models_________3": {
+    "properties": {
+     "평가": {
+      "type": "string",
+      "enum": [
+       "맞음",
+       "틀림"
+      ],
+      "title": "평가"
+     },
+     "이유": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "판정이 다름",
+         "근거가 다름",
+         "기타"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "이유"
+     },
+     "의견": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 1000
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "의견"
+     }
+    },
+    "type": "object",
+    "required": [
+     "평가"
+    ],
+    "title": "피드백입력"
+   },
    "server__models__________1": {
     "properties": {
      "비목": {
@@ -4258,6 +4414,71 @@
     "type": "object",
     "title": "활성화요청",
     "description": "이전 판을 자동으로 찾지 못할 때 대체_doc_id 나 신규문서 중 하나를 지정한다.\n\n신규문서인데 같은 사업·비슷한 이름의 active 문서가 있으면 409 다. 그 문서와 함께 검색돼야 하는\n별개 문서임을 확인했을 때만 중복_허용=true 를 준다."
+   },
+   "server__routes_ingest_______-Output": {
+    "properties": {
+     "doc_id": {
+      "type": "string",
+      "title": "Doc Id"
+     },
+     "상태": {
+      "type": "string",
+      "title": "상태"
+     },
+     "이전판_doc_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "이전판 Doc Id"
+     },
+     "retrieval_scope": {
+      "type": "string",
+      "title": "Retrieval Scope"
+     },
+     "이전판_청크_삭제": {
+      "type": "integer",
+      "title": "이전판 청크 삭제"
+     },
+     "판정캐시_삭제": {
+      "type": "integer",
+      "title": "판정캐시 삭제"
+     },
+     "경고": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "경고",
+      "default": []
+     },
+     "대체한_doc_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "대체한 Doc Id",
+      "readOnly": true
+     }
+    },
+    "type": "object",
+    "required": [
+     "doc_id",
+     "상태",
+     "retrieval_scope",
+     "이전판_청크_삭제",
+     "판정캐시_삭제",
+     "대체한_doc_id"
+    ],
+    "title": "활성화응답"
    },
    "server__routes_ingest________1": {
     "properties": {
