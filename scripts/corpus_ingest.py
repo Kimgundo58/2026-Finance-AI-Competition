@@ -223,7 +223,8 @@ def _준비(작업: dict, *, 복원조문: list[dict] | None = None) -> dict:
 
     반환: {조문, 전략, 추출방식, 품질, 경고, 청크}. staged 로 둘 수 없으면 _적재실패.
     `복원조문` 을 주면 파일을 읽지 않고 그 조문을 쓴다(scripts/corpus_restored_load.py). 조 구조가 없는 안내 책자처럼
-    PDF 와 대조해 쪽 · 소제목 단위로 복원한 문서다. 대조를 끝낸 입력이라 품질은 high 로 둔다.
+    쪽 · 소제목 단위로 복원한 문서다. 품질은 high 로 둔다. 어떻게 대조했는지는 입력 메타 `대조` 칸이 필수이고
+    ingest_jobs.경고 에 남는다(대조 수준은 칸마다 다르다. 사람 대조가 아닐 수 있다).
     """
     from article_split import is_deleted, validate
 
@@ -696,7 +697,7 @@ def _저장(conn, 작업: dict, 적재데이터: dict) -> bool:
                     해결상태, 해결근거)
                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
                ON CONFLICT (src_doc_id, src_조번호, 참조문자열) DO NOTHING""",
-            _참조_만들기(cur, doc_id, 작업["문서명"], layer, 적재데이터["조문"]))
+            _참조_만들기(cur, doc_id, 작업["문서명"], layer, 적재데이터["조문"], 복원본=적재데이터["전략"] == "복원본"))
 
         cur.execute(
             """UPDATE corpus.ingest_jobs
@@ -707,7 +708,7 @@ def _저장(conn, 작업: dict, 적재데이터: dict) -> bool:
     return True
 
 
-def _참조_만들기(cur, doc_id: str, 문서명: str, layer: str, 조문: list[dict]) -> list[tuple]:
+def _참조_만들기(cur, doc_id: str, 문서명: str, layer: str, 조문: list[dict], *, 복원본: bool = False) -> list[tuple]:
     """조별 참조 표기 -> corpus.refs 행. 참조패턴 인식·해결은 build_refs 를 그대로 쓴다.
 
     대상 문서명 매핑은 build_refs.load_corpus_names 와 같은 규칙(L1_ 접두어·_YYYYMMDD 접미사를 뗀 제명과
@@ -727,15 +728,15 @@ def _참조_만들기(cur, doc_id: str, 문서명: str, layer: str, 조문: list
 
     약칭표 = build_refs.수집_약칭(" ".join(a["본문"] or "" for a in 조문))
     동적 = build_refs._동적패턴(약칭표)
-    행 = []
+    edges = []
     for a in 조문:
         if a["삭제"]:
             continue                      # 효력이 없는 조는 참조의 출발점이 아니다
-        for e in build_refs.scan(a["본문"], doc_id, 문서명_매핑, src_조번호=a["조번호"],
-                                 약칭표=약칭표, 동적=동적):
-            행.append((e["src_doc_id"], e["src_조번호"], layer, e["참조문자열"], e["관계"],
-                       e["dst_doc_id"], e["dst_조번호"], e["해결상태"], e["해결근거"]))
-    return 행
+        edges += build_refs.scan(a["본문"], doc_id, 문서명_매핑, src_조번호=a["조번호"],
+                                 약칭표=약칭표, 동적=동적)
+    build_refs.자기_표기_잇기(edges, 조문, 복원본=복원본)
+    return [(e["src_doc_id"], e["src_조번호"], layer, e["참조문자열"], e["관계"],
+             e["dst_doc_id"], e["dst_조번호"], e["해결상태"], e["해결근거"]) for e in edges]
 
 
 # 활성화·삭제
@@ -815,6 +816,7 @@ def 활성화(conn, doc_id: str, *, 대체_doc_id: str | None = None, 신규문�
                 # 운영 DB 에는 eval 스키마가 없다. 트랜잭션 전체가 롤백되므로 아무것도 바뀌지 않는다.
                 raise 요청거부(f"이전 판 청크를 {e.diag.schema_name}.{e.diag.table_name} 가 참조하고 있어 "
                            "지울 수 없습니다. eval.golden_chunks 라면 골든셋 청크 재매칭을 먼저 하세요.") from e
+            경고 += _참조_옮기기(cur, 이전[0], doc_id)
             경고 += _활성화_경고(cur, 이전[0])
         cur.execute("UPDATE corpus.ingest_jobs SET 이전판_doc_id = %s, updated_at = now() "
                     "WHERE doc_id = %s", (이전[0] if 이전 else None, doc_id))
@@ -895,19 +897,34 @@ def _이전판_후보(cur, layer: str, 키: str, 사업명: str | None) -> list[
     return 후보[:10]
 
 
+def _참조_옮기기(cur, 이전_doc_id: str, doc_id: str) -> list[str]:
+    """active 문서에서 이전 판으로 가는 참조를 새 판으로 옮긴다. 활성화 트랜잭션 안이라 참조가 끊기는 구간이 없다.
+
+    참조 확장은 도착 문서가 active 일 때만 따라가므로(retrieve.참조확장SQL), 옮기지 않으면 판이 바뀌는 순간
+    그 문서의 조문이 근거 문맥에서 판단불가 없이 조용히 빠진다. 새 판에 없는 조로 가는 행은 옮기되 경고한다(확장되지 않는다).
+    """
+    없는조 = [r[0] for r in cur.execute(
+        """SELECT DISTINCT r.dst_조번호
+             FROM corpus.refs r JOIN corpus.documents s ON s.doc_id = r.src_doc_id AND s.status = 'active'
+            WHERE r.dst_doc_id = %(옛)s AND r.dst_조번호 IS NOT NULL AND r.src_doc_id NOT IN (%(옛)s, %(새)s)
+              AND EXISTS (SELECT 1 FROM corpus.doc_articles a WHERE a.doc_id = %(옛)s AND a.조번호 = r.dst_조번호)
+              AND NOT EXISTS (SELECT 1 FROM corpus.doc_articles a WHERE a.doc_id = %(새)s AND a.조번호 = r.dst_조번호)
+            ORDER BY 1""", {"옛": 이전_doc_id, "새": doc_id}).fetchall()]
+    cur.execute(
+        """UPDATE corpus.refs r SET dst_doc_id = %(새)s
+             FROM corpus.documents s
+            WHERE r.dst_doc_id = %(옛)s AND s.doc_id = r.src_doc_id AND s.status = 'active'
+              AND r.src_doc_id NOT IN (%(옛)s, %(새)s)""", {"옛": 이전_doc_id, "새": doc_id})
+    return [f"새 판에 없는 조로 가는 참조가 있습니다(확장되지 않음): {', '.join(없는조[:10])}"] if 없는조 else []
+
+
 def _활성화_경고(cur, 이전_doc_id: str) -> list[str]:
-    """이전 판을 가리키는 룰 근거와 다른 문서의 참조 수. 활성화가 자동으로 고치지 않는 부분이다."""
-    룰수, 참조수 = cur.execute(
-        """SELECT (SELECT count(*) FROM corpus.rules
-                    WHERE 근거 @> jsonb_build_array(jsonb_build_object('doc_id', %(d)s::text))),
-                  (SELECT count(*) FROM corpus.refs WHERE dst_doc_id = %(d)s AND src_doc_id <> %(d)s)""",
-        {"d": 이전_doc_id}).fetchone()
-    경고 = []
-    if 룰수:
-        경고.append(f"이전 판을 근거로 가진 corpus.rules {룰수}건은 재검수가 필요합니다.")
-    if 참조수:
-        경고.append(f"다른 문서의 참조 {참조수}건이 이전 판을 가리킵니다 (참조를 다시 만들기 전까지 그대로 남습니다).")
-    return 경고
+    """이전 판을 가리키는 룰 근거 수. 활성화가 자동으로 고치지 않는 부분이다."""
+    룰수 = cur.execute(
+        """SELECT count(*) FROM corpus.rules
+            WHERE 근거 @> jsonb_build_array(jsonb_build_object('doc_id', %(d)s::text))""",
+        {"d": 이전_doc_id}).fetchone()[0]
+    return [f"이전 판을 근거로 가진 corpus.rules {룰수}건은 재검수가 필요합니다."] if 룰수 else []
 
 
 def 삭제(conn, doc_id: str) -> dict:

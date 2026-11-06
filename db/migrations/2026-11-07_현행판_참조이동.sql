@@ -5,7 +5,8 @@
 -- 3) 운영요령 제19조① → 집행지침은 문서 단위 참조로 둔다. 어느 장인지 원문에 없어 참조 확장은 하지 않는다(묶음 E · H 추출 때 정한다).
 -- 4) 복원본 경로가 src_path 에 남긴 admin_upload/ 를 저장소 경로로 바꾼다.
 -- 5) 판정 캐시를 비운다. 판정 캐시 키는 코퍼스 상태를 담지 않는다.
--- 멱등이다. 새 판이 active 가 아니면 멈춘다. 옛 판에 있던 조가 새 판에 없으면 멈춘다.
+-- 멱등이다. 대상 문서가 하나도 없으면 NOTICE 만 내고 끝난다. 일부만 있으면(새 판이 active 가 아니면) 멈춘다. 옛 판에 있던 조가 새 판에 없으면 멈춘다.
+-- 활성화가 이제 판이 바뀐 문서의 참조를 함께 옮긴다(scripts/corpus_ingest.py _참조_옮기기). 1) 은 superseded 복사본을 가리키던 행과 이 코드 전에 적재한 DB 를 위해 남긴다.
 -- 옛 판에도 없던 조로 가는 참조(사례집 → 요령 제45조 3행, 산업안전보건법 제408조 1행)는 지금도 확장되지 않으므로 그대로 옮긴다.
 -- 데이터 수정이라 db/init 은 고치지 않는다. 원천은 2026_Finance_DATA_FOR_RAG/_refs.json · scripts/build_refs.py.
 --
@@ -32,6 +33,11 @@ DECLARE
     v_제3자참조 CONSTANT text := '「창업지원사업 제3자 부당개입 근절을 위한 업무처리 지침(이하 ‘제3자 부당개입 처리지침)」';
     v_옛 text; v_새 text; v_없는조 text; v_행 int; v_합 int := 0; v_캐시 int;
 BEGIN
+    -- 문서가 하나도 없는 DB(빈 DB 검증)는 할 일이 없다. 일부만 있으면 아래에서 멈춘다.
+    IF NOT EXISTS (SELECT 1 FROM corpus.documents WHERE doc_id = ANY(ARRAY[v_운영요령, v_제3자, v_집행])) THEN
+        RAISE NOTICE '대상 문서가 없다. 아무것도 하지 않는다';
+        RETURN;
+    END IF;
     FOR i IN 1 .. array_length(v_판, 1) LOOP
         v_옛 := v_판[i][1]; v_새 := v_판[i][2];
         IF NOT EXISTS (SELECT 1 FROM corpus.documents WHERE doc_id = v_새 AND status = 'active') THEN
@@ -61,6 +67,9 @@ BEGIN
     UPDATE corpus.refs SET dst_doc_id = v_제3자, "dst_조번호" = '제5조', "해결상태" = 'resolved', "해결근거" = '원문 대조: 제2조26 「…」제5조 및 제6조'
      WHERE src_doc_id = v_모두 AND "src_조번호" = '제2조' AND "참조문자열" = v_제3자참조;
     GET DIAGNOSTICS v_행 = ROW_COUNT;
+    IF v_행 = 0 THEN
+        RAISE EXCEPTION '모두의 창업 제2조의 제3자 지침 참조 행을 찾지 못했다. 참조문자열이 로컬과 다르다';
+    END IF;
     RAISE NOTICE '제3자 지침 제5조 참조: %행', v_행;
     INSERT INTO corpus.refs (src_doc_id, "src_조번호", src_layer, "참조문자열", "관계", dst_doc_id, "dst_조번호", "해결상태", "해결근거")
     VALUES (v_모두, '제2조', 'L2', v_제3자참조 || '제6조', '인용', v_제3자, '제6조', 'resolved', '원문 대조: 제2조26 「…」제5조 및 제6조')

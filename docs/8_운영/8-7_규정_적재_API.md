@@ -76,8 +76,9 @@ curl -s -X POST "$API/admin/documents/<doc_id>/activate" -H "$H" -H "Content-Typ
 - 이전 판은 `superseded`·`index_target=false` 가 되고 청크를 지운다(조문 doc_articles 는 남긴다). 새 판은
   이전 판의 retrieval_scope 를 이어받는다. 새 판 청크를 BM25 색인(chunk_len·chunk_terms)에 넣고, `tenant.judge_cache` 를
   비우고, `corpus.term_df` 를 `REFRESH ... CONCURRENTLY` 한다. staged 동안에는 BM25 점수에 영향을 주지 않는다.
-- 응답 `경고`: 이전 판을 근거로 가진 corpus.rules 수, 이전 판을 가리키는 다른 문서 참조 수, 신규문서일 때 함께
-  검색될 비슷한 active 문서. 룰 근거와 들어오는 참조는 자동으로 고치지 않는다(재검수 대상).
+- 들어오는 참조: active 문서에서 이전 판으로 가는 `corpus.refs` 는 활성화 트랜잭션에서 새 판으로 옮긴다. 판이 바뀌는 순간 참조 확장이 끊기지 않게 하기 위해서다.
+- 응답 `경고`: 이전 판을 근거로 가진 corpus.rules 수, 새 판에 없는 조로 옮긴 참조, 신규문서일 때 함께
+  검색될 비슷한 active 문서. 룰 근거는 자동으로 고치지 않는다(재검수 대상).
 - superseded 를 다시 active 로 돌리는 API 는 없다(청크를 지웠다). 필요하면 그 판을 다시 올려 활성화한다.
 
 ## 판정 캐시 반영

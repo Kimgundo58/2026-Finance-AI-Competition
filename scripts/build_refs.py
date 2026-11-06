@@ -8,6 +8,10 @@ remapped(구판 조번호를 조제목으로 재매칭), dangling(대상이 코�
 corpus.documents.doc_id 로 맞춰야 한다.
 
 실행: python scripts/build_refs.py [--doc-filter 창진원] [--show 예비창업]
+      python scripts/build_refs.py --DB내보내기   # corpus.refs 를 _refs.json 으로 내보낸다(저장소에 있는 파일은 이것으로 만든다)
+
+_articles.json 은 저장소에 없어 깨끗한 체크아웃에서는 조문 스캔을 돌릴 수 없다. 스캔으로 전체를 다시 만들면 원문 대조로 고친 행이
+사라지므로 db/migrations/README.md 「참조를 다시 만든 뒤」의 마이그레이션을 다시 돌린다.
 """
 from __future__ import annotations
 
@@ -35,7 +39,7 @@ PATTERNS = [
     # "「국가연구개발혁신법」"        → 외부 규정 참조
     ("규정", re.compile(r"[「『]([^」』]{4,45})[」』]")),
     # "별표 2" / "붙임 3" / "별지 7"
-    ("별표", re.compile(r"(별표|붙임|별지|참고)제?(\d+)")),
+    ("별표", re.compile(r"(별표|붙임|별지|참고)제?(\d{1,3})(?!\d)")),   # 「참고 2 2026년」의 연도가 번호에 붙지 않게 세 자리까지
     # "이 지침에서 정하지 아니한 사항은 ~ 에 따름"  → 미규정 위임
     ("미규정위임", re.compile(r"정하지아니한사항")),
 ]
@@ -54,6 +58,15 @@ PATTERNS = [
 # 모든 지침 조번호를 14차로 쓴 문서(doc_id 앞부분). 원문 근거: 모두의 창업 제30조(회의비) → 「지침 제33조」는 14차 회의비,
 # 제33조②의 비목 목록 → 14차 제37·38·40·42·43·45조. 옛 판 표로 옮기면 틀린 조가 된다.
 지침_14차표기_문서접두 = ("모두의 창업 프로젝트 세부관리기준",)
+
+# 별표 표기 바로 앞에 다른 규정이 있는 경우: 「…시행령」(이하 "영"이라 한다) 제40조제2항 '별표 4호', 보조금법 시행령 제13조의3 제2항 및 [별표 6].
+# 공백을 지운 사본에서 별표 앞까지 본다. 자기 문서 별표로 해결하면 다른 내용의 표가 근거로 들어간다.
+RE_앞규정_별표 = re.compile(
+    r"(?:[「『]([^」』]{4,45})[」』](?:[(（]이하[^)）]*[)）])?|([가-힣]{2,30}(?:시행령|시행규칙)))"
+    r"(?:제\d+조(?:의\d+)?(?:제\d+항)?(?:제\d+호)?(?:및|,|에따른|의)?)?['‘’\"“”\[]*$")
+RE_통합관리지침_붙임 = re.compile(r"통합관리지침의?['‘’\"“”\[]*$")
+# 「지침 제N조」의 지침이 통합관리지침이 아닌 경우. 총사업비 관리지침 · 국고보조금 통합관리지침처럼 앞말이 다른 지침을 가리킨다.
+_다른지침_앞어절 = ("국고보조금", "총사업비")
 
 # 쉼표로 이어진 조: 「지침 제37조, 제38조」. 공백을 지운 사본에서 앞 참조 바로 뒤를 본다.
 RE_열거 = re.compile(r"(?:[,·ㆍ]|및|또는)제(\d+)조(?:의(\d+))?(?:제\d+항)?")
@@ -174,6 +187,8 @@ def load_corpus_names() -> dict[str, str]:
     # 약칭 인용 — 정식 제명이 훨씬 길다
     "외부감사법시행령": "주식회사등의외부감사에관한법률시행령",
     "외부감사법": "주식회사등의외부감사에관한법률",
+    "보조금법시행령": "보조금관리에관한법률시행령",
+    "보조금법": "보조금관리에관한법률",
     # 원문 오기 — 그런 이름의 규정은 없다
     "중소기업기술개발지원사업관리지침": "중소기업기술개발지원사업운영요령",
     "중소기업지원사업운영요령": "중소기업창업지원사업운영요령",
@@ -192,6 +207,20 @@ def _법령종류(s: str) -> str:
         if s.endswith(접미):
             return 접미
     return "법"
+
+
+def _다른_지침(t: str, imap: list[int], m, doc_id: str) -> str | None:
+    """이 「지침 제N조」가 통합관리지침이 아니면 그 이유를 돌려준다. 원문(공백 있는 사본)으로 앞말을 본다."""
+    앞 = t[:imap[m.start()]]
+    어절 = re.search(r"[가-힣·ㆍ]*$", 앞).group(0)
+    직전 = re.search(r"([가-힣·ㆍ]*)\s*$", 앞[:len(앞) - len(어절)]).group(1)
+    if 어절 in ("통합관리", "관리"):
+        return f"「{직전} {어절}지침」이다. 통합관리지침이 아니다" if 직전 in _다른지침_앞어절 else None
+    if 어절:
+        return f"「{어절}지침」이다. 통합관리지침이 아니다"
+    if "지침" in doc_id and "창업" not in doc_id:
+        return "이 문서 자신의 조로 보인다. 통합관리지침이 아니다"
+    return None
 
 
 def resolve_규정명(name: str, corpus: dict[str, str]) -> tuple[str, str | None]:
@@ -303,11 +332,26 @@ def scan(text: str, doc_id: str, corpus: dict[str, str],
         return re.sub(r"\s+", " ", t[a:b])
 
     def 지침의_붙임(m) -> bool:
-        """「지침의 붙임 제1호」인가. 통합관리지침 자신과 「운영지침의 붙임」처럼 앞에 글자가 더 붙은 말은 제외한다."""
-        if m.group(1) != "붙임" or "통합관리지침" in doc_id or not sq.endswith("지침의", 0, m.start()):
+        """「지침의 붙임 제1호」 · 「통합관리지침 '붙임 제3호'」인가. 통합관리지침 자신과 「운영지침의 붙임」처럼 앞에 글자가 더 붙은 말은 제외한다."""
+        if m.group(1) != "붙임" or "통합관리지침" in doc_id:
+            return False
+        if RE_통합관리지침_붙임.search(sq, 0, m.start()):
+            return True
+        if not sq.endswith("지침의", 0, m.start()):
             return False
         i = imap[m.start() - 3]
         return i == 0 or not ("가" <= t[i - 1] <= "힣")
+
+    def 앞_규정(m) -> tuple[str, str | None] | None:
+        """별표 앞에 다른 규정이 적혀 있으면 (해결상태, doc_id). 없으면 None. 자기 문서 이름이면 None."""
+        if m.group(1) != "별표":
+            return None
+        앞 = RE_앞규정_별표.search(sq, max(0, m.start() - 90), m.start())
+        if not 앞:
+            return None
+        이름 = (앞.group(1) or 앞.group(2)).strip()
+        st, path = resolve_규정명((약칭표 or {}).get(이름, 이름), corpus)
+        return None if path == doc_id else (st, path)
 
     # 범위 패턴을 먼저 매칭한다. "법 제28조부터 제31조까지" 는 조 패턴에도
     # "법 제28조" 로 걸려서, 순서를 안 잡으면 같은 참조가 엣지 두 개가 된다.
@@ -348,9 +392,16 @@ def scan(text: str, doc_id: str, corpus: dict[str, str],
                 e.update(관계="인용", dst_doc_id=path, 해결상태=st)
             elif kind == "별표":
                 # 「지침의 붙임 제1호」는 자기 문서가 아니라 지침의 붙임이다.
-                e.update(관계="별표참조", dst_doc_id=지침_DOCID if 지침의_붙임(m) else doc_id,
-                         dst_조번호=f"{m.group(1)}{m.group(2)}", 해결상태="resolved",
-                         해결근거="본문 표기 「지침의 붙임」" if 지침의_붙임(m) else None)
+                외부 = 앞_규정(m)
+                if 외부 and 외부[0] != "resolved":
+                    e.update(관계="별표참조", 해결상태="dangling", 해결근거="앞에 적힌 다른 규정의 별표. 코퍼스에 없는 규정")
+                elif 외부:
+                    e.update(관계="별표참조", dst_doc_id=외부[1], dst_조번호=f"{m.group(1)}{m.group(2)}",
+                             해결상태="resolved", 해결근거="본문 표기: 앞에 적힌 규정의 별표")
+                else:
+                    e.update(관계="별표참조", dst_doc_id=지침_DOCID if 지침의_붙임(m) else doc_id,
+                             dst_조번호=f"{m.group(1)}{m.group(2)}", 해결상태="resolved",
+                             해결근거="본문 표기 「지침의 붙임」" if 지침의_붙임(m) else None)
             elif kind == "미규정위임":
                 # `resolved` 가 아니다 — "정하지 아니한 사항은 상위 규정에 따른다" 는
                 # 어느 조인지 지목하지 않아 dst 가 비어 있다. 누락이 아니라
@@ -359,15 +410,18 @@ def scan(text: str, doc_id: str, corpus: dict[str, str],
                          해결근거="상위 규정으로 위임(조 미지정). L3 상위 규정 확인의 근거")
             else:  # 조 / 범위 / 약칭조 / 약칭범위
                 target = m.group(1)
-                조 = m.group(2)
+                # 가지조는 본조와 다른 조다(보조금법 제31조의2 ≠ 제31조). 가지 번호까지 도착 조번호에 넣는다.
+                조 = m.group(2) + (f"의{m.group(3)}" if m.group(3) else "")
                 e.update(관계="준용" if target in ("지침", "요령") else "인용",
-                         dst_조번호=f"제{조}조")
+                         dst_조번호=f"제{m.group(2)}조" + (f"의{m.group(3)}" if m.group(3) else ""))
                 if kind.startswith("약칭"):
                     _약칭_해결(e, target, 약칭표, corpus)
                     edges.append(e)
                     continue
                 # 지침 참조는 판본 어긋남을 검사한다.
-                if target == "지침":
+                if target == "지침" and (이유 := _다른_지침(t, imap, m, doc_id)):
+                    e.update(해결상태="dangling", dst_조번호=None, 해결근거=이유)
+                elif target == "지침":
                     _지침_조_해결(e, 조, doc_id)
                     if kind == "조":
                         edges.append(e)
@@ -382,9 +436,10 @@ def scan(text: str, doc_id: str, corpus: dict[str, str],
                             edges.append(e2)
                         continue
                 elif target == "요령":
-                    # 「중소기업창업 지원사업 운영요령」(중기부고시 제2026-82호, ontology/수집/판대조.md). 코퍼스에 있다.
+                    # 「중소기업창업 지원사업 운영요령」. 코퍼스의 active 판을 쓴다(load_corpus_names 와 _참조_만들기 가 active 를 먼저 넣는다).
+                    # 코퍼스 표가 비어 있을 때만 현행 판(중기부고시 제2026-82호, ontology/수집/판대조.md)을 쓴다.
                     e.update(해결상태="resolved",
-                             dst_doc_id="L1_중소기업창업지원사업운영요령_20261008")
+                             dst_doc_id=corpus.get("중소기업창업지원사업운영요령", "L1_중소기업창업지원사업운영요령_20261008"))
                 elif target in ("관리기준", "기준"):
                     # 자기 문서 내부 참조 ("본 관리기준 제N조")
                     e.update(관계="인용", 해결상태="resolved", dst_doc_id=doc_id,
@@ -397,13 +452,72 @@ def scan(text: str, doc_id: str, corpus: dict[str, str],
     return edges
 
 
+def 자기_표기_잇기(edges: list[dict], 조문: list[dict], *, 복원본: bool = False) -> None:
+    """자기 문서 별표 · 붙임 · 참고 참조를 실제 조번호로 잇는다. 없는 조면 미해결로 둔다.
+
+    쪽 단위로 나눈 문서(공고 · 안내 책자)는 조번호가 p28-1 · 참고1-p25-1 이라 「참고 1」 표기와 그대로 맞지 않는다.
+    조번호 머리 → 조제목 머리 순으로 찾는다. 미해결로 돌리는 것은 복원본(corpus_restored_load)뿐이다. 복원본에서 청크를 만들지 않은 조
+    (적용대상 null: 범위 밖 쪽, 옛 기준을 담은 표)도 따라가지 않는다.
+    """
+    번호표 = {a["조번호"]: a for a in 조문}
+
+    def 찾기(라벨: str) -> dict | None:
+        if 라벨 in 번호표:
+            return 번호표[라벨]
+        for a in 조문:
+            if a["조번호"].startswith(라벨 + "-"):
+                return a
+        for a in 조문:
+            if re.match(re.escape(라벨) + r"(?!\d)", re.sub(r"[\s\[【]", "", a.get("조제목") or "")):
+                return a
+        return None
+
+    for e in edges:
+        if e["관계"] != "별표참조" or e["dst_doc_id"] != e["src_doc_id"]:
+            continue
+        a = 찾기(e["dst_조번호"])
+        if not 복원본 and (a is None or a["조번호"] == e["src_조번호"]):
+            continue                  # 법령의 별지 ↔ 서식처럼 표기만 다른 행이 많다. 일반 경로는 있던 대로 둔다(확장되지 않는다)
+        if a is None or a["조번호"] == e["src_조번호"] or (복원본 and a.get("적용대상", True) is None):
+            이유 = ("자기 문서에 없는 표기" if a is None else
+                    "표제에 적힌 자기 표기" if a["조번호"] == e["src_조번호"] else "청크를 만들지 않은 조라 따라가지 않는다")
+            e.update(dst_doc_id=None, dst_조번호=None, 해결상태="dangling", 해결근거=이유)
+        elif a["조번호"] != e["dst_조번호"]:
+            e.update(dst_조번호=a["조번호"], 해결근거="표제로 찾은 자기 문서 조")
+
+
+def DB_내보내기() -> None:
+    """corpus.refs 를 _refs.json 으로 쓴다. 머리글 집계 + edges."""
+    from datetime import date
+    with db.connect(connect_timeout=5) as conn:
+        행 = conn.execute(
+            """SELECT src_doc_id, src_조번호, 참조문자열, 관계, dst_doc_id, dst_조번호, 해결상태, 해결근거, src_layer
+                 FROM corpus.refs ORDER BY src_doc_id, src_조번호, 참조문자열""").fetchall()
+    키 = ("src_doc_id", "src_조번호", "참조문자열", "관계", "dst_doc_id", "dst_조번호", "해결상태", "해결근거", "src_layer")
+    edges = [dict(zip(키, r)) for r in 행]
+    doc = {"생성": "corpus.refs DB 내보내기 (scripts/build_refs.py --DB내보내기)", "기준일": date.today().isoformat(),
+           "문서수": len({e["src_doc_id"] for e in edges}), "엣지수": len(edges),
+           "해결상태": dict(Counter(e["해결상태"] for e in edges)),
+           "해결상태_계층별": {lay: dict(Counter(e["해결상태"] for e in edges if e["src_layer"] == lay))
+                        for lay in sorted({e["src_layer"] for e in edges} - {None})},
+           "관계": dict(Counter(e["관계"] for e in edges)),
+           "주의": "원문 대조로 고친 행까지 담은 DB 내보내기다. 적재 원천이 아니라 기록이다. 운영 반영은 db/migrations 와 적재 절차로 한다.",
+           "edges": edges}
+    OUT.write_bytes((json.dumps(doc, ensure_ascii=False, indent=2) + "\n").encode("utf-8"))
+    print(f"엣지 {len(edges)}개 -> {OUT.relative_to(ROOT)}")
+
+
 def main() -> None:
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace", line_buffering=True)
     ap = argparse.ArgumentParser()
     ap.add_argument("--doc-filter", default="",
                     help="문서 stem 에 이 문자열이 들어간 문서만 처리한다")
     ap.add_argument("--show", default="")
+    ap.add_argument("--DB내보내기", action="store_true", help="스캔 대신 corpus.refs 를 _refs.json 으로 내보낸다")
     args = ap.parse_args()
+    if args.DB내보내기:
+        DB_내보내기()
+        return
 
     corpus = load_corpus_names()
     print(f"코퍼스 규정명 {len(corpus)}건 로드")
@@ -446,6 +560,7 @@ def main() -> None:
                 continue
             edges += scan(a["본문"], stem, corpus, src_조번호=a["조번호"],
                           약칭표=약칭표, 동적=동적)
+        자기_표기_잇기(edges, arts)
         # 계층(layer)을 엣지에 붙인다 — 미해결 참조 비율을 계층별로 봐야 L2 의 실제
         # 해결 실패가 드러난다.
         lay = d.get("layer")
