@@ -14,6 +14,11 @@ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
+-- plan_tasks.집행예정일_연동 — 이 행의 due_date 는 계획의 집행예정일과 같다(계획당 1행).
+ALTER TABLE tenant.plan_tasks
+    ADD COLUMN IF NOT EXISTS 집행예정일_연동 BOOLEAN NOT NULL DEFAULT false;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_tasks_집행줄 ON tenant.plan_tasks (plan_id) WHERE 집행예정일_연동;
+
 COMMENT ON COLUMN tenant.plan_tasks."유형" IS
     '캘린더 배지용 표시 값. 판정(4종)과도 plan_tasks.상태 와도 무관하다.';
 

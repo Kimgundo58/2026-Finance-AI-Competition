@@ -122,6 +122,7 @@ class 할일(BaseModel):
     날짜_사용자수정: bool = False
     상태: 할일상태 = "준비필요"
     계획제목: str | None = None        # 캘린더 행에 연결된 지출계획 제목
+    집행예정일_연동: bool = False      # true 면 이 행의 due_date 는 계획의 집행예정일과 같다(계획 수정으로만 바뀐다)
 
     @computed_field  # 구 이름 호환(제거 예정: 다음 릴리스)
     @property
@@ -198,6 +199,12 @@ class 계획생성(BaseModel):
     정규화: dict[str, Any] = Field(default_factory=dict)
     질문원문: str | None = None        # 폼 값으로 합성한 문장. 없으면 서버가 합성한다
     org_id: str | None = None
+
+
+class 계획수정(BaseModel):
+    """지출계획 수정. 보낸 필드만 바뀐다. 집행예정일을 null 로 보내면 지출일을 비운다."""
+    집행예정일: date | None = None
+    일정이동: bool = False             # true 면 완료 안 된 연결 일정을 지출일과 같은 일수만큼 옮긴다
 
 
 class 계획요약(BaseModel):

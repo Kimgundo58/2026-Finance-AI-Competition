@@ -529,6 +529,7 @@ def _점검(결과: 점검결과) -> None:
         _가입_등록_점검(결과, client, 데모세션, 업로드, 현재문서)
         _확인질문_점검(결과, client, 데모세션, 캡처, 원래_판정, 판정_dry, llm_금지)
         _일정_점검(결과, client, 데모세션)
+        _지출일_점검(결과, client, 데모세션)
     finally:
         l3_load.조문_조회, orchestrate.프롬프트_구성, orchestrate.판정 = (
             원래_조문조회, 원래_프롬프트, 원래_판정)
@@ -835,6 +836,85 @@ def _일정_점검(결과: 점검결과, client, 데모세션) -> None:
                f"B 수정 {B_수정} 삭제 {B_삭제} · 수정 {고침_맞음} · 날짜 비움 {날짜없음} · 캘린더 제외 {캘린더제외} · "
                f"AI 삭제 {ai_삭제} 제목 {ai_제목} 날짜 {ai_날짜} 재점검 보존 {재점검_보존} · 사용자 행 삭제 {사용자_삭제}/{사용자_없어짐} · "
                f"계획 삭제 뒤 일정 {계획삭제후_남음} · 내 삭제 {내_삭제}/{없어짐}")
+
+
+def _지출일_점검(결과: 점검결과, client, 데모세션) -> None:
+    """25: 예상 지출일을 바꾸면 연결 일정이 고른 대로 움직이고, 재점검 동기화 뒤에도 그 날짜가 남는지 본다."""
+    import psycopg
+
+    with _두_계정(데모세션) as (헤더, _org):
+        A, B = 헤더("A"), 헤더("B")
+
+        def 만들기(지출일: str | None) -> tuple[int, int, int, int]:
+            """계획과 AI 행 1건(규정 없음)·완료 행 1건·사용자 행 1건을 만든다."""
+            계획 = client.post("/api/plans", headers=A, json={
+                "사업명": 판정_요청["사업명"], "품목": "지출일 점검", "금액": 100000, "용도": "점검",
+                "집행예정일": 지출일}).json()["plan_id"]
+            with psycopg.connect(OWNER_DSN, connect_timeout=5) as c:
+                ai, 완료 = (c.execute(
+                    "INSERT INTO tenant.plan_tasks (org_id, account_id, plan_id, 출처, 구분, 항목, due_date, 상태) "
+                    "SELECT org_id, account_id, plan_id, 'ai', '결제전', %s, %s, %s "
+                    "FROM tenant.expense_plans WHERE plan_id = %s RETURNING task_id",
+                    (이름, 날짜, 상태, 계획)).fetchone()[0]
+                    for 이름, 날짜, 상태 in (("점검 항목", "2026-12-10", "준비필요"), ("끝난 항목", "2026-12-11", "완료")))
+            사용자 = client.post(f"/api/plans/{계획}/tasks", headers=A, json={
+                "항목": "직접 추가", "due_date": "2026-12-12"}).json()["task_id"]
+            return 계획, ai, 완료, 사용자
+
+        def 날짜(계획: int) -> dict:
+            상세 = client.get(f"/api/plans/{계획}", headers=A).json()
+            return {t["task_id"]: t for t in 상세["할일"]}
+
+        def 재점검(계획: int) -> None:
+            client.post(f"/api/plans/{계획}/tasks:sync", headers=A, json={"해야할일": [
+                {"항목": "점검 항목", "구분": "결제전"}, {"항목": "끝난 항목", "구분": "결제전"}]})
+
+        # 생성 때 집행 줄이 생긴다
+        계획1, ai1, 완료1, 사용자1 = 만들기("2026-12-20")
+        줄 = [t for t in 날짜(계획1).values() if t["집행예정일_연동"]]
+        집행줄_생김 = len(줄) == 1 and 줄[0]["구분"] == "집행" and 줄[0]["due_date"] == "2026-12-20"
+        일정에_보임 = any(t["task_id"] == 줄[0]["task_id"] for t in
+                     client.get("/api/tasks", headers=A, params={"일정만": "true"}).json()["항목"])
+        확인항목_제외 = "집행" not in {t["구분"] for t in 날짜(계획1).values() if t["task_id"] in (ai1, 완료1)}
+
+        # 집행 줄은 일정 쪽에서 날짜를 못 바꾸고 지울 수 없다
+        줄_날짜 = client.patch(f'/api/tasks/{줄[0]["task_id"]}', headers=A, json={"due_date": "2026-12-25"}).status_code
+        줄_삭제 = client.delete(f'/api/tasks/{줄[0]["task_id"]}', headers=A).status_code
+        줄_상태 = client.patch(f'/api/tasks/{줄[0]["task_id"]}', headers=A, json={"상태": "집행예정"}).status_code
+
+        # 같이 옮기기: 5일 뒤. 완료 행 불변, 재점검 뒤에도 유지
+        B_수정 = client.patch(f"/api/plans/{계획1}", headers=B, json={"집행예정일": "2026-12-25", "일정이동": True}).status_code
+        이동 = client.patch(f"/api/plans/{계획1}", headers=A, json={"집행예정일": "2026-12-25", "일정이동": True})
+        재점검(계획1)
+        d = 날짜(계획1)
+        같이_맞음 = (이동.status_code == 200 and 이동.json()["집행예정일"] == "2026-12-25"
+                  and d[사용자1]["due_date"] == "2026-12-17" and d[완료1]["due_date"] == "2026-12-11"
+                  and d[줄[0]["task_id"]]["due_date"] == "2026-12-25")
+        같이_상세 = (d[사용자1]["due_date"], d[완료1]["due_date"], d[줄[0]["task_id"]]["due_date"])
+
+        # 지출일만: 일정은 그대로, 재점검이 날짜를 덮지 않는다(날짜를 다시 계산하면 NULL 이 된다)
+        계획2, ai2, 완료2, 사용자2 = 만들기("2026-12-20")
+        client.patch(f"/api/plans/{계획2}", headers=A, json={"집행예정일": "2026-12-28", "일정이동": False})
+        재점검(계획2)
+        d2 = 날짜(계획2)
+        줄2 = next(t for t in d2.values() if t["집행예정일_연동"])
+        지출일만_맞음 = (d2[ai2]["due_date"] == "2026-12-10" and d2[사용자2]["due_date"] == "2026-12-12"
+                    and d2[완료2]["due_date"] == "2026-12-11" and 줄2["due_date"] == "2026-12-28")
+
+        # 효과 대조: 표시를 안 남기면 재점검이 날짜를 지운다. 행을 되돌려 재점검의 영향을 확인한다
+        계획3, ai3, _완료3, _사용자3 = 만들기("2026-12-20")
+        재점검(계획3)
+        대조_지워짐 = 날짜(계획3)[ai3]["due_date"] is None
+
+        # 지출일을 비우면 집행 줄이 없어진다
+        client.patch(f"/api/plans/{계획2}", headers=A, json={"집행예정일": None, "일정이동": False})
+        비움 = not any(t["집행예정일_연동"] for t in 날짜(계획2).values())
+
+        결과.기록("25 예상 지출일: 집행 줄 생성 · 같이 옮기기 · 지출일만 · 완료 행 불변 · 재점검 뒤 유지 · 다른 계정 차단",
+               집행줄_생김 and 일정에_보임 and 확인항목_제외 and 줄_날짜 == 409 and 줄_삭제 == 409 and 줄_상태 == 200
+               and B_수정 == 404 and 같이_맞음 and 지출일만_맞음 and 대조_지워짐 and 비움,
+               f"집행 줄 {집행줄_생김}/{일정에_보임}/{확인항목_제외} · 줄 날짜 {줄_날짜} 삭제 {줄_삭제} 상태 {줄_상태} · B {B_수정} · "
+               f"같이 {이동.status_code} {같이_상세} · 지출일만 {지출일만_맞음} · 표시 없으면 재점검이 날짜 지움 {대조_지워짐} · 비움 {비움}")
 
 
 def _확인질문_점검(결과: 점검결과, client, 데모세션, 캡처, 원래_판정, 판정_dry, llm_금지) -> None:

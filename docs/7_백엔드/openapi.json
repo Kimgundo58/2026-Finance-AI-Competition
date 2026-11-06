@@ -205,7 +205,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/server__models________11"
+         "$ref": "#/components/schemas/server__models________12"
         }
        }
       }
@@ -263,7 +263,74 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/server__models________11"
+         "$ref": "#/components/schemas/server__models________12"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   },
+   "patch": {
+    "tags": [
+     "지출계획"
+    ],
+    "summary": "수정",
+    "description": "예상 지출일을 바꾼다. 판정 경로는 집행예정일을 읽지 않아 판정은 그대로다.",
+    "operationId": "수정_api_plans__plan_id__patch",
+    "parameters": [
+     {
+      "name": "plan_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "integer",
+       "title": "Plan Id"
+      }
+     },
+     {
+      "name": "org_id",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Org Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/server__models________2"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/server__models________12"
         }
        }
       }
@@ -448,7 +515,7 @@
      "content": {
       "application/json": {
        "schema": {
-        "$ref": "#/components/schemas/server__models________2"
+        "$ref": "#/components/schemas/server__models________3"
        }
       }
      }
@@ -490,7 +557,7 @@
      "content": {
       "application/json": {
        "schema": {
-        "$ref": "#/components/schemas/server__models________2"
+        "$ref": "#/components/schemas/server__models________3"
        }
       }
      }
@@ -696,7 +763,7 @@
      "content": {
       "application/json": {
        "schema": {
-        "$ref": "#/components/schemas/server__models________3"
+        "$ref": "#/components/schemas/server__models________4"
        }
       }
      }
@@ -765,7 +832,7 @@
      "content": {
       "application/json": {
        "schema": {
-        "$ref": "#/components/schemas/server__models________3"
+        "$ref": "#/components/schemas/server__models________4"
        }
       }
      }
@@ -1292,7 +1359,7 @@
      "content": {
       "application/json": {
        "schema": {
-        "$ref": "#/components/schemas/server__models________5"
+        "$ref": "#/components/schemas/server__models________6"
        }
       }
      },
@@ -1352,7 +1419,7 @@
      "content": {
       "application/json": {
        "schema": {
-        "$ref": "#/components/schemas/server__models________7"
+        "$ref": "#/components/schemas/server__models________8"
        }
       }
      }
@@ -2512,6 +2579,11 @@
       ],
       "title": "계획제목"
      },
+     "집행예정일_연동": {
+      "type": "boolean",
+      "title": "집행예정일 연동",
+      "default": false
+     },
      "코드": {
       "anyOf": [
        {
@@ -2536,7 +2608,7 @@
    "___": {
     "properties": {
      "협약": {
-      "$ref": "#/components/schemas/server__models________8"
+      "$ref": "#/components/schemas/server__models________9"
      },
      "집행내역": {
       "items": {
@@ -2783,6 +2855,43 @@
    },
    "server__models________10": {
     "properties": {
+     "전체": {
+      "type": "integer",
+      "title": "전체",
+      "default": 0
+     },
+     "확인필요": {
+      "type": "integer",
+      "title": "확인필요",
+      "default": 0
+     },
+     "위험": {
+      "type": "integer",
+      "title": "위험",
+      "default": 0
+     },
+     "특이사항없음": {
+      "type": "integer",
+      "title": "특이사항없음",
+      "default": 0
+     },
+     "점검전": {
+      "type": "integer",
+      "title": "점검전",
+      "default": 0
+     },
+     "금액합계": {
+      "type": "number",
+      "title": "금액합계",
+      "default": 0
+     }
+    },
+    "type": "object",
+    "title": "계획통계",
+    "description": "홈 화면 통계 카드 값. 목록 응답에 포함해 보낸다(통계 전용 API 없음).\n\n전체 = 확인필요 + 위험 + 특이사항없음 + 점검전."
+   },
+   "server__models________11": {
+    "properties": {
      "plan_id": {
       "type": "integer",
       "title": "Plan Id"
@@ -2887,7 +2996,7 @@
     "title": "계획요약",
     "description": "계획 목록 표의 한 행."
    },
-   "server__models________11": {
+   "server__models________12": {
     "properties": {
      "plan_id": {
       "type": "integer",
@@ -3090,7 +3199,7 @@
     ],
     "title": "계획상세"
    },
-   "server__models________12": {
+   "server__models________13": {
     "properties": {
      "사업명": {
       "type": "string",
@@ -3153,6 +3262,30 @@
     "title": "사업정보"
    },
    "server__models________2": {
+    "properties": {
+     "집행예정일": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "date"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "집행예정일"
+     },
+     "일정이동": {
+      "type": "boolean",
+      "title": "일정이동",
+      "default": false
+     }
+    },
+    "type": "object",
+    "title": "계획수정",
+    "description": "지출계획 수정. 보낸 필드만 바뀐다. 집행예정일을 null 로 보내면 지출일을 비운다."
+   },
+   "server__models________3": {
     "properties": {
      "항목": {
       "type": "string",
@@ -3225,7 +3358,7 @@
     "title": "할일생성",
     "description": "사용자가 직접 추가하는 할일. 출처는 서버가 'user' 로 고정한다(재판정해도 바뀌지 않는다)."
    },
-   "server__models________3": {
+   "server__models________4": {
     "properties": {
      "항목": {
       "anyOf": [
@@ -3320,7 +3453,7 @@
     "title": "할일수정",
     "description": "할일 수정. 보낸 필드만 바뀐다. due_date 를 null 로 보내면 날짜를 비운다(날짜 미정으로 옮긴다)."
    },
-   "server__models________4": {
+   "server__models________5": {
     "properties": {
      "친족거래": {
       "type": "boolean",
@@ -3337,7 +3470,7 @@
     "title": "특수관계",
     "description": "특수관계 거래 여부. 판정 요청에만 쓰고 저장하지 않는다."
    },
-   "server__models________5": {
+   "server__models________6": {
     "properties": {
      "사업명": {
       "anyOf": [
@@ -3418,7 +3551,7 @@
     "title": "질문요청",
     "description": "판정 전 확인 질문 요청. org·계정은 토큰에서 정하므로 받지 않는다."
    },
-   "server__models________6": {
+   "server__models________7": {
     "properties": {
      "code": {
       "type": "string",
@@ -3436,7 +3569,7 @@
     "title": "답변항목",
     "description": "/api/judge 가 받는 답 한 건. code 는 심층질문 code 또는 확인 질문 id(Q1 등)다."
    },
-   "server__models________7": {
+   "server__models________8": {
     "properties": {
      "정규화": {
       "additionalProperties": true,
@@ -3488,11 +3621,11 @@
       "title": "Plan Id"
      },
      "특수관계": {
-      "$ref": "#/components/schemas/server__models________4"
+      "$ref": "#/components/schemas/server__models________5"
      },
      "답변": {
       "items": {
-       "$ref": "#/components/schemas/server__models________6"
+       "$ref": "#/components/schemas/server__models________7"
       },
       "type": "array",
       "title": "답변"
@@ -3512,7 +3645,7 @@
     "type": "object",
     "title": "판정요청"
    },
-   "server__models________8": {
+   "server__models________9": {
     "properties": {
      "정부지원_현금": {
       "type": "number",
@@ -3549,43 +3682,6 @@
     },
     "type": "object",
     "title": "협약정보"
-   },
-   "server__models________9": {
-    "properties": {
-     "전체": {
-      "type": "integer",
-      "title": "전체",
-      "default": 0
-     },
-     "확인필요": {
-      "type": "integer",
-      "title": "확인필요",
-      "default": 0
-     },
-     "위험": {
-      "type": "integer",
-      "title": "위험",
-      "default": 0
-     },
-     "특이사항없음": {
-      "type": "integer",
-      "title": "특이사항없음",
-      "default": 0
-     },
-     "점검전": {
-      "type": "integer",
-      "title": "점검전",
-      "default": 0
-     },
-     "금액합계": {
-      "type": "number",
-      "title": "금액합계",
-      "default": 0
-     }
-    },
-    "type": "object",
-    "title": "계획통계",
-    "description": "홈 화면 통계 카드 값. 목록 응답에 포함해 보낸다(통계 전용 API 없음).\n\n전체 = 확인필요 + 위험 + 특이사항없음 + 점검전."
    },
    "server__models_________1": {
     "properties": {
@@ -3705,7 +3801,7 @@
       "title": "사업명"
      },
      "특수관계": {
-      "$ref": "#/components/schemas/server__models________4"
+      "$ref": "#/components/schemas/server__models________5"
      }
     },
     "type": "object",
@@ -3819,7 +3915,7 @@
    "server__models__________3": {
     "properties": {
      "통계": {
-      "$ref": "#/components/schemas/server__models________9"
+      "$ref": "#/components/schemas/server__models________10"
      },
      "건수": {
       "type": "integer",
@@ -3838,7 +3934,7 @@
      },
      "항목": {
       "items": {
-       "$ref": "#/components/schemas/server__models________10"
+       "$ref": "#/components/schemas/server__models________11"
       },
       "type": "array",
       "title": "항목"
@@ -3927,7 +4023,7 @@
     "properties": {
      "사업": {
       "items": {
-       "$ref": "#/components/schemas/server__models________12"
+       "$ref": "#/components/schemas/server__models________13"
       },
       "type": "array",
       "title": "사업"
