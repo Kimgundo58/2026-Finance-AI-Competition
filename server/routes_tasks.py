@@ -610,6 +610,55 @@ def 지출일_변경_반영(cur, plan_id: int, 계획org, 이전일, 새날짜, 
             cur.execute("UPDATE tenant.plan_tasks SET due_date = %s WHERE task_id = %s", (날짜, task_id))
 
 
+# ════════════════════════════════════════════════════════════════════
+# 진행 단계 — 계획 상세·목록의 단계요약
+# ════════════════════════════════════════════════════════════════════
+
+_단계_순서 = ("사전승인·확인", "견적", "계약", "집행", "증빙")
+
+
+def _단계(구분: str, 유형: str) -> str:
+    if 구분 == "결제후":
+        return "증빙"
+    if 구분 == "집행":
+        return "집행"
+    if 유형 == "계약":
+        return "계약"
+    if 유형 == "비교견적":
+        return "견적"
+    return "사전승인·확인"
+
+
+def 단계요약_계산(행들: list[tuple[str, str, str]]) -> dict:
+    """(구분, 유형, 상태) 목록을 5단계로 묶는다. DB 를 읽지 않는 순수 함수다.
+
+    항목이 없는 단계는 「항목없음」이다. 규정이 필요 없다고 판단한 것이 아니다.
+    """
+    칸 = {단계: [0, 0] for 단계 in _단계_순서}
+    for 구분, 유형, 상태 in 행들:
+        c = 칸[_단계(구분, 유형)]
+        c[1] += 1
+        if 상태 == "완료":
+            c[0] += 1
+    요약 = []
+    for 단계, (완료, 전체) in 칸.items():
+        요약.append({"단계": 단계, "완료": 완료, "전체": 전체, "상태": (
+            "항목없음" if 전체 == 0 else "완료" if 완료 == 전체 else "진행중" if 완료 else "시작전")})
+    현재 = next((s["단계"] for s in 요약 if s["상태"] in ("진행중", "시작전")), None)
+    return {"단계요약": 요약, "현재단계": 현재}
+
+
+def 실제지출_반영(cur, plan_id: int, 계획org, 계획account, 제목: str, 실제지출일) -> None:
+    """실제 지출을 등록하면 집행 줄을 완료로 만든다. 지출일이 미정이라 줄이 없으면 실제 지출일로 만든다."""
+    cur.execute("UPDATE tenant.plan_tasks SET 상태 = '완료' WHERE plan_id = %s AND 집행예정일_연동", (plan_id,))
+    if cur.rowcount == 0:
+        cur.execute(
+            "INSERT INTO tenant.plan_tasks (org_id, account_id, plan_id, 출처, 구분, 항목, due_date, "
+            "상태, 날짜_사용자수정, 집행예정일_연동) "
+            "VALUES (%s,%s,%s,'user','집행',%s,%s,'완료',true,true)",
+            (계획org, 계획account, plan_id, f"{제목} 집행", 실제지출일))
+
+
 def _live_목록(org_id: str | None) -> list[dict]:
     조건, 인자 = _계정조건(org_id, "t")
     행 = _질의(_할일_SELECT + f"WHERE {조건}", 인자)

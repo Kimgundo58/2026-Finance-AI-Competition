@@ -205,7 +205,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/server__models________12"
+         "$ref": "#/components/schemas/server__models________13"
         }
        }
       }
@@ -263,7 +263,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/server__models________12"
+         "$ref": "#/components/schemas/server__models________13"
         }
        }
       }
@@ -330,7 +330,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/server__models________12"
+         "$ref": "#/components/schemas/server__models________13"
         }
        }
       }
@@ -2892,109 +2892,45 @@
    },
    "server__models________11": {
     "properties": {
-     "plan_id": {
-      "type": "integer",
-      "title": "Plan Id"
-     },
-     "제목": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
+     "단계": {
+      "type": "string",
+      "enum": [
+       "사전승인·확인",
+       "견적",
+       "계약",
+       "집행",
+       "증빙"
       ],
-      "title": "제목"
-     },
-     "확정비목": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "확정비목"
-     },
-     "금액": {
-      "anyOf": [
-       {
-        "type": "number"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "금액"
-     },
-     "판정": {
-      "anyOf": [
-       {
-        "type": "string",
-        "enum": [
-         "가능",
-         "조건부",
-         "불가",
-         "판단불가"
-        ]
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "판정"
-     },
-     "집행예정일": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "집행예정일"
-     },
-     "updated_at": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Updated At"
-     },
-     "사업명": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "사업명"
+      "title": "단계"
      },
      "상태": {
       "type": "string",
       "enum": [
-       "draft",
-       "judged"
+       "완료",
+       "진행중",
+       "시작전",
+       "항목없음"
       ],
-      "title": "상태",
-      "default": "draft"
+      "title": "상태"
+     },
+     "완료": {
+      "type": "integer",
+      "title": "완료",
+      "default": 0
+     },
+     "전체": {
+      "type": "integer",
+      "title": "전체",
+      "default": 0
      }
     },
     "type": "object",
     "required": [
-     "plan_id"
+     "단계",
+     "상태"
     ],
-    "title": "계획요약",
-    "description": "계획 목록 표의 한 행."
+    "title": "단계항목",
+    "description": "지출 건의 진행 단계 한 칸. plan_tasks 에서 계산하고 저장하지 않는다."
    },
    "server__models________12": {
     "properties": {
@@ -3093,6 +3029,192 @@
       ],
       "title": "상태",
       "default": "draft"
+     },
+     "실제지출일": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "실제지출일"
+     },
+     "실제지출액": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "실제지출액"
+     },
+     "단계요약": {
+      "items": {
+       "$ref": "#/components/schemas/server__models________11"
+      },
+      "type": "array",
+      "title": "단계요약"
+     },
+     "현재단계": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "현재단계"
+     }
+    },
+    "type": "object",
+    "required": [
+     "plan_id"
+    ],
+    "title": "계획요약",
+    "description": "계획 목록 표의 한 행."
+   },
+   "server__models________13": {
+    "properties": {
+     "plan_id": {
+      "type": "integer",
+      "title": "Plan Id"
+     },
+     "제목": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "제목"
+     },
+     "확정비목": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "확정비목"
+     },
+     "금액": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "금액"
+     },
+     "판정": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "가능",
+         "조건부",
+         "불가",
+         "판단불가"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "판정"
+     },
+     "집행예정일": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "집행예정일"
+     },
+     "updated_at": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Updated At"
+     },
+     "사업명": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "사업명"
+     },
+     "상태": {
+      "type": "string",
+      "enum": [
+       "draft",
+       "judged"
+      ],
+      "title": "상태",
+      "default": "draft"
+     },
+     "실제지출일": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "실제지출일"
+     },
+     "실제지출액": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "실제지출액"
+     },
+     "단계요약": {
+      "items": {
+       "$ref": "#/components/schemas/server__models________11"
+      },
+      "type": "array",
+      "title": "단계요약"
+     },
+     "현재단계": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "현재단계"
      },
      "질문원문": {
       "anyOf": [
@@ -3199,7 +3321,7 @@
     ],
     "title": "계획상세"
    },
-   "server__models________13": {
+   "server__models________14": {
     "properties": {
      "사업명": {
       "type": "string",
@@ -3279,6 +3401,30 @@
       "type": "boolean",
       "title": "일정이동",
       "default": false
+     },
+     "실제지출일": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "date"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "실제지출일"
+     },
+     "실제지출액": {
+      "anyOf": [
+       {
+        "type": "number",
+        "exclusiveMinimum": 0.0
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "실제지출액"
      }
     },
     "type": "object",
@@ -3934,7 +4080,7 @@
      },
      "항목": {
       "items": {
-       "$ref": "#/components/schemas/server__models________11"
+       "$ref": "#/components/schemas/server__models________12"
       },
       "type": "array",
       "title": "항목"
@@ -4023,7 +4169,7 @@
     "properties": {
      "사업": {
       "items": {
-       "$ref": "#/components/schemas/server__models________13"
+       "$ref": "#/components/schemas/server__models________14"
       },
       "type": "array",
       "title": "사업"

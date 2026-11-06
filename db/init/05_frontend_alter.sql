@@ -19,6 +19,11 @@ ALTER TABLE tenant.plan_tasks
     ADD COLUMN IF NOT EXISTS 집행예정일_연동 BOOLEAN NOT NULL DEFAULT false;
 CREATE UNIQUE INDEX IF NOT EXISTS ux_tasks_집행줄 ON tenant.plan_tasks (plan_id) WHERE 집행예정일_연동;
 
+-- expense_plans.실제지출일·실제지출액 — 화면의 「실제 지출 등록」. 판정에는 쓰지 않는다.
+ALTER TABLE tenant.expense_plans
+    ADD COLUMN IF NOT EXISTS "실제지출일" DATE,
+    ADD COLUMN IF NOT EXISTS "실제지출액" NUMERIC;
+
 COMMENT ON COLUMN tenant.plan_tasks."유형" IS
     '캘린더 배지용 표시 값. 판정(4종)과도 plan_tasks.상태 와도 무관하다.';
 
