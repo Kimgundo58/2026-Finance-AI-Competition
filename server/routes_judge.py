@@ -79,14 +79,18 @@ def judge(req: Request, body: 판정요청, mock: str | None = None,
         response_cache.l3_해시(body.org_id),
         # 협약 프로필(B5)을 PUT /api/profile 로 바꾸면 키가 바뀐다(routes_profile 의 캐시 삭제와 함께 쓴다).
         response_cache.프로필_해시(body.org_id, account_id),
+        # 온톨로지 경로의 입력. 값이 달라지면 코드 판정이 달라진다.
+        body.확정세목, json.dumps(body.추가입력값, ensure_ascii=False, sort_keys=True), body.부가세구분,
         # ?mock= 은 mock 모드에서만 응답을 바꾼다. live 에서 키에 넣으면 캐시를 우회할 수 있다.
         *([mock] if MOCK else []))
     캐시 = response_cache.조회(k, body.org_id, account_id)
     # 검색 전에 계산한다. 판정 도중 규정이 활성화되면 결과는 옛 해시로 저장되어 이후 요청에 적중하지 않는다.
     데이터버전해시 = response_cache.요청_해시()
     # 미들웨어 컨텍스트(RLS GUC)가 있는 여기서 읽는다. 저장 질문을 읽지 못하면 판정에서 「가능」을 내지 않는다.
-    사용자답변, 답변유실 = (_사용자답변_읽기(body, account_id)
-                       if 반영 and 캐시 is None and not MOCK else (None, False))
+    사용자답변, 답변유실, 부가세답 = (_사용자답변_읽기(body, account_id)
+                                if 반영 and 캐시 is None and not MOCK else (None, False, None))
+    if body.부가세구분 in (None, "모름") and 부가세답:      # 입력에서 모름이면 코드가 만든 확인 질문의 답을 쓴다
+        body.부가세구분 = 부가세답
 
     def gen():
         for 단계, 설명 in (("검색", "관련 조항을 찾는 중"),
@@ -118,23 +122,23 @@ def judge(req: Request, body: 판정요청, mock: str | None = None,
     return _sse응답(gen())
 
 
-def _사용자답변_읽기(body: 판정요청, account_id: str | None) -> tuple[list[dict] | None, bool]:
-    """저장한 질문세트와 화면 답변으로 (사용자답변, 답변유실) 을 만든다. 프론트가 보낸 글은 쓰지 않는다.
+def _사용자답변_읽기(body: 판정요청, account_id: str | None) -> tuple[list[dict] | None, bool, str | None]:
+    """저장한 질문세트와 화면 답변으로 (사용자답변, 답변유실, 부가세 답) 을 만든다. 프론트가 보낸 글은 쓰지 않는다.
 
     질문세트가 왔는데 저장값을 못 읽으면(만료·재시작·다른 계정 키·DB 오류) 답변유실이다. 사용자가
     「아니오」라고 답했을 수 있으므로 판정이 「가능」을 내지 못하게 한다. 화면에는 오류를 내지 않는다.
     """
     if not body.질문세트:
-        return None, False
+        return None, False, None
     try:
         저장값 = response_cache.질문세트_조회(body.질문세트, body.org_id, account_id)
         if isinstance(저장값, dict) and isinstance(저장값.get("질문"), list):
             import question_generate
-            return (question_generate.답변_구성(저장값, [a.model_dump() for a in body.답변]) or None,
-                    False)
+            답변들 = [a.model_dump() for a in body.답변]
+            return question_generate.답변_구성(저장값, 답변들) or None, False, question_generate.부가세_답(저장값, 답변들)
     except Exception as e:                                    # noqa: BLE001
         _log.warning("질문세트 읽기 실패: %s", type(e).__name__)
-    return None, True
+    return None, True, None
 
 
 def _판정_이벤트(out: dict):
@@ -231,7 +235,8 @@ def _live_판정(body: 판정요청, account_id: str | None = None, 사용자답
                        확정비목=body.확정비목 or None,
                        정규화결과=body.정규화,
                        사용자프로필값=_사용자프로필값_구성(body.답변),
-                       사용자답변=사용자답변, 답변유실=답변유실)
+                       사용자답변=사용자답변, 답변유실=답변유실,
+                       확정세목=body.확정세목, 추가입력값=body.추가입력값, 부가세구분=body.부가세구분)
     return 파이프라인결과_매핑(r, body)
 
 

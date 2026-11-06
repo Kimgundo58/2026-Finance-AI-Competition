@@ -32,6 +32,11 @@ DSN = os.environ.get("SUDDOE_DSN", "postgresql://postgres:devpw@localhost:5432/s
 MOCK = os.environ.get("SUDDOE_MOCK", "0") == "1"
 
 
+def 온톨로지_사업(사업명: str | None) -> bool:
+    """SUDDOE_ONTOLOGY_PROGRAMS 목록에 있는 사업인가. DB 를 보지 않는다(norms 행까지 보는 것은 ontology_lookup.새경로_대상)."""
+    return bool(사업명) and 사업명 in [x.strip() for x in os.environ.get("SUDDOE_ONTOLOGY_PROGRAMS", "").split(",")]
+
+
 def 답변_반영() -> bool:
     """SUDDOE_JUDGE_ANSWERS=0 이면 확인 질문을 내지 않고 답변도 판정에 넣지 않는다(되돌리기용)."""
     return os.environ.get("SUDDOE_JUDGE_ANSWERS", "1") != "0"

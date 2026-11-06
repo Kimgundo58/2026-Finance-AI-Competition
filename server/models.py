@@ -20,6 +20,7 @@ from pydantic import AliasChoices, BaseModel, Field, computed_field, model_valid
 # --- 공통 ---
 
 판정타입 = Literal["가능", "조건부", "불가", "판단불가"]
+부가세구분타입 = Literal["포함", "공급가액", "모름"]
 
 
 class 특수관계(BaseModel):
@@ -49,6 +50,7 @@ class 정규화요청(BaseModel):
 
     # 공통
     사업명: str | None = None
+    부가세구분: 부가세구분타입 | None = None
     특수관계: _특수관계 = Field(default_factory=_특수관계,
                              validation_alias=AliasChoices("특수관계", "f5"))  # 구 이름 호환(제거 예정: 다음 릴리스)
 
@@ -77,6 +79,8 @@ class 질문요청(BaseModel):
     """판정 전 확인 질문 요청. org·계정은 토큰에서 정하므로 받지 않는다."""
     사업명: str | None = None
     확정비목: str
+    확정세목: str | None = None        # 분류 확인 화면에서 고른 세목 표기. 서버가 노드 ID 로 푼다(온톨로지 경로)
+    부가세구분: 부가세구분타입 | None = None
     세부유형: str | None = None
     품목: str | None = None
     금액: float | None = None
@@ -98,6 +102,10 @@ class 판정요청(BaseModel):
     답변: list[답변항목] = Field(default_factory=list)
     # POST /api/questions 가 돌려준 키. 서버에 저장한 질문 문장과 답 값만 판정에 넣는다.
     질문세트: str | None = None
+    # 온톨로지 경로: 분류 확인에서 고른 세목, 화면 숫자 칸 값, 입력 화면의 부가세 구분
+    확정세목: str | None = None
+    추가입력값: dict[str, Any] = Field(default_factory=dict)
+    부가세구분: 부가세구분타입 | None = None
 
 
 # --- 할일 (plan_tasks) ---

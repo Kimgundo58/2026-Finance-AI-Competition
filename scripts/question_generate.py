@@ -2,6 +2,7 @@
 """판정 전에 사용자에게 물을 확인 질문을 규정 원문에서 만든다.
 
 흐름: 조문_후보()(코드, LLM 없음) → 질문 작성(LLM 1회) → 질문_검증()(코드).
+온톨로지 경로: 조문_후보() 대신 판정과 같은 문맥_구성() 을 쓰고, 추가 입력 칸과 부가세 질문은 코드가 만든다(LLM 호출 수 그대로).
 공개: 조문_후보, 질문생성, 질문_검증, 근거_발췌, 질문_공개, 답변_구성, 질문_스키마, 숫자집합.
 읽는 테이블: corpus.rules, corpus.doc_articles, corpus.chunks, corpus.documents, corpus.refs, tenant.l3_articles.
 
@@ -18,6 +19,9 @@ import time
 from typing import Any
 
 import l3_load
+import ontology_context
+import ontology_gate
+import ontology_lookup
 import orchestrate
 import retrieve
 from _lib import db
@@ -44,6 +48,8 @@ L3_최대자수 = 12_000
 발췌_기준 = 1000        # 근거 문장이 이보다 길면 관련 줄만 잘라 쓴다
 
 답변값 = ("예", "아니오", "모름")
+부가세_질문문 = "입력한 금액은 부가세가 포함된 금액인가요?"
+_부가세_값 = {"예": "포함", "아니오": "공급가액", "모름": "모름"}
 
 
 # ---------------------------------------------------------------- 1차: 조문 후보 (코드)
@@ -306,11 +312,37 @@ def _문장끝(글: str) -> str:
     return 글 if 글[-1:] in (".", "!", "?") else f"{글}."
 
 
+def _새경로_준비(cur, 입력: dict, org_id) -> dict:
+    """온톨로지 경로의 질문 재료. 판정과 같은 조회 · 문맥을 쓴다. 바로판정이면 {"바로": 사유} 다.
+
+    금지 · 한도 초과는 입력이 더 있어도 불가라 묻지 않는다. 부가세 기준 미정은 물으면 풀리므로 묻는다.
+    """
+    사업명 = 입력.get("사업명")
+    게이트입력 = orchestrate.게이트_입력(입력.get("금액"), 입력.get("부가세구분"), None)
+    조회 = orchestrate.온톨로지_조회(cur, 사업명, 입력["비목"], 입력.get("확정세목"), 게이트입력, 확정=True)
+    if 조회["게이트"].get("종류") in ("금지", "한도초과"):
+        return {"바로": "코드판정"}
+    l3 = l3_load.조문_연결조회(cur, org_id) if org_id else []
+    검색 = retrieve.검색(cur, 입력.get("질문") or f"{입력.get('용도') or ''} {입력.get('품목') or ''}".strip(), 사업명,
+                       top_k=10, 사업필터=orchestrate.사업필터)
+    문맥 = ontology_context.문맥_구성(cur, 근거행=조회["근거행"], 대상노드=조회["노드들"], l3=l3, 검색=검색,
+                                schema=ontology_lookup._스키마())
+    if 문맥["L3_초과"] or not 문맥["항목수"]:
+        return {"바로": "L3상한" if 문맥["L3_초과"] else "근거없음"}
+    규범들 = 조회["적용"]["규범"]
+    코드질문 = []
+    if ontology_gate.부가세_질문_필요(규범들, 입력.get("부가세구분")):
+        코드질문.append({"id": "VAT", "종류": "부가세", "질문문": 부가세_질문문, "충족답": None,
+                      "이유": "한도와 기준금액을 비교하려면 부가세 포함 여부를 맞춰야 해요.",
+                      "할일": "부가세 포함 여부 확인", "근거": None, "근거조문": None})
+    return {"문맥": 문맥, "코드질문": 코드질문, "추가입력": ontology_gate.추가입력_칸(규범들, 입력.get("확정세목"))}
+
+
 def 질문생성(입력: dict, *, org_id=None, account_id=None, 모델: str | None = None,
           타임아웃: int | None = None) -> dict:
     """입력(사업명, 비목, 세부유형, 품목, 용도, 금액, 질문)으로 질문을 만든다. 예외를 올리지 않는다.
 
-    반환: {"상태": 있음|없음|바로판정|실패, "질문": [내부 항목], "메타": {...}}.
+    반환: {"상태": 있음|없음|바로판정|실패, "질문": [내부 항목], "메타": {...}}. 온톨로지 경로는 `추가입력` 을 더한다.
     내부 항목: id, 질문문, 충족답, 이유, 할일, 근거{doc_id, 조번호, 조제목, 항호, 원문}, 근거조문{종류, id, doc_id, 조번호}.
     바로판정은 금지 항목이거나 근거가 없어 질문 없이 판정으로 끝나는 경우다(LLM 을 부르지 않는다).
     """
@@ -329,6 +361,8 @@ def 질문생성(입력: dict, *, org_id=None, account_id=None, 모델: str | No
             cur = conn.cursor()
             사업명, 비목 = 입력.get("사업명"), 입력["비목"]
             품목, 용도 = 입력.get("품목") or (입력.get("질문") or "")[:40], 입력.get("용도") or ""
+            if ontology_lookup.새경로_대상(cur, 사업명):
+                return _새경로_질문(cur, conn, 입력, org_id, 모델, 타임아웃, 메타, t0)
             if 금지목록_일치(cur, 품목, 용도, 사업명, 비목):
                 return {"상태": "바로판정", "질문": [], "메타": {**메타, "사유": "금지목록"}}
             l3 = l3_load.조문_조회(cur, org_id, 비목=비목) if org_id else []
@@ -351,6 +385,27 @@ def 질문생성(입력: dict, *, org_id=None, account_id=None, 모델: str | No
         _log.warning("질문생성 준비 실패: %s", type(e).__name__)
         return {"상태": "실패", "질문": [], "메타": {**메타, "사유": f"준비실패:{type(e).__name__}"}}
 
+    return _질문_작성(입력, 블록, 문장맵, 조문메타, 모델, 타임아웃, 메타, t0)
+
+
+def _새경로_질문(cur, conn, 입력: dict, org_id, 모델: str, 타임아웃: int, 메타: dict, t0: float) -> dict:
+    """온톨로지 경로. LLM 질문이 실패해도 코드가 만든 칸 · 부가세 질문은 낸다. 조회 오류는 바깥에서 실패로 처리한다."""
+    준비 = _새경로_준비(cur, 입력, org_id)
+    if "바로" in 준비:
+        return {"상태": "바로판정", "질문": [], "추가입력": [], "메타": {**메타, "사유": 준비["바로"]}}
+    번호 = _문장ID_생성기()
+    블록 = "\n\n".join(번호.항목블록(제목, 항목들) for 제목, 항목들 in 준비["문맥"]["블록"])
+    조문메타 = 문장ID_메타(번호.문장맵, conn=conn, org_id=org_id)
+    r = _질문_작성(입력, 블록, 번호.문장맵, 조문메타, 모델, 타임아웃, 메타, t0)
+    코드질문, 칸 = 준비["코드질문"], 준비["추가입력"]
+    질문들 = [*r["질문"], *코드질문]
+    if r["상태"] == "실패" and not (코드질문 or 칸):
+        return {**r, "추가입력": []}
+    return {**r, "상태": "있음" if 질문들 or 칸 else "없음", "질문": 질문들, "추가입력": 칸}
+
+
+def _질문_작성(입력: dict, 블록: str, 문장맵: dict, 조문메타: dict, 모델: str, 타임아웃: int, 메타: dict, t0: float) -> dict:
+    """질문 LLM 1회와 코드 검사."""
     프롬프트 = 프롬프트_틀.format(원문=블록, 지출=_지출_문자열(입력))
     메타["프롬프트자수"] = len(프롬프트)
     t = time.time()
@@ -398,6 +453,17 @@ def 질문_공개(항목: dict) -> dict:
             "근거": 항목["근거"]}
 
 
+def 부가세_답(저장값: dict | None, 답변들: list[dict]) -> str | None:
+    """코드가 만든 부가세 질문의 답 → 부가세 구분. 질문이 없었거나 답하지 않았으면 None."""
+    if not isinstance(저장값, dict) or not isinstance(저장값.get("질문"), list):
+        return None
+    값들 = {a.get("code"): a.get("값") for a in 답변들 if isinstance(a, dict)}
+    for q in 저장값["질문"]:
+        if q.get("종류") == "부가세":
+            return _부가세_값.get(값들.get(q.get("id")))
+    return None
+
+
 def 답변_구성(저장값: dict | None, 답변들: list[dict]) -> list[dict]:
     """서버에 저장해 둔 질문과 화면 답변을 맞춘다. 프론트가 보낸 글은 프롬프트에 넣지 않는다.
 
@@ -408,6 +474,8 @@ def 답변_구성(저장값: dict | None, 답변들: list[dict]) -> list[dict]:
     값들 = {a.get("code"): a.get("값") for a in 답변들 if isinstance(a, dict)}
     out = []
     for q in 저장값["질문"]:
+        if q.get("종류") == "부가세":      # 요건이 아니라 입력값이다. 부가세_답() 으로 따로 읽는다
+            continue
         답 = 값들.get(q.get("id"))
         out.append({"질문문": q.get("질문문"), "충족답": q.get("충족답"), "이유": q.get("이유"), "할일": q.get("할일"),
                     "답": 답 if 답 in 답변값 else "모름",

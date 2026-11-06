@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 """판정 파이프라인: 정규화 → 룰 조회 → 검색 → 프롬프트 구성 → 판정 호출 → 검증 → 전제 확인 → 저장.
 
+SUDDOE_ONTOLOGY_PROGRAMS 에 있는 사업은 새 경로를 탄다(입구에서 정한다. 한 요청이 두 경로를 섞지 않는다, 5-11 문서):
+정규화 → 온톨로지 조회 + 코드 게이트(ontology_gate) → 검색 → 문맥 구성(ontology_context) → 판정 호출 → 검증 → 합치기 → 저장.
+
 /api/judge(server/routes_judge._live_판정)가 판정(...) 을 부른다. 여기서 LLM 호출은 정규화와 판정 두 번이고 나머지는 코드다.
 확인 질문 LLM 은 판정 전에 /api/questions(question_generate)가 따로 부르고, 그 답을 사용자답변으로 받는다.
 게이트: A 금지목록 일치(즉시 불가, 판정 LLM 호출 없음), B 검색 결과 0건(판단불가), C 비목 후보 근접(1순위로
@@ -20,12 +23,15 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import l3_load
+import ontology_context
+import ontology_gate
+import ontology_lookup
 import retrieve
 from _lib import db
 from assemble_context import 프롬프트_구성, 프롬프트_버전
 from llm_qwen import LLM실패, llm_호출
 from llm_schema import 판정_스키마, 체크코드_enum
-from llm_validate import 검증, 체크항목_본문
+from llm_validate import _하향_요약, 검증, 근거_인용, 체크항목_본문
 from normalize_run import 정규화
 from rule_lookup import effective_rule, l3_상위확인, 금지목록_일치, 비목후보_조회
 
@@ -52,7 +58,7 @@ _decisions_컬럼: tuple[str, ...] = (
     "org_id", "account_id", "사업명", "기관id", "질문원문", "plan_id", "정규화", "비목", "금액", "판정",
     "신뢰등급", "요약", "규정버전", "인용", "해야할일", "전제", "참조관계", "미매핑전제",
     "검증사유", "검증코드", "처리단계", "실패단계", "지연ms", "모델", "검색스냅샷", "코퍼스버전",
-    "사용자답변",
+    "사용자답변", "경로",
 )
 
 
@@ -76,6 +82,15 @@ class _판정상태:
     주입: str | None
     참조확장_사용: bool
     account_id: Any = None
+    # 새 경로: 화면에서 확정한 값. 코드 게이트의 입력은 금액 · 부가세구분 · 추가입력값뿐이다
+    새경로: bool = False
+    확정비목: str | None = None
+    확정세목: str | None = None
+    추가입력값: dict = field(default_factory=dict)
+    부가세구분: str | None = None
+    온톨로지: dict = field(default_factory=dict)
+    게이트결과: dict = field(default_factory=dict)
+    문맥: dict | None = None
     # 확인 질문 답변(question_generate.답변_구성). 답변유실은 답이 왔는데 저장된 질문을 읽지 못한 경우다
     사용자답변: list[dict] = field(default_factory=list)
     답변유실: bool = False
@@ -192,7 +207,8 @@ def _decisions_행(상태: _판정상태, 응답: dict) -> dict:
                           ensure_ascii=False, default=str),
         # 충족답·근거조문까지 남긴다. 나중에 질문을 감사할 수 있어야 한다. 화면에는 질문문·답만 나간다
         사용자답변=json.dumps(상태.사용자답변, ensure_ascii=False, default=str),
-        코퍼스버전=코퍼스버전(상태.cur))
+        코퍼스버전=코퍼스버전(상태.cur),
+        경로="온톨로지" if 상태.새경로 else "옛")
 
 
 def decisions_저장(cur, 행: dict) -> int | None:
@@ -623,11 +639,242 @@ def _검증단계(상태: _판정상태, 사용자프로필값: dict | None) -> 
     return _종료(상태, 응답, 기록=상태.기록)
 
 
+# 새 경로(온톨로지). 각 단계는 계속하면 None, 여기서 끝나면 응답 dict 를 돌려준다.
+def 게이트_입력(금액, 부가세구분: str | None, 추가입력값: dict | None) -> dict:
+    """코드 게이트 입력. 화면이 준 값만 쓴다. LLM 이 뽑은 수치는 비교에 쓰지 않는다(칸 미리 채우기용)."""
+    값 = {k: v for k, v in (추가입력값 or {}).items() if k in ontology_gate.입력키 and v not in (None, "")}
+    return {"금액": 금액, "부가세구분": 부가세구분 or "모름", **값}
+
+
+def 온톨로지_조회(cur, 사업명: str | None, 비목: str, 세목: str | None, 입력: dict, *, 확정: bool) -> dict:
+    """대상 노드 → 적용 규범 → 근거 조문 → 코드 게이트. 판정과 질문 생성이 같은 값을 쓴다. 조회 오류는 그대로 올린다."""
+    대상 = ontology_lookup.대상_노드(cur, 사업명, 비목, 세목)
+    적용 = ontology_lookup.적용_규범(cur, 사업명, 대상["대상_id"])
+    근거행 = ontology_lookup.근거_조문(cur, 적용["규범"], 3, 대상["대상_id"], 사업=사업명)
+    실효 = [n for n in 적용["규범"] if n["종류"] != "우선순위"]
+    위임만 = not 실효 and ontology_lookup.위임_있음(근거행)
+    세목미정 = 확정 and not 세목 and ontology_lookup.하위_제약_있음(cur, 사업명, 대상["대상_id"])
+    게이트결과 = ontology_gate.게이트(적용["규범"], 입력, 확정=확정, 세목표시=세목,
+                              우선순위_적용=적용["우선순위_적용"], 위임만=위임만, 세목미정=세목미정)
+    노드들 = {대상["대상_id"], *(p for _, p in 적용["경로"]), ontology_lookup.모든비목}
+    return {"대상": 대상, "적용": 적용, "근거행": 근거행, "게이트": 게이트결과, "노드들": 노드들}
+
+
+def _새_문의_안내(종류: str) -> str:
+    return {"금지": "규정상 집행할 수 없는 항목입니다.",
+            "부가세기준미정": "부가세 포함 여부에 따라 결과가 달라져 판정을 내리지 않았습니다. 입력한 금액의 부가세 포함 여부를 알려 주세요."}[종류]
+
+
+def _코드판정_요약(g: dict) -> str:
+    종류, 코드판정 = g["종류"], g.get("코드판정") or {}
+    if 종류 == "한도초과":
+        return f"{코드판정.get('비교값')}으로 한도({코드판정.get('한도')})를 넘어 집행할 수 없습니다."
+    return _새_문의_안내(종류)
+
+
+def _표시_분류(대상: dict | None) -> dict | None:
+    return {k: 대상.get(k) for k in ("비목", "세목", "표시문")} if 대상 else None
+
+
+def _온톨로지단계(상태: _판정상태) -> dict | None:
+    t = time.time()
+    if 상태.주입 == "onto":
+        raise 주입실패("온톨로지 조회 실패(주입)")
+    비목, 세목 = 상태.확정비목, 상태.확정세목
+    확정 = bool(비목)
+    if not 비목:                 # 화면 밖 경로(CLI 등). 추천값으로 문맥만 만들고 게이트는 발동하지 않는다
+        후보 = 상태.정규화결과.get("분류후보") or []
+        if 후보:
+            비목, 세목 = 후보[0].get("비목"), 후보[0].get("세목")
+    상태.비목 = 비목
+    입력 = 게이트_입력(상태.정규화결과.get("금액"), 상태.부가세구분, 상태.추가입력값)
+    if 비목:
+        상태.온톨로지 = 온톨로지_조회(상태.cur, 상태.사업명, 비목, 세목, 입력, 확정=확정)
+        상태.게이트결과 = 상태.온톨로지["게이트"]
+    else:
+        상태.게이트결과 = ontology_gate.게이트([], 입력, 확정=False)
+        상태.온톨로지 = {"대상": None, "적용": {"규범": [], "경로": [], "우선순위_적용": []}, "근거행": [],
+                      "게이트": 상태.게이트결과, "노드들": set()}
+    상태._지연기록("온톨로지", t)
+    상태.처리단계.append("온톨로지")
+    g = 상태.게이트결과
+    if not g.get("종류"):
+        return None
+
+    # 코드 판정: 판정 LLM 을 부르지 않는다
+    상태.처리단계.append(f"코드판정:{g['종류']}")
+    최종, _ = ontology_gate.합치기(g, None)
+    발동 = g.get("발동규범") or {}
+    인용목록 = 근거_인용(ontology_context.코드판정_문장맵(상태.cur, 발동), conn=상태.conn, org_id=상태.org_id,
+                     현재기관=str(상태.org_id) if 상태.org_id else None)
+    근거행 = ontology_lookup.근거_조문(상태.cur, [발동], 3, None, 사업=상태.사업명)
+    응답 = _기본응답(최종, _코드판정_요약(g), 인용목록=인용목록, 검증사유=[], 검증코드=list(g["검증코드"]),
+                   처리단계="+".join(상태.처리단계))
+    응답.update(게이트="A" if g["종류"] == "금지" else "코드", 비목=비목, 정규화=상태.정규화결과,
+               코드판정=g["코드판정"], 근거경로=ontology_context.근거경로들(근거행, ontology_lookup._스키마()),
+               분류=_표시_분류(상태.온톨로지["대상"]), 조건=[], 경로="온톨로지", 지연ms=상태.지연_총(),
+               모델={"호출수": 상태.정규화_호출수})
+    return _종료(상태, 응답, 기록=상태.기록)
+
+
+def _새_l3_스레드(org_id):
+    if not org_id:
+        return [], None
+    try:
+        with db.connect(connect_timeout=5, autocommit=True) as c:
+            return l3_load.조문_연결조회(c.cursor(), org_id) or [], None
+    except Exception as e:                               # noqa: BLE001
+        return [], f"{type(e).__name__}: {e}"
+
+
+def _새_검색_스레드(질의, 사업명):
+    try:
+        with db.connect(connect_timeout=5, autocommit=True) as c:
+            return retrieve.검색(c.cursor(), 질의, 사업명, top_k=10, 사업필터=사업필터), None
+    except Exception as e:                               # noqa: BLE001
+        return _빈_검색결과(), f"{type(e).__name__}: {e}"
+
+
+def _새_검색단계(상태: _판정상태) -> dict | None:
+    """L3 + 검색 후보(상위 10) + 문맥 구성. 온톨로지 후보 · L3 · 검색이 모두 비면 판단불가(게이트 B)."""
+    t = time.time()
+    if 상태.주입 == "empty":
+        상태.검색결과, 상태.l3본문 = _빈_검색결과(), []
+        상태.온톨로지 = {**상태.온톨로지, "근거행": []}
+    else:
+        질의 = 상태.정규화결과.get("질의문") or 상태.질문
+        with ThreadPoolExecutor(max_workers=2) as ex:
+            fl3 = ex.submit(_새_l3_스레드, 상태.org_id)
+            fse = ex.submit(_새_검색_스레드, 질의, 상태.사업명)
+            상태.l3본문, l3err = fl3.result()
+            상태.검색결과, se_err = fse.result()
+        if l3err:
+            return _실패응답(상태, "L3로드", "기관 규정을 불러오지 못해 판정을 내리지 않았습니다.", f"L3 로드 실패: {l3err}")
+        if se_err:
+            return _실패응답(상태, "검색", "규정 검색에 실패해 판정을 내리지 않았습니다.", f"검색 실패: {se_err}")
+    상태._지연기록("검색", t)
+    상태.처리단계.append("검색")
+
+    t = time.time()
+    검색결과 = {**상태.검색결과, "참조확장": 상태.검색결과["참조확장"] if 상태.참조확장_사용 else []}
+    상태.문맥 = ontology_context.문맥_구성(상태.cur, 근거행=상태.온톨로지["근거행"], 대상노드=상태.온톨로지["노드들"],
+                                     l3=상태.l3본문, 검색=검색결과, schema=ontology_lookup._스키마())
+    상태._지연기록("문맥구성", t)
+    if 상태.문맥["L3_초과"]:
+        상태.처리단계.append("L3상한초과")
+        응답 = _기본응답("판단불가",
+                       "주관기관 규정이 길어 한 번에 볼 수 없어 판정을 내리지 않았습니다. 규정 관리 화면에서 조문 연결을 확인하면 판정할 수 있습니다.",
+                       검증사유=[f"L3 미연결 조문이 글자 상한을 넘음(뺀 항목 {상태.문맥['빠진수']}개)"],
+                       검증코드=[], 처리단계="+".join(상태.처리단계))
+        응답.update(게이트="B", 비목=상태.비목, 정규화=상태.정규화결과, 검색=상태.검색결과,
+                   코드판정=None, 근거경로=[], 분류=_표시_분류(상태.온톨로지["대상"]), 조건=[], 경로="온톨로지",
+                   지연ms=상태.지연_총(), 모델={"호출수": 상태.정규화_호출수})
+        return _종료(상태, 응답, 기록=상태.기록)
+    if not 상태.문맥["항목수"]:
+        상태.처리단계.append("후보없음")
+        응답 = _기본응답("판단불가", "이 질문에 해당하는 규정을 찾지 못했습니다. 담당자 확인이 필요합니다.",
+                       검증사유=["온톨로지 · L3 · 검색 후보 0건"], 검증코드=[], 처리단계="+".join(상태.처리단계))
+        응답.update(게이트="B", 비목=상태.비목, 정규화=상태.정규화결과, 검색=상태.검색결과,
+                   코드판정=None, 근거경로=[], 분류=_표시_분류(상태.온톨로지["대상"]), 조건=[], 경로="온톨로지",
+                   지연ms=상태.지연_총(), 모델={"호출수": 상태.정규화_호출수})
+        return _종료(상태, 응답, 기록=상태.기록)
+    return None
+
+
+def _새_프롬프트단계(상태: _판정상태) -> dict | None:
+    cur, conn = 상태.cur, 상태.conn
+    t = time.time()
+    상태.체크코드 = 체크코드_enum(사업명=상태.사업명, conn=conn) or None
+    상태.체크항목 = 체크항목_본문(set(상태.체크코드), conn=conn) if 상태.체크코드 else {}
+    프로필요약문, 상태.프로필값 = _프로필값_읽기(cur, 상태.org_id, 상태.account_id)
+    대상 = 상태.온톨로지["대상"]
+    b4 = ontology_context.규범_요약(상태.온톨로지["적용"], 상태.게이트결과, 분류표시=(대상 or {}).get("표시문"),
+                               확정=bool(상태.확정비목), l3있음=bool(상태.l3본문))
+    상태.프롬프트, 상태.문장맵, 상태.참조관계 = 프롬프트_구성(
+        cur, 상태.질문, 상태.정규화결과, 룰결과=b4, 프로필요약=프로필요약문,
+        참조관계=상태.검색결과["참조관계"], 체크코드=상태.체크코드, 체크항목=상태.체크항목,
+        사용자답변=상태.사용자답변 or None, 문맥=상태.문맥)
+    상태._지연기록("프롬프트구성", t)
+    상태.처리단계.append("판정생성")
+    if not 상태.문장맵:
+        return _실패응답(상태, "프롬프트구성", "인용할 규정 원문이 없어 판정을 내리지 않았습니다.",
+                      "문장맵 0건", 검증코드=["NO_CITATION"], 처리단계="+".join(상태.처리단계))
+    if 상태.dry and 상태.주입 not in ("schema", "cite"):
+        응답 = _기본응답("판단불가", "[dry] LLM 을 호출하지 않았다. 프롬프트 구성까지만 실행했다.",
+                       검증사유=[], 검증코드=[], 처리단계="+".join(상태.처리단계 + ["dry종료"]))
+        응답.update(게이트="D", 비목=상태.비목, 정규화=상태.정규화결과, 검색=상태.검색결과,
+                   참조관계=상태.검색결과["참조관계"], dry=True, 프롬프트=상태.프롬프트,
+                   프롬프트길이=len(상태.프롬프트), 문장맵_크기=len(상태.문장맵),
+                   문장맵={k: list(v) for k, v in 상태.문장맵.items()},
+                   b4=bool(b4), b1=len(상태.l3본문), 참조확장사용=상태.참조확장_사용, 경로="온톨로지",
+                   근거경로=ontology_context.근거경로들(상태.온톨로지["근거행"], ontology_lookup._스키마()),
+                   조건=상태.게이트결과.get("조건") or [], 분류=_표시_분류(대상),
+                   문맥요약={k: 상태.문맥[k] for k in ("항목수", "글자수", "빠진수", "온톨로지항목수")},
+                   지연ms=상태.지연_총(), 모델={"호출수": 0})
+        return _종료(상태, 응답, 기록=False)
+    return None
+
+
+_시점_구분 = {"집행 전": "결제전", "집행전": "결제전", "기한": "결제전", "집행 후": "결제후", "집행후": "결제후"}
+
+
+def _조건_할일(조건들: list[dict]) -> list[dict]:
+    """코드 게이트의 조건 → 해야할일 항목. check_items code 가 없어 코드 추정을 막는다(_모름_할일 과 같다)."""
+    return [{"항목": c["문장"], "설명": None, "구분": _시점_구분.get(c.get("시점") or "", "결제전"), "코드추정_제외": True}
+            for c in 조건들 if c.get("구분") in ("의무", "금지조건", "한도예외", "위임", "두기준", "미확정규범")]
+
+
+def _새_검증단계(상태: _판정상태, 사용자프로필값: dict | None) -> dict:
+    t = time.time()
+    org_id, 검색결과, g = 상태.org_id, 상태.검색결과, 상태.게이트결과
+    규범들 = 상태.온톨로지["적용"]["규범"]
+    # 미확정 규범만 있으면 UNVERIFIED_RULE 로 내린다. 우선순위 규범은 판정 근거 규범이 아니라 세지 않는다
+    룰들 = [{"verified": bool(n.get("verified")) and not n.get("해석미결")} for n in 규범들 if n["종류"] != "우선순위"]
+    응답, 사유 = 검증(상태.출력, 상태.문장맵, 룰들=룰들 or None,
+                  체크코드=상태.체크코드, 체크항목=상태.체크항목,
+                  현재기관=str(org_id) if org_id else None, org_id=org_id,
+                  conn=상태.conn, 사업명=상태.사업명,
+                  미해결참조=검색결과["미해결참조"],
+                  사용자답변=상태.사용자답변, 답변유실=상태.답변유실)
+    # 합치는 규칙: 코드 결과는 상한이다. '가능' 만 조건부로 내린다
+    최종, 낮춤 = ontology_gate.합치기(g, 응답.get("판정"))
+    if 낮춤:
+        응답.update(판정=최종, 요약=_하향_요약["조건부"])
+        사유.append("코드 결과(의무 · 입력 비움 · 미확정 규범 · 위임) → '가능' 을 조건부로 하향")
+        상태.처리단계.append("코드상한")
+    조건 = g.get("조건") or []
+    할일 = _조건_할일(조건) if 응답.get("판정") != "불가" else []
+    응답["해야할일"] = [*(응답.get("해야할일") or []), *할일, *_모름_할일(상태.사용자답변)]
+    코드 = 응답.get("검증코드") or []
+    상태._지연기록("검증", t)
+    상태.처리단계.append("검증")
+
+    t = time.time()
+    프로필값 = 프로필값_경로키(상태.프로필값)
+    if 사용자프로필값:
+        프로필값.update(프로필값_경로키(사용자프로필값))
+    확인결과 = 전제확인(응답.get("전제목록") or [], 프로필값)
+    상태._지연기록("전제확인", t)
+    if 확인결과["미매핑"] and "PREMISE_UNMAPPED" not in 코드:
+        코드.append("PREMISE_UNMAPPED")
+    응답.update(게이트="D", 처리단계="+".join(상태.처리단계), 비목=상태.비목, 정규화=상태.정규화결과,
+               검색=검색결과, 참조관계=상태.참조관계, 증빙목록=[],
+               전제확인=확인결과, 검증코드=코드, 검증사유=사유,
+               문장맵={k: list(v) for k, v in 상태.문장맵.items()},
+               지연ms=상태.지연_총(), 프롬프트버전=프롬프트_버전, 참조확장사용=상태.참조확장_사용,
+               모델=_모델메타(상태.정규화_호출수, 상태.정규화_메타, 상태.판정_메타),
+               코드판정=None, 경로="온톨로지",
+               근거경로=ontology_context.근거경로들(상태.온톨로지["근거행"], ontology_lookup._스키마()),
+               분류=_표시_분류(상태.온톨로지["대상"]), 조건=[c["문장"] for c in 조건] if 응답.get("판정") != "불가" else [])
+    return _종료(상태, 응답, 기록=상태.기록)
+
+
 def 판정(질문: str, *, 사업명: str | None = None, org_id=None, account_id=None,
        plan_id: int | None = None,
        확정비목: str | None = None, 정규화결과: dict | None = None,
        사용자프로필값: dict | None = None,
        사용자답변: list[dict] | None = None, 답변유실: bool = False,
+       확정세목: str | None = None, 추가입력값: dict | None = None, 부가세구분: str | None = None,
        dry: bool = False, 기록: bool = True, 주입: str | None = None,
        참조확장_사용: bool = True) -> dict:
     """질문 하나를 판정해 응답 dict 를 돌려준다. 어떤 실패도 예외로 올리지 않고 판단불가로 반환한다.
@@ -637,14 +884,16 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, account_id
     `정규화결과`(이미 실행한 정규화 결과. 주면 정규화 LLM 을 다시 부르지 않는다), `사용자프로필값`(심층질문 답.
     프로필 값과 같은 컬럼명 키이며 DB 값보다 우선한다), `사용자답변`(확인 질문 답. 프롬프트 B5.7 과 검증 하향에 쓴다),
     `답변유실`(답이 왔는데 저장된 질문을 읽지 못함. 「가능」을 내지 않는다).
+    새 경로 인자: `확정세목`(화면에서 확정한 세목 표기), `추가입력값`(화면 숫자 칸), `부가세구분`(포함 · 공급가액 · 모름).
     평가용 인자: `dry`(LLM 없이 규칙 정규화와 프롬프트 구성까지만), `기록`(tenant.decisions 기록 여부),
-    `주입`(장애 주입 'db'|'timeout'|'schema'|'empty'|'cite'), `참조확장_사용`(False 면 B3 을 넣지 않는다).
+    `주입`(장애 주입 'db'|'timeout'|'schema'|'empty'|'cite'|'onto'), `참조확장_사용`(False 면 B3 을 넣지 않는다).
     부수 효과: `기록` 이면 게이트·정상 종료를 tenant.decisions 에 넣는다. 실패 종료는 기록하지 않는다.
     """
     상태 = _판정상태(질문=질문, 사업명=사업명, org_id=org_id, account_id=account_id,
                    plan_id=plan_id, 기록=기록,
                    dry=dry, 주입=주입, 참조확장_사용=참조확장_사용,
-                   사용자답변=list(사용자답변 or []), 답변유실=답변유실)
+                   사용자답변=list(사용자답변 or []), 답변유실=답변유실,
+                   확정비목=확정비목, 확정세목=확정세목, 추가입력값=dict(추가입력값 or {}), 부가세구분=부가세구분)
     try:
         if 주입 == "db":
             raise 주입실패("DB 연결 실패(주입)")
@@ -663,6 +912,16 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, account_id
 
     try:
         상태.cur = 상태.conn.cursor()
+        상태.새경로 = ontology_lookup.새경로_대상(상태.cur, 사업명)
+        if 상태.새경로:
+            for 단계 in (lambda: _정규화단계(상태, 정규화결과),
+                         lambda: _온톨로지단계(상태),
+                         lambda: _새_검색단계(상태),
+                         lambda: _새_프롬프트단계(상태),
+                         lambda: _판정호출(상태)):
+                if (응답 := 단계()) is not None:
+                    return 응답
+            return _새_검증단계(상태, 사용자프로필값)
         for 단계 in (lambda: _정규화단계(상태, 정규화결과),
                      lambda: _룰조회(상태, 확정비목),
                      lambda: _검색단계(상태),

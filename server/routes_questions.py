@@ -28,7 +28,9 @@ router = APIRouter()
 # 질문 화면을 띄워 놓고 오래 있어도 답변이 사라지지 않게 일반 응답 캐시보다 길게 둔다.
 _질문세트_TTL초 = 24 * 3600
 
-_실패_응답 = {"상태": "실패", "질문세트": None, "질문": []}
+_실패_응답 = {"상태": "실패", "질문세트": None, "질문": [], "추가입력": [], "용어풀이": []}
+# LLM 이 실패해 코드 항목(추가 입력 · 부가세 질문)만 남은 결과. 일시적 장애를 오래 고정하지 않는다.
+_임시_TTL초 = 1800
 
 
 def _로그(상태: str, 질문수: int, 버린사유: list[str], 캐시: bool, t0: float) -> None:
@@ -38,7 +40,7 @@ def _로그(상태: str, 질문수: int, 버린사유: list[str], 캐시: bool, 
 
 @router.post("/api/questions")
 def questions(req: Request, body: 질문요청) -> dict:
-    """응답: {상태: 있음|없음|바로판정|실패, 질문세트, 질문: [{id, 질문문, 이유, 선택지, 근거}]}."""
+    """응답: {상태: 있음|없음|바로판정|실패, 질문세트, 질문: [{id, 질문문, 이유, 선택지, 근거}], 추가입력, 용어풀이}."""
     t0 = time.time()
     body.확정비목 = _비목_표준화(body.확정비목)
     if body.확정비목 not in 비목_ENUM:
@@ -53,7 +55,7 @@ def questions(req: Request, body: 질문요청) -> dict:
     if MOCK:
         return mock_질문
     if not 답변_반영():                                    # 답을 쓰지 않을 때는 묻지 않는다
-        return {"상태": "없음", "질문세트": None, "질문": []}
+        return {"상태": "없음", "질문세트": None, "질문": [], "추가입력": [], "용어풀이": []}
 
     org, account = auth.검증된_org(req), auth.검증된_account(req)
     try:
@@ -68,12 +70,14 @@ def _live_질문(body: 질문요청, org: str | None, account: str | None, ip: s
     import question_generate
 
     # 캐시 행은 계정 단위라(RLS) 키에도 org·계정을 넣는다. L3 를 새로 올리면 키가 바뀐다.
-    k = response_cache.캐시키("questions", org, account, body.사업명, body.확정비목, body.세부유형,
-                            body.품목, body.금액, body.용도, body.질문원문, response_cache.l3_해시(org))
+    k = response_cache.캐시키("questions", org, account, body.사업명, body.확정비목, body.확정세목, body.부가세구분,
+                            body.세부유형, body.품목, body.금액, body.용도, body.질문원문,
+                            response_cache.l3_해시(org))
 
     def 응답(저장값: dict) -> dict:
         return {"상태": 저장값["상태"], "질문세트": k,
-                "질문": [question_generate.질문_공개(q) for q in 저장값["질문"]]}
+                "질문": [question_generate.질문_공개(q) for q in 저장값["질문"]],
+                "추가입력": 저장값.get("추가입력") or [], "용어풀이": 저장값.get("용어풀이") or []}
 
     # 조회() 를 쓰지 않는다. 아직 카운트를 올리지 않았으므로 적중해도 되돌릴 것이 없다.
     저장값 = response_cache.질문세트_조회(k, org, account)
@@ -88,8 +92,9 @@ def _live_질문(body: 질문요청, org: str | None, account: str | None, ip: s
 
     데이터버전해시 = response_cache.요청_해시()
     r = question_generate.질문생성(
-        {"사업명": body.사업명, "비목": body.확정비목, "세부유형": body.세부유형, "품목": body.품목,
-         "용도": body.용도, "금액": body.금액, "질문": body.질문원문},
+        {"사업명": body.사업명, "비목": body.확정비목, "세부유형": body.확정세목 or body.세부유형, "품목": body.품목,
+         "용도": body.용도, "금액": body.금액, "질문": body.질문원문,
+         "확정세목": body.확정세목, "부가세구분": body.부가세구분},
         org_id=org, account_id=account)
     메타 = r.get("메타") or {}
     if not 메타.get("LLM호출"):                         # LLM 을 부르지 않았으면 일일 카운트를 되돌린다
@@ -99,9 +104,9 @@ def _live_질문(body: 질문요청, org: str | None, account: str | None, ip: s
     _로그(r["상태"], len(r["질문"]), 버린사유 or ([메타["사유"]] if 메타.get("사유") else []), False, t0)
     if r["상태"] == "실패":                             # 일시적 장애를 24시간 고정하지 않는다
         return dict(_실패_응답)
-    저장값 = {"상태": r["상태"], "질문": r["질문"]}
-    저장됨 = response_cache.저장(k, 저장값, 종류="questions", org=org, account=account,
-                              데이터버전_해시=데이터버전해시, ttl초=_질문세트_TTL초)
+    저장값 = {"상태": r["상태"], "질문": r["질문"], "추가입력": r.get("추가입력") or [], "용어풀이": r.get("용어풀이") or []}
+    저장됨 = response_cache.저장(k, 저장값, 종류="questions", org=org, account=account, 데이터버전_해시=데이터버전해시,
+                              ttl초=_임시_TTL초 if 메타.get("사유") == "LLM실패" else _질문세트_TTL초)
     if not 저장됨 and 저장값["질문"]:                    # 답을 받아도 판정에서 질문을 찾지 못하니 묻지 않는다
         _로그("실패", 0, ["저장실패"], False, t0)
         return dict(_실패_응답)

@@ -126,7 +126,7 @@ def _우선순위_적용(규범들: list[dict]) -> tuple[list[dict], list[dict]]
                 continue
             r = _우선순위_찾기(우선순위들, n, 표[대상])
             제외됨.add(대상)
-            적용.append({"채택": n["norm_id"], "제외": 대상, "조건": {
+            적용.append({"채택": n["norm_id"], "제외": 대상, "채택규범": n, "제외규범": 표[대상], "조건": {
                 "종류": "대체", "우선순위규범": r["norm_id"] if r else None,
                 "범위": (r.get("조건") or {}).get("범위") if r else None}})
     for n in 규범들:
@@ -321,6 +321,94 @@ def 근거경로_문장(경로: list[str], schema: dict) -> str:
         if not 조각 or 조각[-1] != 글:
             조각.append(글)
     return " → ".join(조각)
+
+
+def 레이블_목록(cur, 사업명: str | None) -> list[dict]:
+    """질의 변환 · 분류 확인 화면에 쓰는 분류 목록 [{표시문, 비목, 세목, 별칭:[]}]. 내부 ID 를 넣지 않는다.
+
+    사업이 `사용` 관계로 쓰는 비목과 그 아래 세목만 낸다. 사업키를 모르면 빈 목록이다.
+    """
+    사업키 = next((k for k, v in (_스키마().get("사업키") or {}).items() if v == 사업명), None)
+    if not 사업키:
+        return []
+    사업들 = [사업명]
+    행들 = cur.execute(
+        """SELECT b.concept_id, b.pref_label, NULL::text, NULL::text
+             FROM corpus.concept_relations r JOIN corpus.concepts b ON b.concept_id = r.dst_id
+            WHERE r.관계 = '사용' AND r.src_id = %(사업id)s AND b.종류 = '비목'
+              AND (r.적용사업 IS NULL OR r.적용사업 = ANY(%(사업들)s))
+           UNION ALL
+           SELECT s.concept_id, b.pref_label, s.pref_label, b.concept_id
+             FROM corpus.concept_relations r
+             JOIN corpus.concepts b ON b.concept_id = r.dst_id
+             JOIN corpus.concept_relations h ON h.관계 = '상위' AND h.dst_id = b.concept_id
+                  AND (h.적용사업 IS NULL OR h.적용사업 = ANY(%(사업들)s))
+             JOIN corpus.concepts s ON s.concept_id = h.src_id AND s.종류 = '세목'
+            WHERE r.관계 = '사용' AND r.src_id = %(사업id)s AND b.종류 = '비목'
+              AND (r.적용사업 IS NULL OR r.적용사업 = ANY(%(사업들)s))
+            ORDER BY 2, 3 NULLS FIRST""", {"사업id": f"사업:{사업키}", "사업들": 사업들}).fetchall()
+    별칭: dict[str, list[str]] = {}
+    for cid, 글 in cur.execute("""SELECT concept_id, alt_label FROM corpus.concept_labels
+                                  WHERE concept_id = ANY(%s) AND (적용사업 IS NULL OR 적용사업 = %s)
+                                  ORDER BY concept_id, alt_label""", ([r[0] for r in 행들], 사업명)).fetchall():
+        별칭.setdefault(cid, []).append(글)
+    return [{"표시문": f"{r[1]} > {r[2]}" if r[2] else r[1], "비목": r[1], "세목": r[2], "별칭": 별칭.get(r[0], []),
+             "노드": r[0]} for r in 행들]
+
+
+def 별칭_후보(cur, 표현: str | None, 사업명: str | None, 레이블: list[dict]) -> list[dict]:
+    """품목 표현의 별칭 정확 일치 → 그 노드(품목이면 가장 가까운 상위 세목 · 비목)의 분류 후보. 없으면 빈 목록."""
+    표 = {x["노드"]: x for x in 레이블}
+    사업들 = [사업명] if 사업명 else []
+    out: list[dict] = []
+    for 행 in 노드_결정(cur, 표현 or "", 사업명):
+        차례 = [행["concept_id"], *(p for _, p in _상위_경로(cur, 행["concept_id"], 사업들))]
+        x = next((표[i] for i in 차례 if i in 표), None)
+        if x and all(o["표시문"] != x["표시문"] for o in out):
+            out.append({"비목": x["비목"], "세목": x["세목"], "표시문": x["표시문"], "신뢰도": 1.0})
+    return out
+
+
+def 대상_노드(cur, 사업명: str | None, 비목: str, 세목: str | None = None) -> dict:
+    """화면에서 확정한 비목 · 세목 표기 → 노드 ID. 세목이 주어졌는데 그 비목 아래에 없으면 LookupError(판단불가)."""
+    사업들 = [사업명] if 사업명 else []
+    행 = cur.execute("""SELECT concept_id FROM corpus.concepts WHERE 종류 = '비목' AND pref_label = %s
+                         AND (적용사업 IS NULL OR 적용사업 = ANY(%s)) ORDER BY 적용사업 NULLS LAST LIMIT 1""",
+                     (비목, 사업들)).fetchone()
+    if 행 is None:
+        raise LookupError(f"없는 비목: {비목}")
+    비목_id = 행[0]
+    if not 세목:
+        return {"대상_id": 비목_id, "비목_id": 비목_id, "표시문": 비목, "비목": 비목, "세목": None}
+    행 = cur.execute("""SELECT s.concept_id FROM corpus.concepts s
+                          JOIN corpus.concept_relations h ON h.src_id = s.concept_id AND h.관계 = '상위' AND h.dst_id = %s
+                         WHERE s.종류 = '세목' AND s.pref_label = %s AND (s.적용사업 IS NULL OR s.적용사업 = ANY(%s))
+                           AND (h.적용사업 IS NULL OR h.적용사업 = ANY(%s))
+                         ORDER BY s.적용사업 NULLS LAST LIMIT 1""", (비목_id, 세목, 사업들, 사업들)).fetchone()
+    if 행 is None:
+        raise LookupError(f"{비목} 아래에 없는 세목: {세목}")
+    return {"대상_id": 행[0], "비목_id": 비목_id, "표시문": f"{비목} > {세목}", "비목": 비목, "세목": 세목}
+
+
+def 하위_제약_있음(cur, 사업명: str | None, 대상_id: str) -> bool:
+    """대상 아래 노드에 금지 · 한도 · 임계값 규범이 있나. 비목만 확정했을 때 세목을 고르라고 알리는 데 쓴다."""
+    사업들 = [사업명] if 사업명 else []
+    행 = cur.execute(
+        """WITH RECURSIVE 하위(id, 방문) AS (
+             SELECT r.src_id, ARRAY[r.dst_id, r.src_id] FROM corpus.concept_relations r
+              WHERE r.관계 = '상위' AND r.dst_id = %(대상)s AND (r.적용사업 IS NULL OR r.적용사업 = ANY(%(사업들)s))
+             UNION ALL
+             SELECT r.src_id, h.방문 || r.src_id FROM 하위 h JOIN corpus.concept_relations r ON r.dst_id = h.id
+              WHERE r.관계 = '상위' AND (r.적용사업 IS NULL OR r.적용사업 = ANY(%(사업들)s)) AND NOT r.src_id = ANY(h.방문))
+           SELECT 1 FROM corpus.norms n
+            WHERE n.종류 IN ('금지', '한도', '임계값') AND (n.적용사업 IS NULL OR n.적용사업 = ANY(%(사업들)s))
+              AND n.대상 && (SELECT array_agg(id) FROM 하위) LIMIT 1""", {"대상": 대상_id, "사업들": 사업들}).fetchone()
+    return 행 is not None
+
+
+def 위임_있음(근거행: list[dict]) -> bool:
+    """근거 조문 결과에 위임 관계가 있나. 규범 없이 위임만 있는 대상(창업활동자금 등)을 가린다."""
+    return any(str(r.get("출처") or "").startswith("위임") for r in 근거행)
 
 
 def 새경로_대상(cur, 사업명: str | None) -> bool:

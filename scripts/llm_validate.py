@@ -14,6 +14,7 @@ import json
 import logging
 import re
 import sys
+from dataclasses import asdict
 from typing import Iterable, Optional
 
 from _lib import db
@@ -359,6 +360,13 @@ def _인용_검증(llm출력: dict, 문장맵: dict, 메타: dict[str, dict], �
                           원문=m.get("원문"), 원문범위=m.get("원문범위"),
                           version=m.get("version"), extraction=m.get("extraction")))
     return 인용목록, 인용계층, 유출
+
+
+def 근거_인용(문장맵: dict, *, conn=None, org_id=None, 현재기관: Optional[str] = None) -> list[dict]:
+    """코드 판정의 근거를 인용과 같은 모양으로 바꾼다. LLM 이 고른 것이 아니어서 문장맵 전부가 인용이다. 원문은 DB 값이다."""
+    메타 = 문장ID_메타(문장맵, conn=conn, org_id=org_id)
+    인용목록, _계층, _유출 = _인용_검증({"인용": list(문장맵)}, 문장맵, 메타, 현재기관, _검증기록())
+    return [asdict(c) for c in 인용목록]
 
 
 def _전제_검증(llm출력: dict, 문장맵: dict, 메타: dict[str, dict], 허용경로: set[str],

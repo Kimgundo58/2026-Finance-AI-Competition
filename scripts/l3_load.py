@@ -404,6 +404,18 @@ def 조문_조회(cur, org_id: str, 비목: str | None = None) -> list[dict[str,
             for a in _조문들(cur, org_id)]
 
 
+def 조문_연결조회(cur, org_id: str) -> list[dict[str, Any]]:
+    """`조문_조회` + 조마다 온톨로지 연결 `concept_ids`(None = 미확인, [] = 확인했고 해당 세목 없음). 새 경로 전용."""
+    조문 = 조문_조회(cur, org_id)
+    if not 조문:
+        return []
+    with cur.connection.transaction():
+        _rls_org_설정(cur, _org정규화(org_id))
+        연결 = dict(cur.execute("SELECT article_id, concept_ids FROM tenant.l3_articles WHERE article_id = ANY(%s)",
+                               ([a["article_id"] for a in 조문],)).fetchall())
+    return [{**a, "concept_ids": 연결.get(a["article_id"])} for a in 조문]
+
+
 def l3룰(cur, org_id: str, 비목: str) -> dict[str, Any] | None:
     """현재 기관 L3 에 이 비목 규정이 있으면 룰 dict, 없으면 None.
 

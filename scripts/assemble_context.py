@@ -74,6 +74,22 @@ def _s(i: int) -> str:
     return f"S{i:02d}"
 
 
+_전각 = str.maketrans({"<": "＜", ">": "＞"})
+_RE_문장표식 = re.compile(r"\[\s*S(\d+)\s*\]")
+_RE_줄머리_제목 = re.compile(r"(?m)^([ \t]*)#")
+
+
+def 이스케이프(글: str | None) -> str:
+    """규정 원문이 프롬프트 표식을 흉내 내지 못하게 바꾼다(새 경로, L1 · L2 · L3 모두).
+
+    문장 표식 `[S01]` · 래퍼 끝 표식 · 줄머리 `#` · 꺾쇠만 비슷한 전각 문자로 바꾼다. 인용은 문장맵으로 DB 원문을 다시 읽어
+    치환하므로 화면 원문에는 영향이 없다.
+    """
+    s = (글 or "").replace(래퍼_끝, "［규정 원문 끝］").translate(_전각)
+    s = _RE_문장표식.sub(lambda m: f"［S{m.group(1)}］", s)
+    return _RE_줄머리_제목.sub(r"\1＃", s)
+
+
 def 항_분할(본문: str) -> list[tuple[str | None, str]]:
     """조 본문을 (항 기호, 조각) 목록으로 나눈다. 항이 없으면 조 전체가 한 조각이다."""
     자리 = [m.start() for m in RE_항.finditer(본문 or "")]
@@ -114,6 +130,16 @@ class _문장ID_생성기:
                         키 = f"{키}#{횟수[키]}"
                 self.문장맵[_s(self.n)] = (종류, _id, 키)
                 줄.append(f"[{_s(self.n)}] {표시헤더}\n{조각}")
+        줄.append(래퍼_끝)
+        return "\n\n".join(줄)
+
+    def 항목블록(self, 제목: str, 항목들: list[tuple[str, int, str, str, str | None]]) -> str:
+        """이미 항 단위로 나눈 항목 (종류, id, 표시헤더, 조각, 키) 에 문장 ID 를 붙인다(새 경로). 원문은 이스케이프한다."""
+        줄 = [f"## {제목}", 래퍼_시작]
+        for 종류, _id, 표시헤더, 조각, 키 in 항목들:
+            self.n += 1
+            self.문장맵[_s(self.n)] = (종류, _id, 키)
+            줄.append(f"[{_s(self.n)}] {이스케이프(표시헤더)}\n{이스케이프(조각)}")
         줄.append(래퍼_끝)
         return "\n\n".join(줄)
 
@@ -199,22 +225,27 @@ def 프롬프트_구성(cur, 질문: str, 정규화: dict, *,
               참조관계: list[dict] | None = None,
               체크코드: list[str] | None = None,
               체크항목: dict[str, dict] | None = None,
-              사용자답변: list[dict] | None = None) -> tuple[str, dict, list[dict]]:
+              사용자답변: list[dict] | None = None,
+              문맥: dict | None = None) -> tuple[str, dict, list[dict]]:
     """판정 프롬프트를 구성해 (프롬프트, 문장맵, 참조관계) 를 돌려준다.
 
     블록 순서는 B0(시스템 프롬프트), B1(L3), B2(검색 청크), B3(참조 확장 조문), B4(룰 결과),
     B5(기업 프로필 요약), B5.5(해야할일 후보), B5.7(사용자답변), B6(질문)이고, 값이 없는 블록은 넣지 않는다.
+    `문맥` 은 새 경로의 ontology_context.문맥_구성 결과다. 주면 B1~B3 대신 그 블록을 쓰고, l3 · 검색 · 참조확장은 보지 않는다.
     `참조관계` 는 받은 그대로 돌려준다. LLM 은 참조 그래프를 보지 않는다.
     `체크코드` 를 주고 `체크항목` 을 주지 않으면 check_items 본문을 같은 커넥션으로 조회한다.
     """
     번호 = _문장ID_생성기()
     블록: list[str] = [시스템_프롬프트]
-    if l3:
-        블록.append(_기관규정_블록(번호, l3))
-    if 검색:
-        블록.append(_검색규정_블록(cur, 번호, 검색))
-    if 참조확장:
-        블록.append(_참조조항_블록(cur, 번호, 참조확장))
+    if 문맥 is not None:
+        블록 += [번호.항목블록(제목, 항목들) for 제목, 항목들 in 문맥["블록"]]
+    else:
+        if l3:
+            블록.append(_기관규정_블록(번호, l3))
+        if 검색:
+            블록.append(_검색규정_블록(cur, 번호, 검색))
+        if 참조확장:
+            블록.append(_참조조항_블록(cur, 번호, 참조확장))
     if 룰결과:
         블록.append(_룰요약_블록(룰결과))
     if 프로필요약:

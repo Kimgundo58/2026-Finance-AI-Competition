@@ -28,7 +28,7 @@ from eval_store import 평가용_사업명  # noqa: E402
 
 _log = logging.getLogger(__name__)
 
-_주입종류 = ("db", "timeout", "schema", "empty", "cite")
+_주입종류 = ("db", "timeout", "schema", "empty", "cite", "onto")      # onto 는 온톨로지 경로 사업에서만 걸린다
 _장애주입_질문 = "노트북 200만원 구매해도 되나요"
 
 

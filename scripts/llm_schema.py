@@ -135,6 +135,35 @@ def 정규화_스키마(비목목록: list[str] | None = None) -> dict[str, Any]
     }
 
 
+def 질의변환_스키마(표시문들: list[str]) -> dict[str, Any]:
+    """온톨로지 경로의 질의 변환 출력(docs/4_검색/4-4_검색_재설계.md). `분류후보.표시문` 은 레이블 enum 으로 제한한다."""
+    수 = {"type": ["number", "null"], "minimum": 0}
+    return {
+        "type": "object", "additionalProperties": False,
+        "required": ["품목", "금액", "금액_추정여부", "용도", "질의문", "분류후보", "수치", "거래처유형", "누락필드"],
+        "properties": {
+            "품목": {"type": "string", "minLength": 1, "maxLength": 60},
+            "금액": 수,
+            "금액_추정여부": {"type": "boolean"},
+            "용도": {"type": "string", "maxLength": 200},
+            "질의문": {"type": "string", "maxLength": 200},
+            "분류후보": {
+                "type": "array", "minItems": 0, "maxItems": 3,
+                "items": {"type": "object", "additionalProperties": False,
+                          "required": ["표시문", "신뢰도"],
+                          "properties": {"표시문": {"type": "string", "enum": 표시문들},
+                                         "신뢰도": {"type": "number", "minimum": 0, "maximum": 1}}},
+            },
+            "수치": {"type": "object", "additionalProperties": False,
+                   "required": ["인원", "일수", "박수", "시간", "계약총액", "부가세구분"],
+                   "properties": {"인원": 수, "일수": 수, "박수": 수, "시간": 수, "계약총액": 수,
+                                  "부가세구분": {"type": "string", "enum": ["포함", "공급가액", "모름"]}}},
+            "거래처유형": {"type": ["string", "null"], "maxLength": 40},
+            "누락필드": {"type": "array", "maxItems": 6, "items": {"type": "string"}},
+        },
+    }
+
+
 # 최종 응답. 필드마다 LLM 이 채우는지 코드가 채우는지를 주석으로 구분한다.
 @dataclass
 class 인용:

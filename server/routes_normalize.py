@@ -10,7 +10,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 
 from server import auth, response_cache
-from server._common import MOCK, _sse, _sse응답, 구키_추가, 클라이언트_ip
+from server._common import MOCK, _sse, _sse응답, 구키_추가, 온톨로지_사업, 클라이언트_ip
 from server.catalog import _사업_비목, _사업명_표준화, _심층질문마스터
 from server.models import 정규화요청
 from server.rate_limit import 제한
@@ -36,7 +36,9 @@ def normalize(req: Request, body: 정규화요청):
     # 캐시 행은 계정 단위라(RLS) 키에도 org·계정을 넣는다. 키가 같으면 다른 계정 행과 PRIMARY KEY 가 겹친다.
     k = response_cache.캐시키("normalize", org, account, (body.질문 or "").strip(),
                             body.품목, body.금액, body.용도, body.추가설명, body.사업명,
-                            body.특수관계.친족거래, body.특수관계.전직임직원업체)
+                            body.특수관계.친족거래, body.특수관계.전직임직원업체,
+                            # 온톨로지 경로는 응답 모양이 달라 옛 경로의 저장값을 쓰지 않는다
+                            body.부가세구분, 온톨로지_사업(body.사업명))
     캐시 = response_cache.조회(k, org, account)
 
     def gen():
@@ -55,7 +57,7 @@ def normalize(req: Request, body: 정규화요청):
         out.setdefault("질문원문", _합성_질문(body))
         if not 실패:                  # 일시적 LLM 오류로 빈 비목후보가 캐시에 남지 않게 한다
             response_cache.저장(k, out, 종류="normalize", org=org, account=account)
-        for 필드 in ("품목", "금액", "금액_추정여부", "용도", "비목후보"):
+        for 필드 in ("품목", "금액", "금액_추정여부", "용도", "비목후보", "분류후보", "수치"):
             if 필드 in out:
                 yield _sse("필드", {필드: out[필드]})
         yield _sse("결과", out)
@@ -66,6 +68,10 @@ def normalize(req: Request, body: 정규화요청):
 
 def _live_정규화(body: 정규화요청) -> tuple[dict, bool]:
     """live 정규화. (결과, 실패) — 실패는 폼 경로 LLM 오류로 비목후보가 비었다는 뜻이다."""
+    if 온톨로지_사업(body.사업명):
+        결과 = _온톨로지_정규화(body)
+        if 결과 is not None:
+            return 결과
     실패 = False
     # 사업에 없는 비목을 후보로 받으면 화면에 고를 칸이 없고, 심층질문도 그 비목 기준으로 걸러진다.
     비목들 = _사업_비목(body.사업명)
@@ -96,6 +102,55 @@ def _live_정규화(body: 정규화요청) -> tuple[dict, bool]:
     out["비목후보"] = ([c for c in 후보 if isinstance(c, dict) and c.get("비목") in 비목들]
                     if isinstance(후보, list) else [])
     out["심층질문"] = _심층질문_선별(body.사업명, out.get("비목후보"))
+    return out, 실패
+
+
+def _온톨로지_정규화(body: 정규화요청) -> tuple[dict, bool] | None:
+    """질의 변환(docs/4_검색/4-4_검색_재설계.md ①). 대상 사업이 아니면 None. 레이블 밖 후보는 버리고 사용자가 고른다.
+
+    폼 값은 사용자가 쓴 그대로 둔다. LLM 이 뽑은 수치는 화면 칸을 미리 채우는 데만 쓴다.
+    """
+    import ontology_lookup
+    from _lib import db
+    from llm_qwen import LLM실패
+    from normalize_run import 질의변환
+
+    with db.connect(connect_timeout=5, autocommit=True) as c:
+        cur = c.cursor()
+        if not ontology_lookup.새경로_대상(cur, body.사업명):
+            return None
+        레이블 = ontology_lookup.레이블_목록(cur, body.사업명)
+        폼 = not (body.질문 and body.질문.strip())
+        용도 = body.용도 or ""
+        if 폼 and body.추가설명:
+            용도 = f"{용도} ({body.추가설명})".strip()
+        입력 = ({"품목": body.품목, "용도": 용도, "금액": body.금액, "부가세구분": body.부가세구분, "사업명": body.사업명}
+              if 폼 else {"질문": body.질문, "부가세구분": body.부가세구분, "사업명": body.사업명})
+        실패 = False
+        try:
+            out, _메타 = 질의변환(입력, 레이블)
+        except LLM실패:
+            if not 폼:
+                raise                                  # 자연어는 품목 · 금액을 모른다. 오류 이벤트로 끝난다
+            실패 = True                                 # 폼은 값이 있다. 후보 없이 사용자가 고른다
+            out = {"질의문": f"{용도} {body.품목 or ''}".strip(), "분류후보": [], "수치": {}, "거래처유형": None}
+        if 폼:
+            out.update(품목=body.품목, 금액=body.금액, 금액_추정여부=False, 용도=용도)
+        # 별칭 정확 일치가 있으면 그 노드를 첫 후보로 둔다(게이트는 사용자 확정 뒤에만 발동한다)
+        일치 = ontology_lookup.별칭_후보(cur, out.get("품목"), body.사업명, 레이블)
+        후보 = [*일치, *[c for c in out.get("분류후보") or [] if all(c["표시문"] != x["표시문"] for x in 일치)]][:3]
+    수치 = {k: v for k, v in (out.get("수치") or {}).items() if v not in (None, "")}
+    수치["부가세구분"] = body.부가세구분 or 수치.get("부가세구분") or "모름"
+    비목후보: list[dict] = []
+    for c in 후보:
+        if all(x["비목"] != c["비목"] for x in 비목후보):
+            비목후보.append({"비목": c["비목"], "신뢰도": c.get("신뢰도", 0.0)})
+    out.update(분류후보=[{k: c.get(k) for k in ("비목", "세목", "표시문")} for c in 후보], 비목후보=비목후보, 수치=수치)
+    for k in ("결제수단", "구매명의", "신청일", "비교견적", "하위항목"):
+        out.setdefault(k, None)
+    out.pop("누락필드", None)
+    out.pop("_출처", None)
+    out["심층질문"] = _심층질문_선별(body.사업명, 비목후보)
     return out, 실패
 
 
