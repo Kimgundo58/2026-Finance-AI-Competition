@@ -50,9 +50,11 @@ COPY --from=builder /opt/hf /opt/hf
 WORKDIR /app
 # server/ 는 scripts/ 를 sys.path 에 넣고 import 하므로 둘 다 복사한다.
 # 비목 어휘집은 판정 스키마를 만들 때 llm_schema.py 가 읽는다.
+# ontology/schema.json 은 ontology_lookup.py 가 문서키 ↔ doc_id 와 문서 표시명을 읽는다.
 COPY server/ /app/server/
 COPY scripts/ /app/scripts/
 COPY 2026_Finance_DATA_FOR_RAG/_비목_어휘집.json /app/2026_Finance_DATA_FOR_RAG/
+COPY ontology/schema.json /app/ontology/schema.json
 
 # import 가 되는지 빌드에서 확인한다. import 시점에는 DB 에 접속하지 않는다.
 RUN python -c "import server.main; print('import ok')"

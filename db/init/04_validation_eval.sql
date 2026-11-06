@@ -68,6 +68,11 @@ ALTER TABLE tenant.decisions ADD COLUMN IF NOT EXISTS "검증코드" TEXT[] NOT 
 ALTER TABLE tenant.decisions ADD COLUMN IF NOT EXISTS "처리단계" TEXT;
 ALTER TABLE tenant.decisions ADD COLUMN IF NOT EXISTS "실패단계" TEXT;
 ALTER TABLE tenant.decisions ADD COLUMN IF NOT EXISTS "사용자답변" JSONB NOT NULL DEFAULT '[]';
+-- 경로 : 판정이 지난 경로. 옛 · 온톨로지(docs/5_룰/5-11_전환_계획.md). 전환 전 행은 NULL.
+ALTER TABLE tenant.decisions ADD COLUMN IF NOT EXISTS "경로" TEXT;
+ALTER TABLE tenant.decisions DROP CONSTRAINT IF EXISTS "decisions_경로_check";
+ALTER TABLE tenant.decisions ADD CONSTRAINT "decisions_경로_check"
+    CHECK ("경로" IN ('옛', '온톨로지'));
 
 -- 검증코드 허용 목록. 목록 밖의 코드는 거부해 오타가 지표를 갈라놓지 못하게 한다.
 -- 기준 목록은 scripts/llm_validate.py 의 검증코드_전체 이고, 이 CHECK 는 같은 순서로 맞춘다.
@@ -86,7 +91,8 @@ ALTER TABLE tenant.decisions
     'DOMAIN_WARN','PRECEDENCE_OVERRIDE',
     'TASK_STATE_UNSOURCED','TASK_STATE_MISMATCH',
     'TASK_NUMBER_UNSOURCED','TASK_BASIS_NOT_IN_MAP',
-    'ANSWER_UNCONFIRMED'
+    'ANSWER_UNCONFIRMED',
+    'ONTOLOGY_BAN','LIMIT_EXCEEDED','VAT_BASIS_UNKNOWN'
   ]::text[]);
 
 CREATE INDEX IF NOT EXISTS "ix_decisions_처리단계" ON tenant.decisions ("처리단계");

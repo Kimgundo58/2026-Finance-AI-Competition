@@ -4,7 +4,8 @@
 /api/normalize·/api/judge·/api/questions 가 캐시키() 로 키를 만들고 조회(k, org, account)·저장(k, 값, 종류=, org=, account=) 를
 부른다. 게스트(org 없음)는 프로세스 메모리(FIFO, 재시작하면 사라진다), 인증된 org 는 tenant.judge_cache 를 쓴다.
 DB 캐시 행은 계정 단위다(account_id, RLS account_isolation). 데모 세션은 계정이 없어 account_id 가 NULL 이다.
-두 캐시 모두 _데이터버전_해시()(코퍼스·룰·우선순위 규칙·체크항목·별칭 버전)가 저장 때와 같을 때만 적중한다.
+두 캐시 모두 _데이터버전_해시()(코퍼스·룰·우선순위 규칙·체크항목·별칭·온톨로지 버전과 SUDDOE_ONTOLOGY_PROGRAMS)가
+저장 때와 같을 때만 적중한다.
 확인 질문은 키가 곧 질문세트이고 저장(ttl초=) 로 항목별 만료 시각을 준다. 질문세트_조회() 는 조회() 와 달리 일일
 카운트를 되돌리지 않는다. /api/questions 의 캐시 확인(카운트를 올리기 전)과 판정 요청 안의 조회가 쓴다.
 환경변수: SUDDOE_RESPONSE_CACHE_TTL(기본 900초), SUDDOE_RESPONSE_CACHE_MAX(메모리 항목 수, 기본 512),
@@ -14,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import threading
 import time
 from typing import Any
@@ -201,7 +203,28 @@ _데이터버전_해시_SQL = """SELECT (SELECT count(*) FROM corpus.chunks),
                                 || coalesce(max(created_at)::text, '')
                            FROM corpus.item_alias),
                         -- staged 문서를 활성화하면 청크 수는 그대로이고 상태만 바뀐다
-                        (SELECT count(*) FROM corpus.chunks WHERE status = 'active')"""
+                        (SELECT count(*) FROM corpus.chunks WHERE status = 'active'),
+                        -- 온톨로지(docs/5_룰/5-8_저장과_조회.md)는 행이 적어 행 전체를 해시한다.
+                        -- 문서가 "네 테이블" 이라 부르는 나머지 corpus.terminology 는 P4-6 에서 더한다.
+                        (SELECT md5(coalesce(string_agg(t::text, '#' ORDER BY concept_id), ''))
+                           FROM corpus.concepts t),
+                        (SELECT md5(coalesce(string_agg(t::text, '#' ORDER BY 정규화, 적용사업, concept_id), ''))
+                           FROM corpus.concept_labels t),
+                        (SELECT md5(coalesce(string_agg(t::text, '#' ORDER BY src_id, 관계, dst_id, 적용사업), ''))
+                           FROM corpus.concept_relations t),
+                        (SELECT md5(coalesce(string_agg(t::text, '#' ORDER BY norm_id), ''))
+                           FROM corpus.norms t)"""
+
+
+def 데이터버전_문자열(n: tuple) -> str:
+    """_데이터버전_해시_SQL 한 행 + 환경변수 SUDDOE_ONTOLOGY_PROGRAMS → 해시 문자열.
+
+    경로를 고르는 환경변수가 바뀌면 같은 데이터로도 판정이 달라지므로 조각으로 더한다.
+    scripts/ontology_load.py 가 적재 전후 값을 비교하려고 같은 함수를 쓴다.
+    """
+    조각 = [*n, os.environ.get("SUDDOE_ONTOLOGY_PROGRAMS", "")]
+    h = hashlib.sha1("|".join(map(str, 조각)).encode()).hexdigest()[:10]
+    return f"c{n[0]}-e{n[1]}-r{n[2]}-d{n[3]}-rule{n[5]}v{n[6]}-rc{str(n[7])[:8]}-{h}"
 
 
 @ttl_캐시("SUDDOE_DATA_VERSION_TTL", 300, 구이름="SUDDOE_CONFIG_HASH_TTL")  # 구 이름 호환(제거 예정: 다음 릴리스)
@@ -210,9 +233,7 @@ def _데이터버전_해시_조회() -> str:
     행 = _질의(_데이터버전_해시_SQL)
     if not 행:
         return ""
-    n = 행[0]
-    h = hashlib.sha1("|".join(map(str, n)).encode()).hexdigest()[:10]
-    return f"c{n[0]}-e{n[1]}-r{n[2]}-d{n[3]}-rule{n[5]}v{n[6]}-rc{str(n[7])[:8]}-{h}"
+    return 데이터버전_문자열(행[0])
 
 
 def _데이터버전_해시() -> str:

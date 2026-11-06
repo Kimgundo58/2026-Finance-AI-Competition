@@ -44,3 +44,18 @@ jobs:
 
       - name: 확인 질문 self-test (DB·LLM 없음)
         run: python scripts/question_check.py --self-test
+
+      # 온톨로지 원천 검사는 HermiT(Java)를 쓴다. Java · owlready2 는 이 잡에만 있고 API 이미지에는 넣지 않는다.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: owlready2 설치 (requirements-api.txt 에 넣지 않는다)
+        run: pip install owlready2==0.51
+
+      - name: 온톨로지 검사 self-test (DB·LLM 없음)
+        run: python scripts/ontology_check.py --self-test
+
+      - name: 추출 비교 self-test (DB·LLM 없음)
+        run: python scripts/extraction_compare.py --self-test
