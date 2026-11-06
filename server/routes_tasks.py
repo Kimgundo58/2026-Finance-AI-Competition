@@ -570,20 +570,25 @@ def 집행줄_유지(cur, plan_id: int, 계획org, 계획account, 제목: str, �
         cur.execute("DELETE FROM tenant.plan_tasks "
                     "WHERE plan_id = %s AND 집행예정일_연동 AND 상태 <> '완료'", (plan_id,))
         return
-    cur.execute("UPDATE tenant.plan_tasks SET due_date = %s WHERE plan_id = %s AND 집행예정일_연동",
-                (집행예정일, plan_id))
-    if cur.rowcount == 0:
+    cur.execute("SELECT 상태 FROM tenant.plan_tasks WHERE plan_id = %s AND 집행예정일_연동", (plan_id,))
+    줄 = cur.fetchone()
+    if 줄 is None:
         cur.execute(
             "INSERT INTO tenant.plan_tasks (org_id, account_id, plan_id, 출처, 구분, 항목, due_date, "
             "상태, 날짜_사용자수정, 집행예정일_연동) "
             "VALUES (%s,%s,%s,'user','집행',%s,%s,'집행예정',true,true)",
             (계획org, 계획account, plan_id, f"{제목} 집행", 집행예정일))
+    elif 줄[0] != "완료":
+        # 완료한 줄은 실제 지출일을 담고 있으므로 예상 지출일을 따라가지 않는다
+        cur.execute("UPDATE tenant.plan_tasks SET due_date = %s WHERE plan_id = %s AND 집행예정일_연동",
+                    (집행예정일, plan_id))
 
 
 def 지출일_변경_반영(cur, plan_id: int, 계획org, 이전일, 새날짜, 일정이동: bool) -> None:
     """집행예정일이 바뀔 때 연결 일정을 맞춘다. 호출자의 트랜잭션 안에서 실행한다.
 
     같이 옮기기: 완료 아닌 날짜 있는 행을 일수 차이만큼 옮기고, 규정 기한이 있는데 날짜가 없던 AI 행은 새 지출일로 계산한다.
+    이전 지출일이 없으면 옮길 기준이 없으므로, 사용자가 고치지 않은 AI 행은 날짜가 있어도 새 지출일로 다시 계산한다.
     지출일만: 남긴 행에 날짜_사용자수정=true 를 넣는다. 안 넣으면 다음 재점검이 `_동기화_적용` 에서 날짜를 덮는다.
     완료 행은 어느 쪽이든 그대로 둔다.
     """
@@ -599,8 +604,8 @@ def 지출일_변경_반영(cur, plan_id: int, 계획org, 이전일, 새날짜, 
         cur.execute(f"UPDATE tenant.plan_tasks SET due_date = due_date + %s "
                     f"WHERE {남길_조건} AND 상태 <> '완료'", ((새날짜 - 이전일).days, plan_id))
     cur.execute("SELECT task_id, 코드, 항목, 설명 FROM tenant.plan_tasks "
-                "WHERE plan_id = %s AND 출처 = 'ai' AND due_date IS NULL "
-                "AND NOT 날짜_사용자수정 AND 상태 <> '완료'", (plan_id,))
+                "WHERE plan_id = %s AND 출처 = 'ai' AND (due_date IS NULL OR %s) "
+                "AND NOT 날짜_사용자수정 AND 상태 <> '완료'", (plan_id, 이전일 is None))
     날짜없음 = cur.fetchall()
     if not 날짜없음:
         return
@@ -621,7 +626,7 @@ _단계_순서 = ("사전승인·확인", "견적", "계약", "집행", "증빙"
 
 
 def _단계(구분: str, 유형: str) -> str:
-    if 구분 == "결제후":
+    if 구분 == "결제후" or 유형 == "증빙":
         return "증빙"
     if 구분 == "집행":
         return "집행"
@@ -652,8 +657,9 @@ def 단계요약_계산(행들: list[tuple[str, str, str]]) -> dict:
 
 
 def 실제지출_반영(cur, plan_id: int, 계획org, 계획account, 제목: str, 실제지출일) -> None:
-    """실제 지출을 등록하면 집행 줄을 완료로 만든다. 지출일이 미정이라 줄이 없으면 실제 지출일로 만든다."""
-    cur.execute("UPDATE tenant.plan_tasks SET 상태 = '완료' WHERE plan_id = %s AND 집행예정일_연동", (plan_id,))
+    """실제 지출을 등록하면 집행 줄을 완료로 만들고 날짜를 실제 지출일로 맞춘다. 줄이 없으면 실제 지출일로 만든다."""
+    cur.execute("UPDATE tenant.plan_tasks SET 상태 = '완료', due_date = %s WHERE plan_id = %s AND 집행예정일_연동",
+                (실제지출일, plan_id))
     if cur.rowcount == 0:
         cur.execute(
             "INSERT INTO tenant.plan_tasks (org_id, account_id, plan_id, 출처, 구분, 항목, due_date, "

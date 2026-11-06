@@ -10,19 +10,20 @@
 -- USAGE 가 없으면 벡터 검색이 "permission denied for schema extensions" 로 실패한다.
 GRANT USAGE ON SCHEMA tenant, corpus, extensions TO suddoe_app;
 
--- 로그인용 SECURITY DEFINER 함수 실행 권한. 11_accounts_login.sql 과 같은 내용이다.
+-- 로그인·팀·피드백용 SECURITY DEFINER 함수 실행 권한. 11_accounts_login.sql · 19_decision_feedback.sql · 21_teams.sql 과 같은 내용이다.
 -- --no-privileges 덤프를 복원하면 함수 권한이 기본값(PUBLIC EXECUTE)으로 돌아가므로 여기서 다시 설정한다.
--- 로컬 init 에서는 이 파일이 11 보다 먼저 실행되어 함수가 아직 없으므로, 함수가 있을 때만 적용한다.
+-- 로컬 init 에서는 이 파일이 함수보다 먼저 실행되어 그때는 대상이 없다.
 DO $$
+DECLARE
+    함수 regprocedure;
 BEGIN
-    IF to_regprocedure('tenant.계정찾기(text)') IS NOT NULL THEN
-        REVOKE ALL ON FUNCTION tenant.계정찾기(text) FROM PUBLIC;
-        GRANT EXECUTE ON FUNCTION tenant.계정찾기(text) TO suddoe_app;
-    END IF;
-    IF to_regprocedure('tenant.계정등록(text,uuid)') IS NOT NULL THEN
-        REVOKE ALL ON FUNCTION tenant.계정등록(text, uuid) FROM PUBLIC;
-        GRANT EXECUTE ON FUNCTION tenant.계정등록(text, uuid) TO suddoe_app;
-    END IF;
+    FOR 함수 IN
+        SELECT p.oid::regprocedure FROM pg_proc p
+        WHERE p.pronamespace = 'tenant'::regnamespace AND p.prosecdef
+    LOOP
+        EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC', 함수);
+        EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO suddoe_app', 함수);
+    END LOOP;
 END
 $$;
 
@@ -33,6 +34,14 @@ $$;
 -- tenant: 읽고 쓴다. 기관 간 격리는 권한이 아니라 RLS 정책이 담당한다.
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES    IN SCHEMA tenant TO suddoe_app;
 GRANT USAGE, SELECT                  ON ALL SEQUENCES IN SCHEMA tenant TO suddoe_app;
+-- 팀 표(초대 코드 해시)는 SECURITY DEFINER 함수로만 읽고 쓴다. 위 일괄 GRANT 를 되돌린다.
+DO $$
+BEGIN
+    IF to_regclass('tenant.teams') IS NOT NULL THEN
+        REVOKE ALL ON tenant.teams FROM suddoe_app;
+    END IF;
+END
+$$;
 
 -- corpus: 읽기만. 규정·청크·룰은 수집 파이프라인만 쓴다.
 GRANT SELECT ON ALL TABLES IN SCHEMA corpus TO suddoe_app;
@@ -70,7 +79,7 @@ ALTER ROLE suddoe_app SET search_path = corpus, tenant, extensions, public;
 --   2. 테이블 권한   corpus 의 모든 테이블에 SELECT, tenant 의 모든 테이블에 SELECT/INSERT/UPDATE/DELETE
 --   3. 기본 권한     select defaclobjtype from pg_default_acl;  -> r 두 개와 S 한 개
 --   4. eval 부재     select 1 from pg_namespace where nspname='eval';  -> 운영에서는 0행
---   5. 함수 권한     extensions USAGE, tenant.계정찾기(text)·계정등록(text,uuid) EXECUTE, PUBLIC EXECUTE 없음
+--   5. 함수 권한     extensions USAGE, tenant 의 SECURITY DEFINER 함수 전부 EXECUTE, PUBLIC EXECUTE 없음, tenant.teams 권한 없음
 --
 -- 권한 조회가 모두 통과해도 쓰기가 된다는 증거는 아니다. 최종 확인은 suddoe_app 으로 직접 INSERT 하는 것이다:
 --

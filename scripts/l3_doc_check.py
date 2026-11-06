@@ -84,6 +84,9 @@ def 기관명_변형(기관명: str) -> list[str]:
     return [이름 for 이름 in dict.fromkeys([전체, 핵심]) if len(이름) >= 3]
 
 
+_전국_발행처 = ("창업진흥원", "중소벤처기업부")
+
+
 def 코드_통과(본문: str, 기관명: str, 조수: int, 전략: str) -> bool:
     """이 기관이 만든 사업비 규정임이 글에서 바로 보이는가. 애매하면 False 로 LLM 에 넘긴다.
 
@@ -94,6 +97,9 @@ def 코드_통과(본문: str, 기관명: str, 조수: int, 전략: str) -> bool
         return False
     앞부분 = re.sub(r"\s+", "", 본문[:_앞부분_글자])
     if not any(이름 in 앞부분 for 이름 in 기관명_변형(기관명)):
+        return False
+    # 전국 사업 안내 자료는 앞부분에 주관기관 이름과 창진원·중기부가 함께 나올 수 있다. LLM 이 본다.
+    if any(발행처 in 앞부분 for 발행처 in _전국_발행처):
         return False
     return sum(어휘 in 본문 for 어휘 in _사업비_어휘) >= _코드통과_어휘수
 
