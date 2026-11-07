@@ -202,6 +202,11 @@ def main() -> int:
     확인("GET /api/programs — 8사업", len(p["사업"]) == 8, str(len(p["사업"])))
     a = c.post("/api/accounts", json={"slug": "abc"})
     확인("POST /api/accounts — 등록 응답 형식", a.status_code == 201 and set(a.json()) == {"기관명", "slug", "새계정"})
+    l3c = c.get("/api/l3/current").json()
+    확인("GET /api/l3/current — 연결 칸은 기본 null(연결 화면 없음)",
+         all(d.get("연결") is None and d.get("연결상태") is None for d in l3c.get("문서", [])))
+    lk = c.patch("/api/l3/l3-mock-1/links", json={"1": [], "2": None})
+    확인("PATCH /api/l3/{doc_id}/links — 200 · L3현재문서 형식", lk.status_code == 200 and {"doc_id", "연결", "연결선택지"} <= set(lk.json()))
 
     print("\n[SSE]")
 

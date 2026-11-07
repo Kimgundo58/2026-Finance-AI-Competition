@@ -51,9 +51,13 @@ def l3_해시(org: str | None) -> str:
     """
     if org is None or MOCK:
         return ""
+    # 사용자가 확인한 조문 연결(concept_ids)은 새 경로 판정 문맥을 바꾼다(P4-5). 연결이 없으면 예전 값과 같다
     행 = _질의('SELECT md5(coalesce(string_agg(doc_id::text || \':\' || coalesce("파싱품질", \'\') '
-              '|| \':\' || coalesce(status, \'\'), \'#\' ORDER BY doc_id), \'\')) '
-              'FROM tenant.l3_documents WHERE org_id = %s', (org,))
+              '|| \':\' || coalesce(status, \'\'), \'#\' ORDER BY doc_id), \'\') '
+              '|| coalesce(\'|\' || (SELECT string_agg(a.article_id::text || \':\' || array_to_string(a.concept_ids, \',\'), '
+              '\'#\' ORDER BY a.article_id) FROM tenant.l3_articles a JOIN tenant.l3_documents d ON d.doc_id = a.doc_id '
+              ' WHERE d.org_id = %s AND d.status = \'active\' AND a.concept_ids IS NOT NULL), \'\')) '
+              'FROM tenant.l3_documents WHERE org_id = %s', (org, org))
     return 행[0][0] if 행 else ""
 
 

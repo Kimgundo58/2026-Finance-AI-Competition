@@ -338,7 +338,8 @@ def _새경로_준비(cur, 입력: dict, org_id) -> dict:
     검색 = retrieve.검색(cur, 입력.get("질문") or f"{입력.get('용도') or ''} {입력.get('품목') or ''}".strip(), 사업명,
                        top_k=10, 사업필터=orchestrate.사업필터)
     문맥 = ontology_context.문맥_구성(cur, 근거행=조회["근거행"], 대상노드=조회["노드들"], l3=l3, 검색=검색,
-                                schema=ontology_lookup._스키마(), 자금=조회.get("자금"))
+                                schema=ontology_lookup._스키마(), 자금=조회.get("자금"),
+                                시작노드=(조회.get("대상") or {}).get("대상_id"))
     if 문맥["L3_초과"] or not 문맥["항목수"]:
         return {"바로": "L3상한" if 문맥["L3_초과"] else "근거없음"}
     규범들 = 조회["적용"]["규범"]

@@ -71,6 +71,14 @@ CREATE INDEX IF NOT EXISTS ix_norms_target ON corpus.norms USING GIN ("대상");
 
 -- NULL 미확인 · '{}' 확인했고 해당 세목 없음
 ALTER TABLE tenant.l3_articles ADD COLUMN IF NOT EXISTS concept_ids TEXT[];
+-- L3 연결 확인 화면(db/migrations/2026-11-07_L3연결초안.sql 과 같다)
+ALTER TABLE tenant.l3_articles ADD COLUMN IF NOT EXISTS "연결초안" TEXT[];
+ALTER TABLE tenant.l3_articles ADD COLUMN IF NOT EXISTS "옛판문구" JSONB;
+ALTER TABLE tenant.l3_documents ADD COLUMN IF NOT EXISTS "연결초안상태" TEXT;
+ALTER TABLE tenant.l3_documents ADD COLUMN IF NOT EXISTS "연결초안시각" TIMESTAMPTZ;
+ALTER TABLE tenant.l3_documents DROP CONSTRAINT IF EXISTS "l3_documents_연결초안상태_check";
+ALTER TABLE tenant.l3_documents ADD CONSTRAINT "l3_documents_연결초안상태_check"
+    CHECK ("연결초안상태" IN ('작성중', '완료', '일부실패', '실패'));
 
 GRANT SELECT ON corpus.concepts, corpus.concept_labels, corpus.concept_relations, corpus.norms, corpus.provenance
     TO suddoe_app;

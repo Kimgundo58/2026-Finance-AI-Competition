@@ -425,7 +425,11 @@ def 조문_조회(cur, org_id: str, 비목: str | None = None) -> list[dict[str,
 
 
 def 조문_연결조회(cur, org_id: str) -> list[dict[str, Any]]:
-    """`조문_조회` + 조마다 온톨로지 연결 `concept_ids`(None = 미확인, [] = 확인했고 해당 세목 없음). 새 경로 전용."""
+    """`조문_조회` + 조마다 온톨로지 연결 `concept_ids`(None = 미확인, [] = 확인했고 해당 세목 없음) · `연결상위`. 새 경로 전용.
+
+    `연결상위` 는 연결한 개념의 상위 노드(`상위` 관계, 재귀)다. 문맥 구성이 비목만 고른 판정에 그 아래 세목에 연결한 조를 넣는 데 쓴다
+    (ontology_context._l3_넣기). 사용자가 확인하기 전 추천(`연결초안`)은 읽지 않는다.
+    """
     조문 = 조문_조회(cur, org_id)
     if not 조문:
         return []
@@ -433,7 +437,18 @@ def 조문_연결조회(cur, org_id: str) -> list[dict[str, Any]]:
         _rls_org_설정(cur, _org정규화(org_id))
         연결 = dict(cur.execute("SELECT article_id, concept_ids FROM tenant.l3_articles WHERE article_id = ANY(%s)",
                                ([a["article_id"] for a in 조문],)).fetchall())
-    return [{**a, "concept_ids": 연결.get(a["article_id"])} for a in 조문]
+        개념들 = sorted({c for ids in 연결.values() for c in ids or ()})
+        상위: dict[str, set[str]] = {}
+        if 개념들:
+            for 시작, 위 in cur.execute(
+                    """WITH RECURSIVE t(시작, id) AS (
+                           SELECT x, x FROM unnest(%s::text[]) AS x
+                           UNION SELECT t.시작, r.dst_id FROM t JOIN corpus.concept_relations r
+                                                     ON r.src_id = t.id AND r."관계" = '상위')
+                       SELECT 시작, id FROM t WHERE id <> 시작""", (개념들,)).fetchall():
+                상위.setdefault(시작, set()).add(위)
+    return [{**a, "concept_ids": 연결.get(a["article_id"]),
+             "연결상위": sorted({p for c in 연결.get(a["article_id"]) or () for p in 상위.get(c, ())})} for a in 조문]
 
 
 def l3룰(cur, org_id: str, 비목: str) -> dict[str, Any] | None:

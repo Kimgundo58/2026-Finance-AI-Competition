@@ -407,6 +407,34 @@ class L3현재문서(BaseModel):
     검토이유: str | None = None
     # 텍스트를 얻은 방식(l3_documents.extraction). 'ocr' 이면 스캔본을 OCR 로 읽은 문서다
     추출방식: str | None = None
+    # 조문 연결 확인(P4-5, 5-6b 「L3 업로드 연결」). 판정에 쓰는 문서(pass/warn)이고 새 경로 사업이 있을 때만 채운다.
+    # 연결상태: 추천작성중 · 추천완료 · 추천일부실패 · 추천실패 · 추천없음(추천을 만들지 않은 문서). None = 연결 화면을 보이지 않는다
+    연결상태: Literal["추천작성중", "추천완료", "추천일부실패", "추천실패", "추천없음"] | None = None
+    연결: list["L3연결조문항목"] | None = None
+    # 고를 수 있는 분류. concept_id 는 PATCH 에 돌려보내는 값이고 화면에 보이지 않는다
+    연결선택지: list["L3연결선택지항목"] | None = None
+
+
+class L3연결선택지항목(BaseModel):
+    concept_id: str
+    표시문: str
+
+
+class L3연결조문항목(BaseModel):
+    """조문 하나의 연결. `상태` 확인 = 사용자가 저장함(판정이 읽는다) · 추천 = 저장 전 추천 · 추천없음 = 추천을 만들지 못함."""
+    article_id: int
+    조번호: str
+    조제목: str | None = None
+    미리보기: str = ""
+    상태: Literal["확인", "추천", "추천없음"]
+    # 화면에 그릴 지금 값(확인값, 없으면 추천). [] = 모든 지출에 공통, None = 고른 분류 없음
+    concept_ids: list[str] | None = None
+    표시문: list[str] = Field(default_factory=list)
+    # 대체된 옛 판(L1 · L2)과 같고 현행 판에는 없는 문장 [{문장, 문서}]. 화면 경고용이고 판정은 읽지 않는다
+    옛판문구: list[dict[str, str]] = Field(default_factory=list)
+
+
+L3현재문서.model_rebuild()
 
 
 class L3현재문서목록응답(BaseModel):
