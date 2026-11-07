@@ -80,7 +80,7 @@ def judge(req: Request, body: 판정요청, mock: str | None = None,
         # 협약 프로필(B5)을 PUT /api/profile 로 바꾸면 키가 바뀐다(routes_profile 의 캐시 삭제와 함께 쓴다).
         response_cache.프로필_해시(body.org_id, account_id),
         # 온톨로지 경로의 입력. 값이 달라지면 코드 판정이 달라진다.
-        body.확정세목, json.dumps(body.추가입력값, ensure_ascii=False, sort_keys=True), body.부가세구분,
+        body.확정세목, json.dumps(body.추가입력값, ensure_ascii=False, sort_keys=True), body.부가세구분, body.사용일자,
         # ?mock= 은 mock 모드에서만 응답을 바꾼다. live 에서 키에 넣으면 캐시를 우회할 수 있다.
         *([mock] if MOCK else []))
     캐시 = response_cache.조회(k, body.org_id, account_id)
@@ -236,7 +236,7 @@ def _live_판정(body: 판정요청, account_id: str | None = None, 사용자답
                        정규화결과=body.정규화,
                        사용자프로필값=_사용자프로필값_구성(body.답변),
                        사용자답변=사용자답변, 답변유실=답변유실,
-                       확정세목=body.확정세목, 추가입력값=body.추가입력값, 부가세구분=body.부가세구분)
+                       확정세목=body.확정세목, 추가입력값=body.추가입력값, 부가세구분=body.부가세구분, 사용일자=body.사용일자)
     return 파이프라인결과_매핑(r, body)
 
 
