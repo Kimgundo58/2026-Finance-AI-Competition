@@ -70,8 +70,8 @@ health 200 은 판정이 정상이라는 뜻이 아니다. 배포 로그를 본 
 ## 잡 `ontology-db`
 
 레포만으로 DB 를 만든다: 서비스 컨테이너(`pgvector/pgvector:pg17`) → `db/init/*.sql` → `scripts/ontology_ci_seed.py`(schema.json 문서키 문서의
-documents · doc_articles, 원본 `ontology/테스트/CI_원문.json`) → `ontology_load.py`(코드 검사 + HermiT + 발췌 ⊂ 본문, 롤 `suddoe_ingest`) →
-`ontology_lookup.py --cq-test` · `--self-test`(롤 `suddoe_app`) → `ontology_revision_check.py`(새 판 활성화 전후 게이트). 청크 · 임베딩 · LLM 은 쓰지 않는다.
+documents · doc_articles, 원본 `ontology/테스트/CI_원문.json`, 청크는 조문마다 1행 · 임베딩 없음) → `ontology_load.py`(코드 검사 + HermiT + 발췌 ⊂ 본문, 롤 `suddoe_ingest`) →
+`ontology_lookup.py --cq-test` · `--self-test`(롤 `suddoe_app`) → `ontology_judge_check.py --self-test`(판정 LLM 고정, 검색 대체) → `ontology_revision_check.py`(새 판 활성화 전후 게이트). 임베딩 · 검색 · LLM 은 쓰지 않는다.
 
 문서키를 더하거나 판을 바꾸면 `적재 검사` 가 실패한다. 로컬 DB 에 그 판을 적재한 뒤 `python scripts/ontology_ci_seed.py --내보내기` 로 `CI_원문.json` 을 다시 만들어 함께 커밋한다.
 Java 는 HermiT 용이고 CI 잡에만 둔다(API 이미지에는 없다).

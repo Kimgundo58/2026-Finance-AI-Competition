@@ -3,6 +3,7 @@
 
 적재 검사는 "발췌 ⊂ DB 본문 · 문서키 활성 판" 을 보는데 레포에는 코퍼스 DB 가 없다. 그래서 그 문서들의 documents · doc_articles 행만
 `ontology/테스트/CI_원문.json` 으로 둔다. 판이 바뀌거나 문서키가 늘면 로컬 DB 에서 다시 내보낸다.
+청크는 파일에 두지 않고 넣을 때 조문마다 1행을 만든다(임베딩 없음, 사업명 없음). 운영 · 로컬 경로는 이 스크립트를 쓰지 않는다.
 
     python scripts/ontology_ci_seed.py --내보내기   # SUDDOE_DSN(기본 로컬) 에서 읽어 파일을 쓴다
     python scripts/ontology_ci_seed.py              # SUDDOE_INGEST_DSN 에 넣는다. 파일에 없는 문서키가 있으면 실패한다
@@ -60,7 +61,7 @@ def 넣기(dsn: str) -> int:
     if 없는것:
         print(f"실패: {파일.name} 에 없는 문서키 문서 {없는것}. 로컬에서 --내보내기 로 다시 만든다")
         return 1
-    조문수 = 0
+    조문수 = 청크수 = 0
     with db.psycopg.connect(dsn, connect_timeout=10) as conn, conn.cursor() as cur:
         for d in 묶음:
             cur.execute(f"INSERT INTO corpus.documents ({', '.join(_문서칸)}) VALUES ({', '.join(['%s'] * len(_문서칸))})",
@@ -69,7 +70,17 @@ def 넣기(dsn: str) -> int:
                 f"INSERT INTO corpus.doc_articles (doc_id, {', '.join(_조문칸)}) VALUES (%s, {', '.join(['%s'] * len(_조문칸))})",
                 [[d["doc_id"], *(a[칸] for 칸 in _조문칸)] for a in d["조문"]])
             조문수 += len(d["조문"])
-    print(f"넣음: 문서 {len(묶음)} · 조문 {조문수}")
+            # 청크: 조문마다 1행(본문 그대로, 임베딩 없음). 판정 경로 시험의 자금 거르기가 청크를 읽는다(ontology_judge_check._고정_걸기).
+            # 검색은 하지 않으므로 임베딩 · BM25 · 사업명 · 적용대상은 비운다
+            청크수 += cur.execute(
+                """INSERT INTO corpus.chunks (doc_id, article_id, layer, parse_quality, version, status, retrieval_scope,
+                                              조번호, 조제목, 페이지, text)
+                   SELECT a.doc_id, a.article_id, d.layer, d.parse_quality, d.version, d.status, d.retrieval_scope,
+                          a.조번호, a.조제목, a.페이지, a.본문
+                     FROM corpus.doc_articles a JOIN corpus.documents d USING (doc_id)
+                    WHERE a.doc_id = %s AND NOT a.삭제 AND a.본문 <> ''
+                    ORDER BY a.article_id""", (d["doc_id"],)).rowcount
+    print(f"넣음: 문서 {len(묶음)} · 조문 {조문수} · 청크 {청크수}")
     return 0
 
 

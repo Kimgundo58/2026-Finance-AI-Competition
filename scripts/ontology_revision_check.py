@@ -68,9 +68,9 @@ def _새판_활성화(dsn: str, 옛: str) -> dict:
         조문 = [{"조번호": r[0], "조제목": r[1], "조순번": r[2], "본문": r[3], "페이지": r[4], "삭제": r[5], "적용대상": "공통"}
               for r in cur.execute("SELECT 조번호, 조제목, 조순번, 본문, 페이지, 삭제 FROM corpus.doc_articles "
                                    "WHERE doc_id = %s ORDER BY article_id", (옛,)).fetchall()]
-        # L2 대체는 옛 판 청크로 사업을 확인한다. CI 입력에는 청크가 없어 한 건 만든다
+        # L2 대체는 옛 판 청크의 사업명으로 사업을 확인한다. CI 입력 청크(ontology_ci_seed)에는 사업명이 없어 한 건 만든다
         첫조 = next(i for i, a in enumerate(조문) if not a["삭제"])
-        if not cur.execute("SELECT 1 FROM corpus.chunks WHERE doc_id = %s LIMIT 1", (옛,)).fetchone():
+        if not cur.execute("SELECT 1 FROM corpus.chunks WHERE doc_id = %s AND %s = ANY(사업명) LIMIT 1", (옛, 사업)).fetchone():
             cur.execute(
                 """INSERT INTO corpus.chunks (doc_id, article_id, layer, version, status, 조번호, 사업명, 적용대상, text, embedding)
                    SELECT doc_id, article_id, 'L2', '점검', 'active', 조번호, %s, '공통', 본문, %s::extensions.vector(1024)
