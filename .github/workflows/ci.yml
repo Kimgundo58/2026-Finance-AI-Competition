@@ -46,6 +46,15 @@ jobs:
       - name: 확인 질문 self-test (DB·LLM 없음)
         run: python scripts/question_check.py --self-test
 
+      - name: 자금 구분 self-test (DB·LLM 없음)
+        run: python scripts/ontology_fund.py --self-test
+
+      - name: 코드 게이트 self-test (DB·LLM 없음)
+        run: python scripts/ontology_gate.py --self-test
+
+      - name: 판정 문맥 self-test (DB·LLM 없음)
+        run: python scripts/ontology_context.py --self-test
+
       # 온톨로지 원천 검사는 HermiT(Java)를 쓴다. Java · owlready2 는 CI 잡에만 있고 API 이미지에는 넣지 않는다.
       - uses: actions/setup-java@v4
         with:
@@ -119,6 +128,9 @@ jobs:
 
       - name: 조회 self-test
         run: python scripts/ontology_lookup.py --self-test
+
+      - name: 판정 경로 시험 (판정 LLM 출력 고정, 화면 경로)
+        run: python scripts/ontology_judge_check.py --self-test
 
       # 문서를 실제로 활성화한다. DB 를 바꾸므로 마지막에 둔다.
       - name: 개정 처리 점검
