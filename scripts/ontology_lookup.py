@@ -205,6 +205,8 @@ def 근거_조문(cur, 규범들: list[dict], 깊이: int = 3, 대상_id: str | 
     준용_앞 · 위임_앞. 활성 문서에 없거나 조문을 특정하지 못한 대상은 article_id 가 None 이고 `건너뜀` 에 사유가 있다
     (호출자는 article_id 가 있는 행만 문맥에 넣는다). 경로에는 그대로 남는다.
     확정 노드에서 시작한 행에는 `우선경로` · `경로순위`(0 = 대상 노드, 커질수록 상위)가 더 있다. 화면 "근거 경로" 가 먼저 쓴다.
+    우선순위 규범의 근거 조문은 시작 집합에 넣지 않고(준용 · 위임을 따라가지 않는다) 맨 뒤에 `우선순위근거: True` 인
+    규범근거 행으로 따로 낸다. 문맥에는 들어가고 화면 "근거 경로" 에는 쓰지 않는다.
     관계의 적용사업은 사업 또는 규범들의 적용사업으로 거른다. 둘 다 없으면 공통 관계만 본다.
     """
     schema = _스키마()
@@ -238,10 +240,16 @@ def 근거_조문(cur, 규범들: list[dict], 깊이: int = 3, 대상_id: str | 
             return min(가까움)
         return None if 모든비목 in 대상들 else len(사슬노드)     # 사슬 밖 대상(경로 밖 품목 규범)은 확정 노드 뒤, 공통 앞
 
+    우선순위_근거: dict[str, None] = {}             # 우선순위 규범의 근거 조문. 문맥 후보로만 넣고 사슬 시작점으로 쓰지 않는다
     for n in 규범들:
         if n.get("종류") == "우선순위":
             # 제33조② 처럼 모든 비목의 준용을 나열한 조문에서 시작하면 다른 비목의 조까지 퍼진다.
-            # 그 조문은 대상 비목의 조(지침 제42조)를 dst 로 가질 때 경로 앞에 붙는다
+            # 그 조문은 대상 비목의 조(지침 제42조)를 dst 로 가질 때 경로 앞에 붙는다.
+            # 근거 조문 자체는 4-4 ② 3번(규범의 근거)대로 문맥 후보에 넣는다(아래 `우선순위근거` 행)
+            for g in n.get("근거") or []:
+                i = _조문ID_만들기(g["doc_id"], g["조번호"], g["항호"], 키표)
+                if i is not None:
+                    우선순위_근거.setdefault(i)
             continue
         순위 = 규범_순위(n)
         for g in n.get("근거") or []:
@@ -289,7 +297,7 @@ def 근거_조문(cur, 규범들: list[dict], 깊이: int = 3, 대상_id: str | 
                 SELECT 시작id, dst_id, 관계, 깊이, 경로 FROM 사슬 ORDER BY 깊이, 시작id, dst_id""",
             {"시작": 시작목록, "관계": list(준용_관계), "사업들": 사업들, "깊이": 깊이}).fetchall()
 
-    조문들 = set(시작목록) | set(앞_출처) | {r[1] for r in 사슬 if r[1].startswith("조:")}
+    조문들 = set(시작목록) | set(앞_출처) | {r[1] for r in 사슬 if r[1].startswith("조:")} | set(우선순위_근거)
     정보 = _조문_정보(cur, sorted(조문들), schema)
 
     def 앞_경로(s: str) -> list[str]:
@@ -334,7 +342,17 @@ def 근거_조문(cur, 규범들: list[dict], 깊이: int = 3, 대상_id: str | 
                  "경로": 전체경로, "건너뜀": "조문 미특정" if dst.startswith("미특정") else "조문 아님"}
             우선경로_적기(행, 전체경로, 시작순위.get(시작id))
             끝.append(행)
-    return [*건너뛴_시작, *결과.values(), *끝]
+    # 이미 다른 출처로 나온 조문이어도 따로 낸다. 문맥은 같은 조 · 항을 더 높은 순위(규범 근거)로 한 번만 넣는다.
+    # 화면 "근거 경로" 는 이 행을 쓰지 않는다(`우선순위근거`, ontology_context.근거경로들)
+    우선행 = []
+    for i in 우선순위_근거:
+        v = 정보[i]
+        행 = {"doc_id": v["doc_id"], "조번호": v["조번호"], "항호": v["항호"], "article_id": v["article_id"],
+             "깊이": 0, "출처": "규범근거", "경로": [i], "우선순위근거": True}
+        if v["건너뜀"]:
+            행["건너뜀"] = v["건너뜀"]
+        우선행.append(행)
+    return [*건너뛴_시작, *결과.values(), *끝, *우선행]
 
 
 def 근거경로_문장(경로: list[str], schema: dict) -> str:
@@ -722,6 +740,30 @@ def _자체시험() -> int:
                 우선 = [r for r in 행들 if r.get("우선경로")]
                 t.append(("근거_조문: 확정 노드에서 시작한 행에만 우선경로 · 공통 행은 없음", bool(우선) and len(우선) < len(행들)
                           and all(r["경로순위"] == 0 for r in 우선 if any("제37조" in p for p in r["우선경로"]))))
+                # P5-1 보강 1: 우선순위 규범의 근거 조문은 문맥 후보(규범근거)로만 나오고 준용 사슬은 그대로다
+                import ontology_context
+                기계 = 적용_규범(cur, 사업, "비목:창업/기계장치")["규범"]
+                행들 = 근거_조문(cur, 기계, 3, "비목:창업/기계장치", 사업=사업)
+                새행 = [r for r in 행들 if r.get("우선순위근거")]
+                옛행 = 근거_조문(cur, [n for n in 기계 if n["종류"] != "우선순위"], 3, "비목:창업/기계장치", 사업=사업)
+                t.append(("우선순위 근거: 제4조 · 제33조가 규범근거 행(깊이 0, 우선경로 없음)으로 나온다",
+                          {"제4조", "제33조"} <= {r["조번호"] for r in 새행}
+                          and all(r["출처"] == "규범근거" and r["깊이"] == 0 and "우선경로" not in r for r in 새행)))
+                t.append(("우선순위 근거: 나머지 행은 우선순위 규범을 뺀 결과와 같다(사슬 시작점이 아니다)",
+                          [r for r in 행들 if not r.get("우선순위근거")] == 옛행))
+                표 = _스키마()
+
+                def 문맥조(rs):
+                    m = ontology_context.문맥_구성(cur, 근거행=rs, 대상노드=set(), schema=표, 자금="시제품제작비")
+                    return {h.split("(")[0] for _, 묶음 in m["블록"] for _, _, h, _, _ in 묶음}
+                t.append(("우선순위 근거 효과: 새 행을 빼면 제4조 · 제33조가 문맥에서 빠진다",
+                          {"모두의 창업 제4조", "모두의 창업 제33조"} <= 문맥조(행들)
+                          and not ({"모두의 창업 제4조", "모두의 창업 제33조"} & 문맥조(옛행))))
+                t.append(("우선순위 근거: 화면 근거 경로는 그대로",
+                          ontology_context.근거경로들(행들, 표, 상한=None, 규범들=기계) == ontology_context.근거경로들(옛행, 표, 상한=None, 규범들=기계)))
+                import orchestrate
+                t.append(("자금 없으면 검색 거르기 없음(옛 경로 · 자금 미정과 같은 검색)", orchestrate.자금_거르기(cur, None) is None
+                          and orchestrate.자금_거르기(cur, "시제품제작비") is not None))
     except Exception as e:  # noqa: BLE001 - CI 에는 DB 가 없다
         print(f"건너뜀: 조 단위 식(DB 없음: {type(e).__name__})")
     실패 = [x for x, ok in t if not ok]

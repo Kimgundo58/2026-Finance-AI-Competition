@@ -812,10 +812,19 @@ def _새_l3_스레드(org_id):
         return [], f"{type(e).__name__}: {e}"
 
 
-def _새_검색_스레드(질의, 사업명):
+def 자금_거르기(cur, 자금: str | None):
+    """검색 RRF 순위에서 다른 자금 청크를 상위 10 을 자르기 전에 뺀다(4-4 ③ 상위 10 이 자금 거르기 뒤에도 10 이 되게). 자금이 없으면 None(거르지 않음)."""
+    if not 자금:
+        return None
+    schema = ontology_lookup._스키마()
+    return lambda 청크들: ontology_context.검색청크_거르기(cur, 청크들, 자금, schema)
+
+
+def _새_검색_스레드(질의, 사업명, 자금: str | None = None):
     try:
         with db.connect(connect_timeout=5, autocommit=True) as c:
-            return retrieve.검색(c.cursor(), 질의, 사업명, top_k=10, 사업필터=사업필터), None
+            cur = c.cursor()
+            return retrieve.검색(cur, 질의, 사업명, top_k=10, 사업필터=사업필터, 거르기=자금_거르기(cur, 자금)), None
     except Exception as e:                               # noqa: BLE001
         return _빈_검색결과(), f"{type(e).__name__}: {e}"
 
@@ -830,7 +839,7 @@ def _새_검색단계(상태: _판정상태) -> dict | None:
         질의 = 상태.정규화결과.get("질의문") or 상태.질문
         with ThreadPoolExecutor(max_workers=2) as ex:
             fl3 = ex.submit(_새_l3_스레드, 상태.org_id)
-            fse = ex.submit(_새_검색_스레드, 질의, 상태.사업명)
+            fse = ex.submit(_새_검색_스레드, 질의, 상태.사업명, 상태.온톨로지.get("자금"))
             상태.l3본문, l3err = fl3.result()
             상태.검색결과, se_err = fse.result()
         if l3err:

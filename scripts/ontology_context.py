@@ -223,6 +223,30 @@ def _다른자금_빼기(모음: _모음, 자금: str | None, schema: dict | Non
             del 모음.표[표키]
 
 
+def 검색청크_거르기(cur, 청크들: list[int], 자금: str | None, schema: dict | None) -> list[int]:
+    """검색 RRF 순위에서 `_다른자금_빼기` 가 조각을 하나도 남기지 않을 청크를 뺀다(순서 유지). 상위 10 을 자르기 전에 쓴다(retrieve.검색 `거르기`).
+
+    청크를 `_검색_넣기` 와 같이 항으로 나눠, 글이 있는 조각이 모두 다른 자금이고 금지 문장 항이 아닐 때만 뺀다. 자금이 없으면 그대로 돌려준다.
+    """
+    if not 자금 or not 청크들:
+        return 청크들
+    문서키표 = {v: k for k, v in ((schema or {}).get("문서키") or {}).items()}
+    행들 = {r[0]: r for r in cur.execute('SELECT chunk_id, doc_id, "조번호", "조제목", "항호", text FROM corpus.chunks WHERE chunk_id = ANY(%s)',
+                                        (list(청크들),)).fetchall()}
+
+    def 뺄까(cid: int) -> bool:
+        r = 행들.get(cid)
+        if r is None:
+            return False
+        _, 문서, 조번호, _, 항호, 글 = r
+        문서키 = 문서키표.get(문서)
+        키들 = [항 or 항호 for 항, 조각 in 항_분할(글 or "") if 조각]
+        return bool(키들) and all(ontology_fund.다른_자금(자금, 문서키, 조번호, 키)
+                                and not ontology_fund.금지문장_항인가(자금, 문서키, 조번호, 키) for 키 in 키들)
+
+    return [c for c in 청크들 if not 뺄까(c)]
+
+
 def 문맥_구성(cur, *, 근거행: list[dict], 대상노드: set[str] | list[str] | None = None, l3: list[dict] | None = None,
           검색: dict | None = None, schema: dict | None = None, 상한: int = 글자_상한, 자금: str | None = None,
           시작노드: str | None = None) -> dict:
@@ -367,8 +391,8 @@ def 근거경로들(근거행: list[dict], schema: dict, 상한: int | None = 3,
         return bool(경로) and str(경로[-1]).startswith("미특정:")
 
     for 행 in 근거행:
-        if 행.get("공통미정") or 행.get("품목표"):
-            continue                                    # 적용 미정 규범 · 대조 재료의 경로는 화면에 내지 않는다
+        if 행.get("공통미정") or 행.get("품목표") or 행.get("우선순위근거"):
+            continue                                    # 적용 미정 규범 · 대조 재료 · 우선순위 규범 근거(문맥 후보만)의 경로는 화면에 내지 않는다
         핵심행 = (행.get("doc_id"), 행.get("조번호"), 항호_키(행.get("항호"))) in 핵심
         시작 = 행.get("우선경로") or (행.get("경로") if 핵심행 else None)
         if 시작:
@@ -552,6 +576,27 @@ def _자체시험() -> int:
     t.append(("시제품제작비: 책자가 빠지고 관리기준 조문은 남는다", "책자 본문" not in 시글 and "① 관리 여비" in 시글))
     무 = 문맥_구성(cur2, 근거행=[책자행], 대상노드=set(), 검색={"top5": [200]}, schema=표2)
     t.append(("자금을 주지 않으면 거르지 않는다", {"책자 본문", "① 관리 여비"} <= {i[3] for _, 항목 in 무["블록"] for i in 항목}))
+    # P5-1 보강 2: 상위 10 을 자르기 전에 다른 자금 청크를 뺀다. 자금 없음은 같은 목록 그대로
+    순위 = [200, 201, 999]
+    t.append(("검색청크_거르기: 자금 없으면 같은 목록 그대로", 검색청크_거르기(cur2, 순위, None, 표2) is 순위))
+    t.append(("검색청크_거르기: 시제품제작비는 책자 청크를 빼고 순서를 지킨다(모르는 청크는 남김)", 검색청크_거르기(cur2, 순위, "시제품제작비", 표2) == [200, 999]))
+    t.append(("검색청크_거르기: 창업활동자금은 관리기준 여비 청크를 뺀다", 검색청크_거르기(cur2, 순위, "창업활동자금", 표2) == [201, 999]))
+    import retrieve as _r
+    원래 = (_r.임베딩, _r.dense, _r.sparse, _r.참조확장_수집, _r.DANGLING_SQL)
+    받은: list = []
+    try:
+        _r.임베딩 = lambda q: "v"
+        _r.dense = lambda *a, **k: [(c, 0.9) for c in range(1, 31)]
+        _r.sparse = lambda *a, **k: []
+        _r.참조확장_수집 = lambda cur, top: (받은.append(list(top)) or ([], [], []))
+        짝수만 = lambda ids: [c for c in ids if c % 2 == 0]
+        거름 = _r.검색(None, "q", None, top_k=10, 거르기=짝수만)["top5"]
+        그대로 = _r.검색(None, "q", None, top_k=10)["top5"]
+    finally:
+        _r.임베딩, _r.dense, _r.sparse, _r.참조확장_수집, _r.DANGLING_SQL = 원래
+    t.append(("retrieve.검색 거르기: 거른 뒤 상위 10 · 참조 확장도 그 10 으로", 거름 == list(range(2, 21, 2)) and 받은[0] == 거름))
+    t.append(("retrieve.검색 거르기 없음: 전과 같은 상위 10", 그대로 == list(range(1, 11)) and 받은[1] == 그대로))
+    t.append(("검색청크_거르기: 창업활동자금 금지 문장 항 청크는 남긴다", 검색청크_거르기(_가짜커서([], [(300, "지침", "제42조", "지급수수료", None, "⑦ 기자재임차비 안내 1. 차량 등의 임차 경비는 집행할 수 없다.")]), [300], "창업활동자금", 표2) == [300]))
     제42조 = (24, "지침", "제42조", "지급수수료", "① 멘토링비 안내 ② 기술이전비 안내 ⑦ 기자재임차비 안내 1. 차량 등의 임차 경비는 집행할 수 없다. 2. 기자재 임차료는 협약기간에 한하여 집행할 수 있다. ⑨ 다른 항")
     cur3 = _가짜커서([책자, 제42조], [(300, "지침", "제42조", "지급수수료", None, "⑦ 기자재임차비 안내 1. 차량 등의 임차 경비는 집행할 수 없다.")])
     금지행 = {"doc_id": "지침", "조번호": "제42조", "항호": "⑦", "article_id": 24, "깊이": 0, "출처": "금지미정", "경로": ["조:지침#제42조⑦"], "공통미정": True}

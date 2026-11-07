@@ -356,7 +356,7 @@ def _새경로_준비(cur, 입력: dict, org_id) -> dict:
         return {"바로": "미확정한도초과"}       # 답해도 가능 · 조건부가 나오지 않는다(합치기). 부가세를 모르면 답으로 풀릴 수 있어 묻는다
     l3 = l3_load.조문_연결조회(cur, org_id) if org_id else []
     검색 = retrieve.검색(cur, 입력.get("질문") or f"{입력.get('용도') or ''} {입력.get('품목') or ''}".strip(), 사업명,
-                       top_k=10, 사업필터=orchestrate.사업필터)
+                       top_k=10, 사업필터=orchestrate.사업필터, 거르기=orchestrate.자금_거르기(cur, 조회.get("자금")))
     문맥 = ontology_context.문맥_구성(cur, 근거행=조회["근거행"], 대상노드=조회["노드들"], l3=l3, 검색=검색,
                                 schema=ontology_lookup._스키마(), 자금=조회.get("자금"),
                                 시작노드=(조회.get("대상") or {}).get("대상_id"))
