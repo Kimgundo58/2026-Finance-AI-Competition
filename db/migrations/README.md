@@ -66,6 +66,7 @@ docker rm -f suddoe-verify            # 익명 볼륨까지 지우려면 docker 
 | `2026-11-06_팀.sql` | 필수 | `tenant.teams`, `accounts.team_id`, `plan_tasks.작성_account_id`, 팀 함수. 로그인이 `tenant.로그인주체` 를 부르므로 새 이미지보다 먼저 적용한다. 되돌리는 SQL 은 파일 머리말에 있다 |
 | `2026-11-06_온톨로지.sql` | 필수 | 룰 · 온톨로지 재설계용이다. `corpus.concepts`·`concept_labels`·`concept_relations`·`norms`·`provenance`, `tenant.l3_articles.concept_ids`, `decisions."경로"`, 검증코드 `ONTOLOGY_BAN`·`LIMIT_EXCEEDED`·`VAT_BASIS_UNKNOWN`, `suddoe_app` 읽기 · `suddoe_ingest` 쓰기 권한을 더한다. **코드 배포 전에 적용한다**(새 코드의 데이터 버전 해시가 새 테이블을 읽는다). 옛 코드는 영향이 없어 api 를 멈추지 않는다 |
 | `2026-11-06_세부관리기준_시행일.sql` | 필수(데이터) | 모두의 창업 세부관리기준의 `corpus.documents.시행일` 을 부칙대로 2026-06-23 으로 채운다. 멱등이다. api 를 멈추지 않는다 |
+| `2026-11-08_예비_시행일.sql` | 필수(데이터) | 예비창업패키지 세부관리기준(2025년)의 `corpus.documents.시행일` 을 부칙대로 2025-07-02 로 채운다. 멱등이다. api 를 멈추지 않는다. 로컬 `suddoe_ontology` 에만 적용했다 |
 | `2026-11-06_운영요령_참조정리.sql` | 필수(데이터) | 모두의 창업 · 지침 제14차의 운영요령 참조 41행을 superseded 복사본에서 active 문서로 옮긴다. 조번호가 active 에 없으면 멈춘다. superseded 행은 지우지 않는다. api 를 멈추지 않는다 |
 | `2026-11-06_모두의창업_참조_태그_보정.sql` | 필수(데이터) | 모두의 창업의 쉼표 열거 참조 13행 추가, 제30조 재매핑 · 제41 · 43조 붙임 정정, 제46 · 50 · 52조 적용대상을 공통으로 고친다. 원문 문구와 도착 조제목이 다르면 멈춘다. refs 행 수가 바뀌어 판정 캐시가 무효화된다. api 를 멈추지 않는다 |
 | `2026-11-07_적재형식_html.sql` | 필수 | `corpus.ingest_jobs` 파일형식 CHECK 에 `html` 을 더한다(법령 본문 페이지 원본). 적재 **전에** 적용한다. api 를 멈추지 않는다 |

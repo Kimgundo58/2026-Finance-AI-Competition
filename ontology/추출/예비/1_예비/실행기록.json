@@ -1,0 +1,151 @@
+{
+ "묶음": "ontology/추출/예비/1_예비",
+ "마감": "2026-11-08T03:13:01+09:00",
+ "추출자": {
+  "A": {
+   "에이전트ID": "f9b6b800-77ef-4fab-805f-df585304fac7",
+   "모델": "claude-opus-5-5",
+   "effort": "high",
+   "시작": "2026-11-07T17:43:47.612Z",
+   "끝": "2026-11-07T18:00:49.840Z",
+   "읽은파일": [
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\docs\\5_룰\\5-5_규범_구조.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\docs\\5_룰\\5-7_원문_추출_절차.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\docs\\5_룰\\5-8b_원천_JSON_형식.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\docs\\5_룰\\5-7b_추출_에이전트_지침.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\ontology\\추출\\예비\\1_예비\\작업_A\\입력_원문.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\ontology\\추출\\예비\\1_예비\\작업_A\\입력_문서키.json",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\ontology\\추출\\예비\\1_예비\\작업_A\\입력_기존노드.json"
+   ],
+   "명령": [
+    {
+     "도구": "Bash",
+     "명령": "ls -la \"ontology/추출/예비/1_예비/작업_A\""
+    },
+    {
+     "도구": "Bash",
+     "명령": "cd \"ontology/추출/예비/1_예비/작업_A\" && grep -c '^### ' 입력_원문.md && python -c \"print(len(open('입력_기존노드.json',encoding='utf-8').read()))\""
+    },
+    {
+     "도구": "Bash",
+     "명령": "mkdir -p \"$TEMP/extract_a_tools\" && cat > \"$TEMP/extract_a_tools/fill_check.py\" <<'EOF'\nimport re, sys, unicodedata\ninp, out = sys.argv[1], sys.argv[2]\ndef norm(s):\n    s = unicodedata.normalize('NFC', s)\n    for q in '“”″': s = s.replace(q, '\"')\n    for q in '‘’': s = s.replace(q, \"'\")\n    s = re.sub(r'-\\s*\\d+\\s*-', ' ', s) if False else s\n    s = re.sub(r'(?m)^\\s*-\\s*\\d+\\s*-\\s*$', ' ', s)\n    s = re.sub(r'\\s+', ' ', s).strip()\n    return s\ndef blocks(text):\n    parts = re.split(r'(?m)^### (.+)$', text)\n    return [(parts[i].strip(), parts[i+1]) for i in range(1, len(parts), 2)]\nsrc = blocks(open(inp, encoding='utf-8').read())\nbody = {}\nraw_tbl = {}\nfor k, v in src:\n    lines = [l for l in v.splitlines() if not l.strip().startswith('<!--')]\n    body[k] = norm('\\n'.join(lines))\n    # 원문 line: table rows -> cells joined by ' / '\n    rl = []\n    for l in lines:\n        if re.match(r'^\\s*\\|[-| ]+\\|\\s*$', l): continue\n        if l.strip().startswith('|'):\n            cells = [c.strip() for c in l.strip().strip('|').split('|')]\n            l = ' / '.join(c for c in cells if c)\n        rl.append(l)\n    raw_tbl[k] = norm('\\n'.join(rl))\ntxt = open(out, encoding='utf-8').read()\nob = blocks(txt)\nids_in = [k for k,_ in src]; ids_out = [k for k,_ in ob]\nprint('input', len(ids_in), 'output', len(ids_out), 'same order', ids_in == ids_out)\nprint('missing', [i for i in ids_in if i not in ids_out], 'extra', [i for i in ids_out if i not in ids_in])\n# fill\ndef fill(m):\n    return m.group(0)\nnewparts = re.split(r'(?m)^(### .+)$', txt)\nres = [newparts[0]]\nfor i in range(1, len(newparts), 2):\n    hid = newparts[i][4:].strip(); blk = newparts[i+1]\n    if '원문: @@' in blk:\n        blk = blk.replace('원문: @@', '원문: ' + raw_tbl[hid], 1)\n    res += [newparts[i], blk]\ntxt2 = ''.join(res)\nopen(out, 'w', encoding='utf-8', newline='\\n').write(txt2)\n# checks\nbad = 0; concepts=set(); rels=0; norms=0; kinds={}\nfor hid, blk in blocks(txt2):\n    b = body[hid]\n    for line in blk.splitlines():\n        s = line.strip()\n        if s.startswith('원문:'): continue\n        if s.startswith('개념:'):\n            for m in re.finditer(r'([가-힣A-Za-z]+:[^\\s·()]+) \\((기존|신규)\\)', s): concepts.add(m.group(1))\n        if ' -' in s and '-> ' in s: rels += 1\n        m = re.match(r'(?:규범: )?(규범:\\S+)', s)\n        if m:\n            norms += 1; k = m.group(1).split('/')[-2]; kinds[k] = kinds.get(k,0)+1\n            for f in s.split(' | '):\n                if f.startswith('문장 ') and ('\"' in f): print('QUOTE IN 문장', hid, f); bad+=1\n        for ex in re.findall(r'\"([^\"]*)\"', s):\n            if norm(ex) not in b:\n                print('EXCERPT FAIL', hid, '::', ex); bad += 1\nprint('bad', bad, 'concepts', len(concepts), 'relations', rels, 'norms', norms, kinds)\nEOF\ncd \"ontology/추출/예비/1_예비/작업_A\" && PYTHONIOENCODING=utf-8 python -I \"$TEMP/extract_a_tools/fill_check.py\" 입력_원문.md 추출_A.md"
+    },
+    {
+     "도구": "Bash",
+     "명령": "PYTHONIOENCODING=utf-8 python -I \"$TEMP/extract_a_tools/fill_check.py\" 입력_원문.md 추출_A.md"
+    },
+    {
+     "도구": "Bash",
+     "명령": "grep -c '원문: @@' 추출_A.md; grep -n '^원문:.* | ' 추출_A.md | head; grep -n '^원문:' 추출_A.md | sed -n '22p;34p'"
+    }
+   ],
+   "허용밖읽기": [],
+   "비용": 4.872176400000001,
+   "인증": "ANTHROPIC_API_KEY",
+   "로그": ".claude/작업/api_agents/runs/예비_1_예비_A.jsonl",
+   "경로": "API",
+   "프롬프트해시": "35817047af9e19096a11876f7303a5811f293e7c0504030cb56da5dc05b474f2",
+   "덧붙인문장": {
+    "앞": "Input folder: ontology/추출/예비/1_예비/작업_A\nYou are extractor A. Work independently: another extractor works on the same provisions; do not look for, open or ask about its folder, its output or any file outside the input folder except the documents the prompt below allows.\nIn the prompt below, 입력_원문.md, 입력_문서키.json, 입력_기존노드.json and \"the input folder\" mean the files in ontology/추출/예비/1_예비/작업_A.",
+    "뒤": "Output format: follow the section 출력 형식 of docs/5_룰/5-7b_추출_에이전트_지침.md exactly, and write the output as ontology/추출/예비/1_예비/작업_A/추출_A.md.\nKeep this session under 300k tokens of context."
+   },
+   "입력폴더": [
+    {
+     "이름": "입력_기존노드.json",
+     "sha256": "453be44f823c8868ecc94d5404e49d36b469b2adf5b26998bf8a42dbbad89719"
+    },
+    {
+     "이름": "입력_문서키.json",
+     "sha256": "da265a613cabbe63a58b859bf0b296bbd04f41e4da7849a3be2026329abfc194"
+    },
+    {
+     "이름": "입력_원문.md",
+     "sha256": "ba19a557b04e63b923892708013d5782bf90451dd603a8a44697e984fb58dc4c"
+    },
+    {
+     "이름": "추출_A.md",
+     "sha256": "9b120cb6679856bff1f085ebbc25dae1cfa8c28f8abf3f1ed2365a92b4e58827"
+    }
+   ],
+   "추가파일": [],
+   "문제": []
+  },
+  "B": {
+   "에이전트ID": "25e342eb-7853-4fa0-a85c-83c9ad551de1",
+   "모델": "claude-opus-5-5",
+   "effort": "high",
+   "시작": "2026-11-07T17:43:48.413Z",
+   "끝": "2026-11-07T18:13:01.072Z",
+   "읽은파일": [
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\docs\\5_룰\\5-5_규범_구조.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\docs\\5_룰\\5-7_원문_추출_절차.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\docs\\5_룰\\5-8b_원천_JSON_형식.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\docs\\5_룰\\5-7b_추출_에이전트_지침.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\ontology\\추출\\예비\\1_예비\\작업_B\\입력_원문.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\ontology\\추출\\예비\\1_예비\\작업_B\\입력_문서키.json",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\ontology\\추출\\예비\\1_예비\\작업_B\\입력_기존노드.json"
+   ],
+   "명령": [
+    {
+     "도구": "Bash",
+     "명령": "ls -la \"ontology/추출/예비/1_예비/작업_B\""
+    },
+    {
+     "도구": "Bash",
+     "명령": "cat >> \"ontology/추출/예비/1_예비/작업_B/추출_B.md\" <<'EOF'\n\n### 조:예비#제21조①\n원문: 제21조(창업기업등 사업비 구성) ① 창업기업 사업비는 지침 제32조에 따라 정부지원 사업비 100%로 구성된다.\n개념: 절차:창업기업등사업비 (기존) · 절차:정부지원사업비 (기존)\n관계: 조:예비#제21조① -준용-> 조:지침#제32조 [원문명시] 근거 \"지침 제32조에 따라\"\n규범: 해당 없음\n모르는 것: 자기부담사업비가 없다는 뜻인지(100% 정부지원) 원문은 구성만 말한다 · 지침 제32조가 지금 판의 같은 조인지 확인 못 함\n용어 후보: 정부지원사업비\n\n### 조:예비#제21조②\n원문: ② 창업기업은 사업비 집행 시, 집행내역별 집행 증빙서류를 구비하여야 한다.\n개념: 주체:창업기업 (기존) · 비목:창업/* (기존)\n관계: 해당 없음\n규범: 규범:예비/제21조②/의무/1 | 대상 비목:창업/* | 수범자 주체:창업기업 | 시점 집행 후 | 문장 사업비를 쓸 때마다 집행 내역별로 증빙서류를 갖춰 두어야 합니다. | 근거 \"창업기업은 사업비 집행 시, 집행내역별 집행 증빙서류를 구비하여야 한다\"\n모르는 것: 비목별 증빙 목록은 붙임2 각 비목의 증빙서류 칸에 있다\n용어 후보: 집행 증빙서류\n\n### 조:예비#제22조①\n원문: 제22조(창업기업등 사업비 비목) ① 창업기업 사업비 비목은 지침 제33조부터 제42조까지 정하는 바에 따른다.\n개념: 비목:창업/* (기존)\n관계: 조:예비#제22조① -준용-> 조:지침#제33조 [원문명시] 근거 \"지침 제33조부터 제42조 까지 정하는 바에 따른다\"\n      조:예비#제22조① -준용-> 조:지침#제34조 [원문명시] 근거 \"지침 제33조부터 제42조 까지 정하는 바에 따른다\"\n      조:예비#제22조① -준용-> 조:지침#제35조 [원문명시] 근거 \"지침 제33조부터 제42조 까지 정하는 바에 따른다\"\n      조:예비#제22조① -준용-> 조:지침#제36조 [원문명시] 근거 \"지침 제33조부터 제42조 까지 정하는 바에 따른다\"\n      조:예비#제22조① -준용-> 조:지침#제37조 [원문명시] 근거 \"지침 제33조부터 제42조 까지 정하는 바에 따른다\"\n      조:예비#제22조① -준용-> 조:지침#제38조 [원문명시] 근거 \"지침 제33조부터 제42조 까지 정하는 바에 따른다\"\n      조:예비#제22조① -준용-> 조:지침#제39조 [원문명시] 근거 \"지침 제33조부터 제42조 까지 정하는 바에 따른다\"\n      조:예비#제22조① -준용-> 조:지침#제40조 [원문명시] 근거 \"지침 제33조부터 제42조 까지 정하는 바에 따른다\"\n      조:예비#제22조① -준용-> 조:지침#제41조 [원문명시] 근거 \"지침 제33조부터 제42조 까지 정하는 바에 따른다\"\n      조:예비#제22조① -준용-> 조:지침#제42조 [원문명시] 근거 \"지침 제33조부터 제42조 까지 정하는 바에 따른다\"\n규범: 해당 없음\n모르는 것: 관리기준(2025년)이 인용한 지침 제33~42조가 지금 판(14차) 같은 번호의 비목 조인지 확인 못 함. 입력의 지침 제11조(사업운영위원회) · 제75조(권리 의무 이전)는 관리기준이 각각 제13조 · 제65조로 인용한다(판 번호 차이 의심)\n용어 후보: 비목\n\n### 조:예비#제22조②\n원문: ② 지침에서 정하지 않은 사업비 집행 세부사항은 다음 각 호 및 본 기준 '[붙임 2] 창업기업등 사업비 비목 해설표'에서 정하는 바에 따른다.\n개념: 비목:창업/* (기존)\n관계: 조:예비#제22조② -준용-> 조:예비#붙임2 [원문명시] 근거 \"창업기업등 사업비 비목 해설표\"\n규범: 해당 없음\n모르는 것: 지침과 붙임2 가 다르게 정할 때 어느 쪽이 이기는지는 \"지침에서 정하지 않은\" 이라는 말뿐이다(지침 우선으로 읽힘, 해석미결 후보)\n용어 후보: 비목 해설표\n\n### 조:예비#제22조②1호\n원문: [원문결함] 1. 단일 건의 외주용역비 거래금액이 2천만원을 초과(부가가치세 포함)하거나, 동일 거래업체와의 외주용역비 거래금액이 2천만원을 초과(부가가치세 포함)하는 경우 <표-3>에 따라 주관기관 사업운영위원회 사전심의를 받은 건에 한하여 외주용역비를 집행할 수 있다. 이때 세부 점검 항목 중 1개 이상 항목에서 부적정이 평가된 경우 해당 외주용역비의 집행은 불가하다. 단, 영업비밀보호 등 불가피하다고 인정하는 경우에는 사업운영위원회 사전심의를 생략할 수 있다. 이때, 주관기관의 장은 … 증빙서류를 구비하여야 한다.\n개념: 비목:창업/외주용역비 (기존) · 주체:사업운영위원회 (기존) · 주체:주관기관의장 (기존) · 주체:외주용역업체 (기존) · 절차:사전심의@예비 (신규) · 증빙:사전심의생략사유서 (기존) · 증빙:검토서 (기존) · 증빙:내부결재문서 (기존)\n관계: 조:예비#제22조②1호 -준용-> 조:예비#제22조②표-3 [원문명시] 근거 \"<표-3>에 따라 주관기관 사업운영위원회 사전심의를 받은 건에 한하여\"\n규범: 규범:예비/제22조②1호/임계값/1 | 대상 비목:창업/외주용역비 | 값 20000000 원 | 발동연산 초과 | 누적범위 건별 | 부가세 포함 | 결과 의무/1 | 근거 \"단일 건의 외주용역비 거래금액이 2천만원을 초과(부가가치세 포함)하거나\"\n      규범:예비/제22조②1호/임계값/2 | 대상 비목:창업/외주용역비 | 값 20000000 원 | 발동연산 초과 | 누적범위 동일업체합계 | 부가세 포함 | 결과 의무/1 | 근거 \"거래업체와의 외주용역비 거래금액이 2천만원을 초과(부가가치세 포함)하는 경우\"\n      규범:예비/제22조②1호/의무/1 | 대상 비목:창업/외주용역비 | 수범자 주체:창업기업 | 승인주체 주체:사업운영위원회 | 시점 집행 전 | 예외 규범:예비/제22조②1호/허용/1 | 문장 외주용역비가 한 건에 2천만원(부가세 포함)을 넘거나 같은 업체와의 거래 합계가 2천만원을 넘으면 주관기관 사업운영위원회의 사전심의를 받은 뒤에만 쓸 수 있습니다. | 근거 \"주관기관 사업운영위원회 사전심의를 받은 건에 한하여 외주용역비를 집행할 수 있다\"\n      규범:예비/제22조②1호/금지/1 | 대상 비목:창업/외주용역비 | 수범자 주체:창업기업 | 조건 \"세부 점검 항목 중 1개 이상 항목에서 부적정이 평가된 경우\" | 문장 사전심의에서 점검 항목 가운데 하나라도 부적정으로 평가되면 그 외주용역비는 쓸 수 없습니다. | 근거 \"해당 외주용역비의 집행은 불가하다\"\n      규범:예비/제22조②1호/허용/1 | 대상 비목:창업/외주용역비 | 승인주체 주체:주관기관 | 조건 \"영업비밀보호 등 불가피하다고 인정하는 경우에는\" | 근거 \"영업비밀보호 등 불가피하다고 인정하는 경우에는 사업운영위원회 사전심의를 생략할 수 있다\"\n      규범:예비/제22조②1호/의무/2 | 대상 비목:창업/외주용역비 | 수범자 주체:주관기관의장 | 조건 \"사업운영위원회 사전심의를 생략할 수 있다\" | 증빙 증빙:사전심의생략사유서,증빙:검토서,증빙:내부결재문서 | 문장 사전심의를 생략했다면 주관기관의 장이 생략 사유서, 검토서, 내부 결재문서 같은 불가피한 사유의 증빙을 갖춰야 합니다. | 근거 \"사전심의 생략에 관한 사유서, 검토서, 내부 결재문서 등 불가피한 사유를\"\n모르는 것: 동일 거래업체 합계를 어느 기간(협약기간 전체인지)으로 더하는지 원문에 없다 · 생략을 누가 \"인정\" 하는지(주관기관인지 사업운영위원회인지) 원문에 주어가 없다 · 금지/1 의 \"1개 이상\" 은 점검 항목 수라 수치로 적지 않았다\n용어 후보: 사전심의 · 부적정 · 영업비밀보호 · 동일 거래업체\n\n### 조:예비#제22조②표-3\n원문: [원문결함] < 표-3 > 사업운영위원회 사전심의 세부 점검항목 — ① 외주용역 업체가 사업자등록증을 보유하였음을 확인하였는지? ② 외주용역 업체의 업종·업태 또는 이력·경력 등이 외주용역 과업과 연관성이 있는지? ③ 외주용역 업체가 계약기간 동안 적정하게 과업을 수행할 가능성이 있는지? ④ 외주용역 업체 선정 시 2개 이상의 업체로부터 견적서를 수령하여 적정 계약 금액을 산출하였는지? ⑤ 외주용역 업체가 당해연도 동 사업에 참여한 창업기업이 아님을 확인하였는지? ⑥ 외주용역 업체에 창업기업 대표자 및 임직원이 재직 중이거나, 사전 승인 요청일로부터 2년 이내에 재직한 이력이 없음을 확인하였는지? ⑦ 외주용역 업체에 의뢰한 내용이 창업 아이템 양산을 목적으로 하지 않음을 확인하였는지? (칸: 적정 · 부적정)\n개념: 비목:창업/외주용역비 (기존) · 주체:외주용역업체 (기존) · 주체:사업운영위원회 (기존) · 증빙:사업자등록증 (기존) · 증빙:견적서 (기존) · 절차:사전심의@예비 (신규)\n관계: 해당 없음\n규범: 규범:예비/제22조②표-3/요건/1 | 대상 비목:창업/외주용역비 | 승인주체 주체:사업운영위원회 | 조건 \"사업운영위원회 사전심의 세부 점검항목\" | 근거 \"외주용역 업체가 사업자등록증을 보유하였음을 확인하였는지?\"\n      규범:예비/제22조②표-3/요건/2 | 대상 비목:창업/외주용역비 | 승인주체 주체:사업운영위원회 | 조건 \"사업운영위원회 사전심의 세부 점검항목\" | 근거 \"외주용역 업체의 업종·업태 또는 이력·경력 등이 외주용역 과업과 연관성이 있는지?\"\n      규범:예비/제22조②표-3/요건/3 | 대상 비목:창업/외주용역비 | 승인주체 주체:사업운영위원회 | 조건 \"사업운영위원회 사전심의 세부 점검항목\" | 근거 \"외주용역 업체가 계약기간 동안 적정하게 과업을 수행할 가능성이 있는지?\"\n      규범:예비/제22조②표-3/요건/4 | 대상 비목:창업/외주용역비 | 승인주체 주체:사업운영위원회 | 조건 \"사업운영위원회 사전심의 세부 점검항목\" | 근거 \"외주용역 업체 선정 시 2개 이상의 업체로부터 견적서를 수령하여 적정 계약 금액을 산출하였는지?\"\n      규범:예비/제22조②표-3/요건/5 | 대상 비목:창업/외주용역비 | 승인주체 주체:사업운영위원회 | 조건 \"사업운영위원회 사전심의 세부 점검항목\" | 근거 \"외주용역 업체가 당해연도 동 사업에 참여한 창업기업이 아님을 확인하였는지?\"\n      규범:예비/제22조②표-3/요건/6 | 대상 비목:창업/외주용역비 | 승인주체 주체:사업운영위원회 | 조건 \"사업운영위원회 사전심의 세부 점검항목\" | 근거 \"외주용역 업체에 창업기업 대표자 및 임직원이 재직 중이거나, 사전 승인 요청일로부터 2년 이내에 재직한 이력이 없음을 확인하였는지?\"\n      규범:예비/제22조②표-3/요건/7 | 대상 비목:창업/외주용역비 | 승인주체 주체:사업운영위원회 | 조건 \"사업운영위원회 사전심의 세부 점검항목\" | 근거 \"외주용역 업체에 의뢰한 내용이 창업 아이템 양산을 목적으로 하지 않음을 확인하였는지?\"\n모르는 것: 표 칸(적정 · 부적정)은 비어 있는 서식이다 · 이 점검항목이 사전심의 대상(2천만원 초과) 건에만 쓰이는지, 2천만원 이하 외주용역에도 같은 기준(양산 목적 금지 등)이 적용되는지 원문에 없다 · ⑥ 의 \"사전 승인 요청일\" 이 사전심의 요청일과 같은지\n용어 후보: 업종·업태 · 양산 · 적정 계약 금액\n\n### 조:예비#제22조②2호\n원문: 2. 국외 출장을 실시하려는 창업기업은 출국일 이전에 출장 개요(목적, 기간, 출장자, 출장국가 등) 및 여비 산출근거, 기타 주관기관이 요청하는 사항의 내용을 주관기관의 장에게 보고한 경우에 한하여 사업비 집행이 가능하다.\n개념: 세목:창업/여비/국외여비 (기존) · 주체:창업기업 (기존) · 주체:주관기관의장 (기존)\n관계: 해당 없음\n규범: 규범:예비/제22조②2호/의무/1 | 대상 세목:창업/여비/국외여비 | 수범자 주체:창업기업 | 승인주체 주체:주관기관의장 | 시점 집행 전 출국일 이전 | 문장 국외 출장은 출국 전에 출장 목적, 기간, 출장자, 출장국가 같은 개요와 여비 산출근거, 주관기관이 요청한 내용을 주관기관의 장에게 보고한 경우에만 사업비로 쓸 수 있습니다. | 근거 \"국외 출장을 실시하려는 창업기업은 출국일 이전에 출장 개요(목적, 기간, 출장자,\" · \"장에게 보고한 경우에 한하여 사업비 집행이 가능하다\"\n모르는 것: 보고 서식(출장계획서와 같은지)이 원문에 없다\n용어 후보: 출장 개요 · 여비 산출근거\n\n### 조:예비#제22조②3호\n원문: 3. 협약기간 중 본 사업비로 구매한 기계, 장비 등 취득자산은 자산관리대장에 명기하고 온라인시스템에 등록·관리하여야 한다. 다만, 취득가액 500만원 이하는 그러지 아니한다.\n개념: 비목:창업/기계장치 (기존) · 품목:창업/기계 (기존) · 절차:취득자산관리 (기존) · 증빙:자산관리대장 (기존) · 절차:온라인시스템 (기존) · 시간:협약기간 (기존)\n관계: 해당 없음\n규범: 규범:예비/제22조②3호/임계값/1 | 대상 비목:창업/기계장치 | 값 5000000 원 | 발동연산 초과 | 누적범위 건별 | 부가세 정의없음 | 결과 의무/1 | 근거 \"취득가액 500만원 이하는 그러지 아니한다\"\n      규범:예비/제22조②3호/의무/1 | 대상 비목:창업/기계장치 | 수범자 주체:창업기업 | 시점 집행 후 | 증빙 증빙:자산관리대장 | 문장 협약기간 중 사업비로 산 기계, 장비 같은 취득자산은 자산관리대장에 적고 온라인시스템에 등록해 관리해야 합니다. | 근거 \"협약기간 중 본 사업비로 구매한 기계, 장비 등 취득자산은 자산관리대장에 명기\" · \"하고 온라인시스템에 등록·관리하여야 한다\"\n모르는 것: 원문은 \"500만원 이하는 그러지 아니한다\" 로 면제 쪽을 적었다. 의무가 생기는 쪽은 500만원 초과로 옮겼다 · 취득가액이 부가세 포함인지 정의없음 · 기계 · 장비 외에 어떤 취득자산(다른 비목의 물품)까지 들어가는지 \"등\" 이라 불명확하다 · 취득가액이 품목 1개 기준인지 1건 기준인지\n용어 후보: 취득자산 · 취득가액 · 자산관리대장\n\n### 조:예비#제22조②4호\n원문: 4. 여비는 지침 제40조에 따라 집행하며 대중교통은 일반석 등급 비용에 한하여 지출한다.\n개념: 비목:창업/여비 (기존) · 세목:창업/여비/대중교통비 (기존)\n관계: 조:예비#제22조②4호 -준용-> 조:지침#제40조 [원문명시] 근거 \"여비는 지침 제40조에 따라 집행하며\"\n규범: 규범:예비/제22조②4호/의무/1 | 대상 세목:창업/여비/대중교통비 | 수범자 주체:창업기업 | 문장 여비 중 대중교통비는 일반석 등급 요금만 쓸 수 있습니다. | 근거 \"대중교통은 일반석 등급 비용에 한하여 지출한다\"\n모르는 것: 일반석보다 높은 등급의 차액만 안 되는지, 그 지출 전체가 안 되는지 원문에 없다 · 지침 제40조가 지금 판의 여비 조인지 확인 못 함\n용어 후보: 일반석\n\n### 조:예비#제23조①\n원문: 제23조(사업비 관리) ① 주관기관 사업비는 지침 제44조에 따라 관리하며, 주관기관이 대학인 경우 관계 법령 및 내부규정에 따라 참여기관을 통해 사업비를 집행․관리할 수 있으며, 이의 경우 사업비 관리계좌 및 사업비 카드는 참여기관장의 명의로 개설 및 발급해야 한다.\n개념: 주체:주관기관 (기존) · 주체:참여기관@예비 (신규) · 절차:사업비관리계좌@예비 (신규) · 절차:사업비카드 (기존)\n관계: 조:예비#제23조① -준용-> 조:지침#제44조 [원문명시] 근거 \"주관기관 사업비는 지침 제44조에 따라 관리하며\"\n규범: 규범:예비/제23조①/의무/1 | 대상 절차:사업비관리계좌@예비,절차:사업비카드 | 수범자 주체:주관기관 | 조건 \"주관기관이 대학인 경우\" | 문장 대학인 주관기관이 참여기관을 통해 사업비를 집행하면 사업비 관리계좌와 사업비 카드를 참여기관장 명의로 만들어야 합니다. | 근거 \"사업비 관리계좌 및 사업비 카드는 참여기관장의 명의로 개설\"\n모르는 것: 참여기관의 정의가 입력에 없다 · 이 항은 주관기관 사업비라 창업기업 판정에 쓰이는지 불명\n용어 후보: 참여기관 · 사업비 관리계좌\n\n### 조:예비#제23조②\n원문: ② 주관기관의 자기부담사업비는 주관기관이 별도 집행 및 관리할 수 있으나, 전문기관은 주관기관 자기부담사업비에 대한 사용 적정성 등에 대한 점검을 할 수 있다\n개념: 절차:주관기관자기부담사업비 (기존) · 주체:전문기관 (기존) · 절차:점검 (기존)\n관계: 해당 없음\n규범: 해당 없음\n모르는 것: 없음\n용어 후보: 자기부담사업비\n\n### 조:예비#제23조③\n원문: ③ 창업기업 사업비는 지침 제45조에 따라 관리하며, 당해연도 예비창업패키지 사업에 참여하는 창업기업에 집행할 수 없다.\n개념: 절차:창업기업등사업비 (기존) · 비목:창업/* (기존) · 주체:창업기업 (기존)\n관계: 조:예비#제23조③ -준용-> 조:지침#제45조 [원문명시] 근거 \"창업기업 사업비는 지침 제45조에 따라 관리하며\"\n규범: 규범:예비/제23조③/금지/1 | 대상 비목:창업/* | 수범자 주체:창업기업 | 조건 \"당해연도 예비창업패키지 사업에 참여하는 창업기업에\" | 문장 같은 해 예비창업패키지 사업에 참여하는 창업기업에게는 사업비를 쓸 수 없습니다. | 근거 \"당해연도 예비창업패키지 사업에 참여하는 창업기업에 집행할 수 없다\"\n모르는 것: 거래 상대가 참여 창업기업인 모든 거래(물품 구매 · 용역 등)를 막는지 원문은 \"창업기업에 집행\" 이라고만 한다 · 지침 제45조가 지금 판의 같은 조인지 확인 못 함\n용어 후보: 당해연도\n\n### 조:예비#제23조④\n원문: ④ 단계별 지원 시 창업기업 사업비의 집행 기한 및 정산 시기 등은 전문기관에서 별도로 정하는 바에 따른다.\n개념: 절차:단계별지원@예비 (신규) · 절차:사업비정산 (기존) · 주체:전문기관 (기존)\n관계: 조:예비#제23조④ -위임-> 미특정:전문기관 별도 기준 [원문명시] 근거 \"집행 기한 및 정산 시기 등은 전문기관에서 별도로\"\n규범: 해당 없음\n모르는 것: 전문기관이 정한 집행 기한 문서가 입력에 없다\n용어 후보: 집행 기한\nEOF"
+    },
+    {
+     "도구": "Bash",
+     "명령": "echo \"$TEMP\"; cygpath -w \"$TEMP\" 2>/dev/null"
+    },
+    {
+     "도구": "Bash",
+     "명령": "cd /c/Users/dogun/AppData/Local/Temp/exB && python - <<'PY'\nimport io\np='part6.md'\ns=io.open(p,encoding='utf-8').read()\na='근거 \"사업비에 대한 모든 권리·의무를 협약 시작일을 기준으로 법인에 이전하고\"'\nb='근거 \"법인의 대표로 선정된 창업자는 사업비에 대한 모든 권리·의무를 협약 시작일을\"'\nc='근거 \"정부지원사업비 환수의 책임은 법인 및 창업기업등(선정자)에게 있으며\"'\nd='근거 \"정부지원사업비 환수의 책임은 법인 및 창업기업등(선정자)에게\"'\nassert a in s and c in s\ns=s.replace(a,b).replace(c,d)\nio.open(p,'w',encoding='utf-8',newline='\\n').write(s)\nPY\ncd \"/c/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본\" && cat /c/Users/dogun/AppData/Local/Temp/exB/part{2,3,4,5,6}.md >> \"ontology/추출/예비/1_예비/작업_B/추출_B.md\" && grep -c '^### ' \"ontology/추출/예비/1_예비/작업_B/추출_B.md\""
+    },
+    {
+     "도구": "Bash",
+     "명령": "cd \"/c/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본/ontology/추출/예비/1_예비/작업_B\" && PYTHONIOENCODING=utf-8 python -I - <<'PY'\nimport re,unicodedata,io\ndef norm(t):\n    t=unicodedata.normalize('NFC',t)\n    for q in '“”″': t=t.replace(q,'\"')\n    for q in '‘’': t=t.replace(q,\"'\")\n    t=re.sub(r'- \\d+ -','',t)\n    return re.sub(r'\\s+',' ',t).strip()\nsrc=io.open('입력_원문.md',encoding='utf-8').read()\nout=io.open('추출_B.md',encoding='utf-8').read()\ndef blocks(t):\n    d={};cur=None\n    for line in t.split('\\n'):\n        m=re.match(r'^### (조:\\S.*)$',line)\n        if m: cur=m.group(1).strip(); d[cur]=[]; continue\n        if cur: d[cur].append(line)\n    return d\nsb=blocks(src); ob=blocks(out)\nprint('input ids',len(sb),'output ids',len(ob))\nprint('missing',[k for k in sb if k not in ob]); print('extra',[k for k in ob if k not in sb])\nbad=0\nfor k,lines in ob.items():\n    body=norm('\\n'.join(l for l in sb.get(k,[]) if not l.startswith('<!--')))\n    sect=None\n    for l in lines:\n        if re.match(r'^(관계|규범):',l): sect='x'\n        elif re.match(r'^(모르는 것|용어 후보|원문|개념):',l): sect=None\n        if sect!='x': continue\n        for ex in re.findall(r'\"([^\"]*)\"',l):\n            if norm(ex) not in body:\n                bad+=1; print('FAIL',k,'|',ex)\nprint('bad',bad)\n# counts\nrel=sum(1 for k,ls in ob.items() for l in ls if re.search(r' -\\S+-> ',l))\nnorms=re.findall(r'규범:(?:예비|공통)/\\S+/(금지|허용|한도|임계값|의무|요건|우선순위)/\\d+ \\|',out)\nprint('relations',rel,'norms',len(norms))\nfrom collections import Counter; print(Counter(norms))\ncon=set()\nfor k,ls in ob.items():\n    for l in ls:\n        if l.startswith('개념:'):\n            for c in re.findall(r'(\\S+:\\S+) \\((기존|신규)\\)',l): con.add(c)\nprint('concepts distinct',len(con),'new',len({c for c,s in con if s=='신규'}))\n# check 기존 claims\nex=set(re.findall(r'\"([^\"]+)\"',io.open('입력_기존노드.json',encoding='utf-8').read()))\nprint('claimed 기존 but absent',[c for c,s in con if s=='기존' and c not in ex])\nprint('claimed 신규 but present',[c for c,s in con if s=='신규' and c in ex])\n# 문장 checks\nfor l in out.split('\\n'):\n    m=re.search(r'\\| 문장 ([^|]*)',l)\n    if m and ('\"' in m.group(1) or '규범:' in m.group(1)): print('BAD 문장',l[:80])\nPY"
+    },
+    {
+     "도구": "Bash",
+     "명령": "cd \"/c/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본/ontology/추출/예비/1_예비/작업_B\" && python -I - <<'PY'\nimport io,re,sys\nsys.stdout.reconfigure(encoding='utf-8')\np='추출_B.md'; s=io.open(p,encoding='utf-8').read()\na='근거 \"사업운영위원회를 통해 <표-5>에 따라 점검 결과를 확정하고\"'\nassert s.count(a)==1\ns=s.replace(a,'근거 \"운영위원회를 통해 <표-5>에 따라 점검 결과를 확정하고\"')\nio.open(p,'w',encoding='utf-8',newline='\\n').write(s)\nfrom collections import Counter\nprint(Counter(re.findall(r'규범:(?:예비|공통)/\\S+/(금지|허용|한도|임계값|의무|요건|우선순위)/\\d+ \\|',s)))\nprint('해당없음 norms blocks',s.count('규범: 해당 없음'))\nPY\nls"
+    },
+    {
+     "도구": "Bash",
+     "명령": "rm -rf /c/Users/dogun/AppData/Local/Temp/exB"
+    }
+   ],
+   "허용밖읽기": [],
+   "비용": 6.161281399999999,
+   "인증": "ANTHROPIC_API_KEY",
+   "로그": ".claude/작업/api_agents/runs/예비_1_예비_B.jsonl",
+   "경로": "API",
+   "프롬프트해시": "96432b02340b5466cfa36f5547e2b7ecc56765df05dc72edbb537c5cca74f400",
+   "덧붙인문장": {
+    "앞": "Input folder: ontology/추출/예비/1_예비/작업_B\nYou are extractor B. Work independently: another extractor works on the same provisions; do not look for, open or ask about its folder, its output or any file outside the input folder except the documents the prompt below allows.\nIn the prompt below, 입력_원문.md, 입력_문서키.json, 입력_기존노드.json and \"the input folder\" mean the files in ontology/추출/예비/1_예비/작업_B.",
+    "뒤": "Output format: follow the section 출력 형식 of docs/5_룰/5-7b_추출_에이전트_지침.md exactly, and write the output as ontology/추출/예비/1_예비/작업_B/추출_B.md.\nKeep this session under 300k tokens of context."
+   },
+   "입력폴더": [
+    {
+     "이름": "입력_기존노드.json",
+     "sha256": "453be44f823c8868ecc94d5404e49d36b469b2adf5b26998bf8a42dbbad89719"
+    },
+    {
+     "이름": "입력_문서키.json",
+     "sha256": "da265a613cabbe63a58b859bf0b296bbd04f41e4da7849a3be2026329abfc194"
+    },
+    {
+     "이름": "입력_원문.md",
+     "sha256": "ba19a557b04e63b923892708013d5782bf90451dd603a8a44697e984fb58dc4c"
+    },
+    {
+     "이름": "추출_B.md",
+     "sha256": "3f6b679e68ec0c27d9356226d627f18ee6909a36c37dbfd7eb77633d91a4e6b5"
+    }
+   ],
+   "추가파일": [],
+   "문제": []
+  }
+ },
+ "통과": true
+}
