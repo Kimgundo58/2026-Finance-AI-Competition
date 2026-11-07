@@ -498,6 +498,91 @@ def _용어_시험() -> list[tuple[str, bool]]:
     t.append(("용어풀이: 질문 프롬프트에는 후보 조문에 나온 용어의 풀이만, 상한 이하",
               bool(줄) and len(줄) <= T.프롬프트_상한 and all(T.용어_키(x[2:].split(": ", 1)[0]) in 원문키 for x in 줄)))
     t.append(("용어풀이: 질문이 없으면 응답 풀이도 없다", q.get("용어풀이") == []))
+    t.extend(_용어_질문_시험())
+    return t
+
+
+_S조각 = re.compile(r"\[(S\d+)\] [^\n]*\n(.*?)(?=\n\n\[S\d+\] |\n\n</|\Z)", re.S)
+
+
+def _블록_용어(프롬프트: str) -> list[str]:
+    """프롬프트 <용어풀이> 블록의 용어(줄 순서). 블록이 없으면 빈 목록."""
+    if "<용어풀이>\n" not in 프롬프트:
+        return []
+    return [x[2:].split(": ", 1)[0] for x in 프롬프트.split("<용어풀이>\n", 1)[1].split("\n</용어풀이>", 1)[0].splitlines()]
+
+
+def _용어_질문_시험() -> list[tuple[str, bool]]:
+    """용어 풀이가 질문 경로를 실제로 거친다(리뷰 P4-6 지적 2 · 3): 질문 LLM 자리(`llm_호출`)만 고정 출력으로 바꾸고
+    프롬프트 조립 · 질문 검사 · 응답 `용어풀이` 는 실제 코드로 돈다. 고정 출력은 프롬프트의 용어 풀이에 든 말을 쓴 원문 줄을 근거로 고른다."""
+    t: list[tuple[str, bool]] = []
+    입력 = {"사업명": 사업, "비목": "창업활동비", "금액": 1_000_000, "부가세구분": "포함", "품목": "시험품목", "질문": "시험품목"}
+    고른: dict = {}
+
+    def 고정_llm(프롬프트, 스키마, **_k):
+        고른["프롬프트"] = 프롬프트
+        if "질문" not in 고른:                    # 첫 실행에서 정한 질문을 뒤 실행에도 그대로 낸다(풀이 쪽만 바뀌는지 본다)
+            용어들 = _블록_용어(프롬프트)
+            for m in _S조각.finditer(프롬프트):
+                for 줄 in m.group(2).splitlines():
+                    if not (15 <= len(줄) <= Q.이유_최대) or re.search(r"\d|[|＜＞［］＃]|가능|불가|허용|적합|승인|금지|인정|없|않", 줄):
+                        continue
+                    용어 = next((u for u in 용어들 if T._식(u) and T._식(u).search(줄) and not re.search(r"\d", u)), None)
+                    if 용어:
+                        고른.update(용어=용어, 질문={"근거": m.group(1), "질문문": f"이번 지출이 {용어}에 해당하나요?",
+                                                 "충족답": "예", "이유": 줄.strip(), "할일": "관련 자료 확인"})
+                        break
+                if "질문" in 고른:
+                    break
+        return {"질문": [고른["질문"]] if "질문" in 고른 else []}, {}
+
+    원_llm, 원_준비, 원_작성, 원_목록 = Q.llm_호출, Q._새경로_준비, Q._질문_작성, T.풀이_목록
+    노드: dict = {}
+
+    def 작성_엿보기(*a, **k):                  # 원래 함수를 그대로 부르고 후보 블록만 적어 둔다
+        노드["블록"] = a[1]
+        return 원_작성(*a, **k)
+
+    def 준비_엿보기(cur, 입력_, org_id):
+        r = 원_준비(cur, 입력_, org_id)
+        노드["값"] = set(r.get("노드들") or ())
+        return r
+
+    def 실행() -> dict:
+        with db.connect(autocommit=True) as c:
+            return Q._새경로_질문(c.cursor(), c, dict(입력), None, "고정", 1, {"버린질문": {}}, 0.0)
+    Q.llm_호출, Q._새경로_준비, Q._질문_작성 = 고정_llm, 준비_엿보기, 작성_엿보기
+    try:
+        q = 실행()
+        프롬프트 = 고른.get("프롬프트") or ""
+        용어 = 고른.get("용어")
+        with db.connect(autocommit=True) as c:
+            풀이들 = 원_목록(c.cursor(), 사업)
+        줄 = _블록_용어(프롬프트)
+
+        def 낮춘_목록(cur, 사업명):              # 고른 용어를 화면 목록에서 뺀다(AI대조 로 내린 것과 같다. DB 는 바꾸지 않는다)
+            return [x for x in 원_목록(cur, 사업명) if x["용어"] != 용어]
+        T.풀이_목록 = 낮춘_목록
+        q2 = 실행()
+        프롬프트2 = 고른.get("프롬프트") or ""
+    finally:
+        Q.llm_호출, Q._새경로_준비, Q._질문_작성, T.풀이_목록 = 원_llm, 원_준비, 원_작성, 원_목록
+    t.append(("용어풀이(질문): 질문 프롬프트에 <용어풀이> 블록과 규칙 12 가 들어간다",
+              "<용어풀이>\n- " in 프롬프트 and "12. 용어 풀이는 규정 원문에 나온 어려운 말의 뜻이다" in 프롬프트))
+    질문문들 = [x.get("질문문") for x in q.get("질문") or []]
+    t.append(("용어풀이(질문): 질문문에 나온 용어의 풀이가 응답 용어풀이로 나간다(용어 · 풀이 두 칸)",
+              bool(용어) and any(용어 in (s or "") for s in 질문문들)
+              and any(x == {"용어": 용어, "풀이": next((p["풀이"] for p in 풀이들 if p["용어"] == 용어), None)} for x in q.get("용어풀이") or [])))
+    # 6-5 · E78: 대상 노드에 연결된 풀이가 상한 안에서 먼저 들어간다. 노드 풀이가 처음 나온 자리 순으로는 뒤에 있는 경우만 뜻이 있다
+    개념 = {p["용어"]: p.get("concept_id") for p in 풀이들}
+    노드여부 = [개념.get(u) in 노드.get("값", set()) for u in 줄]
+    자리순 = [x["용어"] for x in T.글에서_찾기(풀이들, [노드.get("블록") or ""], 상한=T.프롬프트_상한)]
+    t.append(("용어풀이(질문): 대상 노드에 연결된 풀이가 프롬프트 앞에 모인다(처음 나온 순서와 다르다)",
+              any(노드여부) and 노드여부 == sorted(노드여부, reverse=True) and 줄 != 자리순))
+    t.append(("용어풀이(질문): 그 용어가 AI검증 미만이면 프롬프트 줄 · 응답 풀이에서 빠지고 질문은 그대로",
+              bool(용어) and f"\n- {용어}: " not in 프롬프트2 and f"\n- {용어}: " in 프롬프트
+              and 용어 not in [x["용어"] for x in q2.get("용어풀이") or []]
+              and [x.get("질문문") for x in q2.get("질문") or []] == 질문문들))
     return t
 
 
