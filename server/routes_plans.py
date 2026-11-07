@@ -214,7 +214,7 @@ def 상세(plan_id: int, org_id: str | None = None) -> 계획상세:
 
 @router.patch("/{plan_id}", response_model=계획상세)
 def 수정(plan_id: int, body: 계획수정, org_id: str | None = None) -> 계획상세:
-    """예상 지출일을 바꾼다. 판정 경로는 집행예정일을 읽지 않아 판정은 그대로다."""
+    """예상 지출일을 바꾼다. 판정을 다시 돌리지 않아 판정은 그대로다. 새 경로는 다음 재점검 때 이 값으로 지난 기한 문장을 뺀다."""
     if MOCK:
         행 = next((p for p in mock_data.mock_계획 if p["plan_id"] == plan_id), None)
         if not 행:

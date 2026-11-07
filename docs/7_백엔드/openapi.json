@@ -285,7 +285,7 @@
      "지출계획"
     ],
     "summary": "수정",
-    "description": "예상 지출일을 바꾼다. 판정 경로는 집행예정일을 읽지 않아 판정은 그대로다.",
+    "description": "예상 지출일을 바꾼다. 판정을 다시 돌리지 않아 판정은 그대로다. 새 경로는 다음 재점검 때 이 값으로 지난 기한 문장을 뺀다.",
     "operationId": "수정_api_plans__plan_id__patch",
     "parameters": [
      {
