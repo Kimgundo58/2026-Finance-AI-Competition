@@ -110,6 +110,7 @@ def _계획에_연결(plan_id: int, body, out: dict, org_id: str | None, account
 
 def _캐시판정_행(body, out: dict, org_id: str | None, account_id: str | None, plan_id: int) -> dict:
     """캐시 응답을 tenant.decisions 한 행으로 만든다. 처리단계='캐시' 로 LLM 을 호출한 판정과 구분한다."""
+    from orchestrate import 온톨로지결과_칸
     정규화 = getattr(body, "정규화", None) or {}
     # 저장된 계획의 정규화 값에는 이전 키로 원문이 들어 있을 수 있어 그 키도 읽는다.
     질문원문 = (정규화.get("질문원문") or 정규화.get("질문")
@@ -128,4 +129,7 @@ def _캐시판정_행(body, out: dict, org_id: str | None, account_id: str | Non
         # 캐시 응답에는 화면 값(질문문·답)만 있다. 계획을 다시 열어도 「확인한 내용」이 보이게 남긴다.
         사용자답변=json.dumps(out.get("사용자답변") or [], ensure_ascii=False),
         검증코드=[], 처리단계="캐시",
+        # 온톨로지 경로 응답은 분류를 갖는다. 다시 열 때 화면 값(분류 · 조건 · 문의처 …)이 사라지지 않게 남긴다
+        **({"경로": "온톨로지", "온톨로지결과": json.dumps({k: out.get(k) for k in 온톨로지결과_칸}, ensure_ascii=False, default=str)}
+           if out.get("분류") else {}),
     )

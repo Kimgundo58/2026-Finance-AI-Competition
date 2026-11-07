@@ -61,6 +61,8 @@ _decisions_컬럼: tuple[str, ...] = (
     "검증사유", "검증코드", "처리단계", "실패단계", "지연ms", "모델", "검색스냅샷", "코퍼스버전",
     "사용자답변", "경로", "온톨로지결과",
 )
+# 판정 행 `온톨로지결과` 에 남기는 화면 값. 판정 기록과 캐시 연결(server/persist.py)이 같이 쓴다
+온톨로지결과_칸: tuple[str, ...] = ("분류", "근거경로", "코드판정", "조건", "금지조건", "해당시조건", "용어풀이", "문의처")
 
 
 class 주입실패(Exception):
@@ -214,8 +216,7 @@ def _decisions_행(상태: _판정상태, 응답: dict) -> dict:
         코퍼스버전=코퍼스버전(상태.cur),
         경로="온톨로지" if 상태.새경로 else "옛",
         # 계획을 다시 열 때 결과 화면에 그대로 보여 줄 값(server/routes_plans.py _live_상세)
-        온톨로지결과=json.dumps({k: 응답.get(k) for k in ("분류", "근거경로", "코드판정", "조건", "금지조건", "해당시조건", "용어풀이", "문의처")},
-                          ensure_ascii=False, default=str) if 상태.새경로 else None)
+        온톨로지결과=json.dumps({k: 응답.get(k) for k in 온톨로지결과_칸}, ensure_ascii=False, default=str) if 상태.새경로 else None)
 
 
 def decisions_저장(cur, 행: dict) -> int | None:

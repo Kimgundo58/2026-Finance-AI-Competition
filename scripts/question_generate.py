@@ -332,6 +332,8 @@ def _새경로_준비(cur, 입력: dict, org_id) -> dict:
                                품목=입력.get("품목"))
     if 조회["게이트"].get("종류") in ("금지", "한도초과"):
         return {"바로": "코드판정"}
+    if 조회["게이트"].get("미확정초과") and 입력.get("부가세구분") in ("포함", "공급가액"):
+        return {"바로": "미확정한도초과"}       # 답해도 가능 · 조건부가 나오지 않는다(합치기). 부가세를 모르면 답으로 풀릴 수 있어 묻는다
     l3 = l3_load.조문_연결조회(cur, org_id) if org_id else []
     검색 = retrieve.검색(cur, 입력.get("질문") or f"{입력.get('용도') or ''} {입력.get('품목') or ''}".strip(), 사업명,
                        top_k=10, 사업필터=orchestrate.사업필터)
