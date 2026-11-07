@@ -334,19 +334,19 @@ def _폼_품목_시험() -> list[tuple[str, bool]]:
     return [("F13: 폼 경로의 정규화 품목은 긴 이름도 입력 그대로다(질문과 판정의 품목 표현이 같다)", bool(결과) and 결과[0].get("품목") == 긴이름)]
 
 
-def _라벨_스윕(cur) -> list[tuple[str, bool]]:
+def _라벨_스윕(cur, 사업명: str = 사업) -> list[tuple[str, bool]]:
     """수정기록_2b F11 · F13 회귀: 실제 규범으로 화면 라벨 전부를 돈다. `가능` 이 코드 상한 없이 나갈 수 있는 라벨, 조건부인데 볼 줄이 하나도 없는 라벨이 없어야 한다.
     공통 사항을 가른 뒤에도 같아야 한다(조건을 숨겨서 판정을 올리지 않는다)."""
     걸린, 줄없음, 수 = [], [], 0
     고정 = L.적용_규범, L.비목_품목금지, L.세목_한도_있음
     L.적용_규범, L.비목_품목금지, L.세목_한도_있음 = _원_적용, _원_품목금지, _원_세목한도
     try:
-        for x in L.레이블_목록(cur, 사업):
+        for x in L.레이블_목록(cur, 사업명):
             if x["비목"] not in 비목_ENUM:
                 continue
             for 금액 in (10_000, 1_000_000):
                 수 += 1
-                g = O.온톨로지_조회(cur, 사업, x["비목"], x["세목"], O.게이트_입력(금액, "포함", {}), 확정=True, 품목=None)["게이트"]
+                g = O.온톨로지_조회(cur, 사업명, x["비목"], x["세목"], O.게이트_입력(금액, "포함", {}), 확정=True, 품목=None)["게이트"]
                 if g["종류"]:
                     continue
                 칸 = O._화면_칸(G.화면_조건(g))
@@ -356,7 +356,8 @@ def _라벨_스윕(cur) -> list[tuple[str, bool]]:
                     줄없음.append(x["표시문"])
     finally:
         L.적용_규범, L.비목_품목금지, L.세목_한도_있음 = 고정
-    return [("라벨 스윕: 라벨을 돌았다", 수 > 0), (f"F11 라벨 {수}행: 코드 상한 없는 행 없음 {걸린}", not 걸린), (f"F13 라벨 {수}행: 조건부 상한인데 화면 줄 없는 행 없음 {줄없음}", not 줄없음)]
+    return [(f"라벨 스윕({사업명}): 라벨을 돌았다", 수 > 0), (f"F11 {사업명} 라벨 {수}행: 코드 상한 없는 행 없음 {걸린}", not 걸린),
+            (f"F13 {사업명} 라벨 {수}행: 조건부 상한인데 화면 줄 없는 행 없음 {줄없음}", not 줄없음)]
 
 
 def _문턱_시험(cur) -> list[tuple[str, bool]]:
@@ -584,7 +585,9 @@ def _시험() -> list[tuple[str, bool]]:
     t.extend(_폼_품목_시험())
     t.extend(_용어_시험())
     with db.connect(autocommit=True) as c:
-        t.extend(_라벨_스윕(c.cursor()))
+        cur = c.cursor()
+        for (사업명,) in cur.execute("SELECT DISTINCT 적용사업 FROM corpus.norms WHERE 적용사업 IS NOT NULL ORDER BY 1").fetchall():
+            t.extend(_라벨_스윕(cur, 사업명))           # 원천에 든 사업 전부
         t.extend(_문턱_시험(c.cursor()))
     return t
 

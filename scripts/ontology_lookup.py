@@ -197,6 +197,14 @@ def _조문_정보(cur, 조문들: list[str], schema: dict) -> dict[str, dict]:
     return out
 
 
+def _다른사업_문서(사업들: list[str]) -> list[str]:
+    """이 사업들 밖 사업 전용 문서의 doc_id(schema.json `문서사업`). 공통 개념의 근거에는 여러 사업의 문서가 합쳐져 있어,
+    판정 문맥에 다른 사업 조문이 들지 않게 개념 근거에서 뺀다. 표에 없는 문서는 공통이다."""
+    schema = _스키마()
+    문서, 사업표 = schema.get("문서키") or {}, schema.get("사업키") or {}
+    return [문서[k] for k, 키 in (schema.get("문서사업") or {}).items() if k in 문서 and 사업표.get(키) not in 사업들]
+
+
 def 근거_조문(cur, 규범들: list[dict], 깊이: int = 3, 대상_id: str | None = None, *, 사업: str | None = None) -> list[dict]:
     """시작 집합 = 규범 근거 + 대상 · 상위 노드의 개념 근거. 나가는 준용 · 위임을 깊이까지 따라간다.
 
@@ -257,8 +265,8 @@ def 근거_조문(cur, 규범들: list[dict], 깊이: int = 3, 대상_id: str | 
     if 대상_id:
         for r in cur.execute(
                 """SELECT DISTINCT doc_id, 조번호, 항호, owner_id FROM corpus.provenance
-                    WHERE owner_kind = '개념' AND owner_id = ANY(%s)
-                    ORDER BY doc_id, 조번호, 항호, owner_id""", (사슬노드,)).fetchall():
+                    WHERE owner_kind = '개념' AND owner_id = ANY(%s) AND doc_id <> ALL(%s)
+                    ORDER BY doc_id, 조번호, 항호, owner_id""", (사슬노드, _다른사업_문서(사업들))).fetchall():
             시작_넣기(r[0], r[1], r[2], "개념근거", 노드순위[r[3]])
 
     시작목록 = sorted(시작)

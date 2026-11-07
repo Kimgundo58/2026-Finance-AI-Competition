@@ -87,13 +87,15 @@ def _덮어쓰기_읽기(문서키: str) -> dict:
     return json.loads(p.read_text(encoding="utf-8")).get("덮어쓰기") or {}
 
 
-def 기존노드() -> list[str]:
-    """이전 묶음에서 확정돼 원천 JSON 에 들어간 개념 ID 목록(5-7b). 새 묶음이 같은 개념을 다시 만들지 않게 한다."""
+def 기존노드(사업명: str | None = None) -> list[str]:
+    """이전 묶음에서 확정돼 원천 JSON 에 들어간 개념 ID 목록(5-7b). 새 묶음이 같은 개념을 다시 만들지 않게 한다.
+    이 사업이 쓸 수 있는 것만 준다(공통 · 이 사업). 다른 사업 전용 개념은 이 사업 조회에서 보이지 않는다(ontology_lookup.py:56)."""
     ids: set[str] = set()
     for 파일 in sorted((저장소 / "ontology").glob("*.json")):
         if 파일.name == "schema.json":
             continue
-        ids.update(c["id"] for c in json.loads(파일.read_text(encoding="utf-8")).get("개념") or [])
+        ids.update(c["id"] for c in json.loads(파일.read_text(encoding="utf-8")).get("개념") or []
+                   if c.get("적용사업") in (None, 사업명))
     return sorted(ids)
 
 
@@ -122,10 +124,17 @@ def 만들기(폴더: Path) -> dict:
                 순서 = {x: i for i, x in enumerate(지정)}
                 고른.sort(key=lambda r: 순서[r[0]])
             호분할 = set(문서.get("호분할") or [])
+            블록접두 = 문서.get("블록접두") or {}             # {"붙임2": ["붙임2/인건비"]}: 그 조에서 이 접두의 블록만(재추출 대상을 좁힌다)
             for 조번호, 조제목, 본문 in 고른:
-                블록 += 블록_만들기(키, 조번호, 조제목, 본문 or "", 호분할=조번호 in 호분할, 덮어쓰기=덮어쓰기)
+                새블록 = 블록_만들기(키, 조번호, 조제목, 본문 or "", 호분할=조번호 in 호분할, 덮어쓰기=덮어쓰기)
+                if 조번호 in 블록접두:
+                    새블록 = [b for b in 새블록 if b["id"].startswith(tuple(f"조:{키}#{x}" for x in 블록접두[조번호]))]
+                블록 += 새블록
     줄 = [f"# 입력 원문 — {폴더.name}", "",
           "각 머리말이 조문 ID 다. 발췌는 이 파일의 본문에서만 따온다. `[원문결함]` 은 DB 본문과 PDF 가 달라 PDF 복원본을 쓴 조문이다.", ""]
+    if 명세.get("인용대응"):         # 옛 판 조번호를 인용하는 규정: 조문 ID 는 현행 판 번호로 쓴다(13차 → 14차, ontology/추출/예비/범위.md)
+        줄 += ["이 규정이 인용한 다른 문서의 조번호는 옛 판 번호다. 관계의 조문 ID 는 아래 오른쪽 번호를 쓰고, 발췌는 원문 표기를 그대로 둔다.", ""]
+        줄 += [f"- {x}" for x in 명세["인용대응"]] + [""]
     for b in 블록:
         줄 += [f"### {b['id']}", f"<!-- {b['머리']}{' [원문결함]' if b['원문결함'] else ''} -->", b["본문"], ""]
     (폴더 / "입력_원문.md").write_text("\n".join(줄), encoding="utf-8")
@@ -136,7 +145,7 @@ def 만들기(폴더: Path) -> dict:
         ensure_ascii=False, indent=1), encoding="utf-8")
     기존 = 폴더 / "입력_기존노드.json"
     if not 기존.exists():
-        기존.write_text(json.dumps(기존노드(), ensure_ascii=False, indent=0) + "\n", encoding="utf-8")
+        기존.write_text(json.dumps(기존노드(스키마["사업키"][명세["사업키"]]), ensure_ascii=False, indent=0) + "\n", encoding="utf-8")
     return {"블록": len(블록), "조문ID": [b["id"] for b in 블록]}
 
 

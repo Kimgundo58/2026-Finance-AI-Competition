@@ -70,6 +70,12 @@ jobs:
       - name: 추출 비교 self-test (DB·LLM 없음)
         run: python scripts/extraction_compare.py --self-test
 
+      - name: 확정표 → 원천 JSON 변환 self-test (DB·LLM 없음)
+        run: python scripts/extraction_to_json.py --self-test
+
+      - name: 추출 실행기록 self-test (DB·LLM 없음)
+        run: python scripts/extraction_run.py --self-test
+
       - name: 용어 풀이 self-test (DB·LLM 없음)
         run: python scripts/ontology_terms.py --self-test
 
