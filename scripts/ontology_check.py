@@ -35,12 +35,11 @@ from _lib import paths  # noqa: E402
 
 ROOT = paths.ensure_on_path()
 
-from ontology_norm import 개념ID_풀이, 규범ID_풀이, 발췌_정규화, 발췌_포함, 조문ID_풀이  # noqa: E402
+from ontology_norm import 개념ID_풀이, 규범ID_풀이, 모든비목, 발췌_정규화, 발췌_포함, 조문ID_풀이  # noqa: E402
 from rule_lookup import _norm  # noqa: E402
 
 원천_기본폴더 = ROOT / "ontology"
 공통_파일 = "공통_L1.json"
-모든비목 = "비목:창업/*"
 
 검수단계_값 = ("AI초안", "AI대조", "AI검증", "사람확정", "재검토")
 검증된_단계 = ("AI검증", "사람확정")

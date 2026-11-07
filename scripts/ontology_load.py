@@ -32,11 +32,10 @@ from _lib import db, paths  # noqa: E402
 ROOT = paths.ensure_on_path()
 
 from ontology_check import 검사오류, 원천_기본폴더, 원천_읽기, 전체_검사, 행_해시, _목록, _원본  # noqa: E402
-from ontology_norm import 조문ID_풀이  # noqa: E402
+from ontology_norm import 모든비목, 조문ID_풀이  # noqa: E402
 from psycopg.types.json import Jsonb  # noqa: E402
 from rule_lookup import _norm  # noqa: E402
 
-모든비목 = "비목:창업/*"
 _보기_상한 = 40
 
 

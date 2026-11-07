@@ -28,10 +28,9 @@ from _lib import paths  # noqa: E402
 
 ROOT = paths.ensure_on_path()
 
-from ontology_norm import 조문ID_풀이, 조번호_표시  # noqa: E402
+from ontology_norm import 모든비목, 조문ID_풀이, 조번호_표시  # noqa: E402
 from rule_lookup import _norm  # noqa: E402
 
-모든비목 = "비목:창업/*"
 준용_관계 = ("준용", "위임")
 _스키마_경로 = ROOT / "ontology" / "schema.json"
 

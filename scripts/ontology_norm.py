@@ -10,6 +10,8 @@ from __future__ import annotations
 import re
 import unicodedata
 
+# 모든 비목에 걸리는 노드. ontology_fund · ontology_context · ontology_lookup · ontology_load · ontology_check 가 쓴다
+모든비목 = "비목:창업/*"
 _따옴표 = str.maketrans({"“": '"', "”": '"', "″": '"', "‘": "'", "’": "'"})
 # 줄 전체가 페이지 표식이거나 본문 사이에 끼어든 `- 14 -`. 숫자 범위 표기(10-20)는 공백이 없어 걸리지 않는다.
 _페이지표식 = re.compile(r"(?:(?<=\s)|^)-\s*\d{1,3}\s*-(?=\s|$)")
