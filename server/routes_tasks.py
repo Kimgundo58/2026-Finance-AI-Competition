@@ -2,7 +2,8 @@
 """할일 API — 계획 상세의 집행 준비 체크리스트와 홈의 다가오는 일정(캘린더).
 
 POST /api/plans/{plan_id}/tasks:sync (판정 결과 반영, persist.판정_저장 도 함수로 호출),
-POST/PATCH /api/plans/{plan_id}/tasks, GET /api/tasks. 체크리스트와 캘린더는
+POST/PATCH /api/plans/{plan_id}/tasks, GET·POST /api/tasks, PATCH·DELETE /api/tasks/{task_id}
+(집행 일정 화면, 계획 없는 일정 포함). 체크리스트와 캘린더는
 tenant.plan_tasks 의 같은 행이고 due_date 유무로만 나뉜다. mock 모드(SUDDOE_MOCK=1)에서는
 mock_data 를 쓰고, live 모드 구현은 `_live_*` 함수에 있다. 동기화는 출처='user' 행과
 사용자가 고친 due_date 를 덮지 않으며, DB 오류는 롤백 후 예외로 전파한다.
@@ -18,7 +19,7 @@ from datetime import timedelta
 
 from fastapi import APIRouter, HTTPException, Query
 
-from ._common import MOCK, 할일구분_ENUM, 트랜잭션, _계정조건, _질의, _실행
+from ._common import 작성자표시, 현재_본인, MOCK, 할일구분_ENUM, 트랜잭션, 현재_account, 현재_org, _계정조건, _질의, _실행
 from . import l3_deadline
 from .l3_deadline import 바이그램
 from .models import (할일, 할일동기화, 할일동기화응답, 할일목록응답, 할일생성, 할일수정)
@@ -145,39 +146,133 @@ class _코드매처:
 # 사용자 직접 추가 — POST /api/plans/{plan_id}/tasks
 # ════════════════════════════════════════════════════════════════════
 
+def _mock_추가(plan_id: int | None, body: 할일생성) -> 할일:
+    새 = max((t["task_id"] for t in mock_data.mock_할일), default=0) + 1
+    행 = {"task_id": 새, "plan_id": plan_id, "출처": "user", "code": None,
+          "구분": body.구분, "항목": body.항목, "설명": body.설명,
+          "due_date": body.due_date.isoformat() if body.due_date else None, "유형": body.유형,
+          "날짜_사용자수정": body.due_date is not None,
+          "상태": body.상태, "계획제목": None}
+    mock_data.mock_할일.append(행)
+    return 할일(**행)
+
+
 @router.post("/api/plans/{plan_id}/tasks", response_model=할일, status_code=201)
 def 추가(plan_id: int, body: 할일생성, org_id: str | None = None) -> 할일:
     if MOCK:
-        새 = max((t["task_id"] for t in mock_data.mock_할일), default=0) + 1
-        행 = {"task_id": 새, "plan_id": plan_id, "출처": "user", "code": None,
-              "구분": body.구분, "항목": body.항목, "설명": body.설명,
-              "due_date": body.due_date, "유형": body.유형,
-              "날짜_사용자수정": body.due_date is not None,
-              "상태": "준비필요", "계획제목": None}
-        mock_data.mock_할일.append(행)
-        return 할일(**행)
+        return _mock_추가(plan_id, body)
     return _live_추가(plan_id, body, org_id)
 
 
+@router.post("/api/tasks", response_model=할일, status_code=201)
+def 일정_추가(body: 할일생성) -> 할일:
+    """지출계획에 묶이지 않은 사용자 일정을 만든다(plan_id NULL). 소유자는 토큰의 기관·계정이다."""
+    if MOCK:
+        return _mock_추가(None, body)
+    org = 현재_org.get()
+    if org is None:
+        raise HTTPException(401, "일정을 저장하려면 로그인이 필요합니다")
+    행 = _질의(
+        'INSERT INTO tenant.plan_tasks '
+        '(org_id, account_id, 작성_account_id, plan_id, 출처, 구분, 항목, 설명, due_date, "유형", 상태, 날짜_사용자수정) '
+        "VALUES (%s,%s,%s,NULL,'user',%s,%s,%s,%s,%s,%s,%s) RETURNING task_id",
+        (org, 현재_account.get(), 현재_본인.get(), body.구분, body.항목, body.설명, body.due_date, body.유형, body.상태,
+         body.due_date is not None),
+    )
+    if not 행:
+        raise HTTPException(503, "일정을 저장하지 못했습니다")
+    return _할일_조회(행[0][0])
+
+
 # ════════════════════════════════════════════════════════════════════
-# 상태·날짜·유형 수정 — PATCH /api/plans/{plan_id}/tasks/{task_id}
+# 수정 — PATCH /api/plans/{plan_id}/tasks/{task_id} · PATCH /api/tasks/{task_id}
 # ════════════════════════════════════════════════════════════════════
+
+_AI행_수정불가 = "규정 점검이 만든 일정은 날짜와 상태만 바꿀 수 있습니다"
+_AI행_보호필드 = {"항목", "설명", "구분"}      # 재점검이 다시 쓰는 값이라 고쳐도 사라진다
+_연동행_수정불가 = "예상 지출일 일정은 지출 계획에서 바꿀 수 있습니다"
+
+
+def _수정_제한(출처: str, 연동: bool, 보낸: set[str]) -> None:
+    """집행 줄은 상태만, 규정 점검이 만든 행은 날짜·상태·유형만 바꿀 수 있다."""
+    if 연동 and 보낸 - {"상태"}:
+        raise HTTPException(409, _연동행_수정불가)
+    if 출처 == "ai" and 보낸 & _AI행_보호필드:
+        raise HTTPException(409, _AI행_수정불가)
+
+
+def _mock_수정(행: dict | None, task_id: int, body: 할일수정) -> 할일:
+    if not 행:
+        raise HTTPException(404, f"할일 {task_id} 을(를) 찾을 수 없습니다")
+    보낸 = body.model_fields_set
+    _수정_제한(행["출처"], bool(행.get("집행예정일_연동")), 보낸)
+    if body.항목 is not None:
+        행["항목"] = body.항목
+    if body.구분 is not None:
+        행["구분"] = body.구분
+    if "설명" in 보낸:
+        행["설명"] = body.설명
+    if body.상태 is not None:
+        행["상태"] = body.상태
+    if "due_date" in 보낸:
+        행["due_date"] = body.due_date.isoformat() if body.due_date else None
+        행["날짜_사용자수정"] = True      # 이후 재판정이 이 날짜를 덮지 않게 한다
+    if body.유형 is not None:
+        행["유형"] = body.유형
+    return 할일(**행)
+
 
 @router.patch("/api/plans/{plan_id}/tasks/{task_id}", response_model=할일)
 def 수정(plan_id: int, task_id: int, body: 할일수정, org_id: str | None = None) -> 할일:
     if MOCK:
         행 = next((t for t in mock_data.mock_할일 if t["task_id"] == task_id), None)
+        return _mock_수정(행, task_id, body)
+    return _live_수정(plan_id, task_id, body, org_id)
+
+
+@router.patch("/api/tasks/{task_id}", response_model=할일)
+def 일정_수정(task_id: int, body: 할일수정, org_id: str | None = None) -> 할일:
+    """집행 일정 화면의 수정. 계획이 없는 일정도 같은 경로를 쓴다."""
+    if MOCK:
+        행 = next((t for t in mock_data.mock_할일 if t["task_id"] == task_id), None)
+        return _mock_수정(행, task_id, body)
+    조건, 인자 = _계정조건(org_id, "t")
+    존재 = _질의(f"SELECT t.출처, t.집행예정일_연동 FROM tenant.plan_tasks t WHERE t.task_id = %s AND {조건}",
+                (task_id, *인자))
+    if not 존재:
+        raise HTTPException(404, f"할일 {task_id} 을(를) 찾을 수 없습니다")
+    return _수정_적용(task_id, 존재[0][0], 존재[0][1], body)
+
+
+# ════════════════════════════════════════════════════════════════════
+# 삭제 — DELETE /api/tasks/{task_id} (사용자가 만든 일정만)
+# ════════════════════════════════════════════════════════════════════
+
+@router.delete("/api/tasks/{task_id}")
+def 일정_삭제(task_id: int, org_id: str | None = None) -> dict:
+    """규정 점검이 만든 행은 지우지 않는다. 지워도 다음 점검이 다시 만들어 사용자가 혼란스럽다."""
+    if MOCK:
+        행 = next((t for t in mock_data.mock_할일 if t["task_id"] == task_id), None)
         if not 행:
             raise HTTPException(404, f"할일 {task_id} 을(를) 찾을 수 없습니다")
-        if body.상태 is not None:
-            행["상태"] = body.상태
-        if body.due_date is not None:
-            행["due_date"] = body.due_date
-            행["날짜_사용자수정"] = True      # 이후 재판정이 이 날짜를 덮지 않게 한다
-        if body.유형 is not None:
-            행["유형"] = body.유형
-        return 할일(**행)
-    return _live_수정(plan_id, task_id, body, org_id)
+        if 행.get("집행예정일_연동"):
+            raise HTTPException(409, _연동행_수정불가)
+        if 행["출처"] != "user":
+            raise HTTPException(409, "규정 점검이 만든 일정은 삭제할 수 없습니다")
+        mock_data.mock_할일.remove(행)
+        return {"삭제": True, "task_id": task_id}
+    조건, 인자 = _계정조건(org_id, "t")
+    존재 = _질의(f"SELECT t.출처, t.집행예정일_연동 FROM tenant.plan_tasks t WHERE t.task_id = %s AND {조건}",
+                (task_id, *인자))
+    if not 존재:
+        raise HTTPException(404, f"할일 {task_id} 을(를) 찾을 수 없습니다")
+    if 존재[0][1]:
+        raise HTTPException(409, _연동행_수정불가)
+    if 존재[0][0] != "user":
+        raise HTTPException(409, "규정 점검이 만든 일정은 삭제할 수 없습니다")
+    if _실행("DELETE FROM tenant.plan_tasks WHERE task_id = %s AND 출처 = 'user'", (task_id,)) < 0:
+        raise HTTPException(503, "일정을 삭제하지 못했습니다")
+    return {"삭제": True, "task_id": task_id}
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -219,15 +314,18 @@ def 목록(
 # DB 컬럼 plan_tasks.코드 는 응답 키 code 로 내보낸다.
 _할일_SELECT = (
     'SELECT t.task_id, t.plan_id, t.출처, t.코드, t.구분, t.항목, t.설명, '
-    't.due_date, t."유형", t.날짜_사용자수정, t.상태, p.제목 '
+    't.due_date, t."유형", t.날짜_사용자수정, t.상태, p.제목, t.집행예정일_연동, t.작성_account_id, w.email '
     'FROM tenant.plan_tasks t LEFT JOIN tenant.expense_plans p ON p.plan_id = t.plan_id '
+    'LEFT JOIN tenant.accounts w ON w.account_id = t.작성_account_id '
 )
 _할일_컬럼 = ("task_id", "plan_id", "출처", "code", "구분", "항목", "설명",
-             "due_date", "유형", "날짜_사용자수정", "상태", "계획제목")
+             "due_date", "유형", "날짜_사용자수정", "상태", "계획제목", "집행예정일_연동",
+             "작성_account_id", "작성자이메일")
 
 
 def _행_할일(행: tuple) -> dict:
     d = dict(zip(_할일_컬럼, 행))
+    d["작성자"] = 작성자표시(d.pop("작성_account_id"), d.pop("작성자이메일"))
     if d.get("due_date") is not None:
         d["due_date"] = d["due_date"].isoformat()
     return d
@@ -404,10 +502,10 @@ def _live_추가(plan_id: int, body: 할일생성, org_id: str | None = None) ->
     날짜수정 = body.due_date is not None
     행 = _질의(
         'INSERT INTO tenant.plan_tasks '
-        '(org_id, account_id, plan_id, 출처, 구분, 항목, 설명, due_date, "유형", 날짜_사용자수정) '
-        "VALUES (%s,%s,%s,'user',%s,%s,%s,%s,%s,%s) RETURNING task_id",
-        (계획org, 계획account, plan_id, body.구분, body.항목, body.설명, body.due_date, body.유형,
-         날짜수정),
+        '(org_id, account_id, 작성_account_id, plan_id, 출처, 구분, 항목, 설명, due_date, "유형", 상태, 날짜_사용자수정) '
+        "VALUES (%s,%s,%s,%s,'user',%s,%s,%s,%s,%s,%s,%s) RETURNING task_id",
+        (계획org, 계획account, 현재_본인.get(), plan_id, body.구분, body.항목, body.설명, body.due_date, body.유형,
+         body.상태, 날짜수정),
     )
     if not 행:
         raise HTTPException(500, "할일 생성에 실패했습니다")
@@ -415,35 +513,159 @@ def _live_추가(plan_id: int, body: 할일생성, org_id: str | None = None) ->
 
 
 def _live_수정(plan_id: int, task_id: int, body: 할일수정, org_id: str | None = None) -> 할일:
-    """할일 상태·날짜·유형을 고친다. 소유 확인은 할일의 org_id 가 아니라 계획(expense_plans 의 org·계정)
-    기준이다. `_live_추가`·`_live_동기화` 와 기준이 같아야 추가는 되는데 수정은 404 인 상황이 생기지 않는다.
+    """소유 확인은 할일의 org_id 가 아니라 계획(expense_plans 의 org·계정) 기준이다. `_live_추가`·
+    `_live_동기화` 와 기준이 같아야 추가는 되는데 수정은 404 인 상황이 생기지 않는다.
     """
     조건, org인자 = _계정조건(org_id, "p")
-    존재 = _질의(f'SELECT 1 FROM tenant.plan_tasks t '
+    존재 = _질의(f'SELECT t.출처, t.집행예정일_연동 FROM tenant.plan_tasks t '
                 f'JOIN tenant.expense_plans p ON p.plan_id = t.plan_id '
                 f'WHERE t.task_id = %s AND t.plan_id = %s AND {조건}',
                 (task_id, plan_id, *org인자))
     if not 존재:
         raise HTTPException(404, f"할일 {task_id} 을(를) 찾을 수 없습니다")
+    return _수정_적용(task_id, 존재[0][0], 존재[0][1], body)
 
+
+def _수정_적용(task_id: int, 출처: str, 연동: bool, body: 할일수정) -> 할일:
+    """소유 확인을 마친 행을 고친다. 보낸 필드만 바뀌고, due_date 를 null 로 보내면 날짜를 비운다."""
+    보낸 = body.model_fields_set
+    _수정_제한(출처, 연동, 보낸)
     수정절: list[str] = []
     인자: list = []
+    if body.항목 is not None:
+        수정절.append("항목=%s")
+        인자.append(body.항목)
+    if "설명" in 보낸:
+        수정절.append("설명=%s")
+        인자.append(body.설명)
+    if body.구분 is not None:
+        수정절.append("구분=%s")
+        인자.append(body.구분)
     if body.상태 is not None:
         수정절.append("상태=%s")
         인자.append(body.상태)
-    if body.due_date is not None:
+    if "due_date" in 보낸:
         수정절.append("due_date=%s")
         인자.append(body.due_date)
-        수정절.append("날짜_사용자수정=true")     # 이후 재판정이 이 날짜를 덮지 않게 한다
+        수정절.append("날짜_사용자수정=true")     # 이후 재판정이 이 날짜를 덮지 않게 한다(비운 날짜도 같다)
     if body.유형 is not None:
         수정절.append('"유형"=%s')
         인자.append(body.유형)
 
     if 수정절:
-        인자 += [task_id, plan_id]
-        _실행(f'UPDATE tenant.plan_tasks SET {", ".join(수정절)} '
-               'WHERE task_id=%s AND plan_id=%s', tuple(인자))
+        인자.append(task_id)
+        if _실행(f'UPDATE tenant.plan_tasks SET {", ".join(수정절)} WHERE task_id=%s', tuple(인자)) < 0:
+            raise HTTPException(503, "일정을 저장하지 못했습니다")
     return _할일_조회(task_id)
+
+
+# ════════════════════════════════════════════════════════════════════
+# 예상 지출일 변경 — PATCH /api/plans/{plan_id} 가 부른다
+# ════════════════════════════════════════════════════════════════════
+
+def 집행줄_유지(cur, plan_id: int, 계획org, 계획account, 제목: str, 집행예정일) -> None:
+    """계획의 집행 줄(집행예정일_연동=true)을 집행예정일에 맞춘다. 재점검이 지우지 않게 출처는 'user' 다."""
+    if 집행예정일 is None:
+        # 이미 완료한 집행 기록은 남긴다
+        cur.execute("DELETE FROM tenant.plan_tasks "
+                    "WHERE plan_id = %s AND 집행예정일_연동 AND 상태 <> '완료'", (plan_id,))
+        return
+    cur.execute("SELECT 상태 FROM tenant.plan_tasks WHERE plan_id = %s AND 집행예정일_연동", (plan_id,))
+    줄 = cur.fetchone()
+    if 줄 is None:
+        cur.execute(
+            "INSERT INTO tenant.plan_tasks (org_id, account_id, plan_id, 출처, 구분, 항목, due_date, "
+            "상태, 날짜_사용자수정, 집행예정일_연동) "
+            "VALUES (%s,%s,%s,'user','집행',%s,%s,'집행예정',true,true)",
+            (계획org, 계획account, plan_id, f"{제목} 집행", 집행예정일))
+    elif 줄[0] != "완료":
+        # 완료한 줄은 실제 지출일을 담고 있으므로 예상 지출일을 따라가지 않는다
+        cur.execute("UPDATE tenant.plan_tasks SET due_date = %s WHERE plan_id = %s AND 집행예정일_연동",
+                    (집행예정일, plan_id))
+
+
+def 지출일_변경_반영(cur, plan_id: int, 계획org, 이전일, 새날짜, 일정이동: bool) -> None:
+    """집행예정일이 바뀔 때 연결 일정을 맞춘다. 호출자의 트랜잭션 안에서 실행한다.
+
+    같이 옮기기: 완료 아닌 날짜 있는 행을 일수 차이만큼 옮기고, 규정 기한이 있는데 날짜가 없던 AI 행은 새 지출일로 계산한다.
+    이전 지출일이 없으면 옮길 기준이 없으므로, 사용자가 고치지 않은 AI 행은 날짜가 있어도 새 지출일로 다시 계산한다.
+    지출일만: 남긴 행에 날짜_사용자수정=true 를 넣는다. 안 넣으면 다음 재점검이 `_동기화_적용` 에서 날짜를 덮는다.
+    완료 행은 어느 쪽이든 그대로 둔다.
+    """
+    if 새날짜 is None:
+        return
+    남길_조건 = "plan_id = %s AND due_date IS NOT NULL AND NOT 집행예정일_연동"
+    if not 일정이동:
+        cur.execute(f"UPDATE tenant.plan_tasks SET 날짜_사용자수정 = true WHERE {남길_조건}", (plan_id,))
+        return
+    cur.execute(f"UPDATE tenant.plan_tasks SET 날짜_사용자수정 = true WHERE {남길_조건} AND 상태 = '완료'",
+                (plan_id,))
+    if 이전일 is not None:
+        cur.execute(f"UPDATE tenant.plan_tasks SET due_date = due_date + %s "
+                    f"WHERE {남길_조건} AND 상태 <> '완료'", ((새날짜 - 이전일).days, plan_id))
+    cur.execute("SELECT task_id, 코드, 항목, 설명 FROM tenant.plan_tasks "
+                "WHERE plan_id = %s AND 출처 = 'ai' AND (due_date IS NULL OR %s) "
+                "AND NOT 날짜_사용자수정 AND 상태 <> '완료'", (plan_id, 이전일 is None))
+    날짜없음 = cur.fetchall()
+    if not 날짜없음:
+        return
+    체크항목 = _체크항목_표(cur)
+    l3조문 = l3_deadline.조문_조회(cur, 계획org) if 계획org else []
+    for task_id, 코드, 항목, 설명 in 날짜없음:
+        마스터 = 체크항목.get(코드) or {}
+        날짜 = _마감일_계산(새날짜, l3조문, 항목, 설명, 마스터.get("오프셋"), 마스터.get("기한근거"))
+        if 날짜:
+            cur.execute("UPDATE tenant.plan_tasks SET due_date = %s WHERE task_id = %s", (날짜, task_id))
+
+
+# ════════════════════════════════════════════════════════════════════
+# 진행 단계 — 계획 상세·목록의 단계요약
+# ════════════════════════════════════════════════════════════════════
+
+_단계_순서 = ("사전승인·확인", "견적", "계약", "집행", "증빙")
+
+
+def _단계(구분: str, 유형: str) -> str:
+    if 구분 == "결제후" or 유형 == "증빙":
+        return "증빙"
+    if 구분 == "집행":
+        return "집행"
+    if 유형 == "계약":
+        return "계약"
+    if 유형 == "비교견적":
+        return "견적"
+    return "사전승인·확인"
+
+
+def 단계요약_계산(행들: list[tuple[str, str, str]]) -> dict:
+    """(구분, 유형, 상태) 목록을 5단계로 묶는다. DB 를 읽지 않는 순수 함수다.
+
+    항목이 없는 단계는 「항목없음」이다. 규정이 필요 없다고 판단한 것이 아니다.
+    """
+    칸 = {단계: [0, 0] for 단계 in _단계_순서}
+    for 구분, 유형, 상태 in 행들:
+        c = 칸[_단계(구분, 유형)]
+        c[1] += 1
+        if 상태 == "완료":
+            c[0] += 1
+    요약 = []
+    for 단계, (완료, 전체) in 칸.items():
+        요약.append({"단계": 단계, "완료": 완료, "전체": 전체, "상태": (
+            "항목없음" if 전체 == 0 else "완료" if 완료 == 전체 else "진행중" if 완료 else "시작전")})
+    현재 = next((s["단계"] for s in 요약 if s["상태"] in ("진행중", "시작전")), None)
+    return {"단계요약": 요약, "현재단계": 현재}
+
+
+def 실제지출_반영(cur, plan_id: int, 계획org, 계획account, 제목: str, 실제지출일) -> None:
+    """실제 지출을 등록하면 집행 줄을 완료로 만들고 날짜를 실제 지출일로 맞춘다. 줄이 없으면 실제 지출일로 만든다."""
+    cur.execute("UPDATE tenant.plan_tasks SET 상태 = '완료', due_date = %s WHERE plan_id = %s AND 집행예정일_연동",
+                (실제지출일, plan_id))
+    if cur.rowcount == 0:
+        cur.execute(
+            "INSERT INTO tenant.plan_tasks (org_id, account_id, plan_id, 출처, 구분, 항목, due_date, "
+            "상태, 날짜_사용자수정, 집행예정일_연동) "
+            "VALUES (%s,%s,%s,'user','집행',%s,%s,'완료',true,true)",
+            (계획org, 계획account, plan_id, f"{제목} 집행", 실제지출일))
 
 
 def _live_목록(org_id: str | None) -> list[dict]:

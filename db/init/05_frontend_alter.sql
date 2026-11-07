@@ -10,9 +10,19 @@ DO $$
 BEGIN
     ALTER TABLE tenant.plan_tasks
         ADD CONSTRAINT plan_tasks_유형_check
-        CHECK ("유형" IN ('기타','계약','비교견적'));
+        CHECK ("유형" IN ('기타','계약','비교견적','사전승인','사전확인','증빙'));
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
+
+-- plan_tasks.집행예정일_연동 — 이 행의 due_date 는 계획의 집행예정일과 같다(계획당 1행).
+ALTER TABLE tenant.plan_tasks
+    ADD COLUMN IF NOT EXISTS 집행예정일_연동 BOOLEAN NOT NULL DEFAULT false;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_tasks_집행줄 ON tenant.plan_tasks (plan_id) WHERE 집행예정일_연동;
+
+-- expense_plans.실제지출일·실제지출액 — 화면의 「실제 지출 등록」. 판정에는 쓰지 않는다.
+ALTER TABLE tenant.expense_plans
+    ADD COLUMN IF NOT EXISTS "실제지출일" DATE,
+    ADD COLUMN IF NOT EXISTS "실제지출액" NUMERIC;
 
 COMMENT ON COLUMN tenant.plan_tasks."유형" IS
     '캘린더 배지용 표시 값. 판정(4종)과도 plan_tasks.상태 와도 무관하다.';
@@ -57,7 +67,7 @@ BEGIN
     ALTER TABLE tenant.l3_documents DROP CONSTRAINT IF EXISTS l3_documents_파싱품질_check;
     ALTER TABLE tenant.l3_documents
         ADD CONSTRAINT l3_documents_파싱품질_check
-        CHECK ("파싱품질" IN ('pending','pass','warn','fail'));
+        CHECK ("파싱품질" IN ('pending','pass','warn','fail','review'));
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
@@ -70,3 +80,11 @@ COMMENT ON COLUMN tenant.l3_documents."파싱품질" IS
 -- expense_plans.질문원문 NOT NULL 은 유지한다. 폼 경로는 폼 값을 문장으로 합성해 채운다.
 --   합성 문장을 다시 LLM 입력으로 쓰지 않는다. 필드→문장→필드 왕복은 정보를 잃는다.
 -- expense_plans.용도·하위항목 은 정규화 JSONB 안에 두고 컬럼으로 따로 빼지 않는다.
+
+-- 올린 문서가 세부기준이 맞는지 판별한 결과와 같은 파일 재사용용 해시(scripts/l3_doc_check.py). 'review' 는 사용자 확인 대기다.
+ALTER TABLE tenant.l3_documents
+    ADD COLUMN IF NOT EXISTS "검토결과" JSONB,
+    ADD COLUMN IF NOT EXISTS sha256 TEXT;
+CREATE INDEX IF NOT EXISTS ix_l3_documents_sha ON tenant.l3_documents (org_id, sha256);
+-- 판정이 어떤 기준 문서로 점검했는가(화면 안내용). 상태·문서명만 둔다.
+ALTER TABLE tenant.decisions ADD COLUMN IF NOT EXISTS "기준문서" JSONB;

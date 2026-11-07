@@ -13,6 +13,7 @@
 """
 from __future__ import annotations
 
+from datetime import date
 from typing import Any, Literal
 
 from pydantic import AliasChoices, BaseModel, Field, computed_field, model_validator
@@ -113,6 +114,10 @@ class 판정요청(BaseModel):
 # --- 할일 (plan_tasks) ---
 # 체크리스트와 캘린더는 같은 테이블의 같은 행이다. due_date 가 있으면 캘린더에도 표시한다.
 
+할일유형 = Literal["기타", "계약", "비교견적", "사전승인", "사전확인", "증빙"]
+할일상태 = Literal["준비필요", "집행예정", "완료"]
+
+
 class 할일(BaseModel):
     task_id: int
     plan_id: int | None = None         # null 이면 계획과 무관한 사용자 일정
@@ -123,10 +128,12 @@ class 할일(BaseModel):
     항목: str
     설명: str | None = None
     due_date: str | None = None        # null 이면 체크리스트에만, 값이 있으면 캘린더에도 표시
-    유형: Literal["기타", "계약", "비교견적"] = "기타"
+    유형: 할일유형 = "기타"
     날짜_사용자수정: bool = False
-    상태: Literal["준비필요", "집행예정", "완료"] = "준비필요"
+    상태: 할일상태 = "준비필요"
     계획제목: str | None = None        # 캘린더 행에 연결된 지출계획 제목
+    작성자: str | None = None          # 다른 구성원이 만든 일정이면 이메일 앞부분
+    집행예정일_연동: bool = False      # true 면 이 행의 due_date 는 계획의 집행예정일과 같다(계획 수정으로만 바뀐다)
 
     @computed_field  # 구 이름 호환(제거 예정: 다음 릴리스)
     @property
@@ -136,18 +143,22 @@ class 할일(BaseModel):
 
 class 할일생성(BaseModel):
     """사용자가 직접 추가하는 할일. 출처는 서버가 'user' 로 고정한다(재판정해도 바뀌지 않는다)."""
-    항목: str
-    설명: str | None = None
+    항목: str = Field(min_length=1, max_length=300)
+    설명: str | None = Field(default=None, max_length=2000)
     구분: Literal["결제전", "결제후", "집행"] = "결제전"
-    due_date: str | None = None
-    유형: Literal["기타", "계약", "비교견적"] = "기타"
+    due_date: date | None = None
+    유형: 할일유형 = "기타"
+    상태: 할일상태 = "준비필요"
 
 
 class 할일수정(BaseModel):
-    """할일 상태 변경·날짜 지정. 보낸 필드만 바뀐다."""
-    상태: Literal["준비필요", "집행예정", "완료"] | None = None
-    due_date: str | None = None
-    유형: Literal["기타", "계약", "비교견적"] | None = None
+    """할일 수정. 보낸 필드만 바뀐다. due_date 를 null 로 보내면 날짜를 비운다(날짜 미정으로 옮긴다)."""
+    항목: str | None = Field(default=None, min_length=1, max_length=300)
+    설명: str | None = Field(default=None, max_length=2000)
+    구분: Literal["결제전", "결제후", "집행"] | None = None
+    상태: 할일상태 | None = None
+    due_date: date | None = None
+    유형: 할일유형 | None = None
 
 
 class 할일동기화(BaseModel):
@@ -201,6 +212,28 @@ class 계획생성(BaseModel):
     org_id: str | None = None
 
 
+class 계획수정(BaseModel):
+    """지출계획 수정. 보낸 필드만 바뀐다. 집행예정일을 null 로 보내면 지출일을 비운다."""
+    집행예정일: date | None = None
+    일정이동: bool = False             # true 면 완료 안 된 연결 일정을 지출일과 같은 일수만큼 옮긴다
+    실제지출일: date | None = None     # 실제 지출 등록. 실제지출액과 함께 보내고 집행 단계를 완료로 만든다
+    실제지출액: float | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def _실제지출_같이(self) -> "계획수정":
+        if (self.실제지출일 is None) != (self.실제지출액 is None):
+            raise ValueError("실제 지출일과 지출액은 함께 보내야 합니다")
+        return self
+
+
+class 단계항목(BaseModel):
+    """지출 건의 진행 단계 한 칸. plan_tasks 에서 계산하고 저장하지 않는다."""
+    단계: Literal["사전승인·확인", "견적", "계약", "집행", "증빙"]
+    상태: Literal["완료", "진행중", "시작전", "항목없음"]
+    완료: int = 0
+    전체: int = 0
+
+
 class 계획요약(BaseModel):
     """계획 목록 표의 한 행."""
     plan_id: int
@@ -212,6 +245,10 @@ class 계획요약(BaseModel):
     updated_at: str | None = None      # 최근 수정일
     사업명: str | None = None
     상태: Literal["draft", "judged"] = "draft"   # 진행 상태이지 판정 값이 아니다
+    실제지출일: str | None = None
+    실제지출액: float | None = None
+    단계요약: list[단계항목] = Field(default_factory=list)
+    현재단계: str | None = None        # 완료 안 된 첫 단계. 항목이 없거나 전부 끝났으면 null
 
 
 class 계획통계(BaseModel):
@@ -235,6 +272,76 @@ class 계획목록응답(BaseModel):
     항목: list[계획요약] = Field(default_factory=list)
 
 
+class 첨부항목(BaseModel):
+    attachment_id: str
+    원본파일명: str
+    크기: int
+    # 증빙 항목에 올린 파일이면 그 항목의 task_id
+    task_id: int | None = None
+    created_at: str | None = None
+    # 다른 구성원이 올렸으면 이메일 앞부분
+    작성자: str | None = None
+
+
+class 팀구성원(BaseModel):
+    account_id: str
+    이메일: str
+    나: bool = False
+    대표: bool = False
+
+
+class 팀정보(BaseModel):
+    팀이름: str
+    사업명: str
+    내역할: Literal["대표", "구성원"]
+    구성원: list[팀구성원] = Field(default_factory=list)
+    # 만들거나 재발급한 응답에만 있다. 서버는 해시만 저장해 다시 보여 줄 수 없다.
+    초대코드: str | None = None
+    초대코드_만료: str | None = None
+
+
+class 팀응답(BaseModel):
+    팀: 팀정보 | None = None
+
+
+class 팀만들기입력(BaseModel):
+    팀이름: str = Field(min_length=1, max_length=40)
+    사업명: str = Field(min_length=1, max_length=100)
+
+
+class 초대코드입력(BaseModel):
+    초대코드: str = Field(min_length=1, max_length=20)
+
+
+class 판정피드백(BaseModel):
+    평가: Literal["맞음", "틀림"]
+    이유: Literal["판정이 다름", "근거가 다름", "기타"] | None = None
+    의견: str | None = None
+
+
+class 팀평가항목(BaseModel):
+    """같은 판정에 다른 구성원이 남긴 평가."""
+    작성자: str
+    평가: Literal["맞음", "틀림"]
+    이유: Literal["판정이 다름", "근거가 다름", "기타"] | None = None
+    의견: str | None = None
+
+
+class 피드백입력(판정피드백):
+    의견: str | None = Field(default=None, max_length=1000)
+
+    @model_validator(mode="after")
+    def _평가별_정리(self):
+        """맞았어요에는 이유·의견을 남기지 않고, 틀렸어요에는 이유가 있어야 한다."""
+        if self.평가 == "맞음":
+            self.이유 = self.의견 = None
+        elif self.이유 is None:
+            raise ValueError("틀렸어요에는 이유가 필요합니다")
+        else:
+            self.의견 = (self.의견 or "").strip() or None
+        return self
+
+
 class 계획상세(계획요약):
     질문원문: str | None = None
     용도: str | None = None
@@ -246,6 +353,10 @@ class 계획상세(계획요약):
     판정상세: dict[str, Any] | None = None
     # 최신 판정에 반영한 확인 질문과 답 [{질문문, 답}]. 결과 화면의 「확인한 내용」과 같다
     사용자답변: list[dict[str, Any]] = Field(default_factory=list)
+    # 지금 계정이 최신 판정에 남긴 평가. 재점검하면 새 판정이라 비어 있다
+    내피드백: 판정피드백 | None = None
+    팀평가: list[팀평가항목] = Field(default_factory=list)
+    첨부: list[첨부항목] = Field(default_factory=list)
     할일: list[_할일] = Field(default_factory=list)
     created_at: str | None = None
 
@@ -257,13 +368,16 @@ class L3업로드응답(BaseModel):
     파일명: str
     확장자: str
     # 업로드 요청은 접수까지만 하고 202 를 돌려준다. 파싱은 백그라운드 작업이 한다.
-    상태: Literal["파싱대기", "파싱중", "완료", "실패"] = "파싱대기"
+    # 확인필요: 다 읽었지만 세부기준이 맞는지 사용자 확인을 기다린다. 적용안함: 사용자가 쓰지 않기로 했다.
+    상태: Literal["파싱대기", "파싱중", "완료", "실패", "확인필요", "적용안함"] = "파싱대기"
     조_건수: int | None = None
     # 등록된 규정에서 찾지 못한 상위 규정 참조. 업로드 실패 안내에 쓴다
     미해결참조: list[dict[str, Any]] = Field(default_factory=list)
     메시지: str | None = None
     # 상태가 '완료' 여도 warn(조문은 추출했지만 품질이 낮음)과 pass 를 프론트가 구분할 수 있게 한다
-    파싱품질: Literal["pending", "pass", "warn", "fail"] | None = None
+    파싱품질: Literal["pending", "pass", "warn", "fail", "review"] | None = None
+    # 확인필요일 때 사용자에게 보여 줄 이유
+    검토이유: str | None = None
     # 실패 분류 코드(스캔본·보호문서·조문없음·중단 등). 실패가 아니면 null. 안내 문구는 메시지에 있다
     실패사유: str | None = None
     # 이 기관이 지금 판정에 쓰는 L3 문서 이름(이 문서일 수도 있다). 없으면 null — 상위 규정만으로 판정한다
@@ -287,8 +401,10 @@ class L3현재문서(BaseModel):
     시행일: str | None = None
     # created_at 값. 시행일이 대부분 NULL 이라 화면에는 이 값을 표시한다
     등록일: str | None = None
-    파싱품질: Literal["pending", "pass", "warn", "fail"] | None = None
+    파싱품질: Literal["pending", "pass", "warn", "fail", "review"] | None = None
     조_건수: int = 0
+    # 파싱품질이 review 일 때 사용자에게 보여 줄 이유
+    검토이유: str | None = None
     # 텍스트를 얻은 방식(l3_documents.extraction). 'ocr' 이면 스캔본을 OCR 로 읽은 문서다
     추출방식: str | None = None
 

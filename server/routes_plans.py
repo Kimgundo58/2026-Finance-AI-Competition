@@ -12,14 +12,14 @@ tenant.expense_plans, tenant.decisions, tenant.plan_tasks 이다.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from ._common import MOCK, 탭_판정, _jsonb, _계정조건, _질의, _실행
+from ._common import 작성자표시, MOCK, 탭_판정, 트랜잭션, _jsonb, _계정조건, _질의, _실행
 from .judge_response import 구_판정키_포함, 사용자답변_공개, 할일_공개
-from .models import 계획목록응답, 계획상세, 계획생성, 계획통계, 계획요약
-from . import auth, mock_data
+from .models import 계획목록응답, 계획상세, 계획생성, 계획수정, 계획통계, 계획요약
+from . import auth, mock_data, routes_attachments, routes_feedback, routes_tasks
 
 router = APIRouter(prefix="/api/plans", tags=["지출계획"])
 
@@ -44,6 +44,7 @@ def 목록(
     org_id: str | None = None,
 ) -> 계획목록응답:
     행 = mock_data.mock_계획요약() if MOCK else _live_목록(org_id)
+    _단계요약_붙이기(행, org_id)
     통계 = 계획통계(**(mock_data.mock_통계() if MOCK else _live_통계(org_id)))
 
     # 통계는 필터 적용 전 전체 기준이다. 탭 배지 숫자가 필터에 따라 바뀌면 안 된다.
@@ -54,6 +55,22 @@ def 목록(
         통계=통계, 건수=len(필터결과), 페이지=페이지, 크기=크기,
         항목=[계획요약(**r) for r in 필터결과[시작:시작 + 크기]],
     )
+
+
+def _단계요약_붙이기(행: list[dict], org_id: str | None) -> None:
+    """목록의 단계요약을 SELECT 한 번으로 채운다(계획마다 조회하지 않는다)."""
+    할일별: dict[int, list[tuple[str, str, str]]] = {}
+    if MOCK:
+        for t in mock_data.mock_할일:
+            할일별.setdefault(t["plan_id"], []).append((t["구분"], t["유형"], t["상태"]))
+    else:
+        조건, 인자 = _계정조건(org_id, "t")
+        for plan_id, 구분, 유형, 상태 in _질의(
+                f'SELECT t.plan_id, t.구분, t."유형", t.상태 FROM tenant.plan_tasks t '
+                f'WHERE t.plan_id IS NOT NULL AND {조건}', 인자):
+            할일별.setdefault(plan_id, []).append((구분, 유형, 상태))
+    for r in 행:
+        r.update(routes_tasks.단계요약_계산(할일별.get(r["plan_id"], [])))
 
 
 def _필터(행: list[dict], 탭, 사업명, 확정비목, q, 금액_최소, 금액_최대) -> list[dict]:
@@ -155,6 +172,9 @@ def 생성(요청: Request, body: 계획생성) -> 계획상세:
             "정규화": body.정규화, "latest_decision_id": None,
         }
         mock_data.mock_계획.append(행)
+        if body.집행예정일:
+            _mock_지출일_변경({**행, "집행예정일": None}, 계획수정(
+                집행예정일=date.fromisoformat(body.집행예정일)))
         return 계획상세(**행, 할일=[], 판정상세=None)
     return _live_생성(body, org_id=_계획_org(요청, body.org_id),
                      account_id=auth.검증된_account(요청))
@@ -185,16 +205,94 @@ def 상세(plan_id: int, org_id: str | None = None) -> 계획상세:
             raise HTTPException(404, f"지출계획 {plan_id} 을(를) 찾을 수 없습니다")
         할일 = [t for t in mock_data.mock_할일 if t["plan_id"] == plan_id]
         # 생성() 이 만든 행에는 '정규화' 키가 있고 시드 데이터에는 없어서 병합해 넘긴다
-        return 계획상세(**{**행, "정규화": 행.get("정규화") or {}},
-                       할일=할일, 판정상세=None)
+        return 계획상세(**{**행, "정규화": 행.get("정규화") or {}}, 할일=할일, 판정상세=None,
+                       내피드백=routes_feedback.내피드백_조회(행.get("latest_decision_id")),
+                       첨부=routes_attachments.계획_첨부목록(plan_id),
+                       **routes_tasks.단계요약_계산([(t["구분"], t["유형"], t["상태"]) for t in 할일]))
     return _live_상세(plan_id, org_id)
+
+
+@router.patch("/{plan_id}", response_model=계획상세)
+def 수정(plan_id: int, body: 계획수정, org_id: str | None = None) -> 계획상세:
+    """예상 지출일을 바꾼다. 판정 경로는 집행예정일을 읽지 않아 판정은 그대로다."""
+    if MOCK:
+        행 = next((p for p in mock_data.mock_계획 if p["plan_id"] == plan_id), None)
+        if not 행:
+            raise HTTPException(404, f"지출계획 {plan_id} 을(를) 찾을 수 없습니다")
+        if "집행예정일" in body.model_fields_set:
+            _mock_지출일_변경(행, body)
+        if body.실제지출일:
+            _mock_실제지출(행, body)
+        return 상세(plan_id)
+    조건, org인자 = _계정조건(org_id, "p")
+    with 트랜잭션() as cur:
+        cur.execute(f'SELECT p.org_id, p.account_id, p.제목, p."집행예정일" FROM tenant.expense_plans p '
+                    f'WHERE p.plan_id = %s AND {조건} FOR UPDATE', (plan_id, *org인자))
+        계획 = cur.fetchone()
+        if not 계획:
+            raise HTTPException(404, f"지출계획 {plan_id} 을(를) 찾을 수 없습니다")
+        계획org, 계획account, 제목, 이전일 = 계획
+        if "집행예정일" in body.model_fields_set and body.집행예정일 != 이전일:
+            cur.execute('UPDATE tenant.expense_plans SET "집행예정일" = %s WHERE plan_id = %s',
+                        (body.집행예정일, plan_id))
+            routes_tasks.집행줄_유지(cur, plan_id, 계획org, 계획account, 제목, body.집행예정일)
+            routes_tasks.지출일_변경_반영(cur, plan_id, 계획org, 이전일, body.집행예정일, body.일정이동)
+        if body.실제지출일:
+            cur.execute('UPDATE tenant.expense_plans SET "실제지출일" = %s, "실제지출액" = %s WHERE plan_id = %s',
+                        (body.실제지출일, body.실제지출액, plan_id))
+            routes_tasks.실제지출_반영(cur, plan_id, 계획org, 계획account, 제목, body.실제지출일)
+    return _live_상세(plan_id, org_id)
+
+
+def _mock_실제지출(행: dict, body: 계획수정) -> None:
+    행["실제지출일"], 행["실제지출액"] = body.실제지출일.isoformat(), body.실제지출액
+    연동 = next((t for t in mock_data.mock_할일
+                if t["plan_id"] == 행["plan_id"] and t.get("집행예정일_연동")), None)
+    if 연동:
+        연동["상태"], 연동["due_date"] = "완료", body.실제지출일.isoformat()
+        return
+    mock_data.mock_할일.append({
+        "task_id": max((t["task_id"] for t in mock_data.mock_할일), default=0) + 1,
+        "plan_id": 행["plan_id"], "출처": "user", "code": None, "구분": "집행",
+        "항목": f'{행["제목"]} 집행', "설명": None, "due_date": body.실제지출일.isoformat(), "유형": "기타",
+        "날짜_사용자수정": True, "상태": "완료", "계획제목": 행["제목"], "집행예정일_연동": True})
+
+
+def _mock_지출일_변경(행: dict, body: 계획수정) -> None:
+    새날짜 = body.집행예정일
+    이전일 = date.fromisoformat(행["집행예정일"]) if 행.get("집행예정일") else None
+    행["집행예정일"] = 새날짜.isoformat() if 새날짜 else None
+    if 새날짜 == 이전일:
+        return
+    할일들 = [t for t in mock_data.mock_할일 if t["plan_id"] == 행["plan_id"]]
+    연동 = next((t for t in 할일들 if t.get("집행예정일_연동")), None)
+    if 새날짜 is None:
+        if 연동 and 연동["상태"] != "완료":
+            mock_data.mock_할일.remove(연동)
+        return
+    if 연동:
+        if 연동["상태"] != "완료":
+            연동["due_date"] = 새날짜.isoformat()
+    else:
+        mock_data.mock_할일.append({
+            "task_id": max((t["task_id"] for t in mock_data.mock_할일), default=0) + 1,
+            "plan_id": 행["plan_id"], "출처": "user", "code": None, "구분": "집행",
+            "항목": f'{행["제목"]} 집행', "설명": None, "due_date": 새날짜.isoformat(), "유형": "기타",
+            "날짜_사용자수정": True, "상태": "집행예정", "계획제목": 행["제목"], "집행예정일_연동": True})
+    for t in 할일들:
+        if t.get("집행예정일_연동") or not t.get("due_date"):
+            continue
+        if not body.일정이동 or t["상태"] == "완료":
+            t["날짜_사용자수정"] = True
+        elif 이전일:
+            t["due_date"] = (date.fromisoformat(t["due_date"]) + (새날짜 - 이전일)).isoformat()
 
 
 @router.delete("/{plan_id}", status_code=200)
 def 삭제(plan_id: int, org_id: str | None = None) -> dict:
     """지출계획 하나를 지운다. 요청한 org 의 계획만 지워진다.
 
-    FK 설정상 plan_tasks 는 CASCADE 로 같이 삭제되고, decisions 는 SET NULL 로 연결만 끊긴다
+    FK 설정상 plan_tasks·plan_attachments 는 CASCADE 로 같이 삭제되고(첨부 파일도 지운다), decisions 는 SET NULL 로 연결만 끊긴다
     (판정 기록은 감사 기록으로 남긴다). 되돌릴 수 없으므로 같이 지워진 할일 건수를 반환한다.
     """
     if MOCK:
@@ -204,6 +302,8 @@ def 삭제(plan_id: int, org_id: str | None = None) -> dict:
             raise HTTPException(404, f"지출계획 {plan_id} 을(를) 찾을 수 없습니다")
         할일 = [t for t in mock_data.mock_할일 if t["plan_id"] == plan_id]
         mock_data.mock_할일[:] = [t for t in mock_data.mock_할일 if t["plan_id"] != plan_id]
+        for 첨부id in [k for k, v in mock_data.mock_첨부.items() if v["plan_id"] == plan_id]:
+            del mock_data.mock_첨부[첨부id]
         return {"삭제": True, "plan_id": plan_id, "할일삭제": len(할일)}
 
     조건, org인자 = _계정조건(org_id, "p")
@@ -216,10 +316,12 @@ def 삭제(plan_id: int, org_id: str | None = None) -> dict:
         # 다른 org 의 계획이어도 404 다. 403 을 주면 id 존재 여부가 드러난다
         raise HTTPException(404, f"지출계획 {plan_id} 을(를) 찾을 수 없습니다")
     제목, 할일수 = 행[0]
+    첨부파일 = routes_attachments.계획_첨부id(plan_id)
     n = _실행(f"DELETE FROM tenant.expense_plans p WHERE p.plan_id = %s AND {조건}",
              (plan_id, *org인자))
     if n != 1:
         raise HTTPException(404, f"지출계획 {plan_id} 을(를) 찾을 수 없습니다")
+    routes_attachments.파일들_지우기(첨부파일)     # 행은 CASCADE 로 지워졌다
     _log.info("지출계획 삭제 plan_id=%s 제목=%r 할일 %d건 동반삭제", plan_id, 제목, 할일수)
     return {"삭제": True, "plan_id": plan_id, "제목": 제목, "할일삭제": 할일수}
 
@@ -239,7 +341,7 @@ def _float변환(v) -> float | None:
 
 
 _목록_컬럼 = ("plan_id", "제목", "확정비목", "금액", "판정", "집행예정일",
-             "updated_at", "사업명", "상태")
+             "updated_at", "사업명", "상태", "실제지출일", "실제지출액")
 
 
 def _live_목록(org_id: str | None) -> list[dict]:
@@ -251,7 +353,7 @@ def _live_목록(org_id: str | None) -> list[dict]:
     조건, 인자 = _계정조건(org_id)
     행 = _질의(f"""
         SELECT p.plan_id, p.제목, p.확정비목, p.금액, d.판정, p.집행예정일,
-               p.updated_at, p.사업명, p.상태
+               p.updated_at, p.사업명, p.상태, p."실제지출일", p."실제지출액"
         FROM tenant.expense_plans p
         LEFT JOIN tenant.decisions d ON d.decision_id = p.latest_decision_id
         WHERE {조건}
@@ -263,6 +365,8 @@ def _live_목록(org_id: str | None) -> list[dict]:
         d["금액"] = _float변환(d["금액"])
         d["집행예정일"] = _문자열(d["집행예정일"])
         d["updated_at"] = _문자열(d["updated_at"])
+        d["실제지출일"] = _문자열(d["실제지출일"])
+        d["실제지출액"] = _float변환(d["실제지출액"])
         out.append(d)
     return out
 
@@ -307,13 +411,25 @@ def _live_생성(body: 계획생성, *, org_id: str | None, account_id: str | No
     # 정규화 전에 임시저장한 계획도 입력값을 남긴다. 상세의 용도와 판정의 금지목록 대조가 정규화 값을 읽는다.
     정규화 = body.정규화 or {"품목": body.품목, "용도": body.용도, "금액": body.금액,
                        "거래처": body.거래처 or "", "질문원문": 질문원문}
+    # 지출일이 있으면 집행 줄도 같은 문장으로 만든다(`routes_tasks.집행줄_유지` 와 같은 행 모양). 일정 탭에 지출일이 보인다.
     행 = _질의_저장(
         """
-        INSERT INTO tenant.expense_plans
-            (org_id, account_id, 제목, 질문원문, 정규화, 사업명, 확정비목, 금액, 집행예정일, 거래처, 추가설명)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        RETURNING plan_id, 제목, 확정비목, 금액, 집행예정일, updated_at, created_at,
-                  사업명, 상태, 질문원문, 거래처, 추가설명, 정규화, latest_decision_id
+        WITH 새계획 AS (
+            INSERT INTO tenant.expense_plans
+                (org_id, account_id, 제목, 질문원문, 정규화, 사업명, 확정비목, 금액, 집행예정일, 거래처, 추가설명)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING plan_id, org_id, account_id, 제목, 확정비목, 금액, 집행예정일, updated_at, created_at,
+                      사업명, 상태, 질문원문, 거래처, 추가설명, 정규화, latest_decision_id
+        ), 집행줄 AS (
+            INSERT INTO tenant.plan_tasks (org_id, account_id, plan_id, 출처, 구분, 항목, due_date,
+                                           상태, 날짜_사용자수정, 집행예정일_연동)
+            SELECT org_id, account_id, plan_id, 'user', '집행', 제목 || ' 집행', 집행예정일,
+                   '집행예정', true, true
+            FROM 새계획 WHERE 집행예정일 IS NOT NULL
+        )
+        SELECT plan_id, 제목, 확정비목, 금액, 집행예정일, updated_at, created_at,
+               사업명, 상태, 질문원문, 거래처, 추가설명, 정규화, latest_decision_id
+        FROM 새계획
         """,
         (org_id, account_id if org_id else None, 제목, 질문원문, _jsonb(정규화), body.사업명,
          body.확정비목, body.금액, body.집행예정일, body.거래처, body.추가설명),
@@ -339,11 +455,11 @@ _상세_컬럼 = ("plan_id", "제목", "확정비목", "금액", "판정", "집�
              "updated_at", "created_at", "사업명", "상태", "질문원문",
              "거래처", "추가설명", "정규화", "latest_decision_id",
              "요약", "해야할일", "인용", "전제", "신뢰등급", "규정버전",
-             "참조관계", "검증사유", "사용자답변", "온톨로지결과")
+             "참조관계", "검증사유", "사용자답변", "온톨로지결과", "실제지출일", "실제지출액", "기준문서")
 
 # 응답 키 순서. DB 컬럼 plan_tasks.코드 는 응답 키 code 로 내보낸다.
 _계획할일_컬럼 = ("task_id", "plan_id", "출처", "code", "구분", "항목", "설명", "due_date",
-               "유형", "날짜_사용자수정", "상태")
+               "유형", "날짜_사용자수정", "상태", "집행예정일_연동", "작성_account_id", "작성자이메일")
 
 
 def _live_상세(plan_id: int, org_id: str | None) -> 계획상세:
@@ -354,7 +470,7 @@ def _live_상세(plan_id: int, org_id: str | None) -> 계획상세:
                p.updated_at, p.created_at, p.사업명, p.상태, p.질문원문,
                p.거래처, p.추가설명, p.정규화, p.latest_decision_id,
                d.요약, d.해야할일, d.인용, d.전제, d.신뢰등급, d.규정버전,
-               d.참조관계, d.검증사유, d."사용자답변", d."온톨로지결과"
+               d.참조관계, d.검증사유, d."사용자답변", d."온톨로지결과", p."실제지출일", p."실제지출액", d."기준문서"
         FROM tenant.expense_plans p
         LEFT JOIN tenant.decisions d ON d.decision_id = p.latest_decision_id
         WHERE p.plan_id = %s AND {조건}
@@ -370,7 +486,7 @@ def _live_상세(plan_id: int, org_id: str | None) -> 계획상세:
             "판정": r["판정"], "요약": r["요약"], "해야할일": 할일_공개(r["해야할일"]),
             "인용": r["인용"] or [], "전제": r["전제"] or [], "신뢰등급": r["신뢰등급"],
             "규정버전": r["규정버전"], "참조관계": r["참조관계"] or [],
-            "검증사유": r["검증사유"] or [],
+            "검증사유": r["검증사유"] or [], "기준문서": r["기준문서"],
             # 온톨로지 경로의 결과 화면 값. 옛 경로 판정은 빈 값이라 화면이 그리지 않는다
             "분류": None, "근거경로": [], "코드판정": None, "조건": [], "기한조건": [], "금지조건": [], "해당시조건": [], "공통사항": [], "용어풀이": [], "문의처": None,
             **(r["온톨로지결과"] or {}),
@@ -392,8 +508,9 @@ def _live_상세(plan_id: int, org_id: str | None) -> 계획상세:
     할일행 = _질의(
         """
         SELECT task_id, plan_id, 출처, 코드, 구분, 항목, 설명, due_date,
-               "유형", 날짜_사용자수정, 상태
-        FROM tenant.plan_tasks WHERE plan_id = %s
+               "유형", 날짜_사용자수정, 상태, 집행예정일_연동, t.작성_account_id, w.email
+        FROM tenant.plan_tasks t LEFT JOIN tenant.accounts w ON w.account_id = t.작성_account_id
+        WHERE t.plan_id = %s
         """,
         (plan_id,),
     )
@@ -402,6 +519,7 @@ def _live_상세(plan_id: int, org_id: str | None) -> 계획상세:
         d = dict(zip(_계획할일_컬럼, t))
         d["due_date"] = _문자열(d["due_date"])
         d["계획제목"] = r["제목"]
+        d["작성자"] = 작성자표시(d.pop("작성_account_id"), d.pop("작성자이메일"))
         할일.append(d)
 
     return 계획상세(
@@ -412,4 +530,9 @@ def _live_상세(plan_id: int, org_id: str | None) -> 계획상세:
         거래처=r["거래처"], 추가설명=r["추가설명"], 정규화=정규화,
         latest_decision_id=r["latest_decision_id"],
         판정상세=판정상세, 사용자답변=사용자답변_공개(r["사용자답변"]), 할일=할일,
+        내피드백=routes_feedback.내피드백_조회(r["latest_decision_id"]),
+        팀평가=routes_feedback.팀평가_조회(r["latest_decision_id"]),
+        첨부=routes_attachments.계획_첨부목록(plan_id),
+        실제지출일=_문자열(r["실제지출일"]), 실제지출액=_float변환(r["실제지출액"]),
+        **routes_tasks.단계요약_계산([(t["구분"], t["유형"], t["상태"]) for t in 할일]),
     )

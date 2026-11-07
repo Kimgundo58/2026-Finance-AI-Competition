@@ -13,15 +13,15 @@ L3 가 바뀌면 캐시키의 l3_해시가 바뀌어 이전 판정 캐시가 답
 """
 from __future__ import annotations
 
-import io
+import json
 import logging
 import uuid
-import zipfile
 
 from fastapi import (APIRouter, BackgroundTasks, File, Form, HTTPException,
                      Request, UploadFile)
 
-from ._common import DSN, MOCK, _org조건, _질의, _실행
+from ._common import DSN, MOCK, 트랜잭션, _org조건, _질의, _실행
+from .file_format import 실제형식
 from .models import L3업로드응답, L3현재문서, L3현재문서목록응답
 from . import auth, mock_data
 
@@ -33,7 +33,9 @@ router = APIRouter(prefix="/api/l3", tags=["L3 업로드"])
 거부_확장자 = {"doc", "docx"}          # 파서가 없다
 최대_바이트 = 30 * 1024 * 1024
 
-_접수_메시지 = "접수했습니다. 조문 분할이 끝나면 상태가 「완료」로 바뀝니다."
+_접수_메시지 = "접수했습니다. 문서를 다 읽으면 상태가 「완료」로 바뀝니다."
+_확인_메시지 = "세부기준 문서가 맞는지 확인이 필요합니다. 확인 전까지는 이 문서를 판정에 쓰지 않습니다."
+_mock_검토이유 = "창업진흥원이 전국 사업에 공통으로 낸 안내 자료로 보입니다."
 
 # 파싱이 이 시간보다 오래 'pending' 이면 끊긴 것으로 본다. 정상 파싱은 수십 초 안에 끝난다
 _중단_판정_분 = 10        # scripts/l3_parse.py `중단_판정_분` 과 같은 값(서버 기동 때 파서를 import 하지 않으려고 따로 둔다)
@@ -61,33 +63,6 @@ _실패_기본안내 = "다시 올려 주세요."
 _표시_품질_SQL = (f"CASE WHEN d.\"파싱품질\" = 'pending' "
                 f"AND d.created_at < now() - interval '{_중단_판정_분} minutes' "
                 f"THEN 'fail' ELSE d.\"파싱품질\" END")
-
-
-def 실제형식(본문: bytes) -> str:
-    """파일 내용으로 실제 형식을 판별한다. 확장자는 신뢰하지 않는다.
-
-    ZIP 계열(HWPX·XLSX·DOCX·PPTX)은 매직바이트가 같아 내부 항목 이름으로 구분한다.
-    OLE 헤더는 구형 HWP·DOC·XLS 가 공유하므로 'hwp' 판정이 확정은 아니다.
-    """
-    if 본문[:5] == b"%PDF-":
-        return "pdf"
-    if 본문[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
-        return "hwp"                       # OLE 복합문서 (구형 HWP·DOC·XLS 공통)
-    if 본문[:4] == b"PK\x03\x04":
-        try:
-            이름들 = zipfile.ZipFile(io.BytesIO(본문)).namelist()
-        except (zipfile.BadZipFile, OSError):
-            return "손상된zip"
-        if any(n.startswith("Contents/") for n in 이름들):
-            return "hwpx"
-        if any(n.startswith("xl/") for n in 이름들):
-            return "xlsx"
-        if any(n.startswith("word/") for n in 이름들):
-            return "docx"
-        if any(n.startswith("ppt/") for n in 이름들):
-            return "pptx"
-        return "zip"
-    return "알수없음"
 
 
 def _업로드_org(요청: Request, 요청_org_id: str | None) -> str:
@@ -142,11 +117,13 @@ def 업로드(
     실제_형식 = 실제형식(본문)
     if 실제_형식 != 확장자:
         raise HTTPException(415, f"파일 내용이 .{확장자} 이 아닙니다 (실제: {실제_형식}). "
-                                 f"확장자만 바꾼 파일은 파싱할 수 없습니다.")
+                                 f"확장자만 바꾼 파일은 읽을 수 없습니다.")
 
     if MOCK:
-        return L3업로드응답(**{**mock_data.mock_L3, "파일명": 이름, "확장자": 확장자,
-                            "doc_id": f"l3-mock-{uuid.uuid4().hex[:8]}"})
+        doc_id = f"l3-mock-{uuid.uuid4().hex[:8]}"
+        if "엉뚱" in 이름:
+            mock_data.mock_L3확인대기[doc_id] = {"원본파일명": 이름, "확장자": 확장자, "품질": "review"}
+        return L3업로드응답(**{**mock_data.mock_L3, "파일명": 이름, "확장자": 확장자, "doc_id": doc_id})
     응답 = _live_업로드(본문, 이름, 확장자, org_id)
     # 202 응답 뒤 백그라운드로 파싱한다. org_id 는 백그라운드_파싱 이 GUC app.org_id 를 설정하는 데 쓴다
     백그라운드.add_task(백그라운드_파싱, 응답.doc_id, org_id)
@@ -163,11 +140,15 @@ def 현재문서(org_id: str | None = None) -> L3현재문서목록응답:
     `/{doc_id}` 보다 먼저 등록해야 한다. 그렇지 않으면 'current' 가 doc_id 경로 파라미터로 매칭된다.
     """
     if MOCK:
-        return L3현재문서목록응답(문서=[])
+        return L3현재문서목록응답(문서=[
+            L3현재문서(doc_id=k, 원본파일명=v["원본파일명"], 파싱품질=v["품질"], 조_건수=12,
+                    검토이유=_mock_검토이유 if v["품질"] == "review" else None)
+            for k, v in mock_data.mock_L3확인대기.items()])
     조건, org인자 = _org조건(org_id, "d")
     행 = _질의(
         f'SELECT d.doc_id, d."원본파일명", d.version, d."시행일", d.created_at, {_표시_품질_SQL}, '
-        f'       (SELECT count(*) FROM tenant.l3_articles a WHERE a.doc_id = d.doc_id), d.extraction '
+        f'       (SELECT count(*) FROM tenant.l3_articles a WHERE a.doc_id = d.doc_id), d.extraction, '
+        f'       d."검토결과"->>\'이유\' '
         f'  FROM tenant.l3_documents d '
         f' WHERE {조건} AND d.status = \'active\' '
         f' ORDER BY (d."파싱품질" IN (\'pass\', \'warn\')) DESC, d.created_at DESC',
@@ -177,22 +158,98 @@ def 현재문서(org_id: str | None = None) -> L3현재문서목록응답:
         L3현재문서(doc_id=str(doc_id), 원본파일명=이름, version=버전,
                 시행일=시행일.isoformat() if 시행일 else None,
                 등록일=등록.date().isoformat() if 등록 else None,
-                파싱품질=파싱품질, 조_건수=건수, 추출방식=추출방식)
-        for doc_id, 이름, 버전, 시행일, 등록, 파싱품질, 건수, 추출방식 in 행])
+                파싱품질=파싱품질, 조_건수=건수, 추출방식=추출방식,
+                검토이유=이유 if 파싱품질 == "review" else None)
+        for doc_id, 이름, 버전, 시행일, 등록, 파싱품질, 건수, 추출방식, 이유 in 행])
 
 
 @router.get("/{doc_id}", response_model=L3업로드응답)
 def 상태(doc_id: str, org_id: str | None = None) -> L3업로드응답:
     """업로드한 문서의 파싱 상태. 프론트가 '분석 중' 표시를 하며 폴링한다."""
     if MOCK:
+        대기 = mock_data.mock_L3확인대기.get(doc_id)
+        if 대기:
+            return _mock_확인대기_응답(doc_id, 대기)
         # 미해결 참조가 있는 완료본을 돌려준다. 프론트가 실패 안내 UI 를 그릴 수 있게 한다
         return L3업로드응답(**{**mock_data.mock_L3_미해결참조, "doc_id": doc_id})
     return _live_상태(doc_id, org_id)
 
 
+@router.post("/{doc_id}/confirm", response_model=L3업로드응답)
+def 적용_확인(doc_id: str, org_id: str | None = None) -> L3업로드응답:
+    """확인을 기다리는 문서를 사용자가 세부기준으로 쓰기로 했다. 이 문서가 판정 기준이 되고 이전 문서는 내려간다."""
+    if MOCK:
+        return _mock_확인처리(doc_id, 적용=True)
+    return _live_확인처리(doc_id, org_id, 적용=True)
+
+
+@router.post("/{doc_id}/reject", response_model=L3업로드응답)
+def 적용_거절(doc_id: str, org_id: str | None = None) -> L3업로드응답:
+    """확인을 기다리는 문서를 쓰지 않기로 했다. 판정 기준은 그대로다."""
+    if MOCK:
+        return _mock_확인처리(doc_id, 적용=False)
+    return _live_확인처리(doc_id, org_id, 적용=False)
+
+
+def _mock_확인대기_응답(doc_id: str, 대기: dict) -> L3업로드응답:
+    검토중 = 대기["품질"] == "review"
+    return L3업로드응답(
+        doc_id=doc_id, 파일명=대기["원본파일명"], 확장자=대기["확장자"], 상태="확인필요" if 검토중 else "완료",
+        조_건수=12, 메시지=_확인_메시지 if 검토중 else "12개 조를 등록했습니다.", 파싱품질=대기["품질"],
+        검토이유=_mock_검토이유 if 검토중 else None, 적용중_문서=mock_data.mock_기준문서()["문서명"])
+
+
+def _mock_확인처리(doc_id: str, 적용: bool) -> L3업로드응답:
+    대기 = mock_data.mock_L3확인대기.get(doc_id)
+    if not 대기 or 대기["품질"] != "review":
+        raise HTTPException(404, f"L3 문서 {doc_id} 을(를) 찾을 수 없습니다")
+    if 적용:
+        대기["품질"] = "warn"
+        return _mock_확인대기_응답(doc_id, 대기)
+    del mock_data.mock_L3확인대기[doc_id]
+    return L3업로드응답(doc_id=doc_id, 파일명=대기["원본파일명"], 확장자=대기["확장자"], 상태="적용안함",
+                        메시지="이 문서는 판정에 쓰지 않습니다.", 파싱품질="review")
+
+
 # ════════════════════════════════════════════════════════════════════
 # live 모드 구현
 # ════════════════════════════════════════════════════════════════════
+
+def _live_확인처리(doc_id: str, org_id: str | None, 적용: bool) -> L3업로드응답:
+    """confirm·reject. 판정 기준을 바꾸는 일이라 파싱 결과 기록과 같은 기관 잠금 안에서 한다."""
+    from l3_parse import _기관_정리_잠금, 적용문서_정리      # scripts/ — 서버 기동 때 파서를 import 하지 않는다
+
+    if not org_id:
+        raise HTTPException(401, "기관을 확인할 수 없습니다. 로그인해 주세요.")
+    try:
+        uuid.UUID(doc_id)
+    except ValueError:
+        raise HTTPException(404, f"L3 문서 {doc_id} 을(를) 찾을 수 없습니다") from None
+    조건, org인자 = _org조건(org_id, "d")
+    문서_org = _질의(f"SELECT d.org_id FROM tenant.l3_documents d WHERE d.doc_id = %s AND {조건}",
+                  (doc_id, *org인자), 예외전파=True)
+    if not 문서_org:
+        raise HTTPException(404, f"L3 문서 {doc_id} 을(를) 찾을 수 없습니다")
+    with 트랜잭션() as cur:
+        _기관_정리_잠금(cur, 문서_org[0][0])
+        행 = cur.execute('SELECT "파싱품질", status, "검토결과" FROM tenant.l3_documents WHERE doc_id = %s',
+                       (doc_id,)).fetchone()
+        if not 행 or 행[0] != "review" or 행[1] != "active":
+            raise HTTPException(409, "이미 처리한 문서입니다. 화면을 새로고침해 주세요.")
+        검토 = dict(행[2] or {})
+        if 적용:
+            검토["사용자확인"] = True
+            cur.execute('UPDATE tenant.l3_documents SET "파싱품질"=%s, "검토결과"=%s WHERE doc_id=%s',
+                        (검토.get("원래품질", "warn"), json.dumps(검토, ensure_ascii=False), doc_id))
+            적용문서_정리(cur, doc_id, 문서_org[0][0], 성공=True)
+            # 계정별 캐시 행은 RLS 로 남을 수 있지만 캐시키의 l3_해시가 바뀌어 이전 근거로 답하지 않는다
+            cur.execute("DELETE FROM tenant.judge_cache WHERE org_id = %s", (문서_org[0][0],))
+        else:
+            검토["사용자거절"] = True
+            cur.execute('UPDATE tenant.l3_documents SET status=\'superseded\', "검토결과"=%s WHERE doc_id=%s',
+                        (json.dumps(검토, ensure_ascii=False), doc_id))
+    return _live_상태(doc_id, org_id)
+
 
 # 확장자 → l3_documents.extraction 값. pdf 는 'native'(pdftext.py 추출)로 기록한다
 _확장자별_추출방식 = {"hwpx": "hwpx", "hwp": "hwp"}
@@ -297,12 +354,18 @@ def _상태_메시지(파싱품질: str | None, 조_건수: int, 미해결참조
     ocr: 스캔본을 OCR 로 읽은 문서인가(extraction='ocr').
     """
     if 파싱품질 == "fail":
-        메시지 = "파싱에 실패했습니다. " + _실패_안내.get(실패사유 or "", _실패_기본안내)
+        메시지 = "문서를 읽지 못했습니다. " + _실패_안내.get(실패사유 or "", _실패_기본안내)
         if 다른_적용문서:
             메시지 += f" 판정에는 기존 규정을 계속 씁니다(「{다른_적용문서}」)."
         else:
             메시지 += " 지금은 적용 중인 기관 규정이 없어 상위 규정(중기부·창진원 지침)만으로 판정합니다."
         return "실패", None, 메시지
+    if 파싱품질 == "review":
+        if 대체됨:
+            return "적용안함", 조_건수, "이 문서는 판정에 쓰지 않습니다."
+        메시지 = _확인_메시지 + (f" 지금은 기존 문서(「{다른_적용문서}」)로 판정합니다." if 다른_적용문서
+                            else " 지금은 공통 규정으로만 판정합니다.")
+        return "확인필요", 조_건수, 메시지
     if 조_건수:
         메시지 = f"{조_건수}개 조를 등록했습니다."
         if 대체됨:
@@ -322,7 +385,7 @@ def _상태_메시지(파싱품질: str | None, 조_건수: int, 미해결참조
         return "완료", 조_건수, 메시지
     if 파싱품질 == "warn":
         # 파서는 실행됐지만 조문이 0건이다. 아직 처리 전인 경우와 원인이 달라 메시지를 나눈다
-        return "파싱대기", None, "파싱을 시도했지만 조문을 뽑아내지 못했습니다. 확인이 필요합니다."
+        return "파싱대기", None, "문서를 읽었지만 조문을 찾지 못했습니다. 확인이 필요합니다."
     if 대체됨:
         # 처리 중에 나중에 올린 문서가 먼저 성공했다. 이 문서는 끝나도 판정에 쓰이지 않는다
         return "파싱대기", None, "이후 올린 문서로 교체되어 이 문서는 판정에 쓰지 않습니다" + (
@@ -343,14 +406,14 @@ def _live_상태(doc_id: str, org_id: str | None) -> L3업로드응답:
     조건, org인자 = _org조건(org_id, "d")
     행 = _질의(
         f'SELECT d."원본파일명", d."파싱품질", {_표시_품질_SQL}, d."미해결참조수", d."실패사유", '
-        f'       d.status, d.org_id, d.created_at, d.extraction '
+        f'       d.status, d.org_id, d.created_at, d.extraction, d."검토결과"->>\'이유\' '
         f'FROM tenant.l3_documents d '
         f'WHERE d.doc_id = %s AND {조건}',
         (doc_id, *org인자),
     )
     if not 행:
         raise HTTPException(404, f"L3 문서 {doc_id} 을(를) 찾을 수 없습니다")
-    파일명, 원래_품질, 파싱품질, 미해결참조수, 실패사유, status, 문서_org, 등록, 추출방식 = 행[0]
+    파일명, 원래_품질, 파싱품질, 미해결참조수, 실패사유, status, 문서_org, 등록, 추출방식, 검토이유 = 행[0]
     if 원래_품질 == "pending" and 파싱품질 == "fail":
         실패사유 = "중단"                     # 파싱이 끊겨 'pending' 으로 남은 문서
     확장자 = 파일명.rsplit(".", 1)[-1].lower() if "." in (파일명 or "") else ""
@@ -375,4 +438,5 @@ def _live_상태(doc_id: str, org_id: str | None) -> L3업로드응답:
     return L3업로드응답(doc_id=doc_id, 파일명=파일명, 확장자=확장자, 상태=상태값,
                         조_건수=조_건수, 미해결참조=[], 메시지=메시지, 파싱품질=파싱품질,
                         실패사유=실패사유 if 파싱품질 == "fail" else None,
-                        적용중_문서=적용_이름, 추출방식=추출방식)
+                        적용중_문서=적용_이름, 추출방식=추출방식,
+                        검토이유=검토이유 if 파싱품질 == "review" else None)

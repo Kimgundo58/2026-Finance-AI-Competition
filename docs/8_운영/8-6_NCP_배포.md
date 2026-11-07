@@ -80,7 +80,7 @@ docker compose ps                                              # 3개 모두 hea
 | 이미지 정리 | deploy.sh 가 지난 레지스트리 태그를 지운다. 손으로 만든 `rollback-*` 는 직접 `docker rmi`. api 이미지 1개가 6.5GB 라 디스크(50GB)를 확인한다 |
 | 스키마 변경 | `db/migrations/README.md` 순서대로 postgres 롤로 적용 (적용 전 `./backup.sh`) |
 | 로그 | `docker compose logs -f api` (json-file, 20MB × 5 로테이션) |
-| 수동 백업 | `./backup.sh` → `backups/` |
+| 수동 백업 | `./backup.sh` → `backups/`(DB 덤프 14개, 첨부 볼륨 `plan_attachments` tar 2개 보관) |
 | 백업 외부 보관 | 로컬 PC 에서 `scp root@<IP>:/opt/suddoe/deploy/ncp/backups/*.dump .` 주기적으로 |
 | 재시작 | `docker compose restart api` (서버 재부팅 시 `restart: unless-stopped` 로 자동 기동) |
 

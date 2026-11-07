@@ -60,8 +60,8 @@ COPY ontology/schema.json /app/ontology/schema.json
 RUN python -c "import server.main; print('import ok')"
 
 RUN useradd -m -u 10001 suddoe \
- && mkdir -p /app/_l3_업로드 \
- && chown -R suddoe:suddoe /app/_l3_업로드
+ && mkdir -p /app/_l3_업로드 /app/_plan_attachments \
+ && chown -R suddoe:suddoe /app/_l3_업로드 /app/_plan_attachments
 USER suddoe
 
 EXPOSE 8080

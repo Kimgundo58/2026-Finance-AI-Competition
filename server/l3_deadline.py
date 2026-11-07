@@ -61,7 +61,10 @@ def 조문_조회(cur, org_id: str | None) -> list[tuple]:
     """
     if not org_id:
         return []
-    cur.execute('SELECT "조번호", "조제목", "본문" FROM tenant.l3_articles WHERE org_id = %s',
+    # 판정에 쓰는 문서만 본다. 교체된 문서나 확인을 기다리는 문서가 일정 날짜를 바꾸면 안 된다
+    cur.execute('SELECT a."조번호", a."조제목", a."본문" FROM tenant.l3_articles a '
+                'JOIN tenant.l3_documents d ON d.doc_id = a.doc_id '
+                'WHERE a.org_id = %s AND d.status = \'active\' AND d."파싱품질" IN (\'pass\', \'warn\')',
                 (org_id,))
     조문 = []
     for 조번호, 조제목, 본문 in cur.fetchall():

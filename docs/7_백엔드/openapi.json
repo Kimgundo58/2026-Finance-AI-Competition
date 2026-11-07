@@ -166,7 +166,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/server__models__________3"
+         "$ref": "#/components/schemas/server__models__________5"
         }
        }
       }
@@ -205,7 +205,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/server__models________11"
+         "$ref": "#/components/schemas/server__models________14"
         }
        }
       }
@@ -263,7 +263,74 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/server__models________11"
+         "$ref": "#/components/schemas/server__models________14"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   },
+   "patch": {
+    "tags": [
+     "지출계획"
+    ],
+    "summary": "수정",
+    "description": "예상 지출일을 바꾼다. 판정 경로는 집행예정일을 읽지 않아 판정은 그대로다.",
+    "operationId": "수정_api_plans__plan_id__patch",
+    "parameters": [
+     {
+      "name": "plan_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "integer",
+       "title": "Plan Id"
+      }
+     },
+     {
+      "name": "org_id",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Org Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/server__models________2"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/server__models________14"
         }
        }
       }
@@ -285,7 +352,7 @@
      "지출계획"
     ],
     "summary": "삭제",
-    "description": "지출계획 하나를 지운다. 요청한 org 의 계획만 지워진다.\n\nFK 설정상 plan_tasks 는 CASCADE 로 같이 삭제되고, decisions 는 SET NULL 로 연결만 끊긴다\n(판정 기록은 감사 기록으로 남긴다). 되돌릴 수 없으므로 같이 지워진 할일 건수를 반환한다.",
+    "description": "지출계획 하나를 지운다. 요청한 org 의 계획만 지워진다.\n\nFK 설정상 plan_tasks·plan_attachments 는 CASCADE 로 같이 삭제되고(첨부 파일도 지운다), decisions 는 SET NULL 로 연결만 끊긴다\n(판정 기록은 감사 기록으로 남긴다). 되돌릴 수 없으므로 같이 지워진 할일 건수를 반환한다.",
     "operationId": "삭제_api_plans__plan_id__delete",
     "parameters": [
      {
@@ -323,6 +390,159 @@
          "type": "object",
          "additionalProperties": true,
          "title": "Response 삭제 Api Plans  Plan Id  Delete"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/plans/{plan_id}/attachments": {
+   "post": {
+    "tags": [
+     "첨부파일"
+    ],
+    "summary": "첨부 올리기",
+    "description": "파일 하나를 저장한다. task_id 를 주면 그 증빙 항목에 묶인다.",
+    "operationId": "첨부_올리기_api_plans__plan_id__attachments_post",
+    "parameters": [
+     {
+      "name": "plan_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "integer",
+       "title": "Plan Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "multipart/form-data": {
+       "schema": {
+        "$ref": "#/components/schemas/Body________api_plans__plan_id__attachments_post"
+       }
+      }
+     }
+    },
+    "responses": {
+     "201": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/server__models________13"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/plans/{plan_id}/attachments/{attachment_id}": {
+   "get": {
+    "tags": [
+     "첨부파일"
+    ],
+    "summary": "첨부 받기",
+    "operationId": "첨부_받기_api_plans__plan_id__attachments__attachment_id__get",
+    "parameters": [
+     {
+      "name": "plan_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "integer",
+       "title": "Plan Id"
+      }
+     },
+     {
+      "name": "attachment_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Attachment Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   },
+   "delete": {
+    "tags": [
+     "첨부파일"
+    ],
+    "summary": "첨부 삭제",
+    "operationId": "첨부_삭제_api_plans__plan_id__attachments__attachment_id__delete",
+    "parameters": [
+     {
+      "name": "plan_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "integer",
+       "title": "Plan Id"
+      }
+     },
+     {
+      "name": "attachment_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Attachment Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response 첨부 삭제 Api Plans  Plan Id  Attachments  Attachment Id  Delete"
         }
        }
       }
@@ -448,7 +668,7 @@
      "content": {
       "application/json": {
        "schema": {
-        "$ref": "#/components/schemas/server__models________2"
+        "$ref": "#/components/schemas/server__models________3"
        }
       }
      }
@@ -477,49 +697,14 @@
     }
    }
   },
-  "/api/plans/{plan_id}/tasks/{task_id}": {
-   "patch": {
+  "/api/tasks": {
+   "post": {
     "tags": [
      "할일"
     ],
-    "summary": "수정",
-    "operationId": "수정_api_plans__plan_id__tasks__task_id__patch",
-    "parameters": [
-     {
-      "name": "plan_id",
-      "in": "path",
-      "required": true,
-      "schema": {
-       "type": "integer",
-       "title": "Plan Id"
-      }
-     },
-     {
-      "name": "task_id",
-      "in": "path",
-      "required": true,
-      "schema": {
-       "type": "integer",
-       "title": "Task Id"
-      }
-     },
-     {
-      "name": "org_id",
-      "in": "query",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "Org Id"
-      }
-     }
-    ],
+    "summary": "일정 추가",
+    "description": "지출계획에 묶이지 않은 사용자 일정을 만든다(plan_id NULL). 소유자는 토큰의 기관·계정이다.",
+    "operationId": "일정_추가_api_tasks_post",
     "requestBody": {
      "required": true,
      "content": {
@@ -531,7 +716,7 @@
      }
     },
     "responses": {
-     "200": {
+     "201": {
       "description": "Successful Response",
       "content": {
        "application/json": {
@@ -552,9 +737,7 @@
       }
      }
     }
-   }
-  },
-  "/api/tasks": {
+   },
    "get": {
     "tags": [
      "할일"
@@ -667,7 +850,212 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/server__models__________4"
+         "$ref": "#/components/schemas/server__models__________6"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/plans/{plan_id}/tasks/{task_id}": {
+   "patch": {
+    "tags": [
+     "할일"
+    ],
+    "summary": "수정",
+    "operationId": "수정_api_plans__plan_id__tasks__task_id__patch",
+    "parameters": [
+     {
+      "name": "plan_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "integer",
+       "title": "Plan Id"
+      }
+     },
+     {
+      "name": "task_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "integer",
+       "title": "Task Id"
+      }
+     },
+     {
+      "name": "org_id",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Org Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/server__models________4"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/__"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/tasks/{task_id}": {
+   "patch": {
+    "tags": [
+     "할일"
+    ],
+    "summary": "일정 수정",
+    "description": "집행 일정 화면의 수정. 계획이 없는 일정도 같은 경로를 쓴다.",
+    "operationId": "일정_수정_api_tasks__task_id__patch",
+    "parameters": [
+     {
+      "name": "task_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "integer",
+       "title": "Task Id"
+      }
+     },
+     {
+      "name": "org_id",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Org Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/server__models________4"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/__"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   },
+   "delete": {
+    "tags": [
+     "할일"
+    ],
+    "summary": "일정 삭제",
+    "description": "규정 점검이 만든 행은 지우지 않는다. 지워도 다음 점검이 다시 만들어 사용자가 혼란스럽다.",
+    "operationId": "일정_삭제_api_tasks__task_id__delete",
+    "parameters": [
+     {
+      "name": "task_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "integer",
+       "title": "Task Id"
+      }
+     },
+     {
+      "name": "org_id",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Org Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response 일정 삭제 Api Tasks  Task Id  Delete"
         }
        }
       }
@@ -784,6 +1172,124 @@
     "summary": "상태",
     "description": "업로드한 문서의 파싱 상태. 프론트가 '분석 중' 표시를 하며 폴링한다.",
     "operationId": "상태_api_l3__doc_id__get",
+    "parameters": [
+     {
+      "name": "doc_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Doc Id"
+      }
+     },
+     {
+      "name": "org_id",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Org Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/L3_____"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/l3/{doc_id}/confirm": {
+   "post": {
+    "tags": [
+     "L3 업로드"
+    ],
+    "summary": "적용 확인",
+    "description": "확인을 기다리는 문서를 사용자가 세부기준으로 쓰기로 했다. 이 문서가 판정 기준이 되고 이전 문서는 내려간다.",
+    "operationId": "적용_확인_api_l3__doc_id__confirm_post",
+    "parameters": [
+     {
+      "name": "doc_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Doc Id"
+      }
+     },
+     {
+      "name": "org_id",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Org Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/L3_____"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/l3/{doc_id}/reject": {
+   "post": {
+    "tags": [
+     "L3 업로드"
+    ],
+    "summary": "적용 거절",
+    "description": "확인을 기다리는 문서를 쓰지 않기로 했다. 판정 기준은 그대로다.",
+    "operationId": "적용_거절_api_l3__doc_id__reject_post",
     "parameters": [
      {
       "name": "doc_id",
@@ -1070,7 +1576,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/server__models__________6"
+         "$ref": "#/components/schemas/server__models__________8"
         }
        }
       }
@@ -1124,7 +1630,7 @@
      "content": {
       "application/json": {
        "schema": {
-        "$ref": "#/components/schemas/server__models________5"
+        "$ref": "#/components/schemas/server__models________6"
        }
       }
      },
@@ -1184,7 +1690,7 @@
      "content": {
       "application/json": {
        "schema": {
-        "$ref": "#/components/schemas/server__models________7"
+        "$ref": "#/components/schemas/server__models________8"
        }
       }
      }
@@ -1195,6 +1701,304 @@
       "content": {
        "application/json": {
         "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/decisions/{decision_id}/feedback": {
+   "put": {
+    "tags": [
+     "판정 피드백"
+    ],
+    "summary": "피드백 저장",
+    "description": "내 평가를 저장한다. 같은 판정에 다시 보내면 바꾼다.",
+    "operationId": "피드백_저장_api_decisions__decision_id__feedback_put",
+    "parameters": [
+     {
+      "name": "decision_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "integer",
+       "title": "Decision Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/server__models_________3"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/server__models_________4"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/team": {
+   "get": {
+    "tags": [
+     "팀"
+    ],
+    "summary": "내팀",
+    "operationId": "내팀_api_team_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/server__models_______3"
+        }
+       }
+      }
+     }
+    }
+   },
+   "post": {
+    "tags": [
+     "팀"
+    ],
+    "summary": "팀 만들기",
+    "operationId": "팀_만들기_api_team_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/server__models__________1"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/server__models_______3"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/team/invite-code": {
+   "post": {
+    "tags": [
+     "팀"
+    ],
+    "summary": "초대코드 재발급",
+    "operationId": "초대코드_재발급_api_team_invite_code_post",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/server__models_______3"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/team/join": {
+   "post": {
+    "tags": [
+     "팀"
+    ],
+    "summary": "팀 들어가기",
+    "operationId": "팀_들어가기_api_team_join_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/server__models__________2"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/server__models_______3"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/team/leave": {
+   "post": {
+    "tags": [
+     "팀"
+    ],
+    "summary": "팀 나가기",
+    "operationId": "팀_나가기_api_team_leave_post",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/server__models_______3"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/team/members/{account_id}": {
+   "delete": {
+    "tags": [
+     "팀"
+    ],
+    "summary": "팀원 내보내기",
+    "operationId": "팀원_내보내기_api_team_members__account_id__delete",
+    "parameters": [
+     {
+      "name": "account_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Account Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/server__models_______3"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/accounts/join": {
+   "post": {
+    "tags": [
+     "팀"
+    ],
+    "summary": "초대코드로 등록",
+    "description": "온보딩의 「초대 코드가 있어요」. 인증 미들웨어 밖이라 토큰을 직접 검증한다(routes_accounts 와 같다).",
+    "operationId": "초대코드로_등록_api_accounts_join_post",
+    "parameters": [
+     {
+      "name": "authorization",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Authorization"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/server__models__________2"
+       }
+      }
+     }
+    },
+    "responses": {
+     "201": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/server__routes_teams________"
+        }
        }
       }
      },
@@ -1237,7 +2041,7 @@
      "content": {
       "application/json": {
        "schema": {
-        "$ref": "#/components/schemas/___"
+        "$ref": "#/components/schemas/___-Input"
        }
       }
      },
@@ -1300,6 +2104,75 @@
          "type": "object",
          "additionalProperties": true,
          "title": "Response Admin Status Admin Status Get"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/admin/feedback": {
+   "get": {
+    "summary": "Admin Feedback",
+    "description": "사용자가 「틀렸어요」로 표시한 판정(최신순, 최대 200건). 기관을 넘어 읽어야 해서 DB 함수를 거친다.",
+    "operationId": "admin_feedback_admin_feedback_get",
+    "parameters": [
+     {
+      "name": "limit",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "default": 50,
+       "title": "Limit"
+      }
+     },
+     {
+      "name": "offset",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "default": 0,
+       "title": "Offset"
+      }
+     },
+     {
+      "name": "x-admin-token",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Admin-Token"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response Admin Feedback Admin Feedback Get"
         }
        }
       }
@@ -1855,7 +2728,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/_____-Output"
+         "$ref": "#/components/schemas/server__routes_ingest_______-Output"
         }
        }
       }
@@ -1920,6 +2793,31 @@
  },
  "components": {
   "schemas": {
+   "Body________api_plans__plan_id__attachments_post": {
+    "properties": {
+     "파일": {
+      "type": "string",
+      "contentMediaType": "application/octet-stream",
+      "title": "파일"
+     },
+     "task_id": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Task Id"
+     }
+    },
+    "type": "object",
+    "required": [
+     "파일"
+    ],
+    "title": "Body_첨부_올리기_api_plans__plan_id__attachments_post"
+   },
    "Body_____api_l3_upload_post": {
     "properties": {
      "파일": {
@@ -2020,7 +2918,8 @@
          "pending",
          "pass",
          "warn",
-         "fail"
+         "fail",
+         "review"
         ]
        },
        {
@@ -2033,6 +2932,17 @@
       "type": "integer",
       "title": "조 건수",
       "default": 0
+     },
+     "검토이유": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "검토이유"
      },
      "추출방식": {
       "anyOf": [
@@ -2074,7 +2984,9 @@
        "파싱대기",
        "파싱중",
        "완료",
-       "실패"
+       "실패",
+       "확인필요",
+       "적용안함"
       ],
       "title": "상태",
       "default": "파싱대기"
@@ -2117,7 +3029,8 @@
          "pending",
          "pass",
          "warn",
-         "fail"
+         "fail",
+         "review"
         ]
        },
        {
@@ -2125,6 +3038,17 @@
        }
       ],
       "title": "파싱품질"
+     },
+     "검토이유": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "검토이유"
      },
      "실패사유": {
       "anyOf": [
@@ -2310,7 +3234,10 @@
       "enum": [
        "기타",
        "계약",
-       "비교견적"
+       "비교견적",
+       "사전승인",
+       "사전확인",
+       "증빙"
       ],
       "title": "유형",
       "default": "기타"
@@ -2341,6 +3268,22 @@
       ],
       "title": "계획제목"
      },
+     "작성자": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "작성자"
+     },
+     "집행예정일_연동": {
+      "type": "boolean",
+      "title": "집행예정일 연동",
+      "default": false
+     },
      "코드": {
       "anyOf": [
        {
@@ -2362,21 +3305,21 @@
     ],
     "title": "할일"
    },
-   "___": {
+   "___-Input": {
     "properties": {
      "협약": {
-      "$ref": "#/components/schemas/server__models________8"
+      "$ref": "#/components/schemas/server__models________9"
      },
      "집행내역": {
       "items": {
-       "$ref": "#/components/schemas/server__models__________1"
+       "$ref": "#/components/schemas/server__models__________3"
       },
       "type": "array",
       "title": "집행내역"
      },
      "참여인력": {
       "items": {
-       "$ref": "#/components/schemas/server__models__________2"
+       "$ref": "#/components/schemas/server__models__________4"
       },
       "type": "array",
       "title": "참여인력"
@@ -2384,71 +3327,6 @@
     },
     "type": "object",
     "title": "프로필"
-   },
-   "_____-Output": {
-    "properties": {
-     "doc_id": {
-      "type": "string",
-      "title": "Doc Id"
-     },
-     "상태": {
-      "type": "string",
-      "title": "상태"
-     },
-     "이전판_doc_id": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "이전판 Doc Id"
-     },
-     "retrieval_scope": {
-      "type": "string",
-      "title": "Retrieval Scope"
-     },
-     "이전판_청크_삭제": {
-      "type": "integer",
-      "title": "이전판 청크 삭제"
-     },
-     "판정캐시_삭제": {
-      "type": "integer",
-      "title": "판정캐시 삭제"
-     },
-     "경고": {
-      "items": {
-       "type": "string"
-      },
-      "type": "array",
-      "title": "경고",
-      "default": []
-     },
-     "대체한_doc_id": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "대체한 Doc Id",
-      "readOnly": true
-     }
-    },
-    "type": "object",
-    "required": [
-     "doc_id",
-     "상태",
-     "retrieval_scope",
-     "이전판_청크_삭제",
-     "판정캐시_삭제",
-     "대체한_doc_id"
-    ],
-    "title": "활성화응답"
    },
    "_______": {
     "properties": {
@@ -2499,6 +3377,78 @@
      "코드미상"
     ],
     "title": "할일동기화응답"
+   },
+   "server__models_______2": {
+    "properties": {
+     "팀이름": {
+      "type": "string",
+      "title": "팀이름"
+     },
+     "사업명": {
+      "type": "string",
+      "title": "사업명"
+     },
+     "내역할": {
+      "type": "string",
+      "enum": [
+       "대표",
+       "구성원"
+      ],
+      "title": "내역할"
+     },
+     "구성원": {
+      "items": {
+       "$ref": "#/components/schemas/server__models________16"
+      },
+      "type": "array",
+      "title": "구성원"
+     },
+     "초대코드": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "초대코드"
+     },
+     "초대코드_만료": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "초대코드 만료"
+     }
+    },
+    "type": "object",
+    "required": [
+     "팀이름",
+     "사업명",
+     "내역할"
+    ],
+    "title": "팀정보"
+   },
+   "server__models_______3": {
+    "properties": {
+     "팀": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/server__models_______2"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     }
+    },
+    "type": "object",
+    "title": "팀응답"
    },
    "server__models________1": {
     "properties": {
@@ -2612,111 +3562,84 @@
    },
    "server__models________10": {
     "properties": {
-     "plan_id": {
+     "전체": {
       "type": "integer",
-      "title": "Plan Id"
+      "title": "전체",
+      "default": 0
      },
-     "제목": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "제목"
+     "확인필요": {
+      "type": "integer",
+      "title": "확인필요",
+      "default": 0
      },
-     "확정비목": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "확정비목"
+     "위험": {
+      "type": "integer",
+      "title": "위험",
+      "default": 0
      },
-     "금액": {
-      "anyOf": [
-       {
-        "type": "number"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "금액"
+     "특이사항없음": {
+      "type": "integer",
+      "title": "특이사항없음",
+      "default": 0
      },
-     "판정": {
-      "anyOf": [
-       {
-        "type": "string",
-        "enum": [
-         "가능",
-         "조건부",
-         "불가",
-         "판단불가"
-        ]
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "판정"
+     "점검전": {
+      "type": "integer",
+      "title": "점검전",
+      "default": 0
      },
-     "집행예정일": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
+     "금액합계": {
+      "type": "number",
+      "title": "금액합계",
+      "default": 0
+     }
+    },
+    "type": "object",
+    "title": "계획통계",
+    "description": "홈 화면 통계 카드 값. 목록 응답에 포함해 보낸다(통계 전용 API 없음).\n\n전체 = 확인필요 + 위험 + 특이사항없음 + 점검전."
+   },
+   "server__models________11": {
+    "properties": {
+     "단계": {
+      "type": "string",
+      "enum": [
+       "사전승인·확인",
+       "견적",
+       "계약",
+       "집행",
+       "증빙"
       ],
-      "title": "집행예정일"
-     },
-     "updated_at": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Updated At"
-     },
-     "사업명": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "사업명"
+      "title": "단계"
      },
      "상태": {
       "type": "string",
       "enum": [
-       "draft",
-       "judged"
+       "완료",
+       "진행중",
+       "시작전",
+       "항목없음"
       ],
-      "title": "상태",
-      "default": "draft"
+      "title": "상태"
+     },
+     "완료": {
+      "type": "integer",
+      "title": "완료",
+      "default": 0
+     },
+     "전체": {
+      "type": "integer",
+      "title": "전체",
+      "default": 0
      }
     },
     "type": "object",
     "required": [
-     "plan_id"
+     "단계",
+     "상태"
     ],
-    "title": "계획요약",
-    "description": "계획 목록 표의 한 행."
+    "title": "단계항목",
+    "description": "지출 건의 진행 단계 한 칸. plan_tasks 에서 계산하고 저장하지 않는다."
    },
-   "server__models________11": {
+   "server__models________12": {
     "properties": {
      "plan_id": {
       "type": "integer",
@@ -2813,6 +3736,248 @@
       ],
       "title": "상태",
       "default": "draft"
+     },
+     "실제지출일": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "실제지출일"
+     },
+     "실제지출액": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "실제지출액"
+     },
+     "단계요약": {
+      "items": {
+       "$ref": "#/components/schemas/server__models________11"
+      },
+      "type": "array",
+      "title": "단계요약"
+     },
+     "현재단계": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "현재단계"
+     }
+    },
+    "type": "object",
+    "required": [
+     "plan_id"
+    ],
+    "title": "계획요약",
+    "description": "계획 목록 표의 한 행."
+   },
+   "server__models________13": {
+    "properties": {
+     "attachment_id": {
+      "type": "string",
+      "title": "Attachment Id"
+     },
+     "원본파일명": {
+      "type": "string",
+      "title": "원본파일명"
+     },
+     "크기": {
+      "type": "integer",
+      "title": "크기"
+     },
+     "task_id": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Task Id"
+     },
+     "created_at": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Created At"
+     },
+     "작성자": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "작성자"
+     }
+    },
+    "type": "object",
+    "required": [
+     "attachment_id",
+     "원본파일명",
+     "크기"
+    ],
+    "title": "첨부항목"
+   },
+   "server__models________14": {
+    "properties": {
+     "plan_id": {
+      "type": "integer",
+      "title": "Plan Id"
+     },
+     "제목": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "제목"
+     },
+     "확정비목": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "확정비목"
+     },
+     "금액": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "금액"
+     },
+     "판정": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "가능",
+         "조건부",
+         "불가",
+         "판단불가"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "판정"
+     },
+     "집행예정일": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "집행예정일"
+     },
+     "updated_at": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Updated At"
+     },
+     "사업명": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "사업명"
+     },
+     "상태": {
+      "type": "string",
+      "enum": [
+       "draft",
+       "judged"
+      ],
+      "title": "상태",
+      "default": "draft"
+     },
+     "실제지출일": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "실제지출일"
+     },
+     "실제지출액": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "실제지출액"
+     },
+     "단계요약": {
+      "items": {
+       "$ref": "#/components/schemas/server__models________11"
+      },
+      "type": "array",
+      "title": "단계요약"
+     },
+     "현재단계": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "현재단계"
      },
      "질문원문": {
       "anyOf": [
@@ -2894,6 +4059,30 @@
       "type": "array",
       "title": "사용자답변"
      },
+     "내피드백": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/server__models_________4"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "팀평가": {
+      "items": {
+       "$ref": "#/components/schemas/server__models_________5"
+      },
+      "type": "array",
+      "title": "팀평가"
+     },
+     "첨부": {
+      "items": {
+       "$ref": "#/components/schemas/server__models________13"
+      },
+      "type": "array",
+      "title": "첨부"
+     },
      "할일": {
       "items": {
        "$ref": "#/components/schemas/__"
@@ -2919,7 +4108,7 @@
     ],
     "title": "계획상세"
    },
-   "server__models________12": {
+   "server__models________15": {
     "properties": {
      "사업명": {
       "type": "string",
@@ -2956,7 +4145,7 @@
      },
      "우선순위규칙목록": {
       "items": {
-       "$ref": "#/components/schemas/server__models__________5"
+       "$ref": "#/components/schemas/server__models__________7"
       },
       "type": "array",
       "title": "우선순위규칙목록"
@@ -2981,16 +4170,95 @@
     ],
     "title": "사업정보"
    },
+   "server__models________16": {
+    "properties": {
+     "account_id": {
+      "type": "string",
+      "title": "Account Id"
+     },
+     "이메일": {
+      "type": "string",
+      "title": "이메일"
+     },
+     "나": {
+      "type": "boolean",
+      "title": "나",
+      "default": false
+     },
+     "대표": {
+      "type": "boolean",
+      "title": "대표",
+      "default": false
+     }
+    },
+    "type": "object",
+    "required": [
+     "account_id",
+     "이메일"
+    ],
+    "title": "팀구성원"
+   },
    "server__models________2": {
+    "properties": {
+     "집행예정일": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "date"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "집행예정일"
+     },
+     "일정이동": {
+      "type": "boolean",
+      "title": "일정이동",
+      "default": false
+     },
+     "실제지출일": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "date"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "실제지출일"
+     },
+     "실제지출액": {
+      "anyOf": [
+       {
+        "type": "number",
+        "exclusiveMinimum": 0.0
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "실제지출액"
+     }
+    },
+    "type": "object",
+    "title": "계획수정",
+    "description": "지출계획 수정. 보낸 필드만 바뀐다. 집행예정일을 null 로 보내면 지출일을 비운다."
+   },
+   "server__models________3": {
     "properties": {
      "항목": {
       "type": "string",
+      "maxLength": 300,
+      "minLength": 1,
       "title": "항목"
      },
      "설명": {
       "anyOf": [
        {
-        "type": "string"
+        "type": "string",
+        "maxLength": 2000
        },
        {
         "type": "null"
@@ -3011,7 +4279,8 @@
      "due_date": {
       "anyOf": [
        {
-        "type": "string"
+        "type": "string",
+        "format": "date"
        },
        {
         "type": "null"
@@ -3024,10 +4293,23 @@
       "enum": [
        "기타",
        "계약",
-       "비교견적"
+       "비교견적",
+       "사전승인",
+       "사전확인",
+       "증빙"
       ],
       "title": "유형",
       "default": "기타"
+     },
+     "상태": {
+      "type": "string",
+      "enum": [
+       "준비필요",
+       "집행예정",
+       "완료"
+      ],
+      "title": "상태",
+      "default": "준비필요"
      }
     },
     "type": "object",
@@ -3037,8 +4319,49 @@
     "title": "할일생성",
     "description": "사용자가 직접 추가하는 할일. 출처는 서버가 'user' 로 고정한다(재판정해도 바뀌지 않는다)."
    },
-   "server__models________3": {
+   "server__models________4": {
     "properties": {
+     "항목": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 300,
+        "minLength": 1
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "항목"
+     },
+     "설명": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 2000
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "설명"
+     },
+     "구분": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "결제전",
+         "결제후",
+         "집행"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "구분"
+     },
      "상태": {
       "anyOf": [
        {
@@ -3058,7 +4381,8 @@
      "due_date": {
       "anyOf": [
        {
-        "type": "string"
+        "type": "string",
+        "format": "date"
        },
        {
         "type": "null"
@@ -3073,7 +4397,10 @@
         "enum": [
          "기타",
          "계약",
-         "비교견적"
+         "비교견적",
+         "사전승인",
+         "사전확인",
+         "증빙"
         ]
        },
        {
@@ -3085,9 +4412,9 @@
     },
     "type": "object",
     "title": "할일수정",
-    "description": "할일 상태 변경·날짜 지정. 보낸 필드만 바뀐다."
+    "description": "할일 수정. 보낸 필드만 바뀐다. due_date 를 null 로 보내면 날짜를 비운다(날짜 미정으로 옮긴다)."
    },
-   "server__models________4": {
+   "server__models________5": {
     "properties": {
      "친족거래": {
       "type": "boolean",
@@ -3104,7 +4431,7 @@
     "title": "특수관계",
     "description": "특수관계 거래 여부. 판정 요청에만 쓰고 저장하지 않는다."
    },
-   "server__models________5": {
+   "server__models________6": {
     "properties": {
      "사업명": {
       "anyOf": [
@@ -3212,7 +4539,7 @@
     "title": "질문요청",
     "description": "판정 전 확인 질문 요청. org·계정은 토큰에서 정하므로 받지 않는다."
    },
-   "server__models________6": {
+   "server__models________7": {
     "properties": {
      "code": {
       "type": "string",
@@ -3230,7 +4557,7 @@
     "title": "답변항목",
     "description": "/api/judge 가 받는 답 한 건. code 는 심층질문 code 또는 확인 질문 id(Q1 등)다."
    },
-   "server__models________7": {
+   "server__models________8": {
     "properties": {
      "정규화": {
       "additionalProperties": true,
@@ -3282,11 +4609,11 @@
       "title": "Plan Id"
      },
      "특수관계": {
-      "$ref": "#/components/schemas/server__models________4"
+      "$ref": "#/components/schemas/server__models________5"
      },
      "답변": {
       "items": {
-       "$ref": "#/components/schemas/server__models________6"
+       "$ref": "#/components/schemas/server__models________7"
       },
       "type": "array",
       "title": "답변"
@@ -3349,7 +4676,7 @@
     "type": "object",
     "title": "판정요청"
    },
-   "server__models________8": {
+   "server__models________9": {
     "properties": {
      "정부지원_현금": {
       "type": "number",
@@ -3386,43 +4713,6 @@
     },
     "type": "object",
     "title": "협약정보"
-   },
-   "server__models________9": {
-    "properties": {
-     "전체": {
-      "type": "integer",
-      "title": "전체",
-      "default": 0
-     },
-     "확인필요": {
-      "type": "integer",
-      "title": "확인필요",
-      "default": 0
-     },
-     "위험": {
-      "type": "integer",
-      "title": "위험",
-      "default": 0
-     },
-     "특이사항없음": {
-      "type": "integer",
-      "title": "특이사항없음",
-      "default": 0
-     },
-     "점검전": {
-      "type": "integer",
-      "title": "점검전",
-      "default": 0
-     },
-     "금액합계": {
-      "type": "number",
-      "title": "금액합계",
-      "default": 0
-     }
-    },
-    "type": "object",
-    "title": "계획통계",
-    "description": "홈 화면 통계 카드 값. 목록 응답에 포함해 보낸다(통계 전용 API 없음).\n\n전체 = 확인필요 + 위험 + 특이사항없음 + 점검전."
    },
    "server__models_________1": {
     "properties": {
@@ -3558,13 +4848,189 @@
       "title": "부가세구분"
      },
      "특수관계": {
-      "$ref": "#/components/schemas/server__models________4"
+      "$ref": "#/components/schemas/server__models________5"
      }
     },
     "type": "object",
     "title": "정규화요청"
    },
+   "server__models_________3": {
+    "properties": {
+     "평가": {
+      "type": "string",
+      "enum": [
+       "맞음",
+       "틀림"
+      ],
+      "title": "평가"
+     },
+     "이유": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "판정이 다름",
+         "근거가 다름",
+         "기타"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "이유"
+     },
+     "의견": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 1000
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "의견"
+     }
+    },
+    "type": "object",
+    "required": [
+     "평가"
+    ],
+    "title": "피드백입력"
+   },
+   "server__models_________4": {
+    "properties": {
+     "평가": {
+      "type": "string",
+      "enum": [
+       "맞음",
+       "틀림"
+      ],
+      "title": "평가"
+     },
+     "이유": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "판정이 다름",
+         "근거가 다름",
+         "기타"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "이유"
+     },
+     "의견": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "의견"
+     }
+    },
+    "type": "object",
+    "required": [
+     "평가"
+    ],
+    "title": "판정피드백"
+   },
+   "server__models_________5": {
+    "properties": {
+     "작성자": {
+      "type": "string",
+      "title": "작성자"
+     },
+     "평가": {
+      "type": "string",
+      "enum": [
+       "맞음",
+       "틀림"
+      ],
+      "title": "평가"
+     },
+     "이유": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "판정이 다름",
+         "근거가 다름",
+         "기타"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "이유"
+     },
+     "의견": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "의견"
+     }
+    },
+    "type": "object",
+    "required": [
+     "작성자",
+     "평가"
+    ],
+    "title": "팀평가항목",
+    "description": "같은 판정에 다른 구성원이 남긴 평가."
+   },
    "server__models__________1": {
+    "properties": {
+     "팀이름": {
+      "type": "string",
+      "maxLength": 40,
+      "minLength": 1,
+      "title": "팀이름"
+     },
+     "사업명": {
+      "type": "string",
+      "maxLength": 100,
+      "minLength": 1,
+      "title": "사업명"
+     }
+    },
+    "type": "object",
+    "required": [
+     "팀이름",
+     "사업명"
+    ],
+    "title": "팀만들기입력"
+   },
+   "server__models__________2": {
+    "properties": {
+     "초대코드": {
+      "type": "string",
+      "maxLength": 20,
+      "minLength": 1,
+      "title": "초대코드"
+     }
+    },
+    "type": "object",
+    "required": [
+     "초대코드"
+    ],
+    "title": "초대코드입력"
+   },
+   "server__models__________3": {
     "properties": {
      "비목": {
       "type": "string",
@@ -3624,7 +5090,7 @@
     ],
     "title": "집행내역항목"
    },
-   "server__models__________2": {
+   "server__models__________4": {
     "properties": {
      "역할": {
       "type": "string",
@@ -3669,10 +5135,10 @@
     ],
     "title": "참여인력항목"
    },
-   "server__models__________3": {
+   "server__models__________5": {
     "properties": {
      "통계": {
-      "$ref": "#/components/schemas/server__models________9"
+      "$ref": "#/components/schemas/server__models________10"
      },
      "건수": {
       "type": "integer",
@@ -3691,7 +5157,7 @@
      },
      "항목": {
       "items": {
-       "$ref": "#/components/schemas/server__models________10"
+       "$ref": "#/components/schemas/server__models________12"
       },
       "type": "array",
       "title": "항목"
@@ -3700,7 +5166,7 @@
     "type": "object",
     "title": "계획목록응답"
    },
-   "server__models__________4": {
+   "server__models__________6": {
     "properties": {
      "건수": {
       "type": "integer",
@@ -3718,7 +5184,7 @@
     "type": "object",
     "title": "할일목록응답"
    },
-   "server__models__________5": {
+   "server__models__________7": {
     "properties": {
      "우선계층": {
       "type": "string",
@@ -3776,11 +5242,11 @@
     "title": "우선순위규칙",
     "description": "corpus.precedence_rules 한 행. L1/L2/L3 중 어느 계층이 우선하는지."
    },
-   "server__models__________6": {
+   "server__models__________8": {
     "properties": {
      "사업": {
       "items": {
-       "$ref": "#/components/schemas/server__models________12"
+       "$ref": "#/components/schemas/server__models________15"
       },
       "type": "array",
       "title": "사업"
@@ -3869,6 +5335,71 @@
     "type": "object",
     "title": "활성화요청",
     "description": "이전 판을 자동으로 찾지 못할 때 대체_doc_id 나 신규문서 중 하나를 지정한다.\n\n신규문서인데 같은 사업·비슷한 이름의 active 문서가 있으면 409 다. 그 문서와 함께 검색돼야 하는\n별개 문서임을 확인했을 때만 중복_허용=true 를 준다."
+   },
+   "server__routes_ingest_______-Output": {
+    "properties": {
+     "doc_id": {
+      "type": "string",
+      "title": "Doc Id"
+     },
+     "상태": {
+      "type": "string",
+      "title": "상태"
+     },
+     "이전판_doc_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "이전판 Doc Id"
+     },
+     "retrieval_scope": {
+      "type": "string",
+      "title": "Retrieval Scope"
+     },
+     "이전판_청크_삭제": {
+      "type": "integer",
+      "title": "이전판 청크 삭제"
+     },
+     "판정캐시_삭제": {
+      "type": "integer",
+      "title": "판정캐시 삭제"
+     },
+     "경고": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "경고",
+      "default": []
+     },
+     "대체한_doc_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "대체한 Doc Id",
+      "readOnly": true
+     }
+    },
+    "type": "object",
+    "required": [
+     "doc_id",
+     "상태",
+     "retrieval_scope",
+     "이전판_청크_삭제",
+     "판정캐시_삭제",
+     "대체한_doc_id"
+    ],
+    "title": "활성화응답"
    },
    "server__routes_ingest________1": {
     "properties": {
@@ -4474,6 +6005,35 @@
      "slug"
     ],
     "title": "데모세션응답"
+   },
+   "server__routes_teams________": {
+    "properties": {
+     "기관명": {
+      "type": "string",
+      "title": "기관명"
+     },
+     "slug": {
+      "type": "string",
+      "title": "Slug"
+     },
+     "팀이름": {
+      "type": "string",
+      "title": "팀이름"
+     },
+     "사업명": {
+      "type": "string",
+      "title": "사업명",
+      "description": "이 팀의 사업. 화면은 이 사업으로 판정을 요청한다"
+     }
+    },
+    "type": "object",
+    "required": [
+     "기관명",
+     "slug",
+     "팀이름",
+     "사업명"
+    ],
+    "title": "초대등록응답"
    }
   }
  }

@@ -92,4 +92,26 @@ class 요청제한:
                     "차단": dict(self.차단)}
 
 
+class 시도제한:
+    """키별 시도 횟수 제한. 초대 코드처럼 맞혀 보는 요청을 막는다. 프로세스 메모리에 둔다."""
+
+    def __init__(self, 최대: int, 초: int) -> None:
+        self.최대, self.초 = 최대, 초
+        self._기록: dict[str, deque] = {}
+        self._락 = threading.Lock()
+
+    def 통과(self, 키: str) -> bool:
+        지금 = time.time()
+        with self._락:
+            for k in [k for k, q in self._기록.items() if not q or 지금 - q[-1] > self.초]:
+                del self._기록[k]
+            q = self._기록.setdefault(키, deque())
+            while q and 지금 - q[0] > self.초:
+                q.popleft()
+            if len(q) >= self.최대:
+                return False
+            q.append(지금)
+            return True
+
+
 제한 = 요청제한()

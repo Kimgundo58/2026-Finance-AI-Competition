@@ -28,6 +28,7 @@ from server.judge_response import (_사용자프로필값_구성, 구_참조관�
 from server.models import 판정요청
 from server.persist import 판정_저장
 from server.rate_limit import 제한
+from server import mock_data
 from server.selftest import mock_판정
 
 _log = logging.getLogger("suddoe.judge")
@@ -105,7 +106,8 @@ def judge(req: Request, body: 판정요청, mock: str | None = None,
             out = {k: v for k, v in 캐시.items() if k != "decision_id"}
             decision_id = None
         elif MOCK:
-            out = {"사용자답변": [], **mock_판정.get(mock or "가능", mock_판정["가능"])}
+            out = {"사용자답변": [], "기준문서": mock_data.mock_기준문서(),
+                   **mock_판정.get(mock or "가능", mock_판정["가능"])}
             decision_id = None
             response_cache.저장(k, out, 종류="judge", org=body.org_id, account=account_id,
                                데이터버전_해시=데이터버전해시)
