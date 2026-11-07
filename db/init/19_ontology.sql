@@ -57,12 +57,24 @@ CREATE TABLE IF NOT EXISTS corpus.norms (
 
 CREATE TABLE IF NOT EXISTS corpus.provenance (
     owner_id   TEXT NOT NULL,            -- 개념 ID · 규범 ID · 관계는 scripts/ontology_load.py 의 관계_소유자ID()
-    owner_kind TEXT NOT NULL,            -- 개념 · 관계 · 규범
-    칸         TEXT NOT NULL,            -- 규범은 수치 · 조건 · 대상, 개념 · 관계는 근거
+    owner_kind TEXT NOT NULL,            -- 개념 · 관계 · 규범 · 용어(term_id)
+    칸         TEXT NOT NULL,            -- 규범은 수치 · 조건 · 대상, 개념 · 관계 · 용어는 근거
     doc_id     TEXT NOT NULL REFERENCES corpus.documents,
     조번호     TEXT NOT NULL,
     항호       TEXT,
     발췌       TEXT NOT NULL
+);
+
+-- 용어 풀이(db/migrations/2026-11-07_용어풀이.sql 과 같다). 근거는 provenance(owner_kind '용어')
+CREATE TABLE IF NOT EXISTS corpus.terminology (
+    term_id    TEXT PRIMARY KEY,
+    용어       TEXT NOT NULL,
+    풀이       TEXT NOT NULL,
+    concept_id TEXT REFERENCES corpus.concepts ON DELETE SET NULL,
+    적용사업   TEXT REFERENCES corpus.programs ("사업명"),
+    검수단계   TEXT NOT NULL,
+    CHECK (검수단계 IN ('AI초안','AI대조','AI검증','사람확정','재검토')),
+    UNIQUE NULLS NOT DISTINCT (용어, 적용사업)
 );
 
 CREATE INDEX IF NOT EXISTS ix_concept_labels_norm ON corpus.concept_labels ("정규화");
@@ -80,10 +92,10 @@ ALTER TABLE tenant.l3_documents DROP CONSTRAINT IF EXISTS "l3_documents_연결�
 ALTER TABLE tenant.l3_documents ADD CONSTRAINT "l3_documents_연결초안상태_check"
     CHECK ("연결초안상태" IN ('작성중', '완료', '일부실패', '실패'));
 
-GRANT SELECT ON corpus.concepts, corpus.concept_labels, corpus.concept_relations, corpus.norms, corpus.provenance
-    TO suddoe_app;
+GRANT SELECT ON corpus.concepts, corpus.concept_labels, corpus.concept_relations, corpus.norms, corpus.provenance,
+    corpus.terminology TO suddoe_app;
 GRANT SELECT, INSERT, UPDATE, DELETE
-    ON corpus.concepts, corpus.concept_labels, corpus.concept_relations, corpus.norms, corpus.provenance
+    ON corpus.concepts, corpus.concept_labels, corpus.concept_relations, corpus.norms, corpus.provenance, corpus.terminology
     TO suddoe_ingest;
 
 -- 적재 때 없는 개념 ID 를 지운다. 본문은 열지 않는다. l3_articles 는 RLS 라 정책 없이는 0행으로 보인다.

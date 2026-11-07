@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """온톨로지 원천 JSON → corpus.concepts · concept_labels · concept_relations · norms · provenance 적재 (docs/5_룰/5-8_저장과_조회.md).
+용어 풀이(ontology/용어풀이.json → corpus.terminology, docs/6_LLM/6-5_용어_풀이.md)도 같은 트랜잭션 · 같은 범위로 넣는다(scripts/ontology_terms.py).
 
 순서: 원천 읽기 → ontology_check(코드 검사 + OWL + HermiT, DB 대조 포함) → 트랜잭션 안에서 범위별 upsert · 없는 행 삭제 →
 참조 무결성 확인 → l3_articles.concept_ids 의 없는 ID 정리 → 판정 캐시 삭제 → 커밋 → 적재 로그. 실패하면 적재 전 상태다.
@@ -31,7 +32,8 @@ from _lib import db, paths  # noqa: E402
 
 ROOT = paths.ensure_on_path()
 
-from ontology_check import 검사오류, 원천_기본폴더, 원천_읽기, 전체_검사, 행_해시, _목록, _원본  # noqa: E402
+import ontology_terms  # noqa: E402
+from ontology_check import DB_원문, 검사오류, 복원본_읽기, 원천_기본폴더, 원천_읽기, 전체_검사, 행_해시, _목록, _원본  # noqa: E402
 from ontology_norm import 모든비목, 조문ID_풀이  # noqa: E402
 from psycopg.types.json import Jsonb  # noqa: E402
 from rule_lookup import _norm  # noqa: E402
@@ -279,7 +281,7 @@ def _데이터버전(cur) -> str:
 
 def _행수(cur) -> dict:
     return {t: cur.execute(f"SELECT count(*) FROM corpus.{t}").fetchone()[0]
-            for t in ("concepts", "concept_labels", "concept_relations", "norms", "provenance")}
+            for t in ("concepts", "concept_labels", "concept_relations", "norms", "provenance", "terminology")}
 
 
 def 로그_쓰기(폴더: Path, 내용: dict) -> Path:
@@ -293,7 +295,8 @@ def 적재(폴더: Path | str, 사업키들: list[str] | None, dry: bool, dsn: s
     폴더 = Path(폴더)
     try:
         원천 = 원천_읽기(폴더, None)
-    except 검사오류 as e:
+        용어원천 = ontology_terms.원천_읽기(폴더)
+    except (검사오류, ValueError) as e:
         print(f"오류: {e}")
         return 1
     사업표 = 원천["schema"].get("사업키") or {}
@@ -311,6 +314,10 @@ def 적재(폴더: Path | str, 사업키들: list[str] | None, dry: bool, dsn: s
     with db.connect(dsn) as conn:
         with conn.cursor() as cur:
             결과, 펼침 = 전체_검사(원천, cur)
+            if 용어원천 is not None:
+                ontology_terms.검사(용어원천["용어"], 원천["schema"], 결과, db=DB_원문(cur), 복원본=복원본_읽기(폴더),
+                                   개념ID={c["id"] for c in 펼침["개념"]})
+                결과.통계["용어"] = len(용어원천["용어"])
             conn.rollback()
             for e in 결과.오류:
                 print(f"오류 [{e['코드']}] {e['위치']}: {e['내용']}")
@@ -323,11 +330,21 @@ def 적재(폴더: Path | str, 사업키들: list[str] | None, dry: bool, dsn: s
             행 = DB행_만들기(펼침, 원천["schema"])
             현재 = _현재(cur, 범위)
             차이 = 차이_계산(행, 현재, 범위)
+            용어새 = 용어옛 = None
+            용어유지: set[str] = set()
+            if 용어원천 is not None:
+                용어새 = ontology_terms.범위_행(ontology_terms.DB행(용어원천["용어"], 원천["schema"]), 범위)
+                용어옛 = ontology_terms.현재(cur, 범위)
+                용어유지 = ontology_terms.재검토_유지(용어새, 용어옛)
+                차이.update(ontology_terms.차이(용어새, 용어옛, 용어유지))
+            else:
+                print(f"{ontology_terms.원천_파일} 이 없어 용어 풀이는 건드리지 않는다")
             차이_출력(차이)
             유지 = _재검토_유지(행, 현재, 범위)
             유지수 = {표: len(v) for 표, v in 유지.items()}
+            유지수["용어"] = len(용어유지)
             if any(유지수.values()):
-                print(f"재검토 유지(원천 행이 그대로): 규범 {유지수['규범']} · 노드 {유지수['개념']}")
+                print(f"재검토 유지(원천 행이 그대로): 규범 {유지수['규범']} · 노드 {유지수['개념']} · 용어 {유지수['용어']}")
             if dry:
                 conn.rollback()
                 print("--dry: 쓰지 않았다")
@@ -335,16 +352,19 @@ def 적재(폴더: Path | str, 사업키들: list[str] | None, dry: bool, dsn: s
 
             변경 = _변경있음(차이)
             정리: list[int] = []
+            끊김: list[str] = []
             삭제캐시 = 0
             try:
                 with conn.transaction():
                     cur.execute("SET LOCAL lock_timeout = '10s'")
                     전 = _데이터버전(cur)
                     _쓰기(cur, 행, 현재, 범위, 유지)
+                    if 용어새 is not None:
+                        끊김 = ontology_terms.쓰기(cur, 용어새, 용어옛, 범위, 용어유지)
                     _참조_확인(cur)
                     정리 = _l3_정리(cur)
                     후 = _데이터버전(cur)
-                    핵심변경 = any(차이[t][k] for t in ("개념", "라벨", "관계", "규범") for k in ("추가", "변경", "삭제"))
+                    핵심변경 = any(차이[t][k] for t in ("개념", "라벨", "관계", "규범", "용어") if t in 차이 for k in ("추가", "변경", "삭제"))
                     if 핵심변경 and 전 == 후:
                         raise 적재실패("내용이 바뀌었는데 데이터 버전 해시가 그대로다. 캐시가 무효화되지 않는다")
                     if not 변경 and 전 != 후:
@@ -354,6 +374,7 @@ def 적재(폴더: Path | str, 사업키들: list[str] | None, dry: bool, dsn: s
                         # L3 연결(concept_ids)은 해시에 없어 정리만 일어나도 지운다.
                         삭제캐시 = cur.execute("DELETE FROM tenant.judge_cache").rowcount
                     행수 = _행수(cur)
+                    용어집계 = ontology_terms.단계_집계(cur)
             except 적재실패 as e:
                 print(f"적재 실패(되돌렸다): {e}")
                 return 1
@@ -362,6 +383,8 @@ def 적재(폴더: Path | str, 사업키들: list[str] | None, dry: bool, dsn: s
     데이터버전_해시_무효화()                          # 같은 프로세스에서 불렀을 때만 효과가 있다
     if 정리:
         print(f"l3_articles.concept_ids 에서 없는 ID 를 지웠다: article_id {정리}")
+    if 끊김:
+        print(f"용어 풀이 {len(끊김)}행은 DB 에 없는 개념을 가리켜 concept_id 를 비웠다: {끊김[:_보기_상한]}")
     print(f"데이터 버전 해시: {전} → {후}" + ("" if 전 != 후 else " (변경 없음)"))
     if 변경 or 정리:
         print(f"판정 캐시 삭제 {삭제캐시}행. 서버 프로세스의 해시 캐시는 최대 "
@@ -371,7 +394,8 @@ def 적재(폴더: Path | str, 사업키들: list[str] | None, dry: bool, dsn: s
         "시각": dt.datetime.now().isoformat(timespec="seconds"), "범위": [s or "공통" for s in 범위],
         "원천파일": 원천["파일"], "행수": 행수, "검사": 결과.요약(),
         "차이": {t: {k: (len(v) if isinstance(v, list) else v) for k, v in d.items()} for t, d in 차이.items()},
-        "재검토_유지": 유지수, "l3_정리_article_id": 정리, "판정캐시_삭제": 삭제캐시, "데이터버전": {"전": 전, "후": 후}})
+        "재검토_유지": 유지수, "l3_정리_article_id": 정리, "판정캐시_삭제": 삭제캐시, "데이터버전": {"전": 전, "후": 후},
+        "용어": {**용어집계, "원천해시": 용어원천["해시"] if 용어원천 else None, "concept_끊김": 끊김}})
     print(f"행 수: {json.dumps(행수, ensure_ascii=False)}")
     print(f"적재 로그: {로그}")
     return 0

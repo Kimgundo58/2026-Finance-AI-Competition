@@ -930,10 +930,11 @@ def _활성화_경고(cur, 이전_doc_id: str) -> list[str]:
 
 
 def _재검토_하향(cur, 이전_doc_id: str) -> list[str]:
-    """이전 판을 근거(provenance)로 가진 노드 · 규범의 검수단계를 `재검토` 로 내린다(docs/5_룰/5-8_저장과_조회.md 개정판).
+    """이전 판을 근거(provenance)로 가진 노드 · 규범 · 용어 풀이의 검수단계를 `재검토` 로 내린다(docs/5_룰/5-8_저장과_조회.md 개정판).
 
     norms.verified 는 생성 칼럼이라 자동으로 false 가 된다. 그러면 코드 게이트가 그 규범으로 불가를 내지 않고(ontology_gate._사용가능)
     '가능' 은 조건부로 내려간다. 내용을 검토하지 않았으니 옛 판 기준으로 판정을 확정하지 않는다.
+    용어 풀이는 `AI검증` 이상만 화면 · 질문 프롬프트에 나가므로(ontology_terms.화면_단계) 재검토가 되면 빠진다.
     """
     규범 = cur.execute(
         """UPDATE corpus.norms SET 검수단계 = '재검토'
@@ -945,9 +946,14 @@ def _재검토_하향(cur, 이전_doc_id: str) -> list[str]:
             WHERE 검수단계 <> '재검토' AND concept_id IN (
                   SELECT owner_id FROM corpus.provenance WHERE owner_kind = '개념' AND doc_id = %s)""",
         (이전_doc_id,)).rowcount
-    if not 규범 and not 개념:
+    용어 = cur.execute(
+        """UPDATE corpus.terminology SET 검수단계 = '재검토'
+            WHERE 검수단계 <> '재검토' AND term_id IN (
+                  SELECT owner_id FROM corpus.provenance WHERE owner_kind = '용어' AND doc_id = %s)""",
+        (이전_doc_id,)).rowcount
+    if not 규범 and not 개념 and not 용어:
         return []
-    return [f"이전 판을 근거로 가진 규범 {규범}건 · 노드 {개념}건을 재검토로 내렸습니다. 원천(ontology/)을 새 판과 대조해 고치고, "
+    return [f"이전 판을 근거로 가진 규범 {규범}건 · 노드 {개념}건 · 용어 풀이 {용어}건을 재검토로 내렸습니다. 원천(ontology/)을 새 판과 대조해 고치고, "
             "schema.json 문서키를 바꿔 다시 적재하세요. 고치지 않은 행은 다시 적재해도 재검토로 남습니다."]
 
 

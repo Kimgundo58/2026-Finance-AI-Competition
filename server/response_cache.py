@@ -209,7 +209,6 @@ _데이터버전_해시_SQL = """SELECT (SELECT count(*) FROM corpus.chunks),
                         -- staged 문서를 활성화하면 청크 수는 그대로이고 상태만 바뀐다
                         (SELECT count(*) FROM corpus.chunks WHERE status = 'active'),
                         -- 온톨로지(docs/5_룰/5-8_저장과_조회.md)는 행이 적어 행 전체를 해시한다.
-                        -- 문서가 "네 테이블" 이라 부르는 나머지 corpus.terminology 는 P4-6 에서 더한다.
                         (SELECT md5(coalesce(string_agg(t::text, '#' ORDER BY concept_id), ''))
                            FROM corpus.concepts t),
                         (SELECT md5(coalesce(string_agg(t::text, '#' ORDER BY 정규화, 적용사업, concept_id), ''))
@@ -217,7 +216,10 @@ _데이터버전_해시_SQL = """SELECT (SELECT count(*) FROM corpus.chunks),
                         (SELECT md5(coalesce(string_agg(t::text, '#' ORDER BY src_id, 관계, dst_id, 적용사업), ''))
                            FROM corpus.concept_relations t),
                         (SELECT md5(coalesce(string_agg(t::text, '#' ORDER BY norm_id), ''))
-                           FROM corpus.norms t)"""
+                           FROM corpus.norms t),
+                        -- 용어 풀이(6-5): 질문 프롬프트와 질문 · 판정 응답 `용어풀이` 가 읽는다. 검수단계를 낮추면 캐시가 무효다
+                        (SELECT md5(coalesce(string_agg(t::text, '#' ORDER BY term_id), ''))
+                           FROM corpus.terminology t)"""
 
 
 def 데이터버전_문자열(n: tuple) -> str:

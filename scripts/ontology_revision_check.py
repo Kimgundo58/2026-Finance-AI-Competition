@@ -34,6 +34,7 @@ ROOT = paths.ensure_on_path()
 import corpus_ingest  # noqa: E402
 import ontology_gate  # noqa: E402
 import ontology_load  # noqa: E402
+import ontology_terms  # noqa: E402
 import orchestrate  # noqa: E402
 
 사업 = "모두의 창업 프로젝트"
@@ -88,7 +89,7 @@ def _새판_활성화(dsn: str, 옛: str) -> dict:
 def _원천_사본(폴더: Path, 문서키값: str) -> Path:
     """레포 원천은 건드리지 않는다. schema.json 문서키만 새 판으로 바꾼 사본(판이 바뀐 뒤 하는 일과 같다)."""
     원천 = ROOT / "ontology"
-    for 이름 in ("schema.json", "공통_L1.json", f"{문서키}.json"):
+    for 이름 in ("schema.json", "공통_L1.json", f"{문서키}.json", ontology_terms.원천_파일):
         shutil.copy(원천 / 이름, 폴더 / 이름)
     for md in (원천 / "추출").rglob("입력_원문.md"):
         대상 = 폴더 / md.relative_to(원천)
@@ -130,6 +131,8 @@ def 점검(ingest_dsn: str) -> int:
     with db.connect(autocommit=True) as conn, conn.cursor() as cur:
         규범들 = _근거_대상(cur, 옛, "규범")
         노드들 = _근거_대상(cur, 옛, "개념")
+        용어들 = _근거_대상(cur, 옛, "용어")
+        전풀이 = {x["용어"] for x in ontology_terms.풀이_목록(cur, 사업)}
         전검증 = {r[0] for r in cur.execute("SELECT norm_id FROM corpus.norms WHERE verified").fetchall()}
         전버전 = ontology_load._데이터버전(cur)
     기록("전: 재검토 대상이 있고 발동 규범이 그 안에 있다", bool(규범들) and 발동 in 규범들, f"규범 {len(규범들)} · 노드 {len(노드들)}")
@@ -141,10 +144,16 @@ def 점검(ingest_dsn: str) -> int:
     with db.connect(autocommit=True) as conn, conn.cursor() as cur:
         재검토규범 = _재검토(cur, "norms", "norm_id")
         재검토노드 = _재검토(cur, "concepts", "concept_id")
+        재검토용어 = _재검토(cur, "terminology", "term_id")
+        후풀이 = {x["용어"] for x in ontology_terms.풀이_목록(cur, 사업)}
+        옛판용어 = {r[0] for r in cur.execute("SELECT 용어 FROM corpus.terminology WHERE term_id = ANY(%s)", (list(용어들),)).fetchall()}
         후검증 = {r[0] for r in cur.execute("SELECT norm_id FROM corpus.norms WHERE verified").fetchall()}
         후버전 = ontology_load._데이터버전(cur)
     기록("옛 판을 가리키는 규범 · 노드가 전부, 그것만 재검토", 재검토규범 == 규범들 and 재검토노드 == 노드들,
        f"규범 {len(재검토규범)} · 노드 {len(재검토노드)}")
+    기록("옛 판을 근거로 가진 용어 풀이가 전부, 그것만 재검토", bool(용어들) and 재검토용어 == 용어들, f"용어 {len(재검토용어)}")
+    기록("재검토 풀이는 화면 · 질문 프롬프트 목록에서 빠진다", 옛판용어 and not (후풀이 & 옛판용어) and 후풀이 < 전풀이,
+       f"{len(전풀이)} → {len(후풀이)}")
     기록("verified: 옛 판 규범만 false, 나머지는 그대로", 후검증 == 전검증 - 규범들 and not (후검증 & 규범들), f"{len(전검증)} → {len(후검증)}")
     기록("데이터 버전 해시가 바뀐다(게스트 캐시 무효)", 전버전 != 후버전)
 
@@ -167,9 +176,11 @@ def 점검(ingest_dsn: str) -> int:
         기록("문서키만 바꾼 재적재가 통과한다", ontology_load.적재(폴더, None, False, ingest_dsn) == 0)
         with db.connect(autocommit=True) as conn, conn.cursor() as cur:
             유지규범 = _재검토(cur, "norms", "norm_id")
+            유지용어 = _재검토(cur, "terminology", "term_id")
             새근거 = cur.execute("SELECT count(*) FROM corpus.provenance WHERE doc_id = %s", (새,)).fetchone()[0]
             옛근거 = cur.execute("SELECT count(*) FROM corpus.provenance WHERE doc_id = %s", (옛,)).fetchone()[0]
         기록("문서키만 바꿔 다시 적재해도 재검토가 유지된다", 유지규범 == 규범들, f"재검토 규범 {len(유지규범)}")
+        기록("문서키만 바꿔 다시 적재해도 용어 풀이 재검토가 유지된다", 유지용어 == 용어들, f"재검토 용어 {len(유지용어)}")
         기록("재적재 뒤 근거가 새 판을 가리킨다", 새근거 > 0 and 옛근거 == 0, f"새 판 {새근거} · 옛 판 {옛근거}")
         기록("재적재 뒤에도 코드 불가가 나지 않는다", _조회()["게이트"]["종류"] is None)
 

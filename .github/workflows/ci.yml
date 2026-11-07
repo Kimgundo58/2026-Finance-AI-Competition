@@ -70,6 +70,9 @@ jobs:
       - name: 추출 비교 self-test (DB·LLM 없음)
         run: python scripts/extraction_compare.py --self-test
 
+      - name: 용어 풀이 self-test (DB·LLM 없음)
+        run: python scripts/ontology_terms.py --self-test
+
   ontology-db:
     runs-on: ubuntu-latest
     timeout-minutes: 30
