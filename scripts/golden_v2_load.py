@@ -8,8 +8,9 @@
 칸 대응 (읽는 곳이 있는 값만 넣는다. 읽는 곳: eval_retrieval.py):
   no = id, 질문 = 대화.첫질문(화면 첫 입력과 같은 짧은 질문), 정답판정 = 판정, 비목 = 비목, verified = false(AI 라벨, 사람 미검수),
   사업명 = corpus.programs 에 있는 값(없으면 NULL, 원표기는 적용범위), 정답근거 = 근거[]의 역할 · doc_id · 조번호 · 항호 · layer · 원문(구절),
-  문항메타 = {"L3": 기관 규정 반사실 문항 여부}
-대화의 추가질문과 L3 기관규정문은 넣지 않는다. 판정 효과 측정(P5-2)을 만들 때 그 스크립트와 같이 더한다(docs/9_백로그.md).
+  문항메타 = {"L3": 기관 규정 반사실 문항 여부, "답들": 대화.추가질문[].답(사용자 진술, 읽는 곳 eval_screen_path.py · eval_retrieval.py --입력 대화),
+             "기관규정문": L3.기관규정문(평가용 가상 규정, 읽는 곳 같음)}
+대화.상황메모와 정답 칸(조건 · 해야할일 · 근거요약)은 판정 입력이 아니라서 넣지 않는다.
 
 문항 본문과 정답은 출력하지 않는다. 개수만 출력한다.
 
@@ -58,7 +59,9 @@ def 행_만들기(x: dict, 세트: str, 사업들: set[str]) -> dict:
         "정답근거": json.dumps(
             [{"역할": g.get("역할"), "doc_id": g.get("doc_id"), "조번호": g.get("조번호"), "항호": g.get("항호"),
               "layer": g.get("layer"), "원문": g.get("구절")} for g in x["근거"]], ensure_ascii=False),
-        "문항메타": json.dumps({"L3": bool(x.get("L3"))}, ensure_ascii=False),
+        "문항메타": json.dumps({"L3": bool(x.get("L3")),
+                            "답들": [q["답"] for q in (x.get("대화") or {}).get("추가질문") or [] if q.get("답")],
+                            "기관규정문": (x.get("L3") or {}).get("기관규정문")}, ensure_ascii=False),
     }
 
 

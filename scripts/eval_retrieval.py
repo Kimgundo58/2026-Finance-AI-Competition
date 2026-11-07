@@ -9,8 +9,13 @@
 세트를 고르지 않으면 정답셋 v2 행은 읽지 않는다(기존 문항만). `--세트 v2_dev` 는 v2 문항을 읽고, 정답을 결정 근거 조문으로 잡아
 근거 단위 · 문항 단위 포함률(상위 5 + 참조 확장)을 함께 낸다. 결정 근거가 L3 기관 규정뿐인 문항은 run 에 평가 제외로 남긴다. v2 문항 본문은 출력하지 않는다.
 
+`--candidates ontology|search|both` 는 새 경로의 후보 커버율을 잰다(P5-1, docs/5_룰/5-9_검증과_측정.md 커버율 프로토콜). 후보는 판정 경로의 함수를 그대로 부른다:
+routes_normalize._온톨로지_정규화 → orchestrate.온톨로지_조회 · orchestrate._새_검색_스레드 → ontology_context.문맥_구성. 글자 상한으로 빠진 항목은 포함으로 세지 않는다.
+입력 비목은 질의 변환 추정값과 정답 비목(정답 비목은 후보를 재는 입력일 뿐 판정에 넘기지 않는다) 둘 다 잰다. L3 문항은 기관규정문을 미연결 조문 행으로 문맥_구성에 넘긴다(DB 쓰기 없음).
+
 실행: PYTHONIOENCODING=utf-8 python scripts/eval_retrieval.py --k 20 [--overlap] [--필터비교] [--dangling] [--참조확장] [--진단]
       PYTHONIOENCODING=utf-8 python scripts/eval_retrieval.py --세트 v2_dev --사업 "모두의 창업 프로젝트" --k 20 --기록
+      PYTHONIOENCODING=utf-8 python scripts/eval_retrieval.py --세트 v2_dev --사업 "모두의 창업 프로젝트" --candidates both --기록
 """
 from __future__ import annotations
 
@@ -38,6 +43,8 @@ class 문항(NamedTuple):
     근거: list[dict]        # eval.golden_set.정답근거
     결정조문: frozenset[int] = frozenset()   # v2: 결정 근거의 article_id
     L3: bool = False        # v2: 기관 규정 반사실 문항
+    비목: str | None = None  # v2: 정답 비목. --candidates 의 입력비목=정답 에서만 읽는다
+    메타: dict | None = None # v2: 문항메타(답들 · 기관규정문). --candidates 에서만 읽는다
 
 
 @dataclass
@@ -155,14 +162,14 @@ def v2_불러오기(cur, 세트: str, 사업: str | None, L3: str) -> tuple[list
     if L3 != "전체":
         조건 += " AND coalesce((문항메타->>'L3')::boolean, false) = %s"
         인자.append(L3 == "만")
-    cur.execute(f"""SELECT gold_id, 세트, 질문, 정답근거, 사업명, coalesce((문항메타->>'L3')::boolean, false)
+    cur.execute(f"""SELECT gold_id, 세트, 질문, 정답근거, 사업명, coalesce((문항메타->>'L3')::boolean, false), 비목, 문항메타
                       FROM eval.golden_set WHERE {조건} ORDER BY gold_id""", 인자)
     rows = cur.fetchall()
     if not rows:
         sys.exit(f"세트 {세트!r} (사업 {사업!r}) 문항이 없다. scripts/golden_v2_load.py 를 먼저 실행한다.")
 
     데이터, 제외 = [], []
-    for gid, 이름, q, 근거, 사업명, l3 in rows:
+    for gid, 이름, q, 근거, 사업명, l3, 비목, 메타 in rows:
         결정 = [g for g in 근거 or [] if "결정" in (g.get("역할") or "")]
         cur.execute("""SELECT a.article_id FROM corpus.doc_articles a
                          JOIN unnest(%s::text[], %s::text[]) AS k(doc_id, 조번호)
@@ -171,7 +178,7 @@ def v2_불러오기(cur, 세트: str, 사업: str | None, L3: str) -> tuple[list
         조문 = frozenset(r[0] for r in cur.fetchall())
         cur.execute("SELECT chunk_id FROM corpus.chunks WHERE article_id = ANY(%s)", (list(조문),))
         정답 = {r[0] for r in cur.fetchall()}
-        (데이터 if 조문 else 제외).append(문항(gid, 이름, q, 정답, 사업명, 근거, 조문, l3))
+        (데이터 if 조문 else 제외).append(문항(gid, 이름, q, 정답, 사업명, 근거, 조문, l3, 비목, 메타))
     print(f"세트 {세트}{f' · 사업 {사업}' if 사업 else ''}: {len(rows)}문항 · 평가 {len(데이터)} · 평가 제외(결정 근거가 코퍼스에 없음) {len(제외)}")
     if not 데이터:
         sys.exit("평가할 문항이 없다.")
@@ -496,9 +503,301 @@ def 보고_참조확장(참조확장res: list[tuple[list[int], list[int], set[in
     print(f"  참조확장이 더한 조  평균 {추가:.1f}개/문항")
 
 
+# ── 후보 커버율 (--candidates, P5-1) ─────────────────────────────────────────
+_L3_문서 = "L3_기관규정문"                # 정답 근거의 가상 문서. golden_v2_load._L3_문서 와 같다
+_후보표시 = {"ontology": "온톨로지", "search": "검색", "both": "병합"}
+_놓친유형 = ("계층 상속", "준용", "비목 경계", "주체", "사건", "표", "별지", "그 밖")
+
+
+def 입력글(m: 문항, 입력: str) -> str:
+    """화면 첫 입력에 넣을 글. `대화` 는 첫질문 뒤에 각본 답(사용자 진술)을 잇는다."""
+    if 입력 != "대화":
+        return m.질문
+    return " ".join([m.질문, *((m.메타 or {}).get("답들") or [])])
+
+
+def _정답_비목(비목: str | None) -> str | None:
+    """정답 라벨의 비목 → 화면 비목 10종. 10종 밖이거나 없으면 None(그 문항은 추정값으로 재고 따로 센다)."""
+    from server._common import 비목_ENUM
+    from server.catalog import _비목_표준화
+    값 = re.sub(r"\(.*?\)", "", 비목 or "").strip()
+    값 = _비목_표준화({"창업활동자금": "창업활동비"}.get(값, 값))   # 진행상황 E1: 화면 비목 창업활동비 = 비목:창업활동자금/*
+    return 값 if 값 in 비목_ENUM else None
+
+
+def _L3_행(m: 문항) -> list[dict]:
+    """기관규정문 → 문맥_구성 입력 행. 연결을 확인하기 전 문서(concept_ids NULL)와 같고, L3 연결 화면(P4-5)이 없어 미연결만 있다."""
+    글 = (m.메타 or {}).get("기관규정문")
+    if not m.L3 or not 글:
+        return []
+    조 = re.search(r"제\s*\d+\s*조(?:의\s*\d+)?", 글)
+    return [{"article_id": -m.gold_id, "조번호": 조.group(0).replace(" ", "") if 조 else "제1조", "조제목": None,
+             "본문": 글, "concept_ids": None}]
+
+
+def 후보_문맥(cur, m: 문항, 변환: dict, 비목: str | None, 세목: str | None, 종류들: tuple[str, ...], 글: str) -> dict:
+    """후보 집합별 문맥. orchestrate._온톨로지단계 · _새_검색단계 와 같은 함수를 같은 값으로 부른다. 조회 오류는 위로 올린다."""
+    import ontology_context
+    import ontology_lookup
+    import orchestrate
+    조회, 노드없음 = None, None
+    if 비목:
+        입력 = orchestrate.게이트_입력(변환.get("금액"), (변환.get("수치") or {}).get("부가세구분"), None)
+        try:
+            조회 = orchestrate.온톨로지_조회(cur, m.사업명, 비목, 세목, 입력, 확정=True, 품목=변환.get("품목"))
+        except LookupError as e:
+            노드없음 = str(e)
+    근거행 = 조회["근거행"] if 조회 else []
+    공통 = {"대상노드": 조회["노드들"] if 조회 else set(), "l3": _L3_행(m), "schema": ontology_lookup._스키마(),
+          "자금": 조회.get("자금") if 조회 else None}
+    검색 = None
+    if "ontology" not in 종류들 or len(종류들) > 1:
+        검색, 오류 = orchestrate._새_검색_스레드(변환.get("질의문") or 글, m.사업명)
+        if 오류:
+            raise RuntimeError(f"검색 실패: {오류}")
+    문맥들 = {}
+    for 종류 in 종류들:
+        문맥들[종류] = ontology_context.문맥_구성(
+            cur, 근거행=[] if 종류 == "search" else 근거행, 검색=None if 종류 == "ontology" else 검색, **공통)
+    return {"문맥들": 문맥들, "비목_id": 조회["대상"]["비목_id"] if 조회 else None, "노드없음": 노드없음}
+
+
+def 문맥_조문(cur, 문맥: dict) -> tuple[dict[tuple[str, str], set], bool]:
+    """문맥에 실제로 남은 항목 → ({(doc_id, 조번호): 항 키 집합}, L3 조문 있음). 키 None 은 항으로 나뉘지 않은 조 전체다."""
+    표: dict[tuple[str, str], set] = {}
+    조문, 청크, l3있음 = {}, {}, False
+    for _, 묶음 in 문맥["블록"]:
+        for 종류, id_, _헤더, _조각, 키 in 묶음:
+            if 종류 == "l3":
+                l3있음 = True
+            else:
+                (조문 if 종류 == "article" else 청크).setdefault(id_, []).append(키)
+    if 조문:
+        for aid, doc, 조 in cur.execute('SELECT article_id, doc_id, "조번호" FROM corpus.doc_articles WHERE article_id = ANY(%s)',
+                                       (list(조문),)).fetchall():
+            표.setdefault((doc, 조), set()).update(조문[aid])
+    if 청크:
+        for cid, doc, 조 in cur.execute('SELECT chunk_id, doc_id, "조번호" FROM corpus.chunks WHERE chunk_id = ANY(%s)',
+                                       (list(청크),)).fetchall():
+            표.setdefault((doc, 조), set()).update(청크[cid])
+    return 표, l3있음
+
+
+def 근거_포함(m: 문항, 표: dict, l3있음: bool) -> dict:
+    """결정 근거를 조 · 항 단위로 대조한다. 근거 항호가 항 기호가 아니면(`제2호` 등) 조 단위로 본다.
+
+    반환: 근거(조·항) 분모 · 포함, 조 분모 · 포함, L3 근거 분모 · 포함, 문항 전부 포함(조·항), 놓친 근거.
+    """
+    import ontology_context
+    결정 = [g for g in m.근거 or [] if "결정" in (g.get("역할") or "")]
+    조항 = {(g["doc_id"], g["조번호"], ontology_context.항호_키(g.get("항호")), g.get("항호")) for g in 결정 if g["doc_id"] != _L3_문서}
+    조들 = {(d, 조) for d, 조, _, _ in 조항}
+    l3근거 = sum(1 for g in 결정 if g["doc_id"] == _L3_문서)
+
+    def 있음(d, 조, 키) -> bool:
+        키들 = 표.get((d, 조))
+        if 키들 is None:
+            return False
+        return 키 is None or None in 키들 or any((k or "").split("#")[0] == 키 for k in 키들)
+    놓침 = sorted({(d, 조, 항호 or "") for d, 조, 키, 항호 in 조항 if not 있음(d, 조, 키)})
+    return {"근거": len(조항), "포함": len(조항) - len(놓침), "조": len(조들), "조포함": sum(1 for x in 조들 if x in 표),
+            "L3근거": 1 if l3근거 else 0, "L3포함": 1 if l3근거 and l3있음 else 0,
+            "전부": not 놓침 and (not l3근거 or l3있음), "놓침": 놓침}
+
+
+def 놓친_분류(cur, 놓침: list[tuple], 비목_id: str | None, 사업: str | None) -> list[dict]:
+    """놓친 근거 → 유형(5-9): 별지 · 표(조번호 · 항호), 준용(준용 · 위임 관계의 도착 조, 연결종류를 함께 적는다),
+    계층 상속 · 비목 경계 · 주체 · 사건(그 조를 근거로 갖는 개념 · 규범의 노드), 그 밖(온톨로지에 연결 없음). 앞의 것이 먼저다."""
+    import ontology_lookup
+    모든비목 = ontology_lookup.모든비목
+    키표 = {v: k for k, v in (ontology_lookup._스키마().get("문서키") or {}).items()}
+    사업들 = [사업] if 사업 else []
+    out = []
+    for doc, 조, 항호 in 놓침:
+        행 = {"doc_id": doc, "조번호": 조, "항호": 항호, "유형": "그 밖", "연결종류": None}
+        out.append(행)
+        if 조.startswith("별지") or 항호.startswith("/"):
+            행["유형"] = "별지"
+            continue
+        if 조.startswith(("별표", "붙임", "표")) or "표" in 항호:
+            행["유형"] = "표"
+            continue
+        i = ontology_lookup._조문ID_만들기(doc, 조, None, 키표)
+        if i is None:
+            continue
+        준용 = cur.execute("""SELECT "연결종류" FROM corpus.concept_relations
+                              WHERE "관계" IN ('준용', '위임') AND left(dst_id, length(%s)) = %s
+                                AND ("적용사업" IS NULL OR "적용사업" = ANY(%s)) LIMIT 1""", (i, i, 사업들)).fetchone()
+        if 준용:
+            행.update(유형="준용", 연결종류=준용[0])
+            continue
+        노드들 = {r[0] for r in cur.execute(
+            """SELECT owner_id FROM corpus.provenance WHERE owner_kind = '개념' AND doc_id = %s AND "조번호" = %s
+               UNION
+               SELECT unnest(n."대상") FROM corpus.provenance p JOIN corpus.norms n ON n.norm_id = p.owner_id
+                WHERE p.owner_kind = '규범' AND p.doc_id = %s AND p."조번호" = %s""", (doc, 조, doc, 조)).fetchall()}
+        분류노드 = [n for n in 노드들 if n.startswith(("비목:", "세목:", "품목:"))]
+        같은비목 = any(n == 모든비목 or n == 비목_id or (비목_id and 비목_id in {p for _, p in ontology_lookup._상위_경로(cur, n, 사업들)})
+                    for n in 분류노드)
+        if 같은비목:
+            행["유형"] = "계층 상속"
+        elif 분류노드:
+            행["유형"] = "비목 경계"
+        elif any(n.startswith("주체:") for n in 노드들):
+            행["유형"] = "주체"
+        elif any(n.startswith(("절차:", "시간:")) for n in 노드들):
+            행["유형"] = "사건"
+    return out
+
+
+def 커버율_집계(결과행: list[dict], 종류: str) -> dict:
+    """문항별 대조 → 묶음별 지표. 분모는 근거(조·항) · 조 · 문항 셋을 다 적는다. 변환 실패 문항은 분모에서 빼고 따로 센다."""
+    def 묶음(행들: list[dict]) -> dict:
+        합 = {k: sum(r["후보"][종류][k] for r in 행들) for k in ("근거", "포함", "조", "조포함", "L3근거", "L3포함")}
+        전부 = sum(1 for r in 행들 if r["후보"][종류]["전부"])
+
+        def 률(a, b):
+            return round(a / b * 100, 1) if b else None
+        return {"문항": len(행들), **합, "문항전부": 전부, "근거단위_pct": 률(합["포함"], 합["근거"]),
+                "조단위_pct": 률(합["조포함"], 합["조"]), "문항단위_pct": 률(전부, len(행들))}
+    재기 = [r for r in 결과행 if not r.get("실패")]
+    불일치 = [r for r in 재기 if r.get("비목불일치")]
+    return {"전체": 묶음(재기), "L3아님": 묶음([r for r in 재기 if not r["L3"]]), "L3": 묶음([r for r in 재기 if r["L3"]]),
+            "추정비목_다름": 묶음(불일치)}
+
+
+def 커버율_실행(cur, 데이터: list[문항], a) -> dict[str, list[dict]]:
+    """문항마다 질의 변환 1회(LLM) 뒤 입력 비목별로 후보를 구성해 대조한다."""
+    from llm_qwen import LLM실패
+    from server.models import 정규화요청
+    from server.routes_normalize import _온톨로지_정규화
+    종류들 = ("ontology", "search", "both") if a.candidates == "both" else (a.candidates,)
+    방식들 = ("추정", "정답") if a.입력비목 == "둘다" else (a.입력비목,)
+    결과행: dict[str, list[dict]] = {x: [] for x in 방식들}
+    for n, m in enumerate(데이터, 1):
+        글 = 입력글(m, a.입력)
+        try:
+            변환 = (_온톨로지_정규화(정규화요청(질문=글, 사업명=m.사업명)) or (None,))[0]
+        except LLM실패 as e:
+            변환, 실패 = None, f"LLM실패: {str(e)[:80]}"
+        else:
+            실패 = None if 변환 else "온톨로지 경로 대상이 아님"
+        후보들 = (변환 or {}).get("분류후보") or []
+        첫후보 = 후보들[0] if 후보들 else {}
+        정답 = _정답_비목(m.비목)
+        for 방식 in 방식들:
+            기본 = {"gold_id": m.gold_id, "세트": m.세트, "L3": m.L3}
+            if 실패:
+                결과행[방식].append({**기본, "실패": 실패})
+                continue
+            if 방식 == "정답" and 정답:
+                비목 = 정답
+                세목 = next((c.get("세목") for c in 후보들 if c.get("비목") == 정답), None)
+            else:
+                비목, 세목 = 첫후보.get("비목"), 첫후보.get("세목")
+            r = 후보_문맥(cur, m, 변환, 비목, 세목, 종류들, 글)
+            대조 = {}
+            for 종류, 문맥 in r["문맥들"].items():
+                표, l3있음 = 문맥_조문(cur, 문맥)
+                대조[종류] = {**근거_포함(m, 표, l3있음), "항목수": 문맥["항목수"], "글자수": 문맥["글자수"],
+                            "빠진수": 문맥["빠진수"], "L3_초과": 문맥["L3_초과"], "온톨로지항목수": 문맥["온톨로지항목수"]}
+            마지막 = 대조[종류들[-1]]
+            결과행[방식].append({**기본, "후보": 대조, "비목": 비목, "세목": 세목,
+                              "비목불일치": bool(정답) and 첫후보.get("비목") != 정답, "정답비목없음": not 정답,
+                              "추정없음": not 첫후보, "노드없음": r["노드없음"],
+                              "놓친유형": 놓친_분류(cur, 마지막["놓침"], r["비목_id"], m.사업명)})
+        print(f"  {n}/{len(데이터)} gold_id={m.gold_id} 변환={'실패' if 실패 else '완료'} 후보수={len(후보들)}", flush=True)
+    return 결과행
+
+
+def 커버율_보고(결과행: dict[str, list[dict]], a) -> None:
+    종류들 = ("ontology", "search", "both") if a.candidates == "both" else (a.candidates,)
+    for 방식, 행들 in 결과행.items():
+        실패 = [r for r in 행들 if r.get("실패")]
+        재기 = [r for r in 행들 if not r.get("실패")]
+        print(f"\n[후보 커버율] 입력비목={방식} · 세트 {a.세트} · 사업 {a.사업} · L3 {a.L3} · 질의={a.입력} · 변환 실패 {len(실패)}문항")
+        print(f"  추정 후보 없음 {sum(1 for r in 재기 if r['추정없음'])} · 추정 ≠ 정답 비목 {sum(1 for r in 재기 if r['비목불일치'])} · "
+              f"정답 비목 10종 밖 {sum(1 for r in 재기 if r['정답비목없음'])} · 노드 없음 {sum(1 for r in 재기 if r['노드없음'])}")
+        if not 재기:
+            continue
+        for 종류 in 종류들:
+            집계 = 커버율_집계(재기, 종류)
+            for 이름, g in 집계.items():
+                if g["문항"]:
+                    print(f"  {_후보표시[종류]:4} {이름:6} {g['문항']:3}문항 · 근거(조·항) {g['포함']:3}/{g['근거']:3} ({g['근거단위_pct']}%) · "
+                          f"조 {g['조포함']:3}/{g['조']:3} ({g['조단위_pct']}%) · 문항 전부 {g['문항전부']:3} ({g['문항단위_pct']}%) · L3 근거 {g['L3포함']}/{g['L3근거']}")
+        유형 = Counter(x["유형"] for r in 재기 for x in r["놓친유형"])
+        연결 = Counter(x["연결종류"] for r in 재기 for x in r["놓친유형"] if x["연결종류"])
+        print(f"  [놓친 근거 유형 · {_후보표시[종류들[-1]]}] " + " · ".join(f"{k} {유형[k]}" for k in _놓친유형 if 유형[k])
+              + (f" · 준용 연결종류 {dict(연결)}" if 연결 else ""))
+        빠짐 = sum(r["후보"][종류들[-1]]["빠진수"] for r in 재기)
+        print(f"  글자 상한으로 뺀 항목 {빠짐}개 · L3 상한 초과 {sum(1 for r in 재기 if r['후보'][종류들[-1]]['L3_초과'])}문항")
+
+
+def 커버율_기록(결과행: dict[str, list[dict]], a) -> None:
+    """입력 비목별로 eval.runs 1행. 조건 · 분모는 설정 · 지표 · 비고에 남고 날짜는 시작 칸이다. 문항 본문은 남기지 않는다."""
+    import eval_store
+    import orchestrate
+    from ontology_context import 글자_상한
+    종류들 = ("ontology", "search", "both") if a.candidates == "both" else (a.candidates,)
+    최종 = 종류들[-1]
+    for 방식, 행들 in 결과행.items():
+        재기 = [r for r in 행들 if not r.get("실패")]
+        지표들 = {_후보표시[k]: 커버율_집계(재기, k) for k in 종류들} if 재기 else {}
+        지표들["놓친유형"] = dict(Counter(x["유형"] for r in 재기 for x in r["놓친유형"]))
+        지표들["변환실패"] = len(행들) - len(재기)
+        run_id = eval_store.기록(
+            {"종류": "retrieval",
+             "설정": {"측정": "후보 커버율", "후보": a.candidates, "입력비목": 방식, "세트": a.세트, "사업": a.사업, "L3": a.L3,
+                      "질의": a.입력, "dry": a.dry, "검색상위": 10, "글자상한": 글자_상한, "사업필터": orchestrate.사업필터,
+                      "SUDDOE_ONTOLOGY_PROGRAMS": os.environ.get("SUDDOE_ONTOLOGY_PROGRAMS"),
+                      "질의변환모델": os.environ.get("SUDDOE_QUERY_MODEL") or os.environ.get("SUDDOE_QWEN_MODEL")},
+             "문항수": len(행들), "지표": 지표들,
+             "라벨": f"후보 커버율 세트={a.세트} 사업={a.사업} L3={a.L3} 입력비목={방식} 후보={a.candidates}",
+             "비고": (f"조건: 세트={a.세트} · 사업={a.사업} · {len(재기)}문항(변환 실패 {len(행들) - len(재기)} 제외) · 입력비목={방식} · 질의={a.입력} · "
+                      "분모 = 결정 근거(조·항) · 조 · 문항. 목표 95% 는 근거 단위. 라벨은 AI, 사람 미검수.")},
+            [{"gold_id": r["gold_id"], "예측": "변환실패" if r.get("실패") else ("전부포함" if r["후보"][최종]["전부"] else "일부놓침"),
+              "정답": "전부포함", "적중": None if r.get("실패") else r["후보"][최종]["전부"], "원출력": r}
+             for r in 행들])
+        print(f"[기록] eval.runs run_id={run_id} (종류=retrieval, 입력비목={방식}, {len(행들)}문항)")
+
+
+def 커버율_측정(cur, a) -> None:
+    """--candidates 실행. 새 경로 사업으로 환경변수를 잡고 질의 변환 · 후보 함수를 부른다."""
+    import eval_store
+    if not (a.세트 and a.사업):
+        sys.exit("--candidates 는 --세트 와 --사업 이 필요하다")
+    os.environ["SUDDOE_ONTOLOGY_PROGRAMS"] = a.사업
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    if a.dry:                                    # LLM 없이 연결 확인: 질의문 = 입력 글, 분류 후보 없음
+        import normalize_run
+        원래 = normalize_run.질의변환
+        normalize_run.질의변환 = lambda 입력, 레이블, **k: 원래(입력, 레이블, dry=True)
+    평가, 제외 = v2_불러오기(cur, a.세트, a.사업, a.L3)
+    # 결정 근거가 L3 뿐인 문항도 후보에서는 L3 조문으로 잴 수 있다
+    데이터 = sorted([*평가, *제외], key=lambda m: m.gold_id)
+    if any("답들" not in (m.메타 or {}) for m in 데이터):
+        sys.exit("문항메타에 답들 · 기관규정문이 없다. scripts/golden_v2_load.py 를 다시 실행한다.")
+    print(f"후보 커버율은 위 평가 제외 문항도 L3 조문으로 잰다: 전체 {len(데이터)}문항" + (f" 중 {a.limit}개" if a.limit else ""))
+    데이터 = eval_store.고르게_뽑기(데이터, a.limit, lambda m: m.L3)
+    retrieve.워밍업()
+    결과행 = 커버율_실행(cur, 데이터, a)
+    커버율_보고(결과행, a)
+    if a.기록:
+        커버율_기록(결과행, a)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--k", type=int, default=50, help="검색 깊이")
+    ap.add_argument("--candidates", choices=("ontology", "search", "both"), default=None,
+                    help="새 경로 후보 커버율(5-9): 온톨로지 후보 · 검색 후보 · 병합. both 는 셋 다 잰다. --세트 · --사업 필요")
+    ap.add_argument("--입력비목", choices=("추정", "정답", "둘다"), default="둘다",
+                    help="(--candidates) 후보 조회에 넣을 비목. 추정 = 질의 변환 첫 후보(화면 기본값), 정답 = 정답 라벨. 5-9 는 둘 다 잰다")
+    ap.add_argument("--입력", choices=("첫질문", "대화"), default="첫질문",
+                    help="(--candidates) 질의 변환 입력. 기준선(5-9)과 같은 첫질문이 기본, 대화 = 첫질문 + 각본 답")
+    ap.add_argument("--limit", type=int, default=None, help="(--candidates) 소량 실행. L3 비율을 맞춰 고르게 뽑는다")
+    ap.add_argument("--dry", action="store_true", help="(--candidates) 질의 변환 LLM 없이 연결만 확인한다. 추정 비목 후보가 없다")
     ap.add_argument("--진단", action="store_true",
                     help="hit@5 미스의 원인 분류 — 필터 제외 / 정답 청크 없음 / 후보 미포함 / 순위 밖")
     ap.add_argument("--기록", action="store_true",
@@ -532,6 +831,9 @@ def main() -> None:
     # 읽기 전용이라도 트랜잭션을 열어 두면 다른 세션의 DDL 과 락 대기가 생길 수 있어 autocommit 으로 연다.
     with db.connect(autocommit=True) as conn:
         cur = conn.cursor()
+        if a.candidates:
+            커버율_측정(cur, a)
+            return
         if a.세트:
             데이터, 정답미확인 = v2_불러오기(cur, a.세트, a.사업, a.L3)
             부분일치: set[int] = set()
