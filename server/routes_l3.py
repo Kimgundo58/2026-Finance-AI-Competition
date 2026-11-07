@@ -204,13 +204,14 @@ def _연결_정보(cur, doc_id: str) -> dict:
     연결 = []
     for a in 조문들:
         if a["concept_ids"] is not None:
-            값, 조상태 = [x for x in a["concept_ids"] if x in 표], "확인"
+            # 확인값은 그대로 돌려준다. 없는 개념 ID 를 빼면 [](모든 지출에 공통)로 보이는데 판정은 그 조를 뺀다
+            값, 조상태 = list(a["concept_ids"]), "확인"
         elif a["연결초안"] is not None and (not a["연결초안"] or any(x in 표 for x in a["연결초안"])):
             값, 조상태 = [x for x in a["연결초안"] if x in 표], "추천"
         else:
             값, 조상태 = None, "추천없음"
         연결.append(L3연결조문항목(article_id=a["article_id"], 조번호=a["조번호"], 조제목=a["조제목"], 미리보기=_미리보기(a["본문"]),
-                          상태=조상태, concept_ids=값, 표시문=[표[x] for x in 값 or ()],
+                          상태=조상태, concept_ids=값, 표시문=[표[x] for x in 값 or () if x in 표],
                           옛판문구=[{"문장": x["문장"], "문서": x["문서"]} for x in a["옛판문구"] or ()]))
     return {"연결상태": _연결상태_표시.get(상태, "추천없음"), "연결": 연결,
             "연결선택지": [L3연결선택지항목(**x) for x in 고를것]}
@@ -221,7 +222,7 @@ def 연결_저장(doc_id: str, 본문: dict[str, list[str] | None] = Body(...), 
     """조문 연결을 저장한다. 본문 `{article_id: [concept_id]}` — [] = 모든 지출에 공통, null = 확인 안 함(미확인으로 되돌림).
 
     같은 기관의 판정에 쓰는 문서만 고친다(코드 조건 + RLS org_isolation). 고를 분류 밖의 concept_id 나 이 문서에 없는 조가
-    있으면 하나도 저장하지 않고 400. 저장하면 판정이 연결을 읽으므로 기관의 판정 캐시를 지운다(캐시키 l3_해시도 바뀐다).
+    있으면 하나도 저장하지 않고 400(그 조에 이미 저장된 확인값은 분류 밖이어도 그대로 다시 보낼 수 있다). 저장하면 판정이 연결을 읽으므로 기관의 판정 캐시를 지운다(캐시키 l3_해시도 바뀐다).
     """
     if MOCK:
         return L3현재문서(doc_id=doc_id, 원본파일명=mock_data.mock_L3["파일명"], 파싱품질="pass", 조_건수=len(본문))
@@ -248,22 +249,25 @@ def 연결_저장(doc_id: str, 본문: dict[str, list[str] | None] = Body(...), 
         고를것 = {x["concept_id"] for x in l3_link.선택지(cur)}
         if not 고를것:
             raise HTTPException(409, "지금은 조문 연결을 쓰지 않습니다.")
-        if any(x not in 고를것 for v in 고칠것.values() for x in v or ()):
-            raise HTTPException(400, "고를 수 없는 분류가 있습니다. 화면을 새로고침해 주세요.")
-        있는조 = {r[0] for r in cur.execute("SELECT article_id FROM tenant.l3_articles WHERE doc_id = %s AND article_id = ANY(%s)",
-                                         (doc_id, list(고칠것))).fetchall()}
-        if 있는조 != set(고칠것):
+        저장값 = dict(cur.execute("SELECT article_id, concept_ids FROM tenant.l3_articles WHERE doc_id = %s AND article_id = ANY(%s)",
+                                  (doc_id, list(고칠것))).fetchall())
+        if set(저장값) != set(고칠것):
             raise HTTPException(400, "이 문서에 없는 조문이 있습니다. 화면을 새로고침해 주세요.")
+        # 그 조에 이미 저장된 확인값은 지금 고를 분류 밖이어도(사업 설정이 바뀜) 그대로 다시 보낼 수 있다. 새로 고르는 값만 분류 안이어야 한다
+        if any(x not in 고를것 and x not in (저장값[aid] or ()) for aid, v in 고칠것.items() for x in v or ()):
+            raise HTTPException(400, "고를 수 없는 분류가 있습니다. 화면을 새로고침해 주세요.")
         for aid, ids in 고칠것.items():
             cur.execute("UPDATE tenant.l3_articles SET concept_ids = %s WHERE article_id = %s AND doc_id = %s AND org_id = %s",
                         (ids, aid, doc_id, org_id))
         cur.execute("DELETE FROM tenant.judge_cache WHERE org_id = %s", (org_id,))
     with 트랜잭션(org_id) as cur:
-        d = cur.execute('SELECT "원본파일명", "파싱품질", extraction, created_at FROM tenant.l3_documents WHERE doc_id = %s',
-                        (doc_id,)).fetchone()
+        # GET /current 의 문서 칸과 같게 채운다(저장 문서는 pass/warn 이라 검토이유는 없다)
+        d = cur.execute('SELECT "원본파일명", "파싱품질", extraction, created_at, version, "시행일" '
+                        '  FROM tenant.l3_documents WHERE doc_id = %s', (doc_id,)).fetchone()
         건수 = cur.execute("SELECT count(*) FROM tenant.l3_articles WHERE doc_id = %s", (doc_id,)).fetchone()[0]
         return L3현재문서(doc_id=doc_id, 원본파일명=d[0], 파싱품질=d[1], 추출방식=d[2], 조_건수=건수,
-                       등록일=d[3].date().isoformat() if d[3] else None, **_연결_정보(cur, doc_id))
+                       등록일=d[3].date().isoformat() if d[3] else None, version=d[4],
+                       시행일=d[5].isoformat() if d[5] else None, **_연결_정보(cur, doc_id))
 
 
 @router.get("/{doc_id}", response_model=L3업로드응답)

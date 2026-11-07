@@ -13,6 +13,7 @@ docs/5_룰/5-6b_API와_화면_변경.md 「L3 업로드 연결」. 업로드 파
 공개: 선택지, 연결대상_조문, 옛판_문구, 초안_계산, 초안_만들기.
 실행: PYTHONIOENCODING=utf-8 python scripts/l3_link.py --self-test        (DB · LLM 없음)
       PYTHONIOENCODING=utf-8 python scripts/l3_link.py --doc-id <uuid> --org-id <uuid>   (초안을 다시 만든다, LLM 호출)
+      PYTHONIOENCODING=utf-8 python scripts/l3_link.py --backfill [--org-id <uuid>] [--목록만]   (적용 중인데 추천이 없는 문서 전부, LLM 호출)
 """
 from __future__ import annotations
 
@@ -311,6 +312,34 @@ def 초안_만들기(doc_id: str, org_id: str, *, dsn: str | None = None) -> dic
         return {"상태": "실패"}
 
 
+def 채울_문서(*, dsn: str | None = None, org_id: str | None = None) -> list[tuple[str, str, str]]:
+    """판정에 쓰는데 추천을 한 번도 만들지 않은 문서(`연결초안상태` NULL) [(org_id, doc_id, 원본파일명)].
+    이 기능 전에 올렸거나 새 경로 사업이 없을 때 올린 문서다. 기관마다 GUC 를 걸고 읽는다(suddoe_app · RLS). org_id 를 주면 그 기관만."""
+    from _lib import db
+    out: list[tuple[str, str, str]] = []
+    with db.connect(dsn, autocommit=True) as conn:
+        cur = conn.cursor()
+        기관들 = [org_id] if org_id else [r[0] for r in cur.execute("SELECT org_id FROM tenant.orgs ORDER BY org_id").fetchall()]
+        for org in 기관들:
+            with conn.transaction():
+                _org(cur, org)
+                out += [(str(org), str(d), 이름) for d, 이름 in cur.execute(
+                    'SELECT doc_id, "원본파일명" FROM tenant.l3_documents WHERE org_id = %s AND status = \'active\' '
+                    '   AND "파싱품질" IN (\'pass\', \'warn\') AND "연결초안상태" IS NULL ORDER BY created_at',
+                    (org,)).fetchall()]
+    return out
+
+
+def 채우기(*, dsn: str | None = None, org_id: str | None = None, 목록만: bool = False) -> list[dict]:
+    """`채울_문서` 마다 `초안_만들기` 를 차례로 부른다(문서마다 LLM 은 50조당 1회, 판정과 별개).
+    새 경로 사업을 켜거나 이 기능을 처음 배포한 뒤 한 번 돌린다(db/migrations/README.md 2026-11-07_L3연결초안 행)."""
+    결과 = []
+    for org, doc_id, 이름 in 채울_문서(dsn=dsn, org_id=org_id):
+        r = {"상태": "목록만"} if 목록만 else 초안_만들기(doc_id, org, dsn=dsn)
+        결과.append({"org_id": org, "doc_id": doc_id, "원본파일명": 이름, **r})
+    return 결과
+
+
 # ── 자체 시험 (DB · LLM 없음) ───────────────────────────────────────
 
 def _자체시험() -> int:
@@ -381,11 +410,19 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--self-test", action="store_true")
     ap.add_argument("--doc-id")
     ap.add_argument("--org-id")
+    ap.add_argument("--backfill", action="store_true", help="적용 중인데 추천을 만든 적 없는 문서를 모두 채운다(LLM 호출)")
+    ap.add_argument("--목록만", action="store_true", help="--backfill 대상만 보여 준다(LLM 없음)")
     a = ap.parse_args(argv)
     if a.self_test:
         return _자체시험()
+    if a.backfill:
+        결과 = 채우기(org_id=a.org_id, 목록만=a.목록만)
+        for r in 결과:
+            print(json.dumps(r, ensure_ascii=False))
+        print(f"대상 {len(결과)}건" + ("" if a.목록만 else f", 실패 {sum(r.get('상태') == '실패' for r in 결과)}건"))
+        return 1 if any(r.get("상태") == "실패" for r in 결과) else 0
     if not (a.doc_id and a.org_id):
-        ap.error("--self-test 또는 --doc-id · --org-id")
+        ap.error("--self-test, --backfill 또는 --doc-id · --org-id")
     print(json.dumps(초안_만들기(a.doc_id, a.org_id), ensure_ascii=False))
     return 0
 

@@ -8,14 +8,18 @@ FastAPI TestClient 로 서버를 프로세스 안에서 띄우고 비특권 롤(
 점검
   1 업로드 뒤 추천 LLM 은 묶음 1회, 판정에는 LLM 을 더 쓰지 않는다 · 추천 상태 · 조마다 추천 · 옛 판 문구 · 화면 값에 내부 ID 없음
   2 확인 전 판정 문맥: L3 조문이 전부 「연결 확인 전」 블록에 들어간다(지금과 같음)
-  3 PATCH 저장 → 조 상태 확인 · 다음 판정 문맥: 연결 조 · 공통 조가 앞 블록, 다른 비목 조는 빠지고, 미확인 조는 그대로 · 캐시가 옛 문맥으로 답하지 않음
+  3 PATCH 저장 → 조 상태 확인 · 다음 판정 문맥: 연결 조 · 공통 조가 앞 블록, 다른 비목 조는 빠지고, 미확인 조는 그대로 ·
+    저장 전 캐시 행이 남아 있어도(다른 계정 행처럼) 캐시키가 바뀌어 옛 문맥으로 답하지 않음
   4 비목만 고른 판정은 그 아래 세목에 연결한 조를 넣는다
-  5 느슨한 L3 를 연결해도 코드 불가는 그대로(LLM 0회) · 코드 상한(조건부)도 그대로
+  5 느슨한 L3 를 연결해도 코드 불가는 그대로(LLM 0회) · L3 만 인용한 「가능」은 조건부(L3_ONLY_DOWNGRADE), 코드 상한을 빼도 같다
   6 규정 글은 데이터: 조문 속 [S01] · 래퍼 끝 표식이 이스케이프된다
   7 PATCH 거절: 게스트 401 · 다른 기관 404 · 없는 분류 400 · 다른 문서 조 400 · 아무것도 저장되지 않음
   8 교체: 새 문서 조문은 미확인으로 시작하고 조제목이 같은 조는 이전 확인값을 추천으로 재사용(LLM 안 부름) · 판정은 새 문서만
   9 추천 실패 · 빈 추천: 문서는 그대로 쓰이고 조는 추천 없음 · 판정 문맥은 전부 「연결 확인 전」
   10 적재 정리: 없는 개념 ID 는 지워지고 비면 미확인(NULL)으로 · 같은 문서 다시 파싱하면 확인값이 남는다
+  11 확인 대기 문서: 적용한 뒤 추천을 만든다 · 추천이 30분 넘게 멈추면 실패로 보인다
+  12 고를 분류 밖 확인값: 받은 값 그대로 다시 저장 가능 · 새로 고른 밖 값은 400 · 없는 ID 는 「공통」 아님 · PATCH 응답 문서 칸
+  13 추천을 만든 적 없는 적용 문서: 「추천없음」 → l3_link --backfill 이 채운다
 
 실행: PYTHONIOENCODING=utf-8 SUDDOE_DSN=... L3_CHECK_OWNER_DSN=... SUDDOE_INGEST_DSN=... python scripts/l3_link_check.py
 종료 코드: 0 통과, 1 실패, 3 환경 없음.
@@ -79,12 +83,14 @@ def _점검() -> list[tuple[str, bool, str]]:
     sys.path[:0] = [str(ROOT / "scripts"), str(ROOT)]
 
     import psycopg
+    from psycopg.types.json import Jsonb
     from fastapi.testclient import TestClient
 
     import l3_doc_check
     import l3_link
     import l3_parse
     import normalize_run
+    import ontology_gate
     import ontology_load
     import orchestrate
     import question_generate
@@ -127,7 +133,9 @@ def _점검() -> list[tuple[str, bool, str]]:
     원래_판정, 원래_프롬프트 = orchestrate.판정, orchestrate.프롬프트_구성
 
     def 판정_감싸기(질문, **k):
-        return 원래_판정(질문, **{**k, "dry": 상태["dry"], "기록": False})
+        out = 원래_판정(질문, **{**k, "dry": 상태["dry"], "기록": False})
+        상태["판정출력"] = out                      # 검증코드는 응답에 나가지 않아 여기서 본다
+        return out
 
     def 프롬프트_감싸기(*a, **k):
         out = 원래_프롬프트(*a, **k)
@@ -205,8 +213,18 @@ def _점검() -> list[tuple[str, bool, str]]:
                str(표["제3조"]["article_id"]): [재료], str(표["제5조"]["article_id"]): [재료]}
         상태["dry"] = False
         판정전, _ = 판정(헤더, dry=False)               # 같은 요청이라 2 의 결과가 판정 캐시에서 나온다(캐시가 살아 있음)
+        with psycopg.connect(OWNER_DSN) as c:
+            옛캐시 = c.execute("SELECT key, org_id, 종류, value, 데이터버전_해시, created_at, expires_at, account_id "
+                             "  FROM tenant.judge_cache WHERE org_id = %s", (org,)).fetchall()
         r = client.patch(f"/api/l3/{doc}/links", headers=헤더, json=저장값)
         저장 = 조표(r.json()) if r.status_code == 200 else {}
+        # PATCH 의 DELETE 는 RLS 로 그 계정 행만 지운다. 같은 기관 다른 계정의 행처럼 저장 전 행을 되살려도
+        # 캐시키의 l3_해시가 바뀌었으므로 다음 판정이 새 문맥으로 돌아야 한다(리뷰 R5)
+        with psycopg.connect(OWNER_DSN) as c:
+            for 행 in 옛캐시:
+                c.execute("INSERT INTO tenant.judge_cache (key, org_id, 종류, value, 데이터버전_해시, created_at, expires_at, account_id) "
+                          "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (key) DO NOTHING",
+                          (*행[:3], Jsonb(행[3]), *행[4:]))
         _, 후 = 판정(헤더)
         B1, B25 = _블록(후, "B1."), _블록(후, "B2.5.")
         with psycopg.connect(OWNER_DSN) as c:
@@ -216,12 +234,13 @@ def _점검() -> list[tuple[str, bool, str]]:
             Path(덤프).mkdir(parents=True, exist_ok=True)
             Path(덤프, "판정프롬프트_연결전.txt").write_text(전, encoding="utf-8")
             Path(덤프, "판정프롬프트_연결후.txt").write_text(후, encoding="utf-8")
-        기록("3 PATCH → 조 확인 · DB concept_ids · 다음 판정 문맥: 제1 · 2조 B1, 제3 · 5조 빠짐, 제4조 B2.5 · 저장 전에는 캐시가 답했고 저장 뒤에는 새 문맥",
+        기록("3 PATCH → 조 확인 · DB concept_ids · 다음 판정 문맥: 제1 · 2조 B1, 제3 · 5조 빠짐, 제4조 B2.5 · 저장 전에는 캐시가 답했고"
+           " 저장 뒤에는 저장 전 캐시 행이 남아 있어도 새 문맥",
            r.status_code == 200 and 저장.get("제2조", {}).get("상태") == "확인" and 저장.get("제4조", {}).get("상태") == "추천없음"
            and db값.get("제1조") == [] and db값.get("제2조") == [멘토링] and db값.get("제4조") is None
            and "제1조(목적)" in B1 and "제2조(멘토링비)" in B1 and "제3조(재료비)" not in 후 and "제5조(자유집행)" not in 후
-           and "제4조(여비)" in B25 and bool(후) and "[dry]" in (판정전.get("요약") or ""),
-           f"PATCH {r.status_code} {r.text[:120] if r.status_code != 200 else ''} · DB {db값} · B1 {[f'제{i}조' for i in range(1, 6) if f'제{i}조' in B1]} · "
+           and "제4조(여비)" in B25 and bool(후) and "[dry]" in (판정전.get("요약") or "") and len(옛캐시) > 0,
+           f"PATCH {r.status_code} {r.text[:120] if r.status_code != 200 else ''} · 되살린 캐시 {len(옛캐시)}행 · DB {db값} · B1 {[f'제{i}조' for i in range(1, 6) if f'제{i}조' in B1]} · "
            f"B2.5 {[f'제{i}조' for i in range(1, 6) if f'제{i}조' in B25]} · 판정 전 {판정전.get('판정')} {판정전.get('검증사유')} {판정전.get('요약')}")
 
         # 4 비목만 고른 판정
@@ -235,10 +254,25 @@ def _점검() -> list[tuple[str, bool, str]]:
         불가, _ = 판정(헤더, 금액=400000, dry=False)
         불가호출 = 호출["판정"]
         상한, 상한프롬프트 = 판정(헤더, 금액=250000, dry=False)
-        기록("5 느슨한 L3(한도 · 승인 없음)를 연결: 1일 40만원 코드 불가(LLM 0회) · LLM 「가능」은 상한 조건부",
+        상한코드 = (상태["판정출력"] or {}).get("검증코드") or []
+        # 5b 코드 상한을 뺀 경우: 지금 데이터는 모든 세목에 코드 상한(의무 · 입력 비움)이 걸려 「가능」이 그 상한으로도 내려간다.
+        # 상한 합치기를 잠시 LLM 판정 그대로 두고, L3 만 인용한 「가능」을 검증(L3_ONLY_DOWNGRADE)이 혼자 낮추는지 본다(리뷰 R4)
+        원래_합치기 = ontology_gate.합치기
+        ontology_gate.합치기 = lambda g, llm판정: (원래_합치기(g, llm판정) if g.get("종류") or g.get("미확정초과")
+                                              else (llm판정 or "판단불가", False))
+        try:
+            단독, _ = 판정(헤더, 금액=240000, dry=False)
+        finally:
+            ontology_gate.합치기 = 원래_합치기
+        단독출력 = 상태["판정출력"] or {}
+        기록("5 느슨한 L3(한도 · 승인 없음)를 연결: 1일 40만원 코드 불가(LLM 0회) · LLM 「가능」(L3 만 인용)은 조건부 · L3_ONLY_DOWNGRADE,"
+           " 코드 상한을 빼도 검증이 혼자 조건부로 낮춤",
            불가.get("판정") == "불가" and 불가호출 == 0 and 상한.get("판정") == "조건부" and 느슨 in _블록(상한프롬프트, "B1.")
-           and 호출["판정"] == 1,
-           f"불가 {불가.get('판정')} LLM {불가호출}회 · 상한 {상한.get('판정')} · 요약 {상한.get('요약')} · 조건 {(상한.get('조건') or [])[:2]}")
+           and 호출["판정"] == 2 and "L3_ONLY_DOWNGRADE" in 상한코드
+           and 단독.get("판정") == "조건부" and "L3_ONLY_DOWNGRADE" in (단독출력.get("검증코드") or [])
+           and "코드상한" not in (단독출력.get("처리단계") or ""),
+           f"불가 {불가.get('판정')} LLM {불가호출}회 · 상한 {상한.get('판정')} {상한코드} · 요약 {상한.get('요약')} · "
+           f"조건 {(상한.get('조건') or [])[:2]} · 상한 뺌 {단독.get('판정')} {단독출력.get('검증코드')} {단독출력.get('처리단계')}")
 
         # 6 이스케이프
         기록("6 규정 글은 데이터: 조문 속 [S01] · 래퍼 끝 표식이 프롬프트에서 이스케이프",
@@ -254,7 +288,7 @@ def _점검() -> list[tuple[str, bool, str]]:
         코드 = [client.patch(f"/api/l3/{doc}/links", json={str(표["제4조"]["article_id"]): [멘토링]}).status_code,
               client.patch(f"/api/l3/{doc}/links", headers=헤더2, json={str(표["제4조"]["article_id"]): [멘토링]}).status_code,
               client.patch(f"/api/l3/{doc}/links", headers=헤더, json={str(표["제4조"]["article_id"]): ["세목:없는/분류"]}).status_code,
-              client.patch(f"/api/l3/{doc}/links", headers=헤더, json={str(표["제4조"]["article_id"]): ["품목:창업/재료비/원재료"]}).status_code,
+              client.patch(f"/api/l3/{doc}/links", headers=헤더, json={str(표["제4조"]["article_id"]): ["품목:창업/건강검진비"]}).status_code,
               client.patch(f"/api/l3/{doc}/links", headers=헤더, json={str(표["제4조"]["article_id"]): [멘토링], str(다른조): []}).status_code]
         with psycopg.connect(OWNER_DSN) as c:
             남음 = c.execute('SELECT concept_ids FROM tenant.l3_articles WHERE article_id = %s', (표["제4조"]["article_id"],)).fetchone()[0]
@@ -332,6 +366,57 @@ def _점검() -> list[tuple[str, bool, str]]:
            대기 == {} and 확인.status_code == 200 and 호출["초안"] == 1 and 적용후.get("연결상태") == "추천완료"
            and 멈춤.get("연결상태") == "추천실패",
            f"대기 {bool(대기)} · confirm {확인.status_code} · 추천 LLM {호출['초안']}회 · {적용후.get('연결상태')} → {멈춤.get('연결상태')}")
+
+        # 12 고를 분류 밖 확인값(사업 설정이 바뀐 뒤): 화면이 받은 값 그대로 다시 저장해도 막히지 않는다 · 새로 고르는 밖 값은 400 ·
+        #    없는 개념 ID 는 「공통」([])으로 보이지 않는다 · PATCH 응답은 GET 과 같은 문서 칸(리뷰 R3 · R6)
+        밖 = "품목:창업/건강검진비"
+        표3id = {k: v["article_id"] for k, v in 조표(현재(헤더)[0]).items()}   # 10 의 다시 파싱 뒤 ID
+        with psycopg.connect(OWNER_DSN) as c:
+            c.execute("UPDATE tenant.l3_articles SET concept_ids = ARRAY[%s] WHERE article_id = %s", (밖, 표3id["제3조"]))
+            c.execute("UPDATE tenant.l3_articles SET concept_ids = ARRAY['세목:사라진/개념'] WHERE article_id = %s", (표3id["제4조"],))
+            c.execute("UPDATE tenant.l3_documents SET version = '2026년 개정', \"시행일\" = '2026-03-01' WHERE doc_id = %s", (doc3,))
+        문서12, _ = 현재(헤더)
+        표12 = 조표(문서12)
+        화면값 = {}                                            # 프런트 L3연결창.저장 과 같은 규칙: 고르지 않음 + 확인 → null, 나머지 그대로
+        for x in 문서12.get("연결") or []:
+            if x["concept_ids"] is None:
+                if x["상태"] == "확인":
+                    화면값[str(x["article_id"])] = None
+            else:
+                화면값[str(x["article_id"])] = x["concept_ids"]
+        화면값[str(표3id["제2조"])] = [재료]                   # 다른 조 하나를 고친다
+        r12 = client.patch(f"/api/l3/{doc3}/links", headers=헤더, json=화면값)
+        새밖 = client.patch(f"/api/l3/{doc3}/links", headers=헤더, json={str(표3id["제2조"]): [밖]}).status_code
+        with psycopg.connect(OWNER_DSN) as c:
+            뒤12 = dict(c.execute('SELECT "조번호", concept_ids FROM tenant.l3_articles WHERE doc_id = %s', (doc3,)).fetchall())
+        응답12 = r12.json() if r12.status_code == 200 else {}
+        기록("12 분류 밖 확인값: 화면 값 그대로 저장 200 · 다른 조 수정 반영 · 밖 값 유지 · 새로 고른 밖 값 400 · 없는 ID 는 「공통」 아님 · PATCH 응답 판 · 시행일",
+           r12.status_code == 200 and 뒤12.get("제2조") == [재료] and 뒤12.get("제3조") == [밖] and 뒤12.get("제4조") == ["세목:사라진/개념"]
+           and 새밖 == 400 and 표12["제3조"]["표시문"] and 표12["제4조"]["concept_ids"] == ["세목:사라진/개념"] and 표12["제4조"]["표시문"] == []
+           and 응답12.get("version") == "2026년 개정" and 응답12.get("시행일") == "2026-03-01",
+           f"PATCH {r12.status_code} {r12.text[:120] if r12.status_code != 200 else ''} · 새 밖 값 {새밖} · DB {뒤12} · "
+           f"제3조 {표12['제3조']['표시문']} · 제4조 {표12['제4조']['concept_ids']} {표12['제4조']['표시문']} · "
+           f"응답 {응답12.get('version')} {응답12.get('시행일')}")
+
+        # 13 이 기능 전에 올린 문서(추천 상태 없음): 「추천없음」 → --backfill 이 그 문서만 채운다(리뷰 R1)
+        헤더5, org5 = 세션()
+        doc5 = 올리기(헤더5, f"{표식}예전_집행지침.hwpx", 문단(f"{표식}예전"))
+        with psycopg.connect(OWNER_DSN) as c:
+            c.execute('UPDATE tenant.l3_articles SET "연결초안" = NULL, "옛판문구" = NULL WHERE doc_id = %s', (doc5,))
+            c.execute('UPDATE tenant.l3_documents SET "연결초안상태" = NULL, "연결초안시각" = NULL WHERE doc_id = %s', (doc5,))
+        예전, _ = 현재(헤더5)
+        대상 = l3_link.채울_문서(dsn=APP_DSN)
+        호출["초안"] = 0
+        채움 = l3_link.채우기(dsn=APP_DSN, org_id=org5)
+        채운뒤, _ = 현재(헤더5)
+        표13 = 조표(채운뒤)
+        기록("13 추천을 만든 적 없는 적용 문서: 화면 연결상태 「추천없음」 · 기관 전체 목록에 있음 · --backfill 로 추천 1회 · 추천완료 · 옛 판 문구",
+           예전.get("연결상태") == "추천없음" and {v["상태"] for v in 조표(예전).values()} == {"추천없음"}
+           and (org5, doc5) in {(o, d) for o, d, _ in 대상} and [x["doc_id"] for x in 채움] == [doc5] and 호출["초안"] == 1
+           and 채운뒤.get("연결상태") == "추천완료" and 표13["제2조"]["상태"] == "추천"
+           and any("창업중심대학" in x["문서"] for x in 표13["제3조"]["옛판문구"]),
+           f"전 {예전.get('연결상태')} · 대상 {len(대상)}건(이 문서 {(org5, doc5) in {(o, d) for o, d, _ in 대상}}) · 채움 "
+           f"{[(x['원본파일명'], x.get('상태')) for x in 채움]} · 추천 LLM {호출['초안']}회 · 뒤 {채운뒤.get('연결상태')}")
         기록("0 화면 밖 LLM(질의 변환 · 질문)은 부르지 않았다", 호출["기타"] == 0, f"{호출}")
     except Exception:                                         # noqa: BLE001
         기록("실행 오류", False, traceback.format_exc()[-1500:])
