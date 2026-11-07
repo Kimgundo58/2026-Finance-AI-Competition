@@ -3333,6 +3333,17 @@
        }
       ],
       "title": "부가세구분"
+     },
+     "사용일자": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "사용일자"
      }
     },
     "type": "object",
