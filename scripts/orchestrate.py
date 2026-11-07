@@ -713,7 +713,11 @@ def 온톨로지_조회(cur, 사업명: str | None, 비목: str, 세목: str | N
     적용["금지미정"] = bool(금지미정_id)
     schema = ontology_lookup._스키마()
     문서키표 = {v: k for k, v in (schema.get("문서키") or {}).items()}
-    근거행 = ontology_fund.근거행_거르기(ontology_lookup.근거_조문(cur, [*적용["규범"], *밖규범], 3, 시작, 사업=사업명), 자금, 문서키표)
+    # 자금 적용 미정인 우선순위 규범의 근거 조문은 아래 공통미정 행으로 넣는다(B2.6). 같은 조 · 항이 B2 로 올라가지 않게 한다
+    공통우선 = ontology_fund.공통_우선순위(자금, 적용["규범"], 노드들)
+    공통우선_id = {n["norm_id"] for n in 공통우선}
+    근거행 = ontology_fund.근거행_거르기(ontology_lookup.근거_조문(
+        cur, [n for n in [*적용["규범"], *밖규범] if n["norm_id"] not in 공통우선_id], 3, 시작, 사업=사업명), 자금, 문서키표)
     실효 = [n for n in 적용["규범"] if n["종류"] != "우선순위"]
     위임만 = not 실효 and ontology_lookup.위임_있음(근거행)
     세목미정 = 확정 and not 세목 and not 품목_id and ontology_lookup.세목_한도_있음(cur, 사업명, 대상["대상_id"])
@@ -725,9 +729,9 @@ def 온톨로지_조회(cur, 사업명: str | None, 비목: str, 세목: str | N
                               # 금지 문장 항은 규범 데이터와 상관없이 적용 미정이다. 결정 전에는 '가능' 을 내지 않는다
                               공통미정=[*공통미정, *공통품목, *({"종류": "금지", "norm_id": i} for i in 금지미정_id)],
                               문의처=ontology_fund.문의처(자금))
-    if 공통미정:                         # 문맥에는 뒤쪽 블록으로 넣되 화면 근거 경로에는 쓰지 않는다. 준용은 따라가지 않는다
+    if 공통미정 or 공통우선:             # 문맥에는 뒤쪽 블록으로 넣되 화면 근거 경로에는 쓰지 않는다. 준용은 따라가지 않는다
         근거행 = [*근거행, *({**행, "공통미정": True} for 행 in ontology_fund.근거행_거르기(
-            ontology_lookup.근거_조문(cur, 공통미정, 0, None, 사업=사업명), 자금, 문서키표))]
+            ontology_lookup.근거_조문(cur, [*공통미정, *공통우선], 0, None, 사업=사업명), 자금, 문서키표))]
     if 품목표:
         근거행 = [*근거행, *({**행, "품목표": True} for 행 in ontology_fund.근거행_거르기(
             ontology_lookup.근거_조문(cur, 품목표, 0, None, 사업=사업명), 자금, 문서키표))]

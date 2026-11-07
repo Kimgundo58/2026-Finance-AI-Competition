@@ -764,6 +764,20 @@ def _자체시험() -> int:
                 import orchestrate
                 t.append(("자금 없으면 검색 거르기 없음(옛 경로 · 자금 미정과 같은 검색)", orchestrate.자금_거르기(cur, None) is None
                           and orchestrate.자금_거르기(cur, "시제품제작비") is not None))
+                # 리뷰 P5-1 보강 지적 1: 창업활동자금 경로의 공통 우선순위 규범 근거(지침 제47조 · 모두의 창업 제4조)는 B2 가 아니라 B2.6
+                창 = orchestrate.온톨로지_조회(cur, 사업, "창업활동비", None, orchestrate.게이트_입력(None, None, None), 확정=True)
+
+                def 블록조(rs):
+                    m = ontology_context.문맥_구성(cur, 근거행=rs, 대상노드=창["노드들"], schema=표, 자금=창["자금"])
+                    return {(제목[:5], h.split("(")[0]) for 제목, 묶음 in m["블록"] for _, _, h, _, _ in 묶음}
+                창조 = 블록조(창["근거행"])
+                옛창 = 블록조([{**r, "공통미정": False} if r.get("우선순위근거") else r for r in 창["근거행"]])
+                t.append(("창업활동자금: 공통 우선순위 근거 조는 B2.6 에만 있고 B2 에 없다(표시를 떼면 B2 로 올라간다)",
+                          {("B2.6.", "지침 제47조"), ("B2.6.", "모두의 창업 제4조")} <= 창조
+                          and not {x for x in 창조 if x[0] == "B2. 이" and x[1] in ("지침 제47조", "모두의 창업 제4조")}
+                          and ("B2. 이", "지침 제47조") in 옛창))
+                t.append(("창업활동자금: 공통 우선순위 규범은 게이트에 그대로 쓴다(L3 적용 순서)",
+                          any(n["종류"] == "우선순위" for n in 창["적용"]["규범"]) and 창["게이트"]["상한"] == "조건부"))
     except Exception as e:  # noqa: BLE001 - CI 에는 DB 가 없다
         print(f"건너뜀: 조 단위 식(DB 없음: {type(e).__name__})")
     실패 = [x for x, ok in t if not ok]
