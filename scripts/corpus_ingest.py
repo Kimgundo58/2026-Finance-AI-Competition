@@ -7,7 +7,8 @@
 -> 청크 분할 -> KURE-v1 임베딩(retrieve.임베딩_모델) -> 참조(build_refs.scan) -> 한 트랜잭션으로 저장.
 BM25 색인 행(bm25_index 토큰화)은 활성화 트랜잭션에서 넣는다.
 쓰는 테이블: corpus.ingest_jobs, documents, doc_articles, chunks, refs, chunk_len·chunk_terms·term_df(활성화 때),
-tenant.judge_cache(활성화 때 삭제). 접속은 호출자가 넘기는 DSN(SUDDOE_INGEST_DSN, 롤 suddoe_ingest) 만 쓴다.
+concepts·norms 의 검수단계(활성화 때 이전 판 근거 행), tenant.judge_cache(활성화 때 삭제).
+접속은 호출자가 넘기는 DSN(SUDDOE_INGEST_DSN, 롤 suddoe_ingest) 만 쓴다.
 불변 조건: 추출 실패·조 0건은 failed 이고 staged 가 되지 않는다. staged 문서는 검색 필터(status='active')에
 걸리지 않고 BM25 통계에도 들어가지 않는다. 적용대상을 정하지 못한 조는 청크로 만들지 않는다.
 활성화는 한 트랜잭션에서 새 판을 active, 이전 판을 superseded 로 바꾼다.
@@ -749,7 +750,7 @@ def 활성화(conn, doc_id: str, *, 대체_doc_id: str | None = None, 신규문�
     이전 판을 정할 수 없음, 신규문서인데 비슷한 active 문서가 있음(중복_허용 이 아니면).
     이전 판은 chunks 를 지우고 doc_articles 는 남긴다(기존 superseded 문서와 같은 상태).
     retrieval_scope 는 이전 판의 값을 이어받는다. BM25 색인 행을 넣고 term_df 를 갱신한다.
-    tenant.judge_cache 는 전부 지운다.
+    이전 판을 근거로 가진 노드 · 규범은 검수단계를 `재검토` 로 내린다. tenant.judge_cache 는 전부 지운다.
     """
     with conn.transaction():
         cur = conn.cursor()
@@ -818,6 +819,7 @@ def 활성화(conn, doc_id: str, *, 대체_doc_id: str | None = None, 신규문�
                            "지울 수 없습니다. eval.golden_chunks 라면 골든셋 청크 재매칭을 먼저 하세요.") from e
             경고 += _참조_옮기기(cur, 이전[0], doc_id)
             경고 += _활성화_경고(cur, 이전[0])
+            경고 += _재검토_하향(cur, 이전[0])
         cur.execute("UPDATE corpus.ingest_jobs SET 이전판_doc_id = %s, updated_at = now() "
                     "WHERE doc_id = %s", (이전[0] if 이전 else None, doc_id))
         _bm25_색인(cur, doc_id)
@@ -925,6 +927,28 @@ def _활성화_경고(cur, 이전_doc_id: str) -> list[str]:
             WHERE 근거 @> jsonb_build_array(jsonb_build_object('doc_id', %(d)s::text))""",
         {"d": 이전_doc_id}).fetchone()[0]
     return [f"이전 판을 근거로 가진 corpus.rules {룰수}건은 재검수가 필요합니다."] if 룰수 else []
+
+
+def _재검토_하향(cur, 이전_doc_id: str) -> list[str]:
+    """이전 판을 근거(provenance)로 가진 노드 · 규범의 검수단계를 `재검토` 로 내린다(docs/5_룰/5-8_저장과_조회.md 개정판).
+
+    norms.verified 는 생성 칼럼이라 자동으로 false 가 된다. 그러면 코드 게이트가 그 규범으로 불가를 내지 않고(ontology_gate._사용가능)
+    '가능' 은 조건부로 내려간다. 내용을 검토하지 않았으니 옛 판 기준으로 판정을 확정하지 않는다.
+    """
+    규범 = cur.execute(
+        """UPDATE corpus.norms SET 검수단계 = '재검토'
+            WHERE 검수단계 <> '재검토' AND norm_id IN (
+                  SELECT owner_id FROM corpus.provenance WHERE owner_kind = '규범' AND doc_id = %s)""",
+        (이전_doc_id,)).rowcount
+    개념 = cur.execute(
+        """UPDATE corpus.concepts SET 검수단계 = '재검토'
+            WHERE 검수단계 <> '재검토' AND concept_id IN (
+                  SELECT owner_id FROM corpus.provenance WHERE owner_kind = '개념' AND doc_id = %s)""",
+        (이전_doc_id,)).rowcount
+    if not 규범 and not 개념:
+        return []
+    return [f"이전 판을 근거로 가진 규범 {규범}건 · 노드 {개념}건을 재검토로 내렸습니다. 원천(ontology/)을 새 판과 대조해 고치고, "
+            "schema.json 문서키를 바꿔 다시 적재하세요. 고치지 않은 행은 다시 적재해도 재검토로 남습니다."]
 
 
 def 삭제(conn, doc_id: str) -> dict:

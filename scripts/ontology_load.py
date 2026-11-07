@@ -5,6 +5,7 @@
 참조 무결성 확인 → l3_articles.concept_ids 의 없는 ID 정리 → 판정 캐시 삭제 → 커밋 → 적재 로그. 실패하면 적재 전 상태다.
 범위는 공통(적용사업 NULL)과 사업이다. 공통 행은 공통_L1.json 과 사업 파일의 적용사업 null 행을 합친 것이라, 항상 모든 파일을
 읽고 검사한다. 사업키 인자는 쓰는 사업만 고른다(공통 범위는 언제나 쓴다).
+개정 활성화(corpus_ingest._재검토_하향)로 `재검토` 가 된 행은 원천 행이 그대로면 재검토로 둔다(_재검토_유지).
 쓰기 DSN 은 SUDDOE_INGEST_DSN(롤 suddoe_ingest), 없으면 scripts/_lib/db.py 의 로컬 기본 DSN 이다. Java 가 있어야 한다.
 
     python scripts/ontology_load.py --dry            # diff 만 출력한다
@@ -124,15 +125,29 @@ def _현재(cur, 범위: list) -> dict:
     def 읽기(sql: str) -> list[tuple]:
         return cur.execute(sql.format(조건=조건), 인자).fetchall()
 
-    개념 = {r[0]: r[1] for r in 읽기("SELECT concept_id, 원천해시 FROM corpus.concepts WHERE {조건}")}
-    규범 = {r[0]: r[1] for r in 읽기("SELECT norm_id, 원천해시 FROM corpus.norms WHERE {조건}")}
+    개념행 = 읽기("SELECT concept_id, 원천해시, 검수단계 FROM corpus.concepts WHERE {조건}")
+    규범행 = 읽기("SELECT norm_id, 원천해시, 검수단계 FROM corpus.norms WHERE {조건}")
+    개념 = {r[0]: r[1] for r in 개념행}
+    규범 = {r[0]: r[1] for r in 규범행}
+    재검토 = {"개념": {r[0] for r in 개념행 if r[2] == "재검토"}, "규범": {r[0] for r in 규범행 if r[2] == "재검토"}}
     라벨 = {(r[0], r[1]): r[2] for r in 읽기("SELECT 정규화, 적용사업, concept_id || '|' || alt_label FROM corpus.concept_labels WHERE {조건}")}
     관계 = {(r[0], r[1], r[2], r[3]): (r[4], json.dumps(r[5], ensure_ascii=False, sort_keys=True) if r[5] is not None else None, r[6])
           for r in 읽기("SELECT src_id, 관계, dst_id, 적용사업, 연결종류, 문맥, 검수단계 FROM corpus.concept_relations WHERE {조건}")}
     소유자 = list(개념) + list(규범) + [관계_소유자ID(k[0], k[1], k[2], k[3]) for k in 관계]
     근거 = {tuple(r) for r in cur.execute(
         "SELECT owner_id, owner_kind, 칸, doc_id, 조번호, 항호, 발췌 FROM corpus.provenance WHERE owner_id = ANY(%s)", (소유자,)).fetchall()}
-    return {"개념": 개념, "규범": 규범, "라벨": 라벨, "관계": 관계, "근거": 근거, "소유자": 소유자}
+    return {"개념": 개념, "규범": 규범, "라벨": 라벨, "관계": 관계, "근거": 근거, "소유자": 소유자, "재검토": 재검토}
+
+
+def _재검토_유지(행: dict, 현재: dict, 범위: list) -> dict[str, set[str]]:
+    """개정 활성화로 `재검토` 가 된 행 중 원천 행이 그대로인 것(원천해시 같음). 원천의 검수단계로 되돌리지 않는다.
+
+    원천에는 활성화 전 값(AI검증 등)이 그대로 있다. schema.json 문서키만 바꿔 다시 적재한다고 새 판과 대조한 것이 아니므로
+    verified 를 돌려주지 않는다. 대조해서 원천 행을 고치면 해시가 달라져 원천 값을 쓴다.
+    """
+    return {표: {k for k, v in 행[표].items()
+                if v["적용사업"] in 범위 and k in 현재["재검토"][표] and 현재[표].get(k) == v["원천해시"]}
+            for 표 in ("개념", "규범")}
 
 
 def _차이(새것: dict, 옛것: dict) -> dict:
@@ -171,9 +186,9 @@ def 차이_출력(차이: dict) -> None:
 
 # 쓰기 ─────────────────────────────────────────────────────────────────────
 
-def _쓰기(cur, 행: dict, 현재: dict, 범위: list) -> None:
-    개념 = [v for v in 행["개념"].values() if v["적용사업"] in 범위]
-    규범 = [v for v in 행["규범"].values() if v["적용사업"] in 범위]
+def _쓰기(cur, 행: dict, 현재: dict, 범위: list, 유지: dict[str, set[str]]) -> None:
+    개념 = [{**v, "검수단계": "재검토"} if k in 유지["개념"] else v for k, v in 행["개념"].items() if v["적용사업"] in 범위]
+    규범 = [{**v, "검수단계": "재검토"} if k in 유지["규범"] else v for k, v in 행["규범"].items() if v["적용사업"] in 범위]
     관계 = [v for v in 행["관계"].values() if v["적용사업"] in 범위]
     라벨 = [v for v in 행["라벨"].values() if v["적용사업"] in 범위]
     사업들 = [s for s in 범위 if s is not None]
@@ -310,6 +325,10 @@ def 적재(폴더: Path | str, 사업키들: list[str] | None, dry: bool, dsn: s
             현재 = _현재(cur, 범위)
             차이 = 차이_계산(행, 현재, 범위)
             차이_출력(차이)
+            유지 = _재검토_유지(행, 현재, 범위)
+            유지수 = {표: len(v) for 표, v in 유지.items()}
+            if any(유지수.values()):
+                print(f"재검토 유지(원천 행이 그대로): 규범 {유지수['규범']} · 노드 {유지수['개념']}")
             if dry:
                 conn.rollback()
                 print("--dry: 쓰지 않았다")
@@ -322,7 +341,7 @@ def 적재(폴더: Path | str, 사업키들: list[str] | None, dry: bool, dsn: s
                 with conn.transaction():
                     cur.execute("SET LOCAL lock_timeout = '10s'")
                     전 = _데이터버전(cur)
-                    _쓰기(cur, 행, 현재, 범위)
+                    _쓰기(cur, 행, 현재, 범위, 유지)
                     _참조_확인(cur)
                     정리 = _l3_정리(cur)
                     후 = _데이터버전(cur)
@@ -353,7 +372,7 @@ def 적재(폴더: Path | str, 사업키들: list[str] | None, dry: bool, dsn: s
         "시각": dt.datetime.now().isoformat(timespec="seconds"), "범위": [s or "공통" for s in 범위],
         "원천파일": 원천["파일"], "행수": 행수, "검사": 결과.요약(),
         "차이": {t: {k: (len(v) if isinstance(v, list) else v) for k, v in d.items()} for t, d in 차이.items()},
-        "l3_정리_article_id": 정리, "판정캐시_삭제": 삭제캐시, "데이터버전": {"전": 전, "후": 후}})
+        "재검토_유지": 유지수, "l3_정리_article_id": 정리, "판정캐시_삭제": 삭제캐시, "데이터버전": {"전": 전, "후": 후}})
     print(f"행 수: {json.dumps(행수, ensure_ascii=False)}")
     print(f"적재 로그: {로그}")
     return 0
