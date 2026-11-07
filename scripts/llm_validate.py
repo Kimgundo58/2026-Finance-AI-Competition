@@ -173,14 +173,18 @@ def _항호_표시(항호: str | None) -> str | None:
 
     `corpus.chunks.항호` 값은 None(대다수), "①" 같은 항 기호, "항1~③"·"-4#1" 같은 청킹 내부 위치 표기의
     세 종류다. 내부 위치 표기는 사용자가 읽을 표기가 아니어서 항 기호 부분만 남긴다. 원문은 `원문` 필드에 있다.
+    범위 값(`②#2~②#3`, `②-6~⑤`)은 양 끝의 첫 항 기호로 읽는다: 같은 항이면 `②`, 다르면 `②~⑤`(이어 붙이면 `②②` 가 된다, 진단 4-3).
     """
     if not 항호:
         return None
     t = 항호.strip()
     if _항호_기호만.match(t):
         return t
-    기호 = "".join(ch for ch in t if "①" <= ch <= "⑳")
-    return 기호 or None
+    끝들 = [next((ch for ch in 쪽 if "①" <= ch <= "⑳"), None) for 쪽 in t.split("~")]
+    기호 = [x for x in 끝들 if x]
+    if len(끝들) == 2 and len(기호) == 2:
+        return 기호[0] if 기호[0] == 기호[1] else f"{기호[0]}~{기호[1]}"
+    return 기호[0] if len(끝들) == 2 and 기호 else "".join(ch for ch in t if "①" <= ch <= "⑳") or None
 
 
 def _조제목_표시(조번호: str | None, 조제목: str | None) -> str | None:
