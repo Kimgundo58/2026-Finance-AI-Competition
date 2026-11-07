@@ -116,6 +116,45 @@ def _조문id(cur, 키: str, 조번호: str) -> int:
 
 
 _검색표적: dict[str, int] = {}                   # 자금 → 거르기가 있어야 상위 10 에 드는 청크
+_검색_top_k: list[int] = []                      # 검색 대체가 받은 top_k(판정 · 질문 경로가 10 을 넘기는지 본다)
+_상위 = 10                                       # 4-4 ③ 검색 상위 10
+_묶음_최소 = 5                                   # 표적 앞 묶음별 최소 · 거르기 뒤 표적 앞에 남는 그 자금 청크 최소
+
+
+def _순위_조건(순위: list[int], 묶음들: dict[str, list[int]], 표적들: dict[str, int], 거름들: dict, 글자: dict[int, int]) -> None:
+    """검색 순위가 시험 전제를 만족하는지 본다. 못 맞추면 묶음별 숫자를 찍고 실패한다(건너뛰지 않는다).
+
+    - 표적 앞 묶음별 최소(시제품쪽 · 책자쪽 각각 5 이상)
+    - 자금마다: 거르기 뒤 표적 앞에 그 자금에서 남는 청크가 5 이상, 표적은 상위 10 안. 거르기가 없으면 표적은 상위 10 밖
+    - 거르기 뒤 표적까지의 글자 합이 문맥 글자 상한의 1/4 이하(검색 청크는 상한에서 먼저 빠진다)
+    """
+    문제, 수 = [], {}
+    첫표적 = min(순위.index(t) for t in 표적들.values() if t in 순위) if all(t in 순위 for t in 표적들.values()) else 0
+    for 이름, 청크들 in 묶음들.items():
+        수[f"{이름} 후보"] = len(청크들)
+        수[f"{이름} 표적 앞"] = n = sum(1 for c in 순위[:첫표적] if c in set(청크들))
+        if n < _묶음_최소:
+            문제.append(f"{이름} 표적 앞 {n} < {_묶음_최소}")
+    for 자금, 표적 in 표적들.items():
+        if 표적 not in 순위:
+            문제.append(f"{자금} 표적이 순위에 없다")
+            continue
+        남 = 거름들[자금](순위)
+        자리 = 남.index(표적) if 표적 in 남 else None
+        남은앞 = sum(1 for c in 남[:자리 or 0] if 거름들[자금]([c]))
+        글합 = sum(글자.get(c, 0) for c in 남[:(자리 or 0) + 1])
+        수[f"{자금} 거르기 뒤 표적 앞"], 수[f"{자금} 거르기 없이 표적 자리"], 수[f"{자금} 표적까지 글자"] = 남은앞, 순위.index(표적) + 1, 글합
+        if 자리 is None or 자리 >= _상위:
+            문제.append(f"{자금} 거르기 뒤 표적이 상위 {_상위} 밖({자리})")
+        if 남은앞 < _묶음_최소:
+            문제.append(f"{자금} 거르기 뒤 표적 앞 {남은앞} < {_묶음_최소}")
+        if 순위.index(표적) < _상위:
+            문제.append(f"{자금} 거르기 없이도 표적이 상위 {_상위} 안({순위.index(표적) + 1})")
+        if 글합 > C.글자_상한 // 4:
+            문제.append(f"{자금} 표적까지 글자 {글합} > {C.글자_상한 // 4}")
+    if 문제:
+        raise SystemExit(f"검색 시험 전제 미달: {'; '.join(문제)} · 수 {수}")
+    print(f"검색 시험 전제: {수}")
 
 
 def _청크_글(chunk_id: int) -> str:
@@ -132,31 +171,55 @@ def _고정_걸기(cur) -> None:
     O.프롬프트_구성 = _프롬프트
     O.판정 = lambda 질, **k: _원_판정(질, **{**k, "기록": False})
     검색결과 = {**O._빈_검색결과(), "참조확장": 후보}
-    # 검색 순위(리뷰 P5-1 보강 지적 2): 앞 10 = 두 자금 모두 다른 자금인 책자 청크(AI 솔루션 · 멘토링 쪽) + 창업활동자금에서만 빠지는
-    # 시제품 조 청크, 11 · 12 번째 = 자금별 표적. 판정 · 질문 경로가 자금 거르기를 넘기면 그 자금의 표적이 상위 10 에 들고, 넘기지 않으면 잘린다.
-    # 실제 청크(조 · 쪽 여러 행)와 CI 시드 청크(ontology_ci_seed, 조문당 1행) 둘 다에서 성립하게 조마다 첫 청크만 쓴다
-    창거름, 시거름 = O.자금_거르기(cur, "창업활동자금"), O.자금_거르기(cur, "시제품제작비")
-
-    def 조마다_첫(키: str, 조번호들: list[str] | None, 조건) -> list[int]:
-        행들 = cur.execute('SELECT chunk_id, "조번호" FROM corpus.chunks WHERE doc_id = %s ORDER BY "조번호", chunk_id', (문서[키],)).fetchall()
-        본 = {}
-        for cid, 조 in 행들:
-            if (조번호들 is None or 조 in 조번호들) and 조 not in 본 and 조건(cid):
-                본[조] = cid
-        return [본[조] for 조 in (조번호들 or sorted(본)) if 조 in 본]
-    둘다 = lambda c: not 창거름([c]) and not 시거름([c])
+    # 검색 순위(리뷰 P5-1 보강 지적 2 · 검토 지적 5): 시제품쪽 5 · 책자쪽 5 를 번갈아 앞에 두고 11 · 12 번째에 자금별 표적을 둔다.
+    # 자금 거르기를 넘기면 다른 자금 묶음이 빠져 그 자금의 청크 5 개가 남은 채 표적이 6 번째로 상위 10 에 들고, 넘기지 않으면 표적이 잘린다.
+    # 묶음은 원문이 정하는 자금 거르기 결과(O.자금_거르기)로 문서키 문서 전체에서 고른다. 실제 청크(조 · 쪽 여러 행)와
+    # CI 시드 청크(ontology_ci_seed, 조문당 1행) 둘 다에서 같은 조건이 성립하게 조마다 한 청크, 짧은 조부터 고른다(글자 상한에 안 걸리게)
+    거름들 = {"창업활동자금": O.자금_거르기(cur, "창업활동자금"), "시제품제작비": O.자금_거르기(cur, "시제품제작비")}
+    창거름, 시거름 = 거름들["창업활동자금"], 거름들["시제품제작비"]
     창만빠짐 = lambda c: not 창거름([c]) and bool(시거름([c]))
     시만빠짐 = lambda c: bool(창거름([c])) and not 시거름([c])
-    앞 = 조마다_첫("안내책자", None, 둘다)
-    앞 += 조마다_첫("모두의창업", ["제33조", "제34조"], 창만빠짐) + 조마다_첫("지침", ["제45조"], 창만빠짐)
-    # 표적은 시험 규범 · 참조 확장으로는 문맥에 들지 않는 청크다(검색으로만 들어온다)
-    창표적, 시표적 = 조마다_첫("안내책자", ["p11-2"], 시만빠짐), 조마다_첫("지침", ["제43조"], 창만빠짐)
-    if len(앞) < 10 or not 창표적 or not 시표적:
-        raise SystemExit(f"검색 시험 청크가 모자랍니다: 앞 {len(앞)}/10 · 표적 {len(창표적)} · {len(시표적)}")
-    _검색표적.update(창업활동자금=창표적[0], 시제품제작비=시표적[0])
-    검색순위 = [*앞[-10:], 창표적[0], 시표적[0]]          # 시제품 조를 남기고 앞을 10 으로 맞춘다(시제품제작비에서 표적 앞에 남는 청크를 줄인다)
+
+    def 첫청크(키: str, 조번호: str, 조건) -> int | None:
+        행 = [r[0] for r in cur.execute('SELECT chunk_id FROM corpus.chunks WHERE doc_id = %s AND "조번호" = %s ORDER BY chunk_id', (문서[키], 조번호)).fetchall()]
+        return next((c for c in 행 if 조건(c)), None)
+    # 표적은 시험 규범 · 참조 확장으로는 문맥에 들지 않는 청크다(검색으로만 들어온다). 아래 단언의 「거르기를 끊으면 빠진다」 가 이것도 확인한다
+    창표적, 시표적 = 첫청크("안내책자", "p11-2", 시만빠짐), 첫청크("지침", "제43조", 창만빠짐)
+    표적들 = {"창업활동자금": 창표적, "시제품제작비": 시표적}
+    if None in 표적들.values():
+        raise SystemExit(f"검색 시험 표적 청크가 없습니다: {표적들}")
+    표적조 = set(cur.execute('SELECT doc_id, "조번호" FROM corpus.chunks WHERE chunk_id = ANY(%s)', (list(표적들.values()),)).fetchall())
+    쪽키 = lambda 조: re.sub(r"-\d+$", "", 조 or "")       # 같은 쪽 · 조의 청크는 문맥에서 헤더 하나(예: 안내 책자 21쪽)로 묶인다
+    후보행 = cur.execute('SELECT a.article_id, a.doc_id, a."조번호", c.chunk_id FROM corpus.doc_articles a JOIN corpus.chunks c USING (article_id) '
+                      'WHERE a.article_id = ANY(%s)', (후보,)).fetchall()
+
+    def 빠지는_후보쪽(거름) -> set:
+        """그 자금에서 청크가 모두 빠지는 참조 확장 후보 조의 쪽 키. 앞 청크가 이 쪽에 있으면 문맥 단언(21쪽 · 제33조 없음)이 흔들린다."""
+        조별: dict = {}
+        for _, d, 조, cid in 후보행:
+            조별.setdefault((d, 조), []).append(cid)
+        return {(d, 쪽키(조)) for (d, 조), cids in 조별.items() if not 거름(cids)}
+    행들 = cur.execute('SELECT chunk_id, doc_id, "조번호", length(text) FROM corpus.chunks WHERE doc_id = ANY(%s) ORDER BY length(text), chunk_id',
+                     (sorted(set(문서.values())),)).fetchall()
+
+    def 묶음(조건, 남는자금: str) -> list[tuple[int, int]]:
+        """(chunk_id, 글자수): 조건에 맞는 청크를 조마다 가장 짧은 하나씩, 짧은 순으로. 표적 조와 그 자금에서 빠지는 후보 쪽은 뺀다."""
+        뺄쪽, 본, 나 = 빠지는_후보쪽(거름들[남는자금]), set(), []
+        for cid, d, 조, 길이 in 행들:
+            if (d, 조) in 본 or (d, 조) in 표적조 or (d, 쪽키(조)) in 뺄쪽 or not 조건(cid):
+                continue
+            본.add((d, 조))
+            나.append((cid, 길이))
+        return 나
+    시제품쪽 = 묶음(창만빠짐, "시제품제작비")         # 창업활동자금에서만 빠진다(시제품 조)
+    책자쪽 = 묶음(시만빠짐, "창업활동자금")           # 시제품제작비에서만 빠진다(안내책자 창업활동 쪽)
+    검색순위 = [c for 짝 in zip([c for c, _ in 시제품쪽[:5]], [c for c, _ in 책자쪽[:5]]) for c in 짝] + [창표적, 시표적]
+    _순위_조건(검색순위, {"시제품쪽": [c for c, _ in 시제품쪽], "책자쪽": [c for c, _ in 책자쪽]}, 표적들, 거름들,
+             {c: 길이 for c, 길이 in [*시제품쪽, *책자쪽]} | {c: 길이 for c, _, _, 길이 in 행들 if c in 표적들.values()})
+    _검색표적.update(표적들)
 
     def _검색(*a, 거르기=None, top_k: int = 5, **k):
+        _검색_top_k.append(top_k)
         return {**검색결과, "top5": (거르기(검색순위) if 거르기 is not None else list(검색순위))[:top_k]}
     retrieve.검색 = _검색
     L.적용_규범 = _적용
@@ -355,14 +418,16 @@ def _시험() -> list[tuple[str, bool]]:
     for 비목, 자금, 금액, 출력 in (("창업활동비", "창업활동자금", 1_000_000, {"판정": "가능", "요약": 정상요약}),
                              ("재료비", "시제품제작비", 300_000, {"판정": "조건부", "요약": "납품 확인 뒤 집행합니다."})):
         표적글 = _청크_글(_검색표적[자금])
+        _검색_top_k.clear()
         판정(비목, 금액, 출력)
-        있음 = 표적글 in _고정.프롬프트
+        있음, 받은k = 표적글 in _고정.프롬프트, list(_검색_top_k)
         O.자금_거르기 = lambda cur, 자금_: None
         try:
             판정(비목, 금액, 출력)
         finally:
             O.자금_거르기 = 원_거르기
         t.append((f"판정 검색 자금 거르기({자금}): 표적 청크가 상위 10 에 들고, 거르기를 끊으면 빠진다", 있음 and 표적글 not in _고정.프롬프트))
+        t.append((f"판정 검색 상위 수({자금}): 검색에 top_k 10 을 넘긴다", 받은k == [_상위]))
     t.append(("문의처: 재료비는 주관기관", r.get("문의처") == "주관기관에"))
     t.append(("정상 요약은 그대로", r["판정"] == "조건부" and r["요약"] == "납품 확인 뒤 집행합니다." and not r.get("_실패")))
     t.append(("3-1: 세목 대상 의무는 이번 지출 칸과 할 일로 나간다", r.get("조건") == ["시험용 재료비 의무 문장입니다."] and "시험용 재료비 의무 문장입니다." in _할일(r) and not r.get("공통사항")))
@@ -471,8 +536,10 @@ def _시험() -> list[tuple[str, bool]]:
     t.append(("B2.6 이 잘리면 LLM 없이 판단불가 · 내부 말 없이 물을 곳을 말한다", r["판정"] == "판단불가" and 멘토 in r["요약"] and _고정.호출수 == 0 and "B2.6" not in r["요약"]))
 
     # 확인 질문은 판정과 같은 자금 문맥을 쓴다
+    _검색_top_k.clear()
     with db.connect(autocommit=True) as c:
         준비 = Q._새경로_준비(c.cursor(), {"사업명": 사업, "비목": "창업활동비", "금액": 1_000_000, "부가세구분": "포함", "품목": "시험품목", "질문": "시험품목"}, None)
+    질문k = list(_검색_top_k)
     머리 = [x[2] for _, 항들 in 준비.get("문맥", {}).get("블록", []) for x in 항들]
     t.append(("질문 문맥 자금: 창업활동 질문 재료에 AI 솔루션 · 시제품 조가 없다", bool(머리) and not any("21쪽" in h or "제33조" in h for h in 머리) and any("9쪽" in h for h in 머리)))
     표적 = _청크_글(_검색표적["창업활동자금"])
@@ -486,6 +553,7 @@ def _시험() -> list[tuple[str, bool]]:
         O.자금_거르기 = 원_거르기
     끊은재료 = "\n".join(x[3] for _, 항들 in 끊음.get("문맥", {}).get("블록", []) for x in 항들)
     t.append(("질문 검색 자금 거르기: 표적 청크가 질문 재료에 들고, 거르기를 끊으면 빠진다", 표적 in 재료 and 표적 not in 끊은재료))
+    t.append(("질문 검색 상위 수: 검색에 top_k 10 을 넘긴다", 질문k == [_상위]))
     # 온톨로지 경로 질문은 금액집합으로 숫자를 본다(`3천5백만원` 을 옛 읽기는 5,003,000 으로 본다)
     받음: dict = {}
     원_작성 = Q._질문_작성
