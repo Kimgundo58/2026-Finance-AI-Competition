@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """온톨로지 조회 함수(읽기 전용, docs/5_룰/5-8_저장과_조회.md). 판정 · 질문 생성의 새 경로가 쓴다.
 
-노드_결정 · 품목_노드 · 경로밖_품목 · 경로밖_규범 · 세목_한도_있음 · 적용_규범 · 근거_조문 · 새경로_대상 · 근거경로_문장. 쓰지 않는다. 어떤 예외도 호출자에게 그대로 올린다
+노드_결정 · 품목_노드 · 경로밖_품목 · 경로밖_규범 · 비목_품목금지 · 조문_행 · 세목_한도_있음 · 적용_규범 · 근거_조문 · 새경로_대상 · 근거경로_문장. 쓰지 않는다. 어떤 예외도 호출자에게 그대로 올린다
 (호출자 orchestrate 가 판단불가로 바꾼다). 없는 노드 ID 는 LookupError 다.
 L3 는 여기서 다루지 않는다. 읽는 테이블: corpus.concepts · concept_labels · concept_relations · norms · provenance ·
 documents · doc_articles.
@@ -444,14 +444,14 @@ def 품목_노드(cur, 사업명: str | None, 표현: str | None, 확정_id: str
 
 
 def 경로밖_품목(cur, 사업명: str | None, 표현: str | None, 비목_id: str) -> list[str]:
-    """품목 표현이 별칭과 정확히 일치하는데 확정 경로 밖인 품목 노드. 확정 세목과 같은 비목 또는 모든 비목(`비목:창업/*`) 아래만.
+    """품목 표현이 별칭과 정확히 일치하는데 확정 경로 밖인 품목 · 세목 노드. 확정 세목과 같은 비목 또는 모든 비목(`비목:창업/*`) 아래만.
 
     `품목_노드` 가 None 일 때 부른다. 이 노드의 규범은 코드 불가를 내지 않고(5-6 ③ 확정 노드) 판정 문맥과 조건 문장에만 쓴다.
-    다른 비목 아래 품목은 다른 자금의 기준일 수 있어 넣지 않는다.
+    다른 비목 아래 노드는 다른 자금의 기준일 수 있어 넣지 않는다. 세목 이름을 품목으로 적은 경우(여비 + 「식비」)도 같은 비목 아래면 닿는다.
     """
     사업들 = [사업명] if 사업명 else []
     return [행["concept_id"] for 행 in 노드_결정(cur, 표현 or "", 사업명)
-            if 행["종류"] == "품목" and {비목_id, 모든비목} & {p for _, p in _상위_경로(cur, 행["concept_id"], 사업들)}]
+            if 행["종류"] in ("품목", "세목") and {비목_id, 모든비목} & {p for _, p in _상위_경로(cur, 행["concept_id"], 사업들)}]
 
 
 def 경로밖_규범(cur, 사업명: str | None, 품목들: list[str], 적용: dict) -> list[dict]:
@@ -464,6 +464,37 @@ def 경로밖_규범(cur, 사업명: str | None, 품목들: list[str], 적용: d
                 이미.add(n["norm_id"])
                 out.append(n)
     return out
+
+
+def 비목_품목금지(cur, 사업명: str | None, 비목들: list[str]) -> list[dict]:
+    """비목들 아래 품목 노드에 걸린 금지 규범(근거 포함). 품목 표현이 어느 별칭과도 일치하지 않을 때 LLM 이 대조할 재료다.
+
+    유사 일치를 코드로 하지 않는다(5-6 불변식). 코드 불가 · 조건 문장에 쓰지 않고 판정 문맥에만 넣는다.
+    """
+    사업들 = [사업명] if 사업명 else []
+    행들 = cur.execute(
+        f"""WITH RECURSIVE 하위(id, 방문) AS (
+             SELECT r.src_id, ARRAY[r.dst_id, r.src_id] FROM corpus.concept_relations r
+              WHERE r.관계 = '상위' AND r.dst_id = ANY(%(비목들)s) AND (r.적용사업 IS NULL OR r.적용사업 = ANY(%(사업들)s))
+             UNION ALL
+             SELECT r.src_id, h.방문 || r.src_id FROM 하위 h JOIN corpus.concept_relations r ON r.dst_id = h.id
+              WHERE r.관계 = '상위' AND (r.적용사업 IS NULL OR r.적용사업 = ANY(%(사업들)s)) AND NOT r.src_id = ANY(h.방문))
+           SELECT {", ".join(f'n."{c}"' for c in _규범_컬럼)} FROM corpus.norms n
+            WHERE n.종류 = '금지' AND (n.적용사업 IS NULL OR n.적용사업 = ANY(%(사업들)s))
+              AND n.대상 && (SELECT array_agg(h.id) FROM 하위 h JOIN corpus.concepts c ON c.concept_id = h.id AND c.종류 = '품목')
+            ORDER BY n.norm_id""", {"비목들": 비목들, "사업들": 사업들}).fetchall()
+    규범들 = [dict(zip(_규범_컬럼, r)) for r in 행들]
+    _근거_붙이기(cur, 규범들)
+    return 규범들
+
+
+def 조문_행(cur, 조문들: list[str], 출처: str) -> list[dict]:
+    """조문 ID 를 문맥 행으로 바꾼다(`근거_조문` 결과와 같은 모양). 준용을 따라가지 않는다. 활성 문서에 없는 조문은 article_id 가 None 이다."""
+    if not 조문들:
+        return []
+    정보 = _조문_정보(cur, 조문들, _스키마())
+    return [{"doc_id": 정보[i]["doc_id"], "조번호": 정보[i]["조번호"], "항호": 정보[i]["항호"], "article_id": 정보[i]["article_id"],
+             "깊이": 0, "출처": 출처, "경로": [i], **({"건너뜀": 정보[i]["건너뜀"]} if 정보[i]["건너뜀"] else {})} for i in 조문들]
 
 
 def 세목_한도_있음(cur, 사업명: str | None, 대상_id: str) -> bool:

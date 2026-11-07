@@ -21,6 +21,7 @@ sys.path.insert(0, _here)
 from _lib import db, paths  # noqa: E402
 
 paths.ensure_on_path()
+import ontology_lookup  # noqa: E402
 import orchestrate  # noqa: E402
 import retrieve  # noqa: E402
 from assemble_context import 프롬프트_버전  # noqa: E402
@@ -40,6 +41,10 @@ def 워밍업() -> None:
         _log.exception("검색 워밍업 실패(계속 진행)")
 
 
+_장애주입_화면경로 = {"사업명": "모두의 창업 프로젝트", "확정비목": "재료비"}
+_장애주입_화면질문 = "전자부품 100만원 구매해도 되나요"       # 코드 판정으로 끝나지 않고 검증 단계까지 가는 입력
+
+
 def _장애주입_실행(종류: list[str], 질문: str | None, 사업명: str | None,
               참조확장_사용: bool) -> int:
     """장애 주입별로 판정을 dry 로 실행하고 판단불가로 끝나지 않은 개수를 돌려준다.
@@ -47,17 +52,26 @@ def _장애주입_실행(종류: list[str], 질문: str | None, 사업명: str |
     LLM 서버 없이도 각 주입이 자기 단계에서 걸려야 한다. 모두 정규화에서 실패하면 아무것도 검증하지 못한다.
     """
     실패수 = 0
-    for f in 종류:
-        r = orchestrate.판정(질문 or _장애주입_질문, 사업명=사업명, dry=True, 기록=False,
-                           주입=f, 참조확장_사용=참조확장_사용)
-        ok = r["판정"] == "판단불가"
-        if f in ("schema", "cite"):
-            # 검증 단계에서 판정이 하향되면 LLM 이 쓴 요약("주입")이 아니라 고정 문구(_하향_요약)가 나가야 한다
-            ok = ok and r.get("요약") not in ("", "주입")
-        실패수 += 0 if ok else 1
-        print(f"{'PASS' if ok else 'FAIL'} 주입={f:8} 판정={r['판정']:6} "
-              f"실패단계={r.get('실패단계')} 게이트={r.get('게이트')} "
-              f"코드={r.get('검증코드')} · {str(r.get('검증사유'))[:110]}")
+    # 화면은 비목을 확정해 판정을 부른다. 온톨로지 대상 사업이면 그 경로도 같은 주입을 받아야 한다
+    경로들: list[tuple[str, str, dict]] = [("일반", 질문 or _장애주입_질문, {"사업명": 사업명})]
+    with db.connect(autocommit=True) as conn:
+        대상임 = ontology_lookup.새경로_대상(conn.cursor(), _장애주입_화면경로["사업명"])
+    if 대상임:
+        경로들.append(("화면", _장애주입_화면질문, dict(_장애주입_화면경로)))
+    else:
+        print(f"건너뜀 화면 경로: {_장애주입_화면경로['사업명']} 이 온톨로지 대상이 아니다")
+    for 이름, 입력, 인자 in 경로들:
+        for f in 종류:
+            r = orchestrate.판정(입력, dry=True, 기록=False,
+                               주입=f, 참조확장_사용=참조확장_사용, **인자)
+            ok = r["판정"] == "판단불가"
+            if f in ("schema", "cite"):
+                # 검증 단계에서 판정이 하향되면 LLM 이 쓴 요약("주입")이 아니라 고정 문구(_하향_요약)가 나가야 한다
+                ok = ok and r.get("요약") not in ("", "주입")
+            실패수 += 0 if ok else 1
+            print(f"{'PASS' if ok else 'FAIL'} {이름} 주입={f:8} 판정={r['판정']:6} "
+                  f"실패단계={r.get('실패단계')} 게이트={r.get('게이트')} "
+                  f"코드={r.get('검증코드')} · {str(r.get('검증사유'))[:110]}")
     print("\n" + ("PASS: 모든 장애 주입이 판단불가로 끝났다" if not 실패수
                  else f"FAIL: {실패수}건이 판단불가가 아니다"))
     return 실패수
