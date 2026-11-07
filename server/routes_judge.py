@@ -21,7 +21,7 @@ import time
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from server import auth, inquiry, response_cache
-from server._common import MOCK, _정수_환경변수, _sse, _sse응답, 답변_반영, 클라이언트_ip, 비목_ENUM
+from server._common import MOCK, _정수_환경변수, _sse, _sse응답, 답변_반영, 클라이언트_ip, 비목_ENUM, 온톨로지_사업
 from server.catalog import _비목_표준화, _사업명_표준화
 from server.judge_response import (_사용자프로필값_구성, 구_참조관계_이벤트, 구_판정키_포함,
                                    파이프라인결과_매핑, 할일_공개)
@@ -80,7 +80,9 @@ def judge(req: Request, body: 판정요청, mock: str | None = None,
         # 협약 프로필(B5)을 PUT /api/profile 로 바꾸면 키가 바뀐다(routes_profile 의 캐시 삭제와 함께 쓴다).
         response_cache.프로필_해시(body.org_id, account_id),
         # 온톨로지 경로의 입력. 값이 달라지면 코드 판정이 달라진다.
-        body.확정세목, json.dumps(body.추가입력값, ensure_ascii=False, sort_keys=True), body.부가세구분, body.사용일자,
+        body.확정세목, json.dumps(body.추가입력값, ensure_ascii=False, sort_keys=True), body.부가세구분,
+        # 사용일자는 새 경로의 지난 기한 문장에만 쓴다. 옛 경로는 날짜가 달라도 같은 결과라 키를 나누지 않는다.
+        body.사용일자 if 온톨로지_사업(body.사업명) else None,
         # ?mock= 은 mock 모드에서만 응답을 바꾼다. live 에서 키에 넣으면 캐시를 우회할 수 있다.
         *([mock] if MOCK else []))
     캐시 = response_cache.조회(k, body.org_id, account_id)
