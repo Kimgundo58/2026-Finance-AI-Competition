@@ -28,6 +28,7 @@ import ontology_context
 import ontology_fund
 import ontology_gate
 import ontology_lookup
+import ontology_terms
 import retrieve
 from _lib import db
 from assemble_context import 프롬프트_구성, 프롬프트_버전
@@ -172,6 +173,7 @@ def _기록후종료(상태: _판정상태, 응답: dict, *, 기록: bool) -> di
     응답["사용자답변"] = 상태.사용자답변
     if 상태.온톨로지:                     # 새 경로. 화면 안내 문구가 같은 문의처를 쓴다(프런트 lib/adapt.ts 행동문구)
         응답["문의처"] = ontology_fund.문의처(상태.온톨로지.get("자금"))
+        응답["용어풀이"] = _용어풀이(상태, 응답)
     try:
         if 상태.cur is not None:
             응답["기준문서"] = l3_load.기준문서_상태(상태.cur, 상태.org_id)
@@ -186,6 +188,27 @@ def _기록후종료(상태: _판정상태, 응답: dict, *, 기록: bool) -> di
             except Exception:                            # noqa: BLE001
                 pass
     return 응답
+
+
+_풀이_칸 = ("조건", "기한조건", "금지조건", "해당시조건", "공통사항")
+
+
+def _용어풀이(상태: _판정상태, 응답: dict) -> list[dict]:
+    """결과 화면의 조건 · 인용 원문 · 코드판정 발췌에 나온 용어의 풀이(6-5, `AI검증` 이상). 판정 · 프롬프트에 쓰지 않는다.
+
+    판정이 끝난 뒤 화면 값만 더한다. 못 읽으면 풀이 없이 간다(판정을 바꾸지 않는다). 소비: judge_response · 온톨로지결과(계획 다시 열기).
+    """
+    if 상태.cur is None:
+        return []
+    글들 = [*(문장 for k in _풀이_칸 for 문장 in 응답.get(k) or [] if isinstance(문장, str)),
+          *(c.get("원문") for c in 응답.get("인용목록") or [] if isinstance(c, dict)),
+          (응답.get("코드판정") or {}).get("발췌")]
+    try:
+        풀이들 = ontology_terms.풀이_목록(상태.cur, 상태.사업명)
+    except Exception as e:                               # noqa: BLE001
+        응답.setdefault("검증사유", []).append(f"용어 풀이 조회 실패(풀이 없이 응답): {type(e).__name__}")
+        return []
+    return ontology_terms.공개(ontology_terms.글에서_찾기(풀이들, 글들, 상한=ontology_terms.응답_상한))
 
 
 def _decisions_행(상태: _판정상태, 응답: dict) -> dict:

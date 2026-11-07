@@ -32,6 +32,7 @@ import normalize_run  # noqa: E402
 import ontology_context as C  # noqa: E402
 import ontology_gate as G  # noqa: E402
 import ontology_lookup as L  # noqa: E402
+import ontology_terms as T  # noqa: E402
 import orchestrate as O  # noqa: E402
 import question_generate as Q  # noqa: E402
 import retrieve  # noqa: E402
@@ -453,9 +454,50 @@ def _시험() -> list[tuple[str, bool]]:
     t.extend(_진술_시험())
     t.extend(_항호_시험())
     t.extend(_폼_품목_시험())
+    t.extend(_용어_시험())
     with db.connect(autocommit=True) as c:
         t.extend(_라벨_스윕(c.cursor()))
         t.extend(_문턱_시험(c.cursor()))
+    return t
+
+
+def _용어_시험() -> list[tuple[str, bool]]:
+    """용어 풀이(6-5, P4-6): 판정 프롬프트에는 없고 응답에만 · AI검증 미만은 빠진다 · 질문 프롬프트에는 후보 조문의 풀이만."""
+    t: list[tuple[str, bool]] = []
+    r = 판정("창업활동비", 1_000_000, {"판정": "가능", "요약": 정상요약})
+    풀이 = r.get("용어풀이") or []
+    화면글 = T.용어_키(" ".join([*_화면글(r), *(c.get("원문") or "" for c in r.get("인용") or [])]))
+    t.append(("용어풀이: 판정 프롬프트에 풀이를 넣지 않는다(원문은 데이터)", bool(_고정.프롬프트) and "<용어풀이>" not in _고정.프롬프트))
+    t.append(("용어풀이: 응답은 용어 · 풀이 두 칸, 상한 이하, 화면 글에 나온 말만",
+              bool(풀이) and len(풀이) <= T.응답_상한 and all(set(x) == {"용어", "풀이"} and T.용어_키(x["용어"]) in 화면글 for x in 풀이)))
+    낮춤 = 풀이[0]["용어"] if 풀이 else None
+    원_목록 = T.풀이_목록
+
+    def 낮춘_목록(cur, 사업명):          # 그 용어 행만 AI대조 로 본다(DB 는 바꾸지 않는다)
+        행 = cur.execute("SELECT 용어, 풀이, concept_id, 적용사업, 검수단계 FROM corpus.terminology "
+                        "WHERE 적용사업 IS NULL OR 적용사업 = %s", (사업명,)).fetchall()
+        return T.고르기([(*x[:4], "AI대조" if x[0] == 낮춤 else x[4]) for x in 행], 사업명)
+    T.풀이_목록 = 낮춘_목록
+    try:
+        r2 = 판정("창업활동비", 1_000_000, {"판정": "가능", "요약": 정상요약})
+    finally:
+        T.풀이_목록 = 원_목록
+    t.append(("용어풀이: AI검증 미만 행은 응답에서 빠지고 판정은 그대로",
+              낮춤 is not None and 낮춤 not in [x["용어"] for x in r2.get("용어풀이") or []] and r2["판정"] == r["판정"]))
+    받음: dict = {}
+    원_작성 = Q._질문_작성
+    Q._질문_작성 = lambda *a, **k: (받음.update(k, 블록=a[1]), {"상태": "없음", "질문": [], "메타": {}})[1]
+    try:
+        with db.connect(autocommit=True) as c:
+            q = Q._새경로_질문(c.cursor(), c, {"사업명": 사업, "비목": "창업활동비", "금액": 1_000_000, "부가세구분": "포함",
+                                             "품목": "시험품목", "질문": "시험품목"}, None, "고정", 1, {}, 0.0)
+    finally:
+        Q._질문_작성 = 원_작성
+    줄 = (받음.get("용어블록") or "").splitlines()[1:-1]
+    원문키 = T.용어_키(받음.get("블록") or "")
+    t.append(("용어풀이: 질문 프롬프트에는 후보 조문에 나온 용어의 풀이만, 상한 이하",
+              bool(줄) and len(줄) <= T.프롬프트_상한 and all(T.용어_키(x[2:].split(": ", 1)[0]) in 원문키 for x in 줄)))
+    t.append(("용어풀이: 질문이 없으면 응답 풀이도 없다", q.get("용어풀이") == []))
     return t
 
 
