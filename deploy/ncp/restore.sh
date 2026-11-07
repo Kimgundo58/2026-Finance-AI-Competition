@@ -87,7 +87,7 @@ missing=$(psql_admin -tA <<'SQL'
 select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace
  where (n.nspname = 'corpus' and c.relkind in ('r','p','v','m')
         and not has_table_privilege('suddoe_app', c.oid, 'SELECT'))
-    or (n.nspname = 'tenant' and c.relkind in ('r','p')
+    or (n.nspname = 'tenant' and c.relkind in ('r','p') and c.relname <> 'teams'  -- teams 는 함수로만 접근한다
         and not (has_table_privilege('suddoe_app', c.oid, 'SELECT')
              and has_table_privilege('suddoe_app', c.oid, 'INSERT')
              and has_table_privilege('suddoe_app', c.oid, 'UPDATE')

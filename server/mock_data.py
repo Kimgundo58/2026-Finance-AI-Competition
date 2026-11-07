@@ -84,6 +84,15 @@ def mock_통계() -> dict:
 # 할일 — 체크리스트 + 캘린더 (같은 행이고 due_date 유무로 나뉜다)
 # ════════════════════════════════════════════════════════════════════
 
+# 계획 첨부 (attachment_id → 첨부항목 값 + plan_id·본문)
+mock_첨부: dict[str, dict] = {}
+
+# 팀 하나. routes_teams 의 mock 이 쓴다.
+mock_팀: dict[str, dict] = {}
+
+# 판정별 내 평가 (decision_id → 평가·이유·의견)
+mock_피드백: dict[int, dict] = {}
+
 mock_할일: list[dict] = [
     {
         "task_id": 11, "plan_id": 1, "출처": "ai", "code": "PRE_QUOTE_3",
@@ -148,6 +157,19 @@ mock_할일: list[dict] = [
 # ════════════════════════════════════════════════════════════════════
 # L3 업로드
 # ════════════════════════════════════════════════════════════════════
+
+# 파일명에 「엉뚱」이 들어간 mock 업로드는 확인 대기가 된다 (doc_id → L3현재문서 값)
+mock_L3확인대기: dict[str, dict] = {}
+
+def mock_기준문서() -> dict:
+    """mock 판정의 기준문서. 업로드 상태를 따라가 화면 안내를 확인할 수 있게 한다."""
+    문서들 = list(mock_L3확인대기.values())
+    적용 = next((d["원본파일명"] for d in 문서들 if d["품질"] != "review"), None)
+    대기 = next((d["원본파일명"] for d in 문서들 if d["품질"] == "review"), None)
+    if 대기:
+        return {"상태": "확인대기", "문서명": 적용, "대기문서명": 대기}
+    return {"상태": "적용" if 적용 else "없음", "문서명": 적용}
+
 
 mock_L3 = {
     "doc_id": "l3-mock-0001",

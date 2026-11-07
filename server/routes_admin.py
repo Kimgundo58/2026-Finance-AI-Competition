@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-"""관리 엔드포인트: /admin/status(요청 제한·캐시 상태), /admin/queue(재검수 큐), /admin/warmup(모델 워밍업).
+"""관리 엔드포인트: /admin/status(요청 제한·캐시 상태), /admin/queue(재검수 큐), /admin/feedback(틀렸어요 평가),
+/admin/warmup(모델 워밍업).
 
 모든 라우트는 X-Admin-Token 헤더를 auth.관리자_확인 으로 검사한다(SUDDOE_ADMIN_TOKEN 미설정이면 전부 403).
 모델_워밍업() 은 main 의 기동 훅도 같이 쓴다. 읽기 전용이다. 재검수 큐를 승인해 corpus.rules 로
@@ -48,6 +49,17 @@ def admin_status() -> dict:
     out = {"모드": "mock" if MOCK else "live", **제한.상태(),
            "캐시": response_cache.상태(), "워밍업": _워밍업시각}
     return _구_상태키_포함(out)
+
+
+@router.get("/admin/feedback")
+def admin_feedback(limit: int = 50, offset: int = 0) -> dict:
+    """사용자가 「틀렸어요」로 표시한 판정(최신순, 최대 200건). 기관을 넘어 읽어야 해서 DB 함수를 거친다."""
+    if MOCK:
+        return {"건수": 0, "항목": []}
+    행 = _질의("SELECT * FROM tenant.틀림_피드백목록(%s, %s)", (limit, offset), 예외전파=True)
+    키 = ("decision_id", "plan_id", "기관명", "이유", "의견", "질문원문", "판정", "요약", "저장시각")
+    항목 = [dict(zip(키, r)) for r in 행]
+    return {"건수": len(항목), "항목": [{**h, "저장시각": h["저장시각"].isoformat()} for h in 항목]}
 
 
 @router.get("/admin/queue")
