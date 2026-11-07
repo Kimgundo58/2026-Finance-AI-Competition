@@ -3,7 +3,7 @@
 
 노드_결정 · 품목_노드 · 경로밖_품목 · 경로밖_규범 · 비목_품목금지 · 조문_행 · 세목_한도_있음 · 적용_규범 · 근거_조문 · 새경로_대상 · 근거경로_문장. 쓰지 않는다. 어떤 예외도 호출자에게 그대로 올린다
 (호출자 orchestrate 가 판단불가로 바꾼다). 없는 노드 ID 는 LookupError 다.
-L3 는 여기서 다루지 않는다. 읽는 테이블: corpus.concepts · concept_labels · concept_relations · norms · provenance ·
+L3 는 여기서 다루지 않는다(능력 질문 시험의 `문맥_구성` 호출만 판정과 같은 문맥 구성 함수로 L3 연결을 본다). 읽는 테이블: corpus.concepts · concept_labels · concept_relations · norms · provenance ·
 documents · doc_articles.
 
     python scripts/ontology_lookup.py --cq-test ontology/테스트/능력질문.json     # 전부 일치해야 0 으로 끝난다(DB 필요)
@@ -531,8 +531,33 @@ def 새경로_대상(cur, 사업명: str | None) -> bool:
 
 # 능력 질문 테스트 ─────────────────────────────────────────────────────────
 
-_기대_키 = {"규범ID_포함", "규범ID_제외", "제외규범ID_포함", "경로쌍_포함", "조문ID_포함", "조문ID_제외", "조문경로_포함",
-            "노드ID_포함", "노드없음", "문장", "값"}
+_기대_키 = {"규범ID_포함", "규범ID_제외", "제외규범ID_포함", "경로쌍_포함", "경로쌍_제외", "조문ID_포함", "조문ID_제외",
+            "조문경로_포함", "노드ID_포함", "노드ID_제외", "노드없음", "문장", "값", "규범값", "예외쌍_포함",
+            "L3ID_포함", "L3ID_제외"}
+
+
+def _칸_값(규범: dict, 경로: str):
+    """`수치.값` · `조건.구조화` · `결과.시점` 처럼 점으로 이은 칸의 값. 없으면 None."""
+    v = 규범
+    for 조각 in 경로.split("."):
+        v = v.get(조각) if isinstance(v, dict) else None
+    return v
+
+
+def _값_맞나(실제, 기대값) -> bool:
+    """기대값이 {"포함": 글 또는 [글...]} 이면 실제 값(목록 · dict 는 JSON 글)에 그 글이 모두 들어 있나.
+    목록은 순서 없이 같은가. 그 밖은 같은가."""
+    if isinstance(기대값, dict) and set(기대값) == {"포함"}:
+        if 실제 is None:
+            return False
+        글 = 실제 if isinstance(실제, str) else json.dumps(실제, ensure_ascii=False, sort_keys=True)
+        조각들 = 기대값["포함"] if isinstance(기대값["포함"], list) else [기대값["포함"]]
+        return all(x in 글 for x in 조각들)
+    if isinstance(기대값, list) and isinstance(실제, list):
+        def 키(x):
+            return json.dumps(x, ensure_ascii=False, sort_keys=True)
+        return sorted(map(키, 실제)) == sorted(map(키, 기대값))
+    return 실제 == 기대값
 
 
 def _사례_실행(cur, 사례: dict, schema: dict) -> list[str]:
@@ -555,10 +580,18 @@ def _사례_실행(cur, 사례: dict, schema: dict) -> list[str]:
                 틀림.append(f"{이름}: {x} 가 있으면 안 된다")
 
     if 함수 == "노드_결정":
-        결과 = 노드_결정(cur, 인자["표현"], 인자.get("사업"))
-        포함("노드ID_포함", {r["concept_id"] for r in 결과})
-        if 기대.get("노드없음") and 결과:
-            틀림.append(f"노드없음: {[r['concept_id'] for r in 결과]}")
+        # 표현이 목록이면(원문 표기 여럿) 표현마다 같은 기대를 본다
+        for 표현 in (인자["표현"] if isinstance(인자["표현"], list) else [인자["표현"]]):
+            결과 = 노드_결정(cur, 표현, 인자.get("사업"))
+            ids = {r["concept_id"] for r in 결과}
+            for x in 기대.get("노드ID_포함", []):
+                if x not in ids:
+                    틀림.append(f"노드ID_포함: {표현!r} → {x} 가 없다")
+            for x in 기대.get("노드ID_제외", []):
+                if x in ids:
+                    틀림.append(f"노드ID_제외: {표현!r} → {x} 가 있으면 안 된다")
+            if 기대.get("노드없음") and 결과:
+                틀림.append(f"노드없음: {표현!r} → {sorted(ids)}")
     elif 함수 == "적용_규범":
         결과 = 적용_규범(cur, 인자.get("사업"), 인자["대상_id"])
         ids = {n["norm_id"] for n in 결과["규범"]}
@@ -568,6 +601,34 @@ def _사례_실행(cur, 사례: dict, schema: dict) -> list[str]:
         for 쌍 in 기대.get("경로쌍_포함", []):
             if tuple(쌍) not in 결과["경로"]:
                 틀림.append(f"경로쌍_포함: {쌍} 가 없다")
+        for 쌍 in 기대.get("경로쌍_제외", []):
+            if tuple(쌍) in 결과["경로"]:
+                틀림.append(f"경로쌍_제외: {쌍} 가 있으면 안 된다")
+        # 예외쌍 [원칙, 단서]: 원칙의 `예외` 에 단서가 있고 둘 다 결과에 있어 우선순위_적용 에 예외로 남는다
+        예외쌍 = {(a["제외"], a["채택"]) for a in 결과["우선순위_적용"] if a["조건"].get("종류") == "예외"}
+        for 원칙, 단서 in 기대.get("예외쌍_포함", []):
+            if (원칙, 단서) not in 예외쌍:
+                틀림.append(f"예외쌍_포함: {원칙} ← 단서 {단서} 가 없다")
+        표 = {n["norm_id"]: n for n in 결과["규범"]}
+        for nid, 칸들 in (기대.get("규범값") or {}).items():
+            if nid not in 표:
+                틀림.append(f"규범값: {nid} 가 결과에 없다")
+                continue
+            for 칸, 기대값 in 칸들.items():
+                실제 = _칸_값(표[nid], 칸)
+                if not _값_맞나(실제, 기대값):
+                    틀림.append(f"규범값: {nid} {칸} 기대 {기대값!r} 실제 {실제!r}")
+    elif 함수 == "문맥_구성":
+        # 판정 화면과 같은 길: orchestrate.온톨로지_조회(대상 · 상위 노드 · 자금) → ontology_context.문맥_구성(L3 행 고정)
+        import ontology_context
+        import orchestrate
+        조회 = orchestrate.온톨로지_조회(cur, 인자.get("사업"), 인자["비목"], 인자.get("세목"),
+                                 orchestrate.게이트_입력(None, None, None), 확정=True, 품목=인자.get("품목"))
+        문맥 = ontology_context.문맥_구성(cur, 근거행=조회["근거행"], 대상노드=조회["노드들"], l3=인자.get("l3") or [],
+                                    schema=schema, 자금=조회.get("자금"))
+        l3_ids = {i[1] for _, 항목 in 문맥["블록"] for i in 항목 if i[0] == "l3"}
+        포함("L3ID_포함", l3_ids)
+        불포함("L3ID_제외", l3_ids)
     elif 함수 == "근거_조문":
         적용 = 적용_규범(cur, 인자.get("사업"), 인자["대상_id"])
         결과 = 근거_조문(cur, 적용["규범"], 인자.get("깊이", 3), 인자["대상_id"], 사업=인자.get("사업"))
