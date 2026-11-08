@@ -4,7 +4,8 @@
 프로필은 계정 단위다. org 는 주관기관이라 같은 org 의 다른 계정(다른 창업기업)과 나눠 쓰지 않는다.
 GET 은 토큰으로 검증된 org·계정의 tenant.profile_agreements 를 읽는다(코드 조건 + RLS). ?org_id= 쿼리 값은 믿지 않는다.
 프로필이 없거나 게스트면 빈 프로필을 준다. 프로필 없이도 판정은 되고 전제가 늘어날 뿐이다.
-PUT 은 협약 네 값(협약시작일·협약종료일·정부지원_현금·자기부담_현금)을 검증된 org·계정의 행에 저장한다.
+PUT 은 협약 다섯 값(협약시작일·협약종료일·정부지원_현금·자기부담_현금·자기부담_현물)을 검증된 org·계정의 행에 저장한다.
+  - 자기부담_현물 은 보내지 않거나 null 이면 NULL(미입력)로 저장한다. 0 은 「현물 없음」이다.
   - org·계정은 토큰에서만 정한다. 데모 토큰은 계정이 없어 account_id NULL 행을 쓴다. 게스트는 401 이다.
   - 판정(orchestrate._프로필값_읽기, B5)은 계정당 한 행을 읽는다. 표의 UNIQUE 는 (org_id, account_id, 사업명)
     (NULLS NOT DISTINCT)이라 계정 하나에 행이 둘 생길 수 있으므로, 코드가 기존 행(최근 수정 순 첫 행)을 UPDATE
@@ -54,9 +55,14 @@ def _빈_프로필() -> dict:
     return _구키_포함({"협약": 협약정보().model_dump(), "집행내역": [], "참여인력": []})
 
 
-def _협약_dict(a, b, c, d) -> dict:
-    """DB 행 값(정부지원_현금, 자기부담_현금, 협약시작일, 협약종료일)을 응답의 협약 dict 로 바꾼다."""
+# GET·PUT 이 돌려주는 협약 칸. 순서는 _협약_dict 인자 순서다
+_협약_칸 = '"정부지원_현금", "자기부담_현금", "협약시작일", "협약종료일", "자기부담_현물"'
+
+
+def _협약_dict(a, b, c, d, e) -> dict:
+    """DB 행 값(_협약_칸 순서)을 응답의 협약 dict 로 바꾼다. 자기부담_현물 NULL 은 None(미입력)으로 둔다."""
     return {"정부지원_현금": float(a or 0), "자기부담_현금": float(b or 0),
+            "자기부담_현물": float(e) if e is not None else None,
             "협약시작일": str(c) if c else None,
             "협약종료일": str(d) if d else None}
 
@@ -68,7 +74,7 @@ def profile_get(req: Request) -> dict:
     if MOCK or not org_id:
         return _빈_프로필()
     조건, 인자 = _계정조건(org_id, "p", auth.검증된_account(req))
-    행 = _질의('SELECT "정부지원_현금", "자기부담_현금", "협약시작일", "협약종료일" '
+    행 = _질의(f'SELECT {_협약_칸} '
               f'FROM tenant.profile_agreements p WHERE {조건} {_행_순서}', 인자)
     if not 행:
         return _빈_프로필()
@@ -97,12 +103,13 @@ def _금액(값: float, 이름: str) -> Decimal:
     return d.quantize(Decimal(1)) if d == d.to_integral_value() else d
 
 
-def _협약_검증(협약: 협약정보) -> tuple[date | None, date | None, Decimal, Decimal]:
+def _협약_검증(협약: 협약정보) -> tuple[date | None, date | None, Decimal, Decimal, Decimal | None]:
     시작 = _날짜(협약.협약시작일, "협약시작일")
     종료 = _날짜(협약.협약종료일, "협약종료일")
     if 시작 and 종료 and 시작 > 종료:
         raise HTTPException(422, f"협약시작일({시작})이 협약종료일({종료})보다 늦습니다")
-    return 시작, 종료, _금액(협약.정부지원_현금, "정부지원_현금"), _금액(협약.자기부담_현금, "자기부담_현금")
+    현물 = None if 협약.자기부담_현물 is None else _금액(협약.자기부담_현물, "자기부담_현물")
+    return 시작, 종료, _금액(협약.정부지원_현금, "정부지원_현금"), _금액(협약.자기부담_현금, "자기부담_현금"), 현물
 
 
 def _저장_응답(저장: bool, 사유: str | None, 받은값: dict) -> dict:
@@ -117,7 +124,7 @@ def _새행_사업명(cur, org_id: str) -> str:
     return 사업들[0] if len(사업들) == 1 else _사업명_미지정
 
 
-def _협약_저장(org_id: str, account_id: str | None, 시작, 종료, 정부, 자기) -> tuple:
+def _협약_저장(org_id: str, account_id: str | None, 시작, 종료, 정부, 자기, 현물) -> tuple:
     """한 트랜잭션에서 계정의 협약 행을 UPDATE(있으면) 또는 INSERT 하고 판정 캐시를 지운다. 저장된 값을 돌려준다."""
     조건, 인자 = _계정조건(org_id, "p", account_id)
     with 트랜잭션(org_id, account_id) as cur:
@@ -127,22 +134,23 @@ def _협약_저장(org_id: str, account_id: str | None, 시작, 종료, 정부, 
         if r:
             저장됨 = cur.execute(
                 'UPDATE tenant.profile_agreements p SET "협약시작일" = %s, "협약종료일" = %s, '
-                '"정부지원_현금" = %s, "자기부담_현금" = %s, updated_at = now() '
+                '"정부지원_현금" = %s, "자기부담_현금" = %s, "자기부담_현물" = %s, updated_at = now() '
                 f'WHERE p.profile_id = %s AND {조건} '
-                'RETURNING "정부지원_현금", "자기부담_현금", "협약시작일", "협약종료일"',
-                (시작, 종료, 정부, 자기, r[0], *인자)).fetchone()
+                f'RETURNING {_협약_칸}',
+                (시작, 종료, 정부, 자기, 현물, r[0], *인자)).fetchone()
         else:
             # 행이 없던 두 요청이 동시에 오면 둘 다 여기로 온다. 사업명이 같아 UNIQUE(org_id, account_id, 사업명)에서 만난다
             저장됨 = cur.execute(
                 'INSERT INTO tenant.profile_agreements '
-                '(org_id, account_id, "사업명", "협약시작일", "협약종료일", "정부지원_현금", "자기부담_현금") '
-                'VALUES (%s, %s, %s, %s, %s, %s, %s) '
+                '(org_id, account_id, "사업명", "협약시작일", "협약종료일", "정부지원_현금", "자기부담_현금", '
+                '"자기부담_현물") '
+                'VALUES (%s, %s, %s, %s, %s, %s, %s, %s) '
                 'ON CONFLICT (org_id, account_id, "사업명") DO UPDATE SET '
                 '"협약시작일" = EXCLUDED."협약시작일", "협약종료일" = EXCLUDED."협약종료일", '
                 '"정부지원_현금" = EXCLUDED."정부지원_현금", "자기부담_현금" = EXCLUDED."자기부담_현금", '
-                'updated_at = now() '
-                'RETURNING "정부지원_현금", "자기부담_현금", "협약시작일", "협약종료일"',
-                (org_id, account_id, _새행_사업명(cur, org_id), 시작, 종료, 정부, 자기)).fetchone()
+                '"자기부담_현물" = EXCLUDED."자기부담_현물", updated_at = now() '
+                f'RETURNING {_협약_칸}',
+                (org_id, account_id, _새행_사업명(cur, org_id), 시작, 종료, 정부, 자기, 현물)).fetchone()
         # 협약값은 판정 프롬프트 B5 에 들어간다. 이 계정의 이전 값으로 만든 판정 캐시가 답하지 않게 지운다
         cur.execute(f"DELETE FROM tenant.judge_cache p WHERE {조건} AND p.종류 = 'judge'", 인자)
     return 저장됨
@@ -150,7 +158,7 @@ def _협약_저장(org_id: str, account_id: str | None, 시작, 종료, 정부, 
 
 @router.put("/api/profile")
 def profile_put(req: Request, body: 프로필 = Body(...)) -> dict:
-    시작, 종료, 정부, 자기 = _협약_검증(body.협약)
+    시작, 종료, 정부, 자기, 현물 = _협약_검증(body.협약)
     if MOCK:
         return _저장_응답(False, "mock 모드(SUDDOE_MOCK=1)에서는 저장하지 않습니다", body.model_dump())
 
@@ -160,7 +168,7 @@ def profile_put(req: Request, body: 프로필 = Body(...)) -> dict:
         raise HTTPException(401, "저장하려면 로그인이 필요합니다")
     account_id = auth.검증된_account(req)
     try:
-        저장됨 = _협약_저장(org_id, account_id, 시작, 종료, 정부, 자기)
+        저장됨 = _협약_저장(org_id, account_id, 시작, 종료, 정부, 자기, 현물)
     except Exception as e:                                    # noqa: BLE001
         상태 = getattr(e, "sqlstate", None)
         # 응답에는 SQLSTATE·DB 메시지를 넣지 않는다(호스트·포트가 포함될 수 있다)

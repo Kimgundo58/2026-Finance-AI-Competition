@@ -524,7 +524,7 @@ def _점검(결과: 점검결과) -> None:
                게스트_put.status_code == 401 and 거꾸로.status_code == 422
                and all(s == 200 and isinstance(j, dict) and j.get("저장") is True for s, j in 저장들)
                and 읽음 == {"협약시작일": "2026-05-03", "협약종료일": "2026-10-30",
-                           "정부지원_현금": 51234000.0, "자기부담_현금": 2345678.0}
+                           "정부지원_현금": 51234000.0, "자기부담_현금": 2345678.0, "자기부담_현물": None}
                and 행수 == 1 and all(all(x in b for x in 기대[i]) for i, b in enumerate(b5들)),
                f"게스트 {게스트_put.status_code} · 역순 {거꾸로.status_code} · 저장 {[s for s, _ in 저장들]} · "
                f"GET {읽음} · 행 {행수}개 · B5 {[b.replace(chr(10), ' / ') for b in b5들]}")

@@ -9,12 +9,11 @@ SET lock_timeout = '10s';
 
 BEGIN;
 
--- 현물 제거 — 현물은 협약 시점 산정 회계 항목이지 집행 승인 대상이 아니다.
--- 자기부담금 구성비율(현금/현물 하한) 검증은 이 컬럼 삭제로 더는 할 수 없다.
--- 다시 필요하면 profile_agreements 에 현물 총액 컬럼 하나만 추가하면 된다.
+-- 정부지원 현물 제거 — 이 사업들에는 정부지원 현물이 없다.
+-- 자기부담_현물(현물 총액)은 남긴다. 「현물은 총사업비의 20% 이하」 같은 비율 한도를 계산할 때 쓴다
+-- (총사업비 = 정부지원_현금 + 자기부담_현금 + 자기부담_현물, migrations/2026-11-08_자기부담_현물.sql).
 
 ALTER TABLE tenant.profile_agreements DROP COLUMN IF EXISTS "정부지원_현물";
-ALTER TABLE tenant.profile_agreements DROP COLUMN IF EXISTS "자기부담_현물";
 
 -- 형태 컬럼이 사라지면 ix_exec_agg 도 같이 사라진다 — 재생성한다. 형태_check 는 컬럼과 함께 삭제된다.
 ALTER TABLE tenant.profile_expenditures DROP COLUMN IF EXISTS "형태";

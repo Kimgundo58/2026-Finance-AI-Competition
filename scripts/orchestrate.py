@@ -297,8 +297,8 @@ def _프로필값_읽기(cur, org_id, account_id=None) -> tuple[str | None, dict
 
     프로필은 계정 단위다. org_id 와 account_id(데모 세션은 None)가 둘 다 맞는 행만 읽는다(RLS 와 별개로 코드에서도).
 
-    프로필 요약문은 profile_agreements 의 협약 기간·현금 재원 네 값이다(없으면 '미입력'). 행이 없거나 조회가
-    실패하면 None. 값은 None = 세 조회 모두 실패(모른다), {} = 프로필 값이 없다(게스트), 그 밖은 실제 값이다.
+    프로필 요약문은 profile_agreements 의 협약 기간·현금 재원 네 값이다(없으면 '미입력'). 자기부담 현물은
+    입력했을 때만 한 줄 더한다(NULL = 미입력이면 줄이 없다). 행이 없거나 조회가 실패하면 None. 값은 None = 세 조회 모두 실패(모른다), {} = 프로필 값이 없다(게스트), 그 밖은 실제 값이다.
     profile_personnel·profile_expenditures 는 여러 행이면 한 값으로 정할 수 없어 비운다.
     """
     if not org_id:
@@ -309,7 +309,7 @@ def _프로필값_읽기(cur, org_id, account_id=None) -> tuple[str | None, dict
     프로필요약문 = None
     try:
         r = cur.execute("""SELECT 협약시작일, 협약종료일, 정부지원_현금, 자기부담_현금,
-                                  과업범위요약
+                                  과업범위요약, 자기부담_현물
                              FROM tenant.profile_agreements
                             WHERE org_id=%s AND account_id IS NOT DISTINCT FROM %s::uuid
                             ORDER BY updated_at DESC, profile_id LIMIT 1""",
@@ -319,8 +319,10 @@ def _프로필값_읽기(cur, org_id, account_id=None) -> tuple[str | None, dict
             이름 = ("협약시작일", "협약종료일", "정부지원(현금)", "자기부담(현금)")
             프로필요약문 = "\n".join(f"{n}: {v if v is not None else '미입력'}" for n, v in zip(이름, r[:4]))
             값.update({k: v for k, v in zip(("협약시작일", "협약종료일", "정부지원_현금",
-                                            "자기부담_현금", "과업범위요약"), r)
+                                            "자기부담_현금", "과업범위요약", "자기부담_현물"), r)
                        if v is not None})
+            if r[5] is not None:
+                프로필요약문 += f"\n자기부담(현물): {r[5]}"
     except Exception:                                    # noqa: BLE001
         _log.exception("프로필 값 조회 실패(profile_agreements)")
     for 테이블, 컬럼 in (("profile_personnel", ("역할", "고용형태", "타사업참여율", "소속기관유형", "겸직")),

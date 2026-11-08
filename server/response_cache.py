@@ -71,7 +71,7 @@ def 프로필_해시(org: str | None, account: str | None = None) -> str:
         return ""
     조건, 인자 = _계정조건(org, "p", account)
     행 = _질의('SELECT md5(coalesce(string_agg(concat_ws(\'|\', profile_id, "사업명", "협약시작일", '
-              '"협약종료일", "정부지원_현금", "자기부담_현금", "과업범위요약"), \'#\' ORDER BY profile_id), \'\')) '
+              '"협약종료일", "정부지원_현금", "자기부담_현금", "과업범위요약", "자기부담_현물"), \'#\' ORDER BY profile_id), \'\')) '
               f'FROM tenant.profile_agreements p WHERE {조건}', 인자)
     return 행[0][0] if 행 else ""
 
