@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """온톨로지 조회 함수(읽기 전용, docs/5_룰/5-8_저장과_조회.md). 판정 · 질문 생성의 새 경로가 쓴다.
 
-노드_결정 · 품목_노드 · 경로밖_품목 · 품목_후보 · 노드결정_적용 · 상위_세목 · 경로밖_규범 · 비율_규범 · 비목_품목금지 · 조문_행 · 세목_한도_있음 · 적용_규범 · 근거_조문 · 새경로_대상 · 근거경로_문장. 쓰지 않는다. 어떤 예외도 호출자에게 그대로 올린다
+노드_결정 · 품목_노드 · 경로밖_품목 · 품목_후보 · 노드결정_적용 · 상위_세목 · 경로밖_규범 · 상황_후보 · 상황_규범 · 비율_규범 · 비목_품목금지 · 조문_행 · 세목_한도_있음 · 적용_규범 · 근거_조문 · 새경로_대상 · 근거경로_문장. 쓰지 않는다. 어떤 예외도 호출자에게 그대로 올린다
 (호출자 orchestrate 가 판단불가로 바꾼다). 없는 노드 ID 는 LookupError 다.
 L3 는 여기서 다루지 않는다(능력 질문 시험의 `문맥_구성` 호출만 판정과 같은 문맥 구성 함수로 L3 연결을 본다). 읽는 테이블: corpus.concepts · concept_labels · concept_relations · norms · provenance ·
 documents · doc_articles.
@@ -574,6 +574,58 @@ def 경로밖_규범(cur, 사업명: str | None, 품목들: list[str], 적용: d
                 이미.add(n["norm_id"])
                 out.append(n)
     return out
+
+
+상황_종류 = ("절차", "시간", "주체")           # 비목 · 품목이 아닌 규범 대상 노드 종류(5-14 C)
+상황_먼저_종류 = ("금지", "한도", "임계값", "요건")    # 후보를 자를 때 먼저 넣는 규범 종류(나머지는 의무 · 허용)
+상황후보_상한 = 80            # 질문 프롬프트에 넣는 최대 상황 후보 수. 현재 질문 프롬프트가 2.5만~5.5만 자(중앙 3.6만)라 규칙 · 목록이 더하는 글자를 2천 자 안으로 잡았다(.claude/작업/조율/C_구현보고.md)
+상황규범_상한 = 10            # 고른 상황 노드에서 판정에 더하는 최대 규범 수(금지 → 한도 → 임계값 → 요건 → 그 밖)
+
+
+def 상황_후보(cur, 사업명: str | None, 상한: int | None = 상황후보_상한) -> list[dict]:
+    """규범의 `대상` 에 쓰인 절차 · 시간 · 주체 노드 [{id, 정식명}](5-14 C). 질문 LLM 이 질문 글에 드러난 상황을 고르는 후보다.
+
+    세지는 규범: `AI검증` 이상(verified) · 해석미결 아님 · 우선순위 아님 · 적용사업이 NULL 이거나 이 사업. 노드도 적용사업이 NULL 이거나 이 사업.
+    비목에서 닿는 규범으로 좁히지 않는다(안 닿는 규범에 가는 길이 목적이다). 금지 · 한도 · 임계값 · 요건 규범의 대상을 먼저, 그 안에서는 그런 규범이 많은 노드를 먼저 두고
+    상한(`상한`, None 이면 자르지 않음)까지 자른다. 같은 입력이면 항상 같은 순서다(판정 때 다시 만들어 ID 를 확인한다).
+    """
+    사업들 = [사업명] if 사업명 else []
+    행들 = cur.execute(
+        """SELECT c.concept_id, c.pref_label,
+                  count(*) FILTER (WHERE n.종류 = ANY(%s)) AS 먼저수
+             FROM corpus.norms n
+             CROSS JOIN LATERAL unnest(n.대상) AS d(id)
+             JOIN corpus.concepts c ON c.concept_id = d.id
+            WHERE n.verified AND NOT n.해석미결 AND n.종류 <> '우선순위' AND (n.적용사업 IS NULL OR n.적용사업 = ANY(%s))
+              AND c.종류 = ANY(%s) AND (c.적용사업 IS NULL OR c.적용사업 = ANY(%s))
+            GROUP BY c.concept_id, c.pref_label
+            ORDER BY (count(*) FILTER (WHERE n.종류 = ANY(%s)) = 0), 3 DESC, c.concept_id""",
+        (list(상황_먼저_종류), 사업들, list(상황_종류), 사업들, list(상황_먼저_종류))).fetchall()
+    out = [{"id": r[0], "정식명": r[1]} for r in 행들]
+    return out if 상한 is None else out[:상한]
+
+
+def 상황_규범(cur, 사업명: str | None, 노드들: list[str], 이미: set[str]) -> list[dict]:
+    """고른 상황 노드(5-14 C)를 `대상` 에 가진 규범(근거 포함). 수범자가 같다는 이유로는 넣지 않는다. 판정 때 다시 확인한다.
+
+    노드 ID 가 지금의 상황 후보(`상황_후보`, 같은 상한)에 없으면 버린다. `이미` 에 든 규범(이미 적용 · 경로밖 · 공통미정)과 우선순위 규범은 뺀다.
+    금지 → 한도 → 임계값 → 요건 → 그 밖 순으로 `상황규범_상한` 개까지 둔다. 코드 불가에 쓰지 않고 문맥 · 조건 문장으로만 쓴다.
+    """
+    노드들 = [x for x in dict.fromkeys(노드들) if isinstance(x, str)]
+    허용 = {c["id"] for c in 상황_후보(cur, 사업명)}
+    노드들 = [x for x in 노드들 if x in 허용]
+    if not 노드들:
+        return []
+    사업들 = [사업명] if 사업명 else []
+    행들 = cur.execute(
+        f"""SELECT {", ".join(f'n."{c}"' for c in _규범_컬럼)} FROM corpus.norms n
+             WHERE n.verified AND NOT n.해석미결 AND n.종류 <> '우선순위' AND (n.적용사업 IS NULL OR n.적용사업 = ANY(%s)) AND n.대상 && %s
+             ORDER BY n.norm_id""", (사업들, 노드들)).fetchall()
+    규범들 = [n for n in (dict(zip(_규범_컬럼, r)) for r in 행들) if n["norm_id"] not in 이미]
+    순서 = {k: i for i, k in enumerate(상황_먼저_종류)}
+    규범들 = sorted(규범들, key=lambda n: (순서.get(n["종류"], len(순서)), n["norm_id"]))[:상황규범_상한]
+    _근거_붙이기(cur, 규범들)
+    return 규범들
 
 
 def 비율_규범(cur, 사업명: str | None) -> list[dict]:

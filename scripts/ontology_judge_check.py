@@ -588,6 +588,7 @@ def _시험() -> list[tuple[str, bool]]:
     t.extend(_폼_품목_시험())
     t.extend(_용어_시험())
     t.extend(_노드결정_시험())
+    t.extend(_상황노드_시험())
     t.extend(_조건답_시험())
     t.extend(_시점_시험())
     t.extend(_협약경고_시험())
@@ -785,6 +786,158 @@ def _노드결정_시험() -> list[tuple[str, bool]]:
     return t
 
 
+def _상황노드_시험() -> list[tuple[str, bool]]:
+    """5-14 C 상황 노드: 화면 경로(/api/questions → /api/judge, 프로세스 안)로 돈다. 질문 LLM · 판정 LLM 은 고정 출력이고 규범은 실제 DB 값이다.
+    재도전성공패키지의 공통 규범 「교부받은 보조금은 원칙적으로 다음 회계연도로 넘겨 쓸 수 없습니다」(보조사업관리규정 제21조①, 대상 절차:이월, 금지, AI검증)가
+    비목 · 품목에서는 닿지 않고 상황 노드로만 닿는다."""
+    from types import SimpleNamespace
+
+    from fastapi.testclient import TestClient
+
+    from server import response_cache
+    from server.main import app
+    t: list[tuple[str, bool]] = []
+    재도전, 노드, 규범id = "재도전성공패키지", "절차:이월", "규범:공통/보조사업관리규정#제21조①/금지/1"
+    문장 = "교부받은 보조금은 원칙적으로 다음 회계연도로 넘겨 쓸 수 없습니다."
+    고정 = L.적용_규범, L.비목_품목금지, L.세목_한도_있음
+    원_프로그램, 원_질문llm, 원_종료 = os.environ["SUDDOE_ONTOLOGY_PROGRAMS"], Q.llm_호출, O._종료
+    질문출력: dict = {"상황노드": None}
+    잡음: dict = {"프롬프트": "", "스키마": {}, "규범": None, "질문": 0}
+
+    def 질문_llm(프롬프트, 스키마, **_k):
+        잡음["질문"] += 1
+        잡음["프롬프트"], 잡음["스키마"], 잡음["최대토큰"] = 프롬프트, 스키마, _k.get("최대토큰")
+        out: dict = {"질문": []}
+        if "품목노드" in 스키마["properties"]:
+            out.update(품목노드={"id": None, "확신": "동일"}, 확인질문=None)
+        if "조건질문" in 스키마["properties"]:
+            out["조건질문"] = []
+        if "상황노드" in 스키마["properties"] and 질문출력["상황노드"] is not None:
+            out["상황노드"] = 질문출력["상황노드"]
+        return out, {}
+
+    def 종료_잡기(상태, 응답, **k):          # 판정 기록 칸(decisions.규범)을 DB 에 쓰지 않고 같은 함수로 만든다
+        잡음["규범"] = O._판정_규범(상태) if 상태.새경로 and 상태.게이트결과 else None
+        잡음["처리단계"] = list(상태.처리단계)
+        return 원_종료(상태, 응답, **k)
+    client = TestClient(app, raise_server_exceptions=False)
+    내부값 = re.compile(r"절차:|규범:|상황노드|상황후보|norm_id")
+
+    def sse(글: str, 이름: str):
+        for 덩이 in 글.split("\n\n"):
+            줄 = 덩이.splitlines()
+            if f"event: {이름}" in 줄:
+                return json.loads("\n".join(x[6:] for x in 줄 if x.startswith("data: ")))
+        return None
+
+    def 흐름(노드들, *, 재점검=False, 비우기=True, 금액=300_000, 사업명=재도전, 비목="지급수수료", 품목="외부 전문가 자문 세션") -> dict:
+        if 비우기:
+            response_cache._메모리.clear()
+        질문출력["상황노드"] = 노드들
+        잡음.update(프롬프트="", 스키마={}, 규범=None, 질문=0)
+        _고정.출력, _고정.호출수, _고정.프롬프트 = {"판정": "가능", "요약": "고정 출력 시험 요약입니다. 규정을 확인했습니다."}, 0, ""
+        원문 = f"{품목} {금액 // 10_000}만원 써도 되나요?"
+        q = client.post("/api/questions", json={"사업명": 사업명, "확정비목": 비목, "확정세목": None, "부가세구분": "포함", "품목": 품목, "금액": 금액,
+                                               "용도": "사업 자문", "질문원문": 원문})
+        qa = q.json()
+        질문들 = (qa.get("질문") or []) if qa.get("상태") == "있음" and qa.get("질문세트") else []
+        정 = {"품목": 품목, "금액": 금액, "금액_추정여부": False, "용도": "사업 자문", "질문원문": None if 재점검 else 원문, "질의문": 품목,
+             "분류후보": [{"비목": 비목, "세목": None, "표시문": 비목}], "비목후보": [{"비목": 비목, "신뢰도": 1.0}], "수치": {"부가세구분": "포함"}, "누락필드": []}
+        j = client.post("/api/judge", json={"사업명": 사업명, "확정비목": 비목, "정규화": 정, "답변": [{"code": x["id"], "값": "예"} for x in 질문들],
+                                           "질문세트": qa.get("질문세트") if 질문들 and not 재점검 else None, "부가세구분": "포함"})
+        r = sse(j.text, "결과") or {}
+        return {"판정": r.get("판정"), "코드": (r.get("코드판정") or {}).get("종류"), "조건": r.get("조건") or [], "금지": r.get("금지조건") or [],
+                "공통": r.get("공통사항") or [], "요약": r.get("요약"), "프롬프트": _고정.프롬프트, "판정호출": _고정.호출수, "글": q.text + j.text,
+                "질문": qa, "캐시": (sse(j.text, "완료") or {}).get("캐시"), "질문프롬프트": 잡음["프롬프트"], "스키마": 잡음["스키마"],
+                "규범": 잡음["규범"], "질문호출": 잡음["질문"], "인용": sse(j.text, "인용") or [], "처리단계": 잡음.get("처리단계")}
+    L.적용_규범, L.비목_품목금지, L.세목_한도_있음 = _원_적용, _원_품목금지, _원_세목한도
+    os.environ["SUDDOE_ONTOLOGY_PROGRAMS"] = f"{사업},{재도전}"
+    Q.llm_호출, O._종료 = 질문_llm, 종료_잡기
+    try:
+        response_cache.데이터버전_해시_무효화()
+        with db.connect(autocommit=True) as c:
+            cur = c.cursor()
+            전체 = L.상황_후보(cur, 재도전, 상한=None)
+            후보 = L.상황_후보(cur, 재도전)
+            종류표 = dict(cur.execute("SELECT concept_id, 종류 FROM corpus.concepts WHERE concept_id = ANY(%s)", ([x["id"] for x in 전체],)).fetchall())
+            먼저종류 = {r[0] for r in cur.execute(
+                """SELECT DISTINCT d FROM corpus.norms n CROSS JOIN LATERAL unnest(n.대상) d WHERE n.verified AND NOT n.해석미결 AND n.종류 = ANY(%s)
+                    AND (n.적용사업 IS NULL OR n.적용사업 = %s)""", (list(L.상황_먼저_종류), 재도전)).fetchall()}
+            규범들 = L.상황_규범(cur, 재도전, [노드, "절차:없는노드", "품목:창업/외주용역비"], set())
+            이미있음 = L.상황_규범(cur, 재도전, [노드], {규범id})
+            다른사업 = L.상황_후보(cur, "모두의 창업 프로젝트")
+        앞 = [x["id"] for x in 후보 if x["id"] in 먼저종류]
+        t.append(("5-14 C 상황 후보: 절차 · 시간 · 주체 노드만 · 상한 이내 · 금지 · 한도 · 임계값 · 요건 규범의 대상이 의무 · 허용만의 대상보다 앞 · 자르기 전보다 적거나 같다 · ID 와 정식명만",
+                  bool(후보) and len(후보) <= L.상황후보_상한 and len(후보) <= len(전체) and all(종류표[x["id"]] in L.상황_종류 for x in 전체) and set(후보[0]) == {"id", "정식명"}
+                  and 후보 == 전체[:len(후보)] and 앞 == [x["id"] for x in 후보][:len(앞)] and any(x["id"] == 노드 for x in 후보)))
+        t.append(("5-14 C 상황 규범: 후보 밖 ID · 비목 노드 ID 는 버리고, 이미 적용한 규범은 빼고, 이 노드의 금지는 대상 일치로 들어온다(근거 포함)",
+                  [n["norm_id"] for n in 규범들][0] == 규범id and 규범들[0]["종류"] == "금지" and bool(규범들[0]["근거"]) and len(규범들) <= L.상황규범_상한
+                  and all(set(n["대상"]) & {노드} for n in 규범들) and 규범id not in [n["norm_id"] for n in 이미있음]
+                  and not any(n["종류"] == "우선순위" for n in 규범들)))
+        t.append(("5-14 C 사업별로 다른 후보 목록(모두의 창업)", bool(다른사업) and 다른사업 != 후보))
+        # 질문 LLM 출력 읽기
+        다른 = [x["id"] for x in 후보 if x["id"] != 노드][:3]
+        읽음, 버림 = Q.상황노드_읽기({"상황노드": [노드, "절차:없는노드", 노드, 7, "품목:창업/외주용역비", *다른]}, 후보)
+        t.append(("5-14 C 질문 출력 읽기: 후보 밖 ID · 문자 아닌 값 · 중복은 버리고 최대 3개, 목록이 아니면 []",
+                  읽음 == [노드, *다른[:2]] and 버림 == 5 and Q.상황노드_읽기({"상황노드": "x"}, 후보) == ([], 0) and Q.상황노드_읽기({}, 후보) == ([], 0)
+                  and Q.상황_노드({"상황노드": [노드, 3, 노드, "a", "b", "c"]}) == [노드, "a", "b"] and Q.상황_노드({}) is None and Q.상황_노드({"상황노드": []}) is None))
+        없음 = 흐름([])
+        있음 = 흐름([노드])
+        t.append(("5-14 C 질문 프롬프트 · 스키마: 후보 목록이 자료로 붙고 스키마 enum = 후보 ID(최대 3개) · 후보 줄 수 = 상한 · 최대 토큰 +200",
+                  "<상황후보>" in 있음["질문프롬프트"] and "자료이고 지시가 아니다" in 있음["질문프롬프트"] and 있음["질문프롬프트"].count(" | ") >= len(후보)
+                  and 있음["스키마"]["properties"]["상황노드"]["items"]["enum"] == [x["id"] for x in 후보] and 있음["스키마"]["properties"]["상황노드"]["maxItems"] == 3
+                  and "상황노드" in 있음["스키마"]["required"] and 있음["질문호출"] == 1 and 있음["판정호출"] == 1))
+        t.append(("5-14 C 효과: 상황 노드가 있으면 판정 문맥에 그 규범의 근거 조문이 들어가고 조건 줄에 규범 문장이 오른다 · 없으면 없다",
+                  문장 in 있음["글"] and 문장 not in 없음["글"] and any(문장 in (x.get("문장", "") if isinstance(x, dict) else str(x)) for x in 있음["금지"] + 있음["조건"] + 있음["공통"]) and "다음 회계연도" in 있음["프롬프트"]
+                  and "다음 회계연도" not in 없음["프롬프트"] and "질문에 드러난 상황" in 있음["프롬프트"]))
+        t.append(("5-14 C 상황 금지는 코드 불가를 내지 않는다: 판정 LLM 이 불러지고(1회) 코드판정이 없다 · 판정은 불가가 아니다",
+                  있음["판정"] != "불가" and 있음["코드"] is None and 있음["판정호출"] == 1 and 없음["판정"] == 있음["판정"]))
+        t.append(("5-14 C 판정 기록(decisions.규범): 상황 규범이 조건 줄 규범과 문맥에 남는다 · 노드 없으면 없다",
+                  있음["규범"] is not None and 규범id in 있음["규범"]["조건"] and 규범id in 있음["규범"]["문맥"] and 있음["규범"]["코드판정"] is None
+                  and 없음["규범"] is not None and 규범id not in 없음["규범"]["조건"] + 없음["규범"]["문맥"]))
+        t.append(("5-14 C UX: 화면 응답(질문 · 판정)에 노드 ID · 규범 ID · 상황노드 필드가 없다 · 질문 응답은 질문세트와 같은 꼴", not 내부값.search(있음["글"]) and "상황노드" not in 있음["질문"]
+                  and 있음["질문"].get("상태") in ("있음", "없음") and set(있음["질문"]) <= {"상태", "질문세트", "질문", "추가입력", "용어풀이"}))
+        밖 = 흐름(["절차:없는노드", "품목:창업/외주용역비"])
+        t.append(("5-14 C 후보 밖 ID 는 버린다: 질문 출력에 지어낸 ID 만 있으면 상황 노드 없음과 같은 결과(조건 · 프롬프트 · 판정)",
+                  밖["조건"] == 없음["조건"] and 밖["금지"] == 없음["금지"] and 밖["프롬프트"] == 없음["프롬프트"] and 밖["판정"] == 없음["판정"] and 문장 not in 밖["글"]))
+        # 판정 단계의 재검사: 저장값에 후보 밖 ID 가 있어도(만료 · 변조 가정) 쓰지 않는다
+        입력 = O.게이트_입력(300_000, "포함", None)
+        with db.connect(autocommit=True) as c:
+            cur = c.cursor()
+            조회0 = O.온톨로지_조회(cur, 재도전, "지급수수료", None, 입력, 확정=True, 품목="외부 전문가 자문 세션")
+            조회1 = O.온톨로지_조회(cur, 재도전, "지급수수료", None, 입력, 확정=True, 품목="외부 전문가 자문 세션", 상황노드=["절차:없는노드"])
+            조회2 = O.온톨로지_조회(cur, 재도전, "지급수수료", None, 입력, 확정=True, 품목="외부 전문가 자문 세션", 상황노드=[노드])
+            조회3 = O.온톨로지_조회(cur, 재도전, "지급수수료", None, 입력, 확정=False, 품목="외부 전문가 자문 세션", 상황노드=[노드])
+        정리 = lambda g: json.dumps(g, ensure_ascii=False, sort_keys=True, default=str)
+        t.append(("5-14 C 판정 단계 재검사: 후보 밖 ID · 비확정 비목에서는 상황 규범이 비고 결과가 노드 없음과 같다 · 유효 ID 면 상황 규범 하나",
+                  조회1["적용"]["상황규범"] == [] and 조회3["적용"]["상황규범"] == [] and 조회0["적용"]["상황규범"] == [] and 정리(조회1["게이트"]) == 정리(조회0["게이트"])
+                  and [n["norm_id"] for n in 조회2["적용"]["상황규범"]][0] == 규범id and 조회2["게이트"].get("종류") is None))
+        # 코드 게이트: 같은 금지가 적용 규범이면 코드 불가, 상황 규범이면 조건 줄만(효과)
+        금지규범 = {**next(n for n in 조회2["적용"]["상황규범"] if n["norm_id"] == 규범id), "예외": []}     # 예외 없는 금지: 적용 규범이면 코드 불가가 나는 모양
+        적용됨 = G.게이트([금지규범], 입력, 확정=True)
+        상황됨 = G.게이트([], 입력, 확정=True, 상황규범=[금지규범])
+        t.append(("5-14 C 게이트: 같은 금지가 적용 규범이면 코드 불가, 상황 규범이면 조건 줄만(불가 없음) · 조건 줄을 만든 규범이 조건규범에 남는다",
+                  적용됨.get("종류") == "금지" and 상황됨.get("종류") is None and any(문장 in c["문장"] and c["구분"] == "금지조건" for c in 상황됨["조건"]) and 상황됨["조건규범"] == [규범id]
+                  and 상황됨["상한"] == "조건부" and G.게이트([], 입력, 확정=True)["조건"] == [] and G.합치기(상황됨, "가능")[0] != "불가"))
+        큰금액 = 흐름([노드], 금액=900_000_000)
+        t.append(("5-14 C 금액이 아무리 커도 상황 금지로 코드 불가는 없다(판정 LLM 이 정한다)", 큰금액["코드"] in (None, "한도초과", "부가세기준미정") and 큰금액["코드"] != "금지" and 규범id != (큰금액["규범"] or {}).get("코드판정")))
+        # 캐시 · 다시 점검(질문세트 · 질문원문 없음)
+        c1 = 흐름([])
+        response_cache._메모리.pop(c1["질문"].get("질문세트"), None)
+        c2 = 흐름([노드], 비우기=False)
+        t.append(("5-14 C 캐시: 노드 없이 판정한 뒤 같은 요청에 노드가 생기면 옛 결과가 나오지 않는다", c1["캐시"] is False and c2["캐시"] is False and 문장 in c2["글"] and 문장 not in c1["글"]))
+        재 = 흐름([노드], 재점검=True)
+        t.append(("5-14 C 다시 점검(질문세트 · 질문원문 없음): 보조 키에 상황 노드를 두지 않아 상황 규범이 들어오지 않는다(질문 글이 없어 상황을 확인할 수 없다)", 문장 not in 재["글"]))
+        모두 = 흐름(None, 사업명=사업, 비목="재료비", 품목="시험 품목")
+        t.append(("5-14 C 질문 LLM 이 상황 노드를 안 내면(필드 없음) 지금과 같다: 상황 규범 없음 · 판정 1회", 모두["판정호출"] <= 1 and 문장 not in 모두["글"] and "상황규범" not in str(모두["처리단계"])))
+        t.append(("5-14 C 질문 LLM 호출은 요청마다 1회, 판정 LLM 호출도 1회 이하(새 호출 없음)", 있음["질문호출"] == 1 and 재["질문호출"] == 1 and 있음["판정호출"] <= 1 and 재["판정호출"] <= 1))
+    finally:
+        L.적용_규범, L.비목_품목금지, L.세목_한도_있음 = 고정
+        Q.llm_호출, O._종료 = 원_질문llm, 원_종료
+        os.environ["SUDDOE_ONTOLOGY_PROGRAMS"] = 원_프로그램
+    return t
+
+
 def _조건답_시험() -> list[tuple[str, bool]]:
     """5-14 B 자연어 조건 확인 질문: 화면 경로(/api/questions → /api/judge, 프로세스 안)로 돈다. 질문 LLM · 판정 LLM 은 고정 출력이다.
     규범은 실제 DB 값이다(적용_규범 고정을 풀고 돈다). 질문 LLM 고정 출력은 조건질문 {규범ID, 조건번호, 질문문} 만 낸다.
@@ -924,9 +1077,11 @@ def _조건답_시험() -> list[tuple[str, bool]]:
     t.append(("5-14 B 질문 프롬프트 · 스키마: 조건 목록과 조건질문(규범 ID · 번호 enum)이 들어간다",
               "<조건목록>" in 예["질문프롬프트"] and 임치 in 예["질문프롬프트"]
               and 임치 in (예["스키마"]["properties"].get("조건질문") or {}).get("items", {}).get("properties", {}).get("규범ID", {}).get("enum", [])))
+    상황떼기 = lambda 글: 글.split("\n\n상황 노드 고르기\n")[0]       # 5-14 C 의 상황 블록은 조건 블록 뒤에 붙는다. 이 시험은 조건 블록만 본다
     t.append(("5-14 B 조건 없음이면 질문 프롬프트 · 스키마는 지금 그대로(조건 블록 · 칸만 덧붙는다)",
               "<조건목록>" not in 빈목록["질문프롬프트"] and "조건질문" not in 빈목록["스키마"]["properties"]
-              and 없음["질문프롬프트"].startswith(빈목록["질문프롬프트"]) and 없음["질문프롬프트"][len(빈목록["질문프롬프트"]):].startswith("\n\n조건 확인 질문\n")
+              and 상황떼기(없음["질문프롬프트"]).startswith(상황떼기(빈목록["질문프롬프트"]))
+              and 상황떼기(없음["질문프롬프트"])[len(상황떼기(빈목록["질문프롬프트"])):].startswith("\n\n조건 확인 질문\n")
               and {k: v for k, v in 없음["스키마"]["properties"].items() if k != "조건질문"} == 빈목록["스키마"]["properties"]))
     t.append(("5-14 B 질문 없음: 그 금지는 조건 줄(금지 칸) · 코드 불가 아님", 없음["코드"] is None and 임치글 in 없음["금지"] and 없음["판정"] == "조건부"))
     t.append(("5-14 B 화면 질문: 같은 꼴(id · 질문문 · 이유 · 선택지 · 근거) · 예 · 아니오 · 모르겠어요 · 첫 질문이 조건 질문",

@@ -353,6 +353,14 @@ def 규범_요약(규범결과: dict, 게이트결과: dict, *, 분류표시: st
                   if 구분 else "")
             글 = max((g.get("발췌") or "" for g in n.get("근거") or []), key=len).strip()      # 짧은 조각보다 뜻이 드러나는 긴 발췌
             줄.append(f"  - {n.get('종류')}: 「{글}」{꼬리}")
+    상황 = [n for n in 규범결과.get("상황규범") or [] if _발췌(n)]
+    if 상황:
+        줄.append("- 질문에 드러난 상황(협약 변경 · 거래 상대 등)에 걸린 규정이 따로 있다. 코드는 이 규정으로 판정하지 않았다. 질문 글에 이 상황이 적혀 있으면 "
+                 "이 규정으로 판단하고(금지에 해당하면 불가), 적혀 있지 않으면 판단에 쓰지 않는다:")
+        for n in 상황:
+            자연어 = _자연어조건(n)
+            글 = max((g.get("발췌") or "" for g in n.get("근거") or []), key=len).strip()
+            줄.append(f"  - {n.get('종류')}: 「{글}」{f' 조건: 「{자연어}」.' if 자연어 else ''}")
     표행 = list(dict.fromkeys(max((g.get("발췌") or "" for g in n.get("근거") or []), key=len).strip()      # 뜻이 드러나는 긴 발췌
                             for n in 규범결과.get("품목표") or [] if _발췌(n)))
     if 표행:
