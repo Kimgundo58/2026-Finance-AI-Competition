@@ -2,7 +2,7 @@
 
 10:40 창업중심대학 검토 6차 OK(github-ce) 뒤 시작
 10:41 입력 명세: 출입국관리법시행령 제23조 문서를 뺐다(도약이 공통으로 추출, ontology/공통_L1.json). 인용대응 「출입국관리법 시행령 제23조 → 조:출입국관리법시행령#제23조」 줄은 남김. 인용대응에 「제23조① 「중소기업창업 지원법 상의 재창업」 → 조:창업지원법#제2조」 를 넣고(5-5, 창업중심대학 제14조와 같은 처리, DB 창업지원법 제2조 5호가 재창업 정의), 미특정 줄을 「그 밖에 조를 특정하지 않은 인용과 입력에 없는 법령(공무원보수규정 등)」 으로 넓혔다. 메모.md · 범위.md · 묶음_계획.json 의 낡은 줄(제30조[2] 조문 ID, 출입국 포함, 글자 수)을 고쳤다
-10:42 ontology_input: 49블록(재도전 48 · 공무원여비규정 별표1 1), 블록 본문 합 7,946자. extraction_run.py 준비 → 프롬프트_A · B(3,109자, 차이는 A/B 표기만)
+10:42 ontology_input: 49블록(재도전 48 · 공무원여비규정 별표1 1), 블록 본문 합 8,906자(ontology_input.블록_만들기 본문 길이 합, 재도전 6,294 · 별표1 2,612. 처음 적은 7,946 은 잘못 셈, 검토 7차 지적 2c 로 고침). extraction_run.py 준비 → 프롬프트_A · B(3,109자, 차이는 A/B 표기만)
 10:43 추출자 시작(구독 경로, opus · high, 프롬프트_X.md 글자 그대로) A a1df52606977452a2 · B a12b28fb8ea176a03. 바로 뒤 각자에 scratch 개인 폴더 안내 메시지(지시 내용 바꾸지 않음). 원문:
   → A: "Note on scratch files: you share the session scratchpad with another agent. If you need draft or helper files outside your input folder, put them only in scratchpad/jaedojeon_A/ and don't read anything elsewhere in the scratchpad. Your input folder must still hold only the three inputs plus 추출_A.md. This message changes none of your instructions."
   → B: 위와 같고 jaedojeon_A → jaedojeon_B, 추출_A.md → 추출_B.md
