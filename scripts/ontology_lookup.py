@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """온톨로지 조회 함수(읽기 전용, docs/5_룰/5-8_저장과_조회.md). 판정 · 질문 생성의 새 경로가 쓴다.
 
-노드_결정 · 품목_노드 · 경로밖_품목 · 품목_후보 · 노드결정_적용 · 경로밖_규범 · 비목_품목금지 · 조문_행 · 세목_한도_있음 · 적용_규범 · 근거_조문 · 새경로_대상 · 근거경로_문장. 쓰지 않는다. 어떤 예외도 호출자에게 그대로 올린다
+노드_결정 · 품목_노드 · 경로밖_품목 · 품목_후보 · 노드결정_적용 · 상위_세목 · 경로밖_규범 · 비목_품목금지 · 조문_행 · 세목_한도_있음 · 적용_규범 · 근거_조문 · 새경로_대상 · 근거경로_문장. 쓰지 않는다. 어떤 예외도 호출자에게 그대로 올린다
 (호출자 orchestrate 가 판단불가로 바꾼다). 없는 노드 ID 는 LookupError 다.
 L3 는 여기서 다루지 않는다(능력 질문 시험의 `문맥_구성` 호출만 판정과 같은 문맥 구성 함수로 L3 연결을 본다). 읽는 테이블: corpus.concepts · concept_labels · concept_relations · norms · provenance ·
 documents · doc_articles.
@@ -528,6 +528,42 @@ def 노드결정_적용(cur, 사업명: str | None, 대상: dict, 노드결정: 
     return None, [nid], 확신
 
 
+def 상위_세목(cur, 사업명: str | None, 노드_id: str, 비목_id: str) -> dict | None:
+    """노드 결정으로 채울 세목(5-14 A) → {id, 세목(정식명)} 또는 None. 호출자가 「동일」 · 사용자 세목 없음을 이미 확인했다.
+
+    노드가 세목이면 그 세목, 품목이면 상위 사슬에서 가장 가까운 세목이다. 어느 쪽이든 그 세목은 `비목_id` 아래여야 한다.
+    비목 아래 세목 중 가장 가까운 단계에 둘 이상이면 고르지 않는다(None). 정식명을 화면이 고르는 길(`대상_노드`)로 다시 풀어
+    같은 노드가 나올 때만 돌려준다. 노드 · 관계는 적용사업이 NULL 이거나 그 사업인 것만.
+    """
+    사업들 = [사업명] if 사업명 else []
+    행 = cur.execute("SELECT 종류 FROM corpus.concepts WHERE concept_id = %s AND (적용사업 IS NULL OR 적용사업 = ANY(%s))",
+                     (노드_id, 사업들)).fetchone()
+    if 행 is None or 행[0] not in ("세목", "품목"):
+        return None
+    경로 = _상위_경로(cur, 노드_id, 사업들)
+    깊이 = {노드_id: 0}
+    for 하, 상 in 경로:               # 깊이 순으로 온다. 처음 닿은 깊이가 가장 짧은 거리다
+        if 하 in 깊이 and 상 not in 깊이:
+            깊이[상] = 깊이[하] + 1
+    후보 = [노드_id] if 행[0] == "세목" else [p for p in 깊이 if p != 노드_id]
+    종류표 = dict(cur.execute("SELECT concept_id, 종류 FROM corpus.concepts WHERE concept_id = ANY(%s)", (후보,)).fetchall())
+    세목들 = [s for s in 후보 if 종류표.get(s) == "세목"
+             and 비목_id in {p for _, p in (경로 if s == 노드_id else _상위_경로(cur, s, 사업들))}]
+    if not 세목들:
+        return None
+    가까움 = min(깊이[s] for s in 세목들)
+    세목들 = [s for s in 세목들 if 깊이[s] == 가까움]
+    if len(세목들) != 1:
+        return None
+    이름 = cur.execute("SELECT pref_label FROM corpus.concepts WHERE concept_id = %s", (세목들[0],)).fetchone()[0]
+    비목 = cur.execute("SELECT pref_label FROM corpus.concepts WHERE concept_id = %s", (비목_id,)).fetchone()[0]
+    try:
+        풀이 = 대상_노드(cur, 사업명, 비목, 이름)
+    except LookupError:
+        return None
+    return {"id": 세목들[0], "세목": 이름} if 풀이["대상_id"] == 세목들[0] and 풀이["비목_id"] == 비목_id else None
+
+
 def 경로밖_규범(cur, 사업명: str | None, 품목들: list[str], 적용: dict) -> list[dict]:
     """경로 밖 품목에 걸린 규범 중 이미 적용 규범에 있는 것과 우선순위를 뺀 것. 그 품목의 상위 묶음 노드 규범도 포함한다."""
     이미 = {n["norm_id"] for n in 적용["규범"]}
@@ -791,6 +827,13 @@ def _자체시험() -> int:
                           (lambda ns: any(n["종류"] == "금지" and "키보드" in str(n["근거"]) for n in ns)
                            and not any(n["종류"] == "우선순위" or n["norm_id"] in {m["norm_id"] for m in 적용["규범"]} for n in ns))
                           (경로밖_규범(cur, 사업, 밖, 적용))))
+                수수료 = "비목:창업/지급수수료"
+                t.append(("5-14 A 상위_세목: 세목은 그 세목 · 품목은 가장 가까운 상위 세목 · 세목 없는 품목 · 다른 비목 · 비목 자신은 None",
+                          상위_세목(cur, 사업, "세목:창업/지급수수료/멘토링비", 수수료) == {"id": "세목:창업/지급수수료/멘토링비", "세목": "멘토링비"}
+                          and 상위_세목(cur, 사업, "품목:창업/공유사무공간", 수수료) == {"id": "세목:창업/지급수수료/사무실임차료", "세목": "사무실임차료"}
+                          and 상위_세목(cur, 사업, "품목:창업/고영향AI인증검증비", 수수료) is None
+                          and 상위_세목(cur, 사업, "세목:창업/지급수수료/멘토링비", "비목:창업/재료비") is None
+                          and 상위_세목(cur, 사업, 수수료, 수수료) is None))
                 t.append(("세목_한도_있음: 한도 있는 세목이 있는 비목만", 세목_한도_있음(cur, 사업, "비목:창업/지급수수료")
                           and not 세목_한도_있음(cur, 사업, "비목:창업/기계장치") and not 세목_한도_있음(cur, 사업, "비목:창업/재료비")))
                 행들 = 근거_조문(cur, 적용_규범(cur, 사업, "비목:창업/재료비")["규범"], 3, "비목:창업/재료비", 사업=사업)

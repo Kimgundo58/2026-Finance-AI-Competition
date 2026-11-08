@@ -156,11 +156,12 @@ def _노드결정_읽기(body: 판정요청, account_id: str | None) -> dict | N
 
     질문세트가 오면 그 값을 쓴다. 안 오면(질문 0개라 화면이 보내지 않음) 판정 요청 값으로 /api/questions 와 같은 키를 다시 만든다.
     화면은 /api/questions 에 정규화의 품목 · 금액 · 용도 · 질문원문(2,000자)을 보내고 세부유형은 보내지 않는다
-    (scripts/eval_screen_path.py 화면_흐름). 값이 하나라도 다르면 키가 달라 None 이다. 노드 확인 답은 질문세트가 올 때만 본다.
+    (scripts/eval_screen_path.py 화면_흐름). 다시 만든 키에 저장값이 없으면(다시 점검은 질문원문을 보내지 않는다)
+    사업 · 확정 비목 · 세목 · 품목만 쓴 보조 키(routes_questions.노드결정_키)에서 결정을 읽는다. 노드 확인 답은 질문세트가 올 때만 본다.
     """
     try:
         import question_generate
-        from server.routes_questions import 질문세트_키
+        from server.routes_questions import 노드결정_키, 질문세트_키
         n = body.정규화
         k = body.질문세트
         if not k:
@@ -169,6 +170,10 @@ def _노드결정_읽기(body: 판정요청, account_id: str | None) -> dict | N
             k = 질문세트_키(body.org_id, account_id, body.사업명, body.확정비목, body.확정세목, body.부가세구분, None,
                          n.get("품목"), 금액, n.get("용도"), (n.get("질문원문") or "")[:2000] or None)
         저장값 = response_cache.질문세트_조회(k, body.org_id, account_id)
+        if 저장값 is None and not body.질문세트:
+            저장값 = response_cache.질문세트_조회(
+                노드결정_키(body.org_id, account_id, body.사업명, body.확정비목, body.확정세목, n.get("품목")),
+                body.org_id, account_id)
         답변들 = [a.model_dump() for a in body.답변] if body.질문세트 else []
         return question_generate.노드_결정(저장값, 답변들, n.get("품목"))
     except Exception as e:                                    # noqa: BLE001

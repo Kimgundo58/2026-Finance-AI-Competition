@@ -120,4 +120,17 @@ def _live_질문(body: 질문요청, org: str | None, account: str | None, ip: s
     if not 저장됨 and 저장값["질문"]:                    # 답을 받아도 판정에서 질문을 찾지 못하니 묻지 않는다
         _로그("실패", 0, ["저장실패"], False, t0)
         return dict(_실패_응답)
+    if 저장됨 and 저장값.get("노드결정"):              # 다시 점검처럼 질문 키가 안 맞는 판정이 읽는 보조 키
+        response_cache.저장(노드결정_키(org, account, body.사업명, body.확정비목, body.확정세목, body.품목),
+                          {"노드결정": 저장값["노드결정"]}, 종류="questions", org=org, account=account,
+                          데이터버전_해시=데이터버전해시, ttl초=_질문세트_TTL초)
     return 응답(저장값)
+
+
+def 노드결정_키(org: str | None, account: str | None, 사업명, 확정비목, 확정세목, 품목) -> str:
+    """품목 노드 결정(5-13)만 담는 보조 키. 질문세트 키와 달리 금액 · 용도 · 질문원문 · 세부유형 · 부가세구분을 넣지 않는다.
+
+    화면의 다시 점검 경로는 질문원문 없이 판정을 불러 질문세트 키가 안 맞는다(9d). 같은 품목 글이면 같은 노드라
+    이 키로 결정만 읽는다. 노드 확인 답은 없으므로 「유사」 는 유사 그대로다. ID 는 판정이 다시 검사한다(ontology_lookup.노드결정_적용).
+    """
+    return response_cache.캐시키("node", org, account, 사업명, 확정비목, 확정세목, (품목 or "").strip())
