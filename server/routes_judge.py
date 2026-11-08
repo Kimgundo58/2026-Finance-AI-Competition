@@ -74,6 +74,9 @@ def judge(req: Request, body: 판정요청, mock: str | None = None,
     상황노드 = (_상황노드_읽기(body, account_id)
               if 반영 and not MOCK and 온톨로지_사업(body.사업명) else None)
     # 같은 계정의 지출 계획 기록(5-15 ③). 누적 한도 · 임계값을 바꾸므로 키에 넣는다. 읽은 값을 판정에 그대로 넘겨 키와 계산이 어긋나지 않게 한다
+    # 기관(L3) 규정 숫자 기준에 확인 질문 LLM 이 표시한 역할(5-15 ⑤). 서버 저장값에서만 읽는다. 판정을 바꾸므로 키에 넣는다
+    L3라벨 = (_L3숫자라벨_읽기(body, account_id)
+            if 반영 and not MOCK and 온톨로지_사업(body.사업명) else None)
     기록누적 = (_기록누적_읽기(body, account_id)
               if 반영 and not MOCK and 온톨로지_사업(body.사업명) else None)
     # 자연어 조건 확인 질문의 답(5-14 B). 서버 저장값의 규범 ID · 조건 번호에 화면 답 값만 맞춘다. 판정을 바꾸므로 키에 넣는다
@@ -106,6 +109,8 @@ def judge(req: Request, body: 판정요청, mock: str | None = None,
         *([json.dumps(상황노드, ensure_ascii=False)] if 상황노드 else []),
         # 지출 계획 기록이 없으면 조각을 더하지 않는다(지금 키 그대로). 기록 금액 · 거래처 · 달이 바뀌면 키가 바뀐다
         *([json.dumps(기록누적, ensure_ascii=False, sort_keys=True)] if 기록누적 else []),
+        # L3 숫자 라벨이 없으면 조각을 더하지 않는다(지금 키 그대로)
+        *([json.dumps(L3라벨, ensure_ascii=False, sort_keys=True)] if L3라벨 else []),
         # 조건 확인 질문이 없으면 조각을 더하지 않는다(지금 키 그대로)
         *([json.dumps(조건답, ensure_ascii=False, sort_keys=True)] if 조건답 else []))
     캐시 = response_cache.조회(k, body.org_id, account_id)
@@ -134,7 +139,7 @@ def judge(req: Request, body: 판정요청, mock: str | None = None,
             response_cache.저장(k, out, 종류="judge", org=body.org_id, account=account_id,
                                데이터버전_해시=데이터버전해시)
         else:
-            out, 실패 = yield from _판정_실행(body, account_id, 사용자답변, 답변유실, 노드결정, 조건답, 상황노드, 기록누적)
+            out, 실패 = yield from _판정_실행(body, account_id, 사용자답변, 답변유실, 노드결정, 조건답, 상황노드, 기록누적, L3라벨)
             # decision_id 를 캐시에 넣으면 다른 요청이 남의 판정 행을 자기 계획에 연결한다.
             decision_id = out.pop("decision_id", None)
             if not 실패:              # 일시적 장애의 판단불가를 캐시에 고정하지 않는다
@@ -206,6 +211,16 @@ def _기록누적_읽기(body: 판정요청, account_id: str | None) -> dict | N
         return None
 
 
+def _L3숫자라벨_읽기(body: 판정요청, account_id: str | None) -> list[dict] | None:
+    """저장한 질문세트(없으면 보조 키)의 기관 규정 숫자 라벨(5-15 ⑤). 없거나 못 읽으면 None 이고 판정은 지금 길로 간다. 지금 조문과 맞는지는 판정이 다시 본다."""
+    try:
+        import question_generate
+        return question_generate.L3숫자_라벨(_질문저장값_읽기(body, account_id))
+    except Exception as e:                                    # noqa: BLE001
+        _log.warning("L3 숫자 라벨 읽기 실패: %s", type(e).__name__)
+        return None
+
+
 def _상황노드_읽기(body: 판정요청, account_id: str | None) -> list[str] | None:
     """저장한 질문세트에서 상황 노드 ID(5-14 C)를 읽는다. 못 읽으면 None 이고 판정은 지금 길로 간다. ID 가 후보 안인지는 판정이 다시 본다."""
     try:
@@ -273,7 +288,7 @@ def _판정_이벤트(out: dict):
 
 def _판정_실행(body: 판정요청, account_id: str | None, 사용자답변: list[dict] | None = None,
             답변유실: bool = False, 노드결정: dict | None = None, 조건답: list[dict] | None = None,
-            상황노드: list[str] | None = None, 기록누적: dict | None = None):
+            상황노드: list[str] | None = None, 기록누적: dict | None = None, L3라벨: list[dict] | None = None):
     """_live_판정 을 워커 스레드에서 실행하고, 기다리는 동안 SSE keep-alive 주석을 yield 한다.
 
     `out, 실패 = yield from _판정_실행(body, account_id, 사용자답변, 답변유실)` 로 쓴다. 예외나 타임아웃은 판단불가 결과와
@@ -282,7 +297,7 @@ def _판정_실행(body: 판정요청, account_id: str | None, 사용자답변: 
     """
     ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     # submit 은 컨텍스트 변수를 복사하지 않는다. 미들웨어가 설정한 현재_org 를 워커에 넘긴다.
-    future = ex.submit(contextvars.copy_context().run, _live_판정, body, account_id, 사용자답변, 답변유실, 노드결정, 조건답, 상황노드, 기록누적)
+    future = ex.submit(contextvars.copy_context().run, _live_판정, body, account_id, 사용자답변, 답변유실, 노드결정, 조건답, 상황노드, 기록누적, L3라벨)
     만료시각 = time.monotonic() + _판정_타임아웃초
     try:
         while True:
@@ -326,7 +341,7 @@ def _실패_결과(body: 판정요청) -> dict:
 
 def _live_판정(body: 판정요청, account_id: str | None = None, 사용자답변: list[dict] | None = None,
              답변유실: bool = False, 노드결정: dict | None = None, 조건답: list[dict] | None = None,
-             상황노드: list[str] | None = None, 기록누적: dict | None = None) -> dict:
+             상황노드: list[str] | None = None, 기록누적: dict | None = None, L3라벨: list[dict] | None = None) -> dict:
     """orchestrate.판정() 을 호출하고 응답 계약으로 바꾼다. 워커 스레드에서 실행된다."""
     import orchestrate
     # 질문 원문이 없을 때만 품목·용도·금액으로 문장을 재구성한다. 합성 문장(_합성_질문)을 다시
@@ -347,7 +362,7 @@ def _live_판정(body: 판정요청, account_id: str | None = None, 사용자답
                        사용자프로필값=_사용자프로필값_구성(body.답변),
                        사용자답변=사용자답변, 답변유실=답변유실,
                        확정세목=body.확정세목, 추가입력값=body.추가입력값, 부가세구분=body.부가세구분, 사용일자=body.사용일자,
-                       노드결정=노드결정, 조건답=조건답, 상황노드=상황노드, 기록누적=기록누적)
+                       노드결정=노드결정, 조건답=조건답, 상황노드=상황노드, 기록누적=기록누적, l3숫자라벨=L3라벨)
     return 파이프라인결과_매핑(r, body)
 
 

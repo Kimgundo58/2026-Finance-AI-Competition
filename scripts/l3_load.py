@@ -427,10 +427,15 @@ def 조문_조회(cur, org_id: str, 비목: str | None = None) -> list[dict[str,
 def 조문_연결조회(cur, org_id: str) -> list[dict[str, Any]]:
     """`조문_조회` + 조마다 온톨로지 연결 `concept_ids`(None = 미확인, [] = 확인했고 해당 세목 없음) · `연결상위`. 새 경로 전용.
 
+    조마다 `doc_id` · `원본파일명` 도 있다(5-15 ⑤ 기관 규정 숫자).
     `연결상위` 는 연결한 개념의 상위 노드(`상위` 관계, 재귀)다. 문맥 구성이 비목만 고른 판정에 그 아래 세목에 연결한 조를 넣는 데 쓴다
     (ontology_context._l3_넣기). 사용자가 확인하기 전 추천(`연결초안`)은 읽지 않는다.
     """
-    조문 = 조문_조회(cur, org_id)
+    org = _org정규화(org_id)
+    if org is None:
+        return []
+    # 문서 id · 원본 파일명도 싣는다: 기관 규정 숫자 기준(5-15 ⑤)이 어느 문서의 어느 조인지 말하고 인용하는 데 쓴다
+    조문 = [{**{k: a[k] for k in ("article_id", "조번호", "조제목", "본문")}, "doc_id": str(a["doc_id"]), "원본파일명": a["원본파일명"]} for a in _조문들(cur, org)]
     if not 조문:
         return []
     with cur.connection.transaction():

@@ -18,6 +18,8 @@ import math
 import re
 import sys
 from datetime import date
+from fractions import Fraction
+from hashlib import md5
 from pathlib import Path
 from typing import Any
 
@@ -786,11 +788,184 @@ def _기한_지남(n: dict, 입력: dict) -> bool:
     return bool(기한 and 사용 and 사용 > 기한)
 
 
+# ---------------------------------------------------------------- 5-15 ⑤ 기관(L3) 규정의 숫자
+# 연결을 확인한 L3 조문에서 정규식이 뽑은 숫자 기준을 후보로 두고, 역할(상한 · 하한 · 해당없음)과 재는 양은 확인 질문 LLM 이 코드가 준 enum 에서 고른다.
+# 계산은 코드가 한다. 넘으면 L3 가 이 사업에서 효력이 있을 때(`우선` = L3적용)만 코드 불가, 아니면 조건 줄만 낸다. 라벨이 없으면 아무것도 하지 않는다.
+
+L3후보_상한 = 12                  # 질문 프롬프트에 넣는 최대 숫자 후보 수
+L3후보_조당 = 4                   # 한 조문에서 뽑는 최대 숫자 수
+_L3_글자 = 100                    # 프롬프트 한 줄의 문장 글자 수
+# 숫자 바로 뒤의 말 → 어느 쪽 기준인가. 「초과」 는 한도인지 절차를 켜는 문턱인지 글자만으로 갈리지 않아 뽑지 않는다
+_L3_연산 = {"이하": "상한", "이내": "상한", "미만": "상한", "한도": "상한", "까지": "상한", "이상": "하한"}
+_L3_숫자꼴 = re.compile(r"(?:(?P<pct>\d[\d,]*(?:\.\d+)?)\s*(?:%|퍼센트)|(?P<amt>" + _금액표현.pattern + r")\s*원)\s*(?:으로|로|의)?\s*(?P<op>이하|이내|미만|이상|한도|까지)")
+L3_양이름 = {"지출금액": "이번 지출 금액", "총사업비": "총사업비(정부지원 현금 + 자기부담 현금 + 자기부담 현물)", "정부지원사업비": "정부지원사업비(정부지원 현금)",
+           "자기부담현금": "자기부담사업비 중 현금", "자기부담현물": "자기부담사업비 중 현물", "자기부담합계": "자기부담사업비 전체(현금 + 현물)"}
+_L3_짧은이름 = {"지출금액": "이번 지출", "총사업비": "총사업비", "정부지원사업비": "정부지원사업비", "자기부담현금": "자기부담 현금",
+             "자기부담현물": "자기부담 현물", "자기부담합계": "자기부담사업비"}
+L3_역할 = ("상한", "하한", "해당없음")
+L3기준 = "기관 규정"
+
+
+def _L3_은는(말: str) -> str:
+    """마지막 글자의 받침으로 은/는."""
+    for ch in reversed(말):
+        if "가" <= ch <= "힣":
+            return "은" if (ord(ch) - 0xAC00) % 28 else "는"
+    return "는"
+
+
+def _L3_문서명(r: dict) -> str:
+    이름 = str(r.get("원본파일명") or "").strip()
+    return re.sub(r"\.(hwpx?|pdf|docx?|txt|xml)$", "", 이름, flags=re.I) or "기관 규정"
+
+
+_L3_단위기준 = re.compile(r"인당|명당|1\s*인|1\s*명|1\s*일|일당|하루|매월|월간|월별|월\s*$|연간|년간|연\s*$|년\s*$|누적|합계|총액|기간|분기")
+_L3_조건꼴 = re.compile(r"\s*(?:의|인|일|이면|면|시\b|시\s|때)")
+
+
+def _L3_숫자들(본문: str) -> list[dict]:
+    """조문 본문에서 숫자 바로 뒤에 이하 · 이내 · 미만 · 이상 · 한도 · 까지가 붙은 금액(원) · 비율(%) 기준 [{글, 값(Fraction), 단위, 연산, 문장}]. 조당 `L3후보_조당` 개까지, 글 순서."""
+    out: list[dict] = []
+    for m in _L3_숫자꼴.finditer(본문 or ""):
+        # 인원당 · 하루당 · 월 · 연 · 누적 기준은 이번 지출 한 번과 바로 비교할 수 없다. LLM 라벨에 맡기지 않고 후보에서 뺀다(1회 · 건당은 둔다)
+        if _L3_단위기준.search(본문[max(본문.rfind("\n", 0, m.start()) + 1, m.start() - 12):m.start()]):
+            continue
+        # 「30만원 이하의 금액 결제 시 견적서 생략」 「50만원 이상인 경우 비교견적」 처럼 조건을 가르는 기준 금액은 한도가 아니다. 뒤에 의 · 인 · 일 · 이면 · 시가 붙으면 뺀다
+        if _L3_조건꼴.match(본문[m.end():m.end() + 8]):
+            continue
+        if m.group("pct"):
+            값, 단위, 글 = Fraction(m.group("pct").replace(",", "")), "%", f'{m.group("pct")}%'
+        else:
+            값, 단위, 글 = Fraction(str(round(_금액값(m.group("amt"))))), "원", f'{m.group("amt")}원'
+        줄시작 = 본문.rfind("\n", 0, m.start()) + 1
+        줄끝 = 본문.find("\n", m.end())
+        줄 = 본문[줄시작:len(본문) if 줄끝 < 0 else 줄끝]
+        상대, 문장, 자리 = m.start() - 줄시작, 줄, 0
+        for 조각 in re.split(r"(?<=[다요]\.)\s+", 줄):         # 한 줄에 문장이 여럿이면 숫자가 든 문장만
+            idx = 줄.find(조각, 자리)
+            if idx <= 상대 < idx + len(조각):
+                문장 = 조각
+                break
+            자리 = idx + len(조각)
+        문장 = re.sub(r"\s+", " ", 문장).strip()
+        out.append({"글": 글, "값": 값, "단위": 단위, "연산": m.group("op"), "문장": 문장 if len(문장) <= _L3_글자 else 문장[:_L3_글자 - 1] + "…"})
+    return out[:L3후보_조당]
+
+
+def L3숫자_후보(l3조문: list[dict] | None, 노드들: set[str] | list[str] | None, 시작노드: str | None = None, 상한: int = L3후보_상한) -> list[dict]:
+    """이 판정의 노드 경로에 **확인한 연결**로 닿는 L3 조문의 숫자 기준 후보(5-15 ⑤).
+
+    `l3조문` 은 `l3_load.조문_연결조회` 결과다(사용 중인 문서만: 적용 중이고 파싱품질 pass · warn. 확인 대기(review) · 실패 문서는 거기서 빠진다).
+    연결(`concept_ids`)이 None(미확인) 이거나 [](확인했고 해당 세목 없음)이면 쓰지 않는다. 연결이 노드 경로(`노드들`)에 들거나 고른 비목 아래 세목에
+    연결한 조(`연결상위` 에 시작 노드)만. 시작 노드에 직접 연결한 조를 먼저 두고 나머지는 조문 순서로, `상한` 개까지 자른다.
+    후보 id = 문서 앞 8자 / 조번호 # 조문 안 순번. 같은 입력이면 늘 같은 후보 · 같은 순서다(판정 때 다시 만들어 라벨과 맞춘다).
+    """
+    경로 = set(노드들 or ())
+    고름: list[tuple[int, int, dict]] = []
+    for i, r in enumerate(l3조문 or []):
+        연결 = r.get("concept_ids")
+        if not 연결 or not r.get("doc_id") or not r.get("조번호"):
+            continue
+        직접 = bool(시작노드) and 시작노드 in 연결
+        if not (set(연결) & 경로 or (시작노드 and 시작노드 in (r.get("연결상위") or ()))):
+            continue
+        고름.append((0 if 직접 else 1, i, r))
+    out: list[dict] = []
+    for _, _, r in sorted(고름, key=lambda x: x[:2]):
+        for k, x in enumerate(_L3_숫자들(r.get("본문") or ""), 1):
+            out.append({"id": f'{str(r["doc_id"])[:8]}/{r["조번호"]}#{k}', "article_id": r.get("article_id"), "doc_id": str(r["doc_id"]), "조번호": r["조번호"],
+                        "조제목": r.get("조제목"), "문서명": _L3_문서명(r), **x, "해시": md5(x["문장"].encode("utf-8")).hexdigest()[:12]})
+    return out[:상한]
+
+
+def L3숫자라벨_정리(라벨들: Any, 후보들: list[dict]) -> dict[str, dict]:
+    """저장한 숫자 라벨(질문 LLM 이 고른 것)을 지금 후보와 맞춰 다시 검사한다. {후보 id: {id, 역할, 분자, 분모}}.
+
+    버리는 경우: 지금 후보에 없는 id · 숫자 글 또는 문장 해시가 다름(조문이 바뀜) · 역할이 enum 밖 · 역할이 숫자 뒤 말과 어긋남(상한인데 이상 …) · 분자 · 분모가 양 목록 밖 ·
+    분자 = 분모 · 같은 id 가 둘. 해당없음은 정리 결과에서 뺀다(계산하지 않는다).
+    """
+    표 = {c["id"]: c for c in 후보들}
+    out: dict[str, dict] = {}
+    for 라벨 in 라벨들 if isinstance(라벨들, list) else []:
+        if not isinstance(라벨, dict) or 라벨.get("id") not in 표 or 라벨.get("id") in out:
+            continue
+        c = 표[라벨["id"]]
+        분자, 분모, 역할 = 라벨.get("분자"), 라벨.get("분모"), 라벨.get("역할")
+        if 라벨.get("글") != c["글"] or 라벨.get("해시") != c["해시"] or 역할 not in L3_역할 or 역할 == "해당없음":
+            continue
+        if (_L3_연산[c["연산"]] != 역할 or (분자 is not None and 분자 not in L3_양이름) or 분모 not in (None, "총사업비")
+                or (분자 is not None and 분자 == 분모)):
+            continue
+        out[c["id"]] = {"id": c["id"], "역할": 역할, "분자": 분자, "분모": 분모}
+    return out
+
+
+def L3_양(입력: dict) -> dict[str, Fraction | None]:
+    """양 ID → 값(원). 입력 `금액` 과 프로필 협약 금액(`정부지원_현금` · `자기부담_현금` · `자기부담_현물`, NULL = 모름)에서만 만든다. 모르면 None."""
+    def 값(k: str) -> Fraction | None:
+        v = 입력.get(k)
+        if v in (None, "") or isinstance(v, bool):
+            return None
+        try:
+            f = Fraction(str(v))
+        except (ValueError, ZeroDivisionError):
+            return None
+        return f if f >= 0 else None
+    지출, 정부, 현금, 현물 = 값("금액"), 값("정부지원_현금"), 값("자기부담_현금"), 값("자기부담_현물")
+    return {"지출금액": 지출 if 지출 else None, "정부지원사업비": 정부, "자기부담현금": 현금, "자기부담현물": 현물,
+            "총사업비": 정부 + 현금 + 현물 if None not in (정부, 현금, 현물) else None,
+            "자기부담합계": 현금 + 현물 if None not in (현금, 현물) else None}
+
+
+def _원_화면(v: Fraction | float) -> str:
+    n = round(v)
+    return f"{n // 10**4:,}만원" if n % 10**4 == 0 and n else f"{n:,}원"
+
+
+def _수_화면(v: Fraction) -> str:
+    f = float(v)
+    return f"{f:.1f}".rstrip("0").rstrip(".") if f != int(f) else str(int(f))
+
+
+def _L3_어김(값: Fraction, 기준: Fraction, 연산: str) -> bool:
+    """기준 말(이하 · 이내 · 한도 · 까지 · 미만 · 이상)을 어겼나. 경계값은 어기지 않는다(이하) / 어긴다(미만)."""
+    if 연산 == "미만":
+        return 값 >= 기준
+    if 연산 == "이상":
+        return 값 < 기준
+    return 값 > 기준                      # 이하 · 이내 · 한도 · 까지
+
+
+def L3_비교(c: dict, 라벨: dict, 입력: dict, 양: dict[str, Fraction | None]) -> dict | None:
+    """정리한 라벨 하나를 입력으로 계산한다. {어김, 계산(화면 글), 분자, 분모, 계산값} 또는 None(비교할 수 없다 → 지금과 같다).
+
+    금액(원) 기준은 분자만(분모 없음), 비율(%) 기준은 분자 · 분모가 다 있어야 한다. 분자가 이번 지출 금액이면 상한만 쓰고(하한은 부가세 · 최소 금액 문턱과 갈리지 않는다),
+    원 기준은 부가세 후보가 모두 넘을 때만 어긴 것이다. 프로필 금액이 비어 있으면 None.
+    """
+    분자, 분모, 역할 = 라벨["분자"], 라벨["분모"], 라벨["역할"]
+    if 분자 is None or (c["단위"] == "%") != (분모 is not None) or (분자 == "지출금액" and 역할 != "상한"):
+        return None
+    if c["단위"] == "원":
+        if 분자 == "지출금액":
+            금액 = 양.get("지출금액")
+            if 금액 is None:
+                return None
+            후보들 = [Fraction(str(v)) for v in _후보금액(float(금액), "정의없음", 입력.get("부가세구분"))]
+            return {"어김": all(_L3_어김(v, c["값"], c["연산"]) for v in 후보들), "계산": _원_화면(금액), "분자": 분자, "분모": None, "계산값": float(금액)}
+        값 = 양.get(분자)
+        return None if 값 is None else {"어김": _L3_어김(값, c["값"], c["연산"]), "계산": _원_화면(값), "분자": 분자, "분모": None, "계산값": float(값)}
+    분자값, 분모값 = 양.get(분자), 양.get(분모)
+    if 분자값 is None or 분모값 is None or 분모값 <= 0:
+        return None
+    비율 = 분자값 / 분모값 * 100
+    return {"어김": _L3_어김(비율, c["값"], c["연산"]), "계산": f"{_수_화면(비율)}%", "분자": 분자, "분모": 분모, "계산값": round(float(비율), 2)}
+
+
 def 게이트(규범들: list[dict], 입력: dict[str, Any], *, 확정: bool, 세목표시: str | None = None,
          우선순위_적용: list[dict] | None = None, 위임만: bool = False, 세목미정: bool = False,
          문서표시: dict[str, str] | None = None, 경로밖_품목규범: list[dict] | None = None,
          경로밖_품목: list[str] | None = None, 공통미정: list[dict] | None = None, 문의처: str = "주관기관에", 상황규범: list[dict] | None = None,
-         가정세목: str | None = None, 조건답: list[dict] | None = None) -> dict:
+         가정세목: str | None = None, 조건답: list[dict] | None = None, L3숫자: dict | None = None) -> dict:
     """규범 + 입력 → 코드 결과.
 
     반환: {종류: 금지|한도초과|부가세기준미정|None, 코드판정, 검증코드[], 조건[{문장, 구분}], 상한(조건부|None),
@@ -819,7 +994,7 @@ def 게이트(규범들: list[dict], 입력: dict[str, Any], *, 확정: bool, �
     """
     r: dict[str, Any] = {"종류": None, "코드판정": None, "검증코드": [], "조건": [], "상한": None,
                          "활성의무": [], "미검증만": False, "쓴규범": [], "제외규범": [], "발동임계값": [], "미확정초과": False, "초과규범": [],
-                         "진술평가": {}, "답변": {}, "자연어답": {}, "조건규범": [], "누적기록": []}
+                         "진술평가": {}, "답변": {}, "자연어답": {}, "조건규범": [], "누적기록": [], "L3숫자": []}
     답표 = _조건답_표(규범들, 조건답)
     # 「확인한 내용」 칸의 항목 이름 = 사용자가 답한 질문문(서버 저장값). 없으면 조건 글
     질문표 = {(a.get("규범ID"), a.get("조건번호")): str(a.get("질문문") or "").strip() for a in 조건답 or [] if isinstance(a, dict)}
@@ -1081,6 +1256,38 @@ def 게이트(규범들: list[dict], 입력: dict[str, Any], *, 확정: bool, �
             r["쓴규범"].append(기간_근거규범)
             r["발동규범"] = 기간규범
             return r
+
+    # ④-3 기관(L3) 규정의 숫자(5-15 ⑤): 질문 LLM 이 표시한 상한 · 하한을 코드가 계산한다. 넘으면 L3 가 이 사업에서 효력이 있을 때(우선 = L3적용)만 코드 불가,
+    # 관리기준이 우선하거나 정할 수 없으면 조건 줄만 낸다. 비교할 수 없으면(입력 · 프로필 금액이 없음) 아무것도 하지 않는다. L3 금지는 여기서 다루지 않는다(판정 LLM)
+    if L3숫자 and L3숫자.get("후보") and L3숫자.get("라벨"):
+        정리 = L3숫자라벨_정리(L3숫자["라벨"], L3숫자["후보"])
+        양 = L3_양(입력)
+        for c in L3숫자["후보"]:
+            라벨 = 정리.get(c["id"])
+            비교 = L3_비교(c, 라벨, 입력, 양) if 라벨 else None
+            if not 비교:
+                continue
+            기록 = {"doc_id": c["doc_id"], "article_id": c["article_id"], "조번호": c["조번호"], "값": c["글"], "역할": 라벨["역할"],
+                  "분자": 비교["분자"], "분모": 비교["분모"], "계산값": 비교["계산값"]}
+            if not 비교["어김"]:
+                r["L3숫자"].append({**기록, "결과": "안넘음"})
+                continue
+            자리 = f'{c["문서명"]} {조번호_표시(c["조번호"])}'
+            이름 = _L3_짧은이름[비교["분자"]]
+            문장 = (f'기관 규정({자리})에 {c["글"]} {c["연산"]} 기준이 있는데 {이름}{_L3_은는(이름)} '
+                  f'{"총사업비의 " if 비교["분모"] else ""}{비교["계산"]}{"예요" if 비교["계산"].endswith("%") else "이에요"}')
+            if L3숫자.get("우선") == "L3적용":
+                상한 = 라벨["역할"] == "상한"
+                r["L3숫자"].append({**기록, "결과": "불가"})
+                r.update(종류="한도초과" if 상한 else "금지", 검증코드=["LIMIT_EXCEEDED" if 상한 else "ONTOLOGY_BAN"],
+                         코드판정={"종류": "한도초과" if 상한 else "금지", "비교값": f"{_L3_짧은이름[비교['분자']]} {비교['계산']}" if 상한 else None,
+                                 "한도": f'{c["글"]} {c["연산"]}' if 상한 else None, "발췌": c["문장"]},
+                         L3금지={"article_id": c["article_id"], "doc_id": c["doc_id"], "자리": 자리, "문장": c["문장"], "기준": c["글"], "연산": c["연산"],
+                               "분자": _L3_짧은이름[비교["분자"]], "분모": _L3_짧은이름[비교["분모"]] if 비교["분모"] else None, "계산": 비교["계산"], "역할": 라벨["역할"]})
+                r["발동규범"] = None
+                return r
+            r["L3숫자"].append({**기록, "결과": "조건"})
+            조건추가(f"{문장}. 세부관리기준이 우선하거나 우선순위를 정할 수 없어 불가로 보지 않았어요. 기관에 확인해 주세요", "기관기준", 상한유지=True)
 
     if 한도갈림:
         n, 값들, 기준 = 한도갈림
