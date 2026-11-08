@@ -307,20 +307,17 @@ def 삭제(plan_id: int, org_id: str | None = None) -> dict:
         return {"삭제": True, "plan_id": plan_id, "할일삭제": len(할일)}
 
     조건, org인자 = _계정조건(org_id, "p")
-    # CASCADE 뒤에는 셀 수 없으므로 지우기 전에 센다
-    행 = _질의(
-        f"SELECT p.제목, (SELECT count(*) FROM tenant.plan_tasks t WHERE t.plan_id = p.plan_id) "
-        f"  FROM tenant.expense_plans p WHERE p.plan_id = %s AND {조건}",
-        (plan_id, *org인자))
-    if not 행:
-        # 다른 org 의 계획이어도 404 다. 403 을 주면 id 존재 여부가 드러난다
-        raise HTTPException(404, f"지출계획 {plan_id} 을(를) 찾을 수 없습니다")
-    제목, 할일수 = 행[0]
-    첨부파일 = routes_attachments.계획_첨부id(plan_id)
-    n = _실행(f"DELETE FROM tenant.expense_plans p WHERE p.plan_id = %s AND {조건}",
-             (plan_id, *org인자))
-    if n != 1:
-        raise HTTPException(404, f"지출계획 {plan_id} 을(를) 찾을 수 없습니다")
+    with 트랜잭션() as cur:
+        cur.execute(f"SELECT p.제목, (SELECT count(*) FROM tenant.plan_tasks t WHERE t.plan_id = p.plan_id) "
+                    f"FROM tenant.expense_plans p WHERE p.plan_id = %s AND {조건} FOR UPDATE",
+                    (plan_id, *org인자))
+        행 = cur.fetchone()
+        if not 행:
+            raise HTTPException(404, f"지출계획 {plan_id} 을(를) 찾을 수 없습니다")
+        제목, 할일수 = 행
+        cur.execute("SELECT attachment_id::text FROM tenant.plan_attachments WHERE plan_id = %s", (plan_id,))
+        첨부파일 = [r[0] for r in cur.fetchall()]
+        cur.execute(f"DELETE FROM tenant.expense_plans p WHERE p.plan_id = %s AND {조건}", (plan_id, *org인자))
     routes_attachments.파일들_지우기(첨부파일)     # 행은 CASCADE 로 지워졌다
     _log.info("지출계획 삭제 plan_id=%s 제목=%r 할일 %d건 동반삭제", plan_id, 제목, 할일수)
     return {"삭제": True, "plan_id": plan_id, "제목": 제목, "할일삭제": 할일수}

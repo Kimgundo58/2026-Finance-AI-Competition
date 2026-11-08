@@ -11,11 +11,14 @@
 -- docker compose exec -T db psql -U postgres -d suddoe --single-transaction -v ON_ERROR_STOP=1 -f - \
 --   < ../../db/migrations/2026-11-08_판정_규범.sql
 --
--- 되돌리기: DROP VIEW eval."v_규범별_판정"; ALTER TABLE tenant.decisions DROP COLUMN "규범";
+-- 되돌리기: DROP VIEW IF EXISTS eval."v_규범별_판정"; ALTER TABLE tenant.decisions DROP COLUMN "규범";
 
 ALTER TABLE tenant.decisions ADD COLUMN IF NOT EXISTS "규범" JSONB;
 
-CREATE OR REPLACE VIEW eval."v_규범별_판정" AS
+DO $migration$
+BEGIN
+IF EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'eval') THEN
+EXECUTE $view$CREATE OR REPLACE VIEW eval."v_규범별_판정" AS
 SELECT x."역할", x."규범ID", d."판정", d."경로", count(*) AS "건수", max(d.created_at) AS "최근"
   FROM tenant.decisions d
  CROSS JOIN LATERAL (
@@ -26,4 +29,7 @@ SELECT x."역할", x."규범ID", d."판정", d."경로", count(*) AS "건수", m
         SELECT '문맥', jsonb_array_elements_text(COALESCE(d."규범"->'문맥', '[]'::jsonb))
        ) x
  WHERE d."규범" IS NOT NULL
- GROUP BY x."역할", x."규범ID", d."판정", d."경로";
+ GROUP BY x."역할", x."규범ID", d."판정", d."경로"$view$;
+END IF;
+END
+$migration$;

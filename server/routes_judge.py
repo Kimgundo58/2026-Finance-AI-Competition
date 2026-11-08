@@ -77,8 +77,13 @@ def judge(req: Request, body: 판정요청, mock: str | None = None,
     # 기관(L3) 규정 숫자 기준에 확인 질문 LLM 이 표시한 역할(5-15 ⑤). 서버 저장값에서만 읽는다. 판정을 바꾸므로 키에 넣는다
     L3라벨 = (_L3숫자라벨_읽기(body, account_id)
             if 반영 and not MOCK and 온톨로지_사업(body.사업명) else None)
-    기록누적 = (_기록누적_읽기(body, account_id)
-              if 반영 and not MOCK and 온톨로지_사업(body.사업명) else None)
+    기록오류 = False
+    try:
+        기록누적 = (_기록누적_읽기(body, account_id)
+                  if not MOCK and 온톨로지_사업(body.사업명) else None)
+    except Exception:  # noqa: BLE001
+        _log.exception("지출 기록 조회 실패")
+        기록누적, 기록오류 = None, True
     # 자연어 조건 확인 질문의 답(5-14 B). 서버 저장값의 규범 ID · 조건 번호에 화면 답 값만 맞춘다. 판정을 바꾸므로 키에 넣는다
     조건답 = (_조건답_읽기(body, account_id)
              if 반영 and not MOCK and body.질문세트 and 온톨로지_사업(body.사업명) else None)
@@ -113,7 +118,7 @@ def judge(req: Request, body: 판정요청, mock: str | None = None,
         *([json.dumps(L3라벨, ensure_ascii=False, sort_keys=True)] if L3라벨 else []),
         # 조건 확인 질문이 없으면 조각을 더하지 않는다(지금 키 그대로)
         *([json.dumps(조건답, ensure_ascii=False, sort_keys=True)] if 조건답 else []))
-    캐시 = response_cache.조회(k, body.org_id, account_id)
+    캐시 = None if 기록오류 else response_cache.조회(k, body.org_id, account_id)
     # 검색 전에 계산한다. 판정 도중 규정이 활성화되면 결과는 옛 해시로 저장되어 이후 요청에 적중하지 않는다.
     데이터버전해시 = response_cache.요청_해시()
     # 미들웨어 컨텍스트(RLS GUC)가 있는 여기서 읽는다. 저장 질문을 읽지 못하면 판정에서 「가능」을 내지 않는다.
@@ -132,6 +137,8 @@ def judge(req: Request, body: 판정요청, mock: str | None = None,
             # 캐시 값에는 decision_id 가 없다(저장 전에 뺀다). 남의 판정 행을 이 계획에 붙이지 않는다.
             out = {k: v for k, v in 캐시.items() if k != "decision_id"}
             decision_id = None
+        elif 기록오류:
+            out, 실패, decision_id = _실패_결과(body), True, None
         elif MOCK:
             out = {"사용자답변": [], "기준문서": mock_data.mock_기준문서(),
                    **mock_판정.get(mock or "가능", mock_판정["가능"])}
@@ -191,7 +198,7 @@ def _질문저장값_읽기(body: 판정요청, account_id: str | None) -> dict 
 
 
 def _기록누적_읽기(body: 판정요청, account_id: str | None) -> dict | None:
-    """같은 계정 · 사업 · 확정 비목의 지출 계획 기록(5-15 ③, orchestrate.지출기록_읽기). 없거나 못 읽으면 None 이고 판정은 지금 길로 간다."""
+    """같은 계정 · 사업 · 확정 비목의 지출 계획 기록(5-15 ③, orchestrate.지출기록_읽기). 없으면 None, 조회 실패는 예외로 전파한다."""
     try:
         import orchestrate
         from server._common import 트랜잭션
@@ -208,7 +215,7 @@ def _기록누적_읽기(body: 판정요청, account_id: str | None) -> dict | N
                                         사업_표준화=사업표준, 비목_표준화=비목표준)
     except Exception as e:                                    # noqa: BLE001
         _log.warning("지출 기록 읽기 실패: %s", type(e).__name__)
-        return None
+        raise
 
 
 def _L3숫자라벨_읽기(body: 판정요청, account_id: str | None) -> list[dict] | None:

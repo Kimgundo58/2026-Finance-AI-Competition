@@ -313,12 +313,12 @@ def 적재(폴더: Path | str, 사업키들: list[str] | None, dry: bool, dsn: s
 
     with db.connect(dsn) as conn:
         with conn.cursor() as cur:
+            cur.execute("LOCK TABLE corpus.documents IN SHARE MODE")
             결과, 펼침 = 전체_검사(원천, cur)
             if 용어원천 is not None:
                 ontology_terms.검사(용어원천["용어"], 원천["schema"], 결과, db=DB_원문(cur), 복원본=복원본_읽기(폴더),
                                    개념ID={c["id"] for c in 펼침["개념"]})
                 결과.통계["용어"] = len(용어원천["용어"])
-            conn.rollback()
             for e in 결과.오류:
                 print(f"오류 [{e['코드']}] {e['위치']}: {e['내용']}")
             for e in 결과.경고:

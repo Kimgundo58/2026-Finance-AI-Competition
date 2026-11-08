@@ -108,6 +108,8 @@ def 실행(doc_id: str, pdf경로: str, 조목록: list[str] | None, 출력: Pat
                           'ORDER BY "조순번" NULLS LAST, article_id', (doc_id,)).fetchall()
     pdf = pdf_조문(pdf경로)
     대상 = [r for r in 행 if not 조목록 or r[0] in 조목록]
+    if not 대상:
+        raise ValueError("대조할 DB 조문이 없다")
     줄 = [f"# PDF 대조 — {doc_id}", "", f"PDF: `{pdf경로}`", "",
           "| 조 | PDF 쪽 | 위치 | 종류 | DB | PDF |", "|---|---|---|---|---|---|"]
     합계 = {"조": 0, "차이있는조": 0, "차이": 0}
@@ -121,6 +123,14 @@ def 실행(doc_id: str, pdf경로: str, 조목록: list[str] | None, 출력: Pat
         for d in 차이:
             셀 = [str(d[k]).replace("|", "\\|").replace("\n", " ") for k in ("위치", "종류", "DB", "PDF")]
             줄.append(f"| {조번호} | {p['쪽'] if p else '-'} | " + " | ".join(셀) + " |")
+    db조 = {r[0] for r in 대상}
+    for 조번호, p in pdf.items():
+        if 조번호 == "부칙" or 조번호 in db조 or (조목록 and 조번호 not in 조목록):
+            continue
+        합계["조"] += 1
+        합계["차이있는조"] += 1
+        합계["차이"] += 1
+        줄.append(f"| {조번호} | {p['쪽']} | 전체 | DB에서 못 찾음 | | |")
     줄 += ["", f"합계: 조 {합계['조']} · 차이 있는 조 {합계['차이있는조']} · 차이 {합계['차이']}", ""]
     if "부칙" in pdf:
         줄 += [f"부칙(PDF p.{pdf['부칙']['쪽']}): {발췌_정규화(pdf['부칙']['본문'])[:200]}", ""]

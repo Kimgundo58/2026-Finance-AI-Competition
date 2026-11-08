@@ -19,6 +19,7 @@ import argparse
 import json
 import os
 import sys
+import tempfile
 from datetime import date
 from pathlib import Path
 
@@ -70,8 +71,14 @@ def 적재(json경로: Path, 원본경로: Path, 메타: dict, *, 대체_doc_id:
         raise SystemExit(f"원본 파일 형식을 모른다: {원본경로.name}")
     dsn = os.environ.get("SUDDOE_INGEST_DSN")
     열기 = (lambda: db.psycopg.connect(dsn, connect_timeout=10)) if dsn else (lambda: db.connect(connect_timeout=10))
-    with 열기() as conn:
-        doc_id = corpus_ingest.접수(conn, 메타, 원본파일명=원본경로.name, 형식=_파일형식[원본경로.suffix.lower()], 저장경로=원본경로)
+    with tempfile.NamedTemporaryFile(suffix=원본경로.suffix, delete=False) as 임시:
+        임시경로 = Path(임시.name)
+    try:
+        with 열기() as conn:
+            doc_id = corpus_ingest.접수(conn, 메타, 원본파일명=원본경로.name, 형식=_파일형식[원본경로.suffix.lower()], 저장경로=임시경로)
+    except BaseException:
+        임시경로.unlink(missing_ok=True)
+        raise
     try:
         with 열기() as conn:
             작업 = corpus_ingest._작업_읽기(conn, doc_id)
@@ -85,7 +92,9 @@ def 적재(json경로: Path, 원본경로: Path, 메타: dict, *, 대체_doc_id:
             활성 = corpus_ingest.활성화(conn, doc_id, 대체_doc_id=대체_doc_id, 신규문서=대체_doc_id is None, 중복_허용=True)
             if 범위:
                 conn.execute("UPDATE corpus.documents SET retrieval_scope = %s WHERE doc_id = %s", (범위, doc_id))
-                conn.execute("UPDATE corpus.chunks SET retrieval_scope = %s WHERE doc_id = %s", (범위, doc_id))
+                conn.execute("""UPDATE corpus.chunks SET retrieval_scope = CASE
+                    WHEN %s = '참조확장전용' OR 조번호 ~ %s
+                    THEN '참조확장전용' ELSE '검색대상' END WHERE doc_id = %s""", (범위, corpus_ingest.RE_첨부.pattern, doc_id))
                 활성["retrieval_scope"] = 범위
     except Exception as e:
         # 활성화 전이면 staged 문서까지 함께 지워 같은 명령으로 다시 돌릴 수 있게 한다. active 가 됐으면 삭제가 거부하므로 그대로 둔다.
@@ -95,6 +104,8 @@ def 적재(json경로: Path, 원본경로: Path, 메타: dict, *, 대체_doc_id:
             except corpus_ingest.요청거부:
                 pass
         raise SystemExit(f"적재 실패: {type(e).__name__}: {e}") from e
+    finally:
+        임시경로.unlink(missing_ok=True)
     return {"doc_id": doc_id, "조": len(적재데이터["조문"]), "청크": len(적재데이터["청크"]),
             "옮긴_정답셋_근거": 옮긴_근거, **활성, "경고": 적재데이터["경고"] + 활성["경고"]}
 

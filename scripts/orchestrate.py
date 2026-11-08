@@ -728,12 +728,12 @@ def 거래처_정규화(글) -> str | None:
 
 def 지출기록_읽기(cur, org_id, account_id, 사업명: str | None, 비목: str | None, plan_id: int | None, 사용일자: str | None,
             사업_표준화=None, 비목_표준화=None) -> dict | None:
-    """같은 계정 · 사업 · 확정 비목의 지출 계획 기록(5-15 ③) → {"계획": [{금액, 거래처, 월, 세목}], "이번거래처", "이번월"}. 없거나 읽지 못하면 None(지금과 같다).
+    """같은 계정 · 사업 · 확정 비목의 지출 계획 기록(5-15 ③) → {"계획": [{금액, 거래처, 월, 세목}], "이번거래처", "이번월"}. 없으면 None, 조회 실패는 예외로 전파한다.
 
     저장된 계획의 사업명 · 확정비목은 표준화되어 있지 않다(POST /api/plans 가 화면 표기 그대로 저장한다: 「2026 초기창업패키지」 등). 그래서 계정의 계획을 사업 · 비목 조건 없이
     읽고, 저장값을 표준화한 것이 요청의 (이미 표준화된) 사업명 · 비목과 같은 행만 남긴다. `사업_표준화` · `비목_표준화` 는 글 → 표준 글 또는 None(표준화할 수 없음 → 그 행은 건너뜀)이고
     판정 라우트가 server.catalog 의 표로 넘긴다(주지 않으면 글자 그대로 비교한다).
-    금액은 실제지출액이 있으면 그것, 없으면 금액. 월은 실제지출일, 없으면 집행예정일. 가장 최근 판정이 불가인 계획과 지금 판정하는 계획(plan_id)은 뺀다.
+    금액은 실제지출액이 있으면 그것, 없으면 금액. 월은 실제지출일, 없으면 집행예정일. 최근 판정이 불가이고 실제지출액이 없는 계획과 지금 판정하는 계획(plan_id)은 뺀다.
     세목은 계획 정규화의 확정세목(모르면 None). 이번 거래처는 plan_id 계획의 거래처, 이번 달은 사용일자의 달이고 사용일자가 없으면 plan_id 계획의 집행예정일의 달이다
     (둘 다 없으면 None). 각 계획에 plan_id 를 남겨 판정 기록(decisions.규범 「누적」)이 어느 계획을 합쳤는지 추적하게 한다. 계정 조건은 `_프로필값_읽기` 와 같다.
     """
@@ -750,13 +750,13 @@ def 지출기록_읽기(cur, org_id, account_id, 사업명: str | None, 비목: 
             """SELECT COALESCE(p.실제지출액, p.금액), p.거래처, COALESCE(p.실제지출일, p.집행예정일), p.정규화->>'확정세목', p.plan_id, p.사업명, p.확정비목
                  FROM tenant.expense_plans p LEFT JOIN tenant.decisions d ON d.decision_id = p.latest_decision_id
                 WHERE p.org_id = %s AND p.account_id IS NOT DISTINCT FROM %s::uuid
-                  AND (%s::bigint IS NULL OR p.plan_id <> %s::bigint) AND COALESCE(d.판정, '') <> '불가' AND COALESCE(p.실제지출액, p.금액) > 0
-                ORDER BY p.plan_id DESC LIMIT 5000""", (org_id, 계정, plan_id, plan_id)).fetchall()
+                  AND (%s::bigint IS NULL OR p.plan_id <> %s::bigint) AND (p.실제지출액 IS NOT NULL OR COALESCE(d.판정, '') <> '불가') AND COALESCE(p.실제지출액, p.금액) > 0
+                ORDER BY p.plan_id DESC""", (org_id, 계정, plan_id, plan_id)).fetchall()
         행들 = sorted(([a, b, c, d, e] for a, b, c, d, e, 사, 비 in 행들
                      if (사업_표준화 or (lambda v: v))(사) == 사업명 and (비목_표준화 or (lambda v: v))(비) == 비목), key=lambda x: x[4])
     except Exception:                                    # noqa: BLE001
         _log.exception("지출 기록 조회 실패(expense_plans)")
-        return None
+        raise
     if not 행들:
         return None
     return {"계획": [{"plan_id": e, "금액": float(a), "거래처": 거래처_정규화(b), "월": c.isoformat()[:7] if c else None, "세목": (d or None)} for a, b, c, d, e in 행들],

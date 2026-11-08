@@ -43,6 +43,28 @@ from server import routes_judge, routes_normalize  # noqa: E402
 from server._common import 비목_ENUM  # noqa: E402
 from server.models import 정규화요청, 판정요청  # noqa: E402
 
+
+def _소유자_연결(*, autocommit: bool = False):
+    """시험 데이터 준비와 정리에만 소유자 롤을 쓴다."""
+    return db.connect(os.environ.get("OWNER_DSN"), autocommit=autocommit)
+
+
+def _계정_클라이언트(app, 이메일: str):
+    """점검용 서명키만 바꾸고 토큰 검증부터 RLS 문맥 설정까지 실제 경로를 탄다."""
+    import time
+    import uuid
+    import jwt
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from fastapi.testclient import TestClient
+    from server import auth
+
+    키 = ec.generate_private_key(ec.SECP256R1())
+    auth._서명키 = lambda _토큰: 키.public_key()
+    토큰 = jwt.encode({"sub": str(uuid.uuid4()), "email": 이메일, "aud": "authenticated",
+                      "exp": int(time.time()) + 3600}, 키, algorithm="ES256")
+    return TestClient(app, raise_server_exceptions=False, headers={"Authorization": f"Bearer {토큰}"})
+
+
 창업활동비_id = "비목:창업활동자금/*@모두의창업"
 재료비_id = "비목:창업/재료비"
 문서 = L._스키마()["문서키"]
@@ -954,16 +976,15 @@ def _누적기록_시험() -> list[tuple[str, bool]]:
     재도전, 멘토링, 지금 = "재도전성공패키지", "멘토링비", "2026-06-15"
     org, 계정, 남계정 = str(uuid.uuid4()), str(uuid.uuid4()), str(uuid.uuid4())
     내부값 = re.compile(r"규범:|norm|절차:|세목:|비목:창업|LIMIT|기록누적")
-    with db.connect(autocommit=True) as c:
+    with _소유자_연결(autocommit=True) as c:
         cur = c.cursor()
         cur.execute("INSERT INTO tenant.orgs (org_id, 기관명, 사업명) VALUES (%s, %s, %s)", (org, "누적기록 시험 기관", [재도전]))
         for a_ in (계정, 남계정):
             cur.execute("INSERT INTO tenant.accounts (account_id, org_id, email) VALUES (%s, %s, %s)", (a_, org, f"cum-{a_}@example.test"))
-    원 = (auth.검증된_org, auth.검증된_account, routes_judge._판정_저장_시도, O._프로필값_읽기)
-    auth.검증된_org, auth.검증된_account = (lambda req: org), (lambda req: 계정)
+    원 = (auth._서명키, routes_judge._판정_저장_시도, O._프로필값_읽기)
     routes_judge._판정_저장_시도 = lambda *a_, **k: {"저장": False, "사유": "시험"}
     O._프로필값_읽기 = lambda cur, org_id, account_id=None: (None, {})
-    client = TestClient(app, raise_server_exceptions=False)
+    client = _계정_클라이언트(app, f"cum-{계정}@example.test")
     고정 = L.적용_규범, L.비목_품목금지, L.세목_한도_있음
     L.적용_규범, L.비목_품목금지, L.세목_한도_있음 = _원_적용, _원_품목금지, _원_세목한도
     원_프로그램, 원_종료 = os.environ["SUDDOE_ONTOLOGY_PROGRAMS"], O._종료
@@ -976,7 +997,7 @@ def _누적기록_시험() -> list[tuple[str, bool]]:
     O._종료 = 종료_잡기
 
     def 계획(금액, *, 거래처=None, 실제액=None, 실제일=None, 예정일=None, 세목=멘토링, 비목="지급수수료", 사업=재도전, 계정id=None, 판정=None) -> int:
-        with db.connect(autocommit=True) as c:
+        with _소유자_연결(autocommit=True) as c:
             cur = c.cursor()
             결정 = None
             if 판정:
@@ -988,7 +1009,7 @@ def _누적기록_시험() -> list[tuple[str, bool]]:
                 (org, 계정id or 계정, json.dumps({"확정세목": 세목} if 세목 else {}, ensure_ascii=False), 사업, 비목, 금액, 예정일, 거래처, 실제액, 실제일, 결정)).fetchone()[0]
 
     def 비우기() -> None:
-        with db.connect(autocommit=True) as c:
+        with _소유자_연결(autocommit=True) as c:
             c.cursor().execute("DELETE FROM tenant.expense_plans WHERE org_id = %s", (org,))
             c.cursor().execute("DELETE FROM tenant.decisions WHERE org_id = %s", (org,))
 
@@ -1002,7 +1023,7 @@ def _누적기록_시험() -> list[tuple[str, bool]]:
     def 흐름(*, 비목="지급수수료", 세목=멘토링, 금액=300_000, plan_id=None, 날짜=None, 추가=None, 캐시유지=False) -> dict:
         if not 캐시유지:
             response_cache._메모리.clear()
-            with db.connect(autocommit=True) as c:           # 임시 기관의 판정 캐시는 DB 에도 남는다(계정 단위 캐시 행)
+            with _소유자_연결(autocommit=True) as c:           # 임시 기관의 판정 캐시는 DB 에도 남는다(계정 단위 캐시 행)
                 c.cursor().execute("DELETE FROM tenant.judge_cache WHERE org_id = %s", (org,))
         _고정.출력, _고정.호출수, _고정.프롬프트 = {"판정": "가능", "요약": "고정 출력 시험 요약입니다. 규정을 확인했습니다."}, 0, ""
         잡음["규범"] = None
@@ -1104,7 +1125,7 @@ def _누적기록_시험() -> list[tuple[str, bool]]:
         t.append(("5-15 ③ 임계값: 동일업체 합이 2천만원을 넘으면 묶인 의무 줄이 켜진다(더 엄한 쪽) · 아래면 지금과 같다(출처 줄 없음)",
                   len(외주넘음["조건"] + 외주넘음["해당시"]) > len(외주미만["조건"] + 외주미만["해당시"]) and "기록된 지출 계획" not in " ".join(외주미만["조건"] + 외주미만["공통"] + 외주미만["해당시"])))
         # 읽기 함수: 달 · 거래처 · 사용일자 없음
-        with db.connect(autocommit=True) as c:
+        with _소유자_연결(autocommit=True) as c:
             cur = c.cursor()
             비우기()
             p1 = 계획(1_000_000, 예정일=datetime.date(2026, 6, 3), 거래처="가나다상사", 세목=None, 비목="외주용역비")
@@ -1157,10 +1178,10 @@ def _누적기록_시험() -> list[tuple[str, bool]]:
                   a1["캐시"] is False and a2["캐시"] is True and a3["캐시"] is False and a3["코드"] == "한도초과" and a4["캐시"] is True and a4["코드"] == "한도초과"))
         t.append(("5-15 ③ 판정 LLM 호출은 요청마다 1회 이하 · 기록이 없으면 판정 상태 코드 200", 기준["판정호출"] <= 1 and 넘음["판정호출"] <= 1 and 외주넘음["판정호출"] <= 1))
     finally:
-        auth.검증된_org, auth.검증된_account, routes_judge._판정_저장_시도, O._프로필값_읽기 = 원
+        auth._서명키, routes_judge._판정_저장_시도, O._프로필값_읽기 = 원
         L.적용_규범, L.비목_품목금지, L.세목_한도_있음 = 고정
         os.environ["SUDDOE_ONTOLOGY_PROGRAMS"], O._종료 = 원_프로그램, 원_종료
-        with db.connect(autocommit=True) as c:
+        with _소유자_연결(autocommit=True) as c:
             c.cursor().execute("DELETE FROM tenant.expense_plans WHERE org_id = %s", (org,))
             c.cursor().execute("DELETE FROM tenant.decisions WHERE org_id = %s", (org,))
             c.cursor().execute("DELETE FROM tenant.judge_cache WHERE org_id = %s", (org,))
@@ -1169,8 +1190,8 @@ def _누적기록_시험() -> list[tuple[str, bool]]:
 
 
 def _L3숫자_시험() -> list[tuple[str, bool]]:
-    """5-15 ⑤ 기관(L3) 규정의 숫자: 임시 기관에 경상국립대 L3 문서(doc 4add2b34…)의 실제 조문 몇 개를 복사하고 연결을 확인한 것으로 표시해 화면 경로(/api/questions → /api/judge)로
-    돌린다. 질문 LLM 의 숫자 라벨과 판정 LLM 출력은 고정이다. 기존 행은 건드리지 않고 임시 행은 끝에 지운다(org 삭제로 문서 · 조문 연쇄 삭제)."""
+    """5-15 ⑤ 기관(L3) 규정의 숫자: 임시 기관에 합성 조문을 만들고 연결을 확인한 것으로 표시해 화면 경로(/api/questions → /api/judge)로
+    돌린다. 질문 LLM 의 숫자 라벨과 판정 LLM 출력은 고정이다. 임시 행은 끝에 지운다(org 삭제로 문서 · 조문 연쇄 삭제)."""
     import uuid
 
     import l3_load
@@ -1181,9 +1202,13 @@ def _L3숫자_시험() -> list[tuple[str, bool]]:
     t: list[tuple[str, bool]] = []
     초격차, 중심, 노드 = "초격차 스타트업 프로젝트", "창업중심대학", "비목:창업/지급수수료"
     org, 계정 = str(uuid.uuid4()), str(uuid.uuid4())
-    원본_조문 = {"한도": 388, "이하": 419, "비율": 356, "기계": 342}      # 30만원 한도 · 30만원 이하 · 50% 이내 · 50만원 이상(다른 비목)
+    원문_한도 = "멘토링비는 1인 1일 최대 30만원 한도 내에서 사용할 수 있다."
+    시험_조문 = {"한도": 원문_한도,
+               "이하": "외주용역비 증빙: 30만원 이하의 결제에는 견적서 제출을 생략한다. 계약금액이 2천만원 초과 시 비교견적서를 낸다.",
+               "비율": "선급금은 계약금액의 50% 이내로 지급한다.",
+               "기계": "50만원 이상의 기계장치는 자산 정보를 등록한 뒤 신청한다."}
     내부값 = re.compile(r"절차:|규범:|비목:창업|norm|L3숫자|article|[0-9a-f]{8}/")
-    with db.connect(autocommit=True) as c:
+    with _소유자_연결(autocommit=True) as c:
         cur = c.cursor()
         cur.execute("INSERT INTO tenant.orgs (org_id, 기관명, 사업명) VALUES (%s, %s, %s)", (org, "L3숫자 시험 기관", [초격차, 중심]))
         cur.execute("INSERT INTO tenant.accounts (account_id, org_id, email) VALUES (%s, %s, %s)", (계정, org, f"l3-{계정}@example.test"))
@@ -1191,24 +1216,21 @@ def _L3숫자_시험() -> list[tuple[str, bool]]:
         def 문서(이름, 품질) -> str:
             return str(cur.execute("INSERT INTO tenant.l3_documents (org_id, 원본파일명, status, 파싱품질) VALUES (%s, %s, 'active', %s) RETURNING doc_id", (org, 이름, 품질)).fetchone()[0])
 
-        def 조문복사(doc: str, 원본: int, 연결, 조번호=None, 순번=None) -> int:
+        def 조문생성(doc: str, 본문: str, 연결, 조번호: str, 순번: int) -> int:
             return cur.execute(
-                """INSERT INTO tenant.l3_articles (doc_id, org_id, 조번호, 조제목, 조순번, 장, 본문, 페이지, concept_ids)
-                   SELECT %s, %s, COALESCE(%s, 조번호), 조제목, COALESCE(%s, 조순번), NULL, 본문, 페이지, %s FROM tenant.l3_articles WHERE article_id = %s RETURNING article_id""",
-                (doc, org, 조번호, 순번, 연결, 원본)).fetchone()[0]
+                """INSERT INTO tenant.l3_articles (doc_id, org_id, 조번호, 조순번, 본문, concept_ids)
+                   VALUES (%s, %s, %s, %s, %s, %s) RETURNING article_id""",
+                (doc, org, 조번호, 순번, 본문, 연결)).fetchone()[0]
         문서통 = 문서("시험대학교 사업비 관리지침.hwpx", "pass")
         검토통 = 문서("검토대기 규정.hwpx", "review")
-        조 = {"한도": 조문복사(문서통, 원본_조문["한도"], [노드], "제12조", 1), "이하": 조문복사(문서통, 원본_조문["이하"], [노드], "제15조", 2),
-             "비율": 조문복사(문서통, 원본_조문["비율"], [노드], "제20조", 3), "기계": 조문복사(문서통, 원본_조문["기계"], ["비목:창업/기계장치"], "제30조", 4),
-             "미확인": 조문복사(문서통, 원본_조문["한도"], None, "제40조", 5), "해당세목없음": 조문복사(문서통, 원본_조문["한도"], [], "제41조", 6),
-             "검토": 조문복사(검토통, 원본_조문["한도"], [노드], "제12조", 1)}
-        # 원본 388 은 「1인 1일 최대 30만원 한도」 라 인원 · 하루당 기준이고 이번 지출 한 번과 비교할 수 없어 후보가 아니다(조율 검토, 아래 시험).
-        # 이 시험은 한 번 지출 한도가 필요하므로 임시 기관의 복사본만 「1회 최대 30만원 한도」 로 바꾼다(원본 행은 그대로)
-        원문_한도 = cur.execute("SELECT 본문 FROM tenant.l3_articles WHERE article_id = %s", (원본_조문["한도"],)).fetchone()[0]
+        조 = {"한도": 조문생성(문서통, 시험_조문["한도"], [노드], "제12조", 1), "이하": 조문생성(문서통, 시험_조문["이하"], [노드], "제15조", 2),
+             "비율": 조문생성(문서통, 시험_조문["비율"], [노드], "제20조", 3), "기계": 조문생성(문서통, 시험_조문["기계"], ["비목:창업/기계장치"], "제30조", 4),
+             "미확인": 조문생성(문서통, 시험_조문["한도"], None, "제40조", 5), "해당세목없음": 조문생성(문서통, 시험_조문["한도"], [], "제41조", 6),
+             "검토": 조문생성(검토통, 시험_조문["한도"], [노드], "제12조", 1)}
+        # 합성 문장의 인원 · 하루당 기준은 이번 지출 한 번과 비교할 수 없어 후보가 아니다(아래 시험).
+        # 한 번 지출 한도 시험에는 임시 조문을 「1회 최대 30만원 한도」 로 바꿔 쓴다.
         cur.execute("UPDATE tenant.l3_articles SET 본문 = replace(본문, '1인 1일 최대 30만원', '1회 최대 30만원') WHERE org_id = %s", (org,))
-        본문 = {k: cur.execute("SELECT 본문 FROM tenant.l3_articles WHERE article_id = %s", (v,)).fetchone()[0] for k, v in 조.items()}
-    원 = (auth.검증된_org, auth.검증된_account, routes_judge._판정_저장_시도, O._프로필값_읽기, os.environ["SUDDOE_ONTOLOGY_PROGRAMS"], Q.llm_호출, O._종료)
-    auth.검증된_org, auth.검증된_account = (lambda req: org), (lambda req: 계정)
+    원 = (auth._서명키, routes_judge._판정_저장_시도, O._프로필값_읽기, os.environ["SUDDOE_ONTOLOGY_PROGRAMS"], Q.llm_호출, O._종료)
     routes_judge._판정_저장_시도 = lambda *a_, **k: {"저장": False, "사유": "시험"}
     O._프로필값_읽기 = lambda cur, org_id, account_id=None: (None, {})
     os.environ["SUDDOE_ONTOLOGY_PROGRAMS"] = f"{사업},{초격차},{중심}"
@@ -1238,9 +1260,9 @@ def _L3숫자_시험() -> list[tuple[str, bool]]:
 
     def 종료_잡기(상태, 응답, **k):
         설정["규범"] = O._판정_규범(상태) if 상태.새경로 and 상태.게이트결과 else None
-        return 원[6](상태, 응답, **k)
+        return 원[-1](상태, 응답, **k)
     O._종료 = 종료_잡기
-    client = TestClient(app, raise_server_exceptions=False)
+    client = _계정_클라이언트(app, f"l3-{계정}@example.test")
 
     def sse(글: str, 이름: str):
         for 덩이 in 글.split("\n\n"):
@@ -1258,7 +1280,7 @@ def _L3숫자_시험() -> list[tuple[str, bool]]:
     def 흐름(라벨, *, 사업명=초격차, 금액=800_000, 재점검=False, 비우기=True, 비목="지급수수료", 품목="외부 전문가 자문 세션") -> dict:
         if 비우기:
             response_cache._메모리.clear()
-            with db.connect(autocommit=True) as c:
+            with _소유자_연결(autocommit=True) as c:
                 c.cursor().execute("DELETE FROM tenant.judge_cache WHERE org_id = %s", (org,))
         설정.update(라벨=라벨, 프롬프트="", 스키마={}, 질문호출=0, 규범=None, 최대토큰=None)
         _고정.출력, _고정.호출수, _고정.프롬프트 = {"판정": "가능", "요약": "고정 출력 시험 요약입니다. 규정을 확인했습니다."}, 0, ""
@@ -1278,19 +1300,42 @@ def _L3숫자_시험() -> list[tuple[str, bool]]:
                 "최대토큰": 최대토큰, "규범": 설정["규범"], "질문": qa, "질문호출": 설정["질문호출"], "상태": j.status_code}
     같음 = lambda x, y: all(x[k] == y[k] for k in ("판정", "코드", "조건", "금지", "공통", "해당시", "요약", "프롬프트", "판정호출"))
     한도라벨 = 라벨만들기(**{"30만원 한도": ("상한", "지출금액", None)})
+    # 실제 사업의 우선순위 행은 건드리지 않는다. 이 시험의 모든 흐름에서 우선순위 조회 키만
+    # 고유한 시험 키로 바꾸고 SQL 조회는 그대로 쓴다. 초격차 키는 비워 L3 후순위 행이 없음을 보장한다.
+    시험사업 = {이름: f"L3숫자시험-{uuid.uuid4()}-{이름}" for 이름 in (초격차, 중심)}
+    원_우선순위 = O.rule_lookup._precedence
+    추가_우선순위: list[int] = []
+
+    def 시험_우선순위(cur, 사업명):
+        행들 = 원_우선순위(cur, 시험사업.get(사업명, 사업명))
+        return [{**행, "사업명": 사업명} for 행 in 행들]
+
     try:
+        with _소유자_연결(autocommit=True) as c:
+            if c.execute("SELECT 1 FROM corpus.precedence_rules WHERE 사업명 = ANY(%s)", (list(시험사업.values()),)).fetchone():
+                raise RuntimeError("우선순위 시험 키가 이미 존재한다")
+            # _precedence_rules.json 의 창업중심대학과 같은 L2 > L3 · all 구조. 원문은 시험용 문장이다.
+            행 = c.execute(
+                """INSERT INTO corpus.precedence_rules (사업명, 우선계층, 후순위계층, 범위, 원문, verified)
+                   VALUES (%s, 'L2', 'L3', 'all', %s, true)
+                   ON CONFLICT (사업명, 우선계층, 후순위계층) DO NOTHING RETURNING prec_id""",
+                (시험사업[중심], "시험 관리기준은 시험 기관의 내부규정보다 우선한다.")).fetchone()
+            if not 행:
+                raise RuntimeError("우선순위 시험 행을 만들지 못했다")
+            추가_우선순위.append(행[0])
+        O.rule_lookup._precedence = 시험_우선순위
         response_cache.데이터버전_해시_무효화()
         # 후보: 확인한 연결 · 사용 중 문서 · 노드 경로만
-        with db.connect(autocommit=True) as c:
+        with _소유자_연결(autocommit=True) as c:
             cur = c.cursor()
             조문들 = l3_load.조문_연결조회(cur, org)
         후보 = G.L3숫자_후보(조문들, {노드, L.모든비목}, 노드)
-        # 제15조 「30만원 이하의 금액 결제 시 견적서 제출 생략」 은 서류를 가르는 기준 금액이라 후보가 아니다(조율 검토)
-        t.append(("5-15 ⑤ 후보: 확인한 연결이 노드 경로에 닿는 사용 중 문서의 숫자 기준만(30만원 한도 · 50% 이내, 「30만원 이하의 금액 결제 시」 는 아님). 미확인(NULL) · 해당 세목 없음([]) · 다른 비목에 연결 · review 문서 조문은 안 든다",
+        # 제15조의 30만원 이하는 서류를 가르는 기준 금액이라 후보가 아니다.
+        t.append(("5-15 ⑤ 후보: 확인한 연결이 노드 경로에 닿는 사용 중 문서의 숫자 기준만(30만원 한도 · 50% 이내, 서류 기준인 30만원 이하는 아님). 미확인(NULL) · 해당 세목 없음([]) · 다른 비목에 연결 · review 문서 조문은 안 든다",
                   sorted(c["글"] + c["연산"] for c in 후보) == sorted(["30만원한도", "50%이내"]) and {c["조번호"] for c in 후보} == {"제12조", "제20조"}
                   and all(set(c) >= {"id", "article_id", "doc_id", "조번호", "글", "연산", "문장", "해시"} for c in 후보)
                   and len({c["id"] for c in 후보}) == len(후보) and all(c["문서명"] == "시험대학교 사업비 관리지침" for c in 후보)))
-        with db.connect(autocommit=True) as c:             # 이하 흐름에서는 연결이 없는 조문이 문맥 상한을 건드리지 않게 다른 비목에 연결해 둔다(후보 시험은 위에서 끝났다)
+        with _소유자_연결(autocommit=True) as c:             # 이하 흐름에서는 연결이 없는 조문이 문맥 상한을 건드리지 않게 다른 비목에 연결해 둔다(후보 시험은 위에서 끝났다)
             c.cursor().execute("UPDATE tenant.l3_articles SET concept_ids = %s WHERE article_id = ANY(%s)", (["비목:창업/재료비"], [조["미확인"], 조["해당세목없음"]]))
         기준 = 흐름(None)
         t.append(("5-15 ⑤ 라벨 없는 기준 흐름: 질문 프롬프트 · 스키마에 기관 규정 숫자가 없고 판정 LLM 1회 · 코드판정 없음", "L3숫자라벨" in 기준["질문스키마"]["properties"] and 기준["판정호출"] == 1 and 기준["코드"] is None))
@@ -1321,18 +1366,18 @@ def _L3숫자_시험() -> list[tuple[str, bool]]:
         # 조문이 바뀌면 라벨을 버린다: 질문 때 저장한 라벨 → 판정 전에 숫자가 바뀜(30만 → 50만)
         설정["라벨"] = 한도라벨
         response_cache._메모리.clear()
-        with db.connect(autocommit=True) as c:
+        with _소유자_연결(autocommit=True) as c:
             c.cursor().execute("DELETE FROM tenant.judge_cache WHERE org_id = %s", (org,))
         질문 = client.post("/api/questions", json={"사업명": 초격차, "확정비목": "지급수수료", "확정세목": None, "부가세구분": "포함", "품목": "외부 전문가 자문 세션", "금액": 800_000,
                                                 "용도": "사업 자문", "질문원문": "외부 전문가 자문 세션 80만원 써도 되나요?"}).json()
-        with db.connect(autocommit=True) as c:
+        with _소유자_연결(autocommit=True) as c:
             c.cursor().execute("UPDATE tenant.l3_articles SET 본문 = replace(본문, '30만원 한도', '50만원 한도') WHERE article_id = %s", (조["한도"],))
         정 = {"품목": "외부 전문가 자문 세션", "금액": 800_000, "금액_추정여부": False, "용도": "사업 자문", "질문원문": "외부 전문가 자문 세션 80만원 써도 되나요?", "질의문": "외부 전문가 자문 세션",
              "분류후보": [{"비목": "지급수수료", "세목": None, "표시문": "지급수수료"}], "비목후보": [{"비목": "지급수수료", "신뢰도": 1.0}], "수치": {"부가세구분": "포함"}, "누락필드": []}
         _고정.출력, _고정.호출수 = {"판정": "가능", "요약": "고정 출력 시험 요약입니다. 규정을 확인했습니다."}, 0
         바뀐 = sse(client.post("/api/judge", json={"사업명": 초격차, "확정비목": "지급수수료", "정규화": 정, "답변": [], "질문세트": 질문.get("질문세트") if 질문.get("질문") else None,
                                                   "부가세구분": "포함"}).text, "결과") or {}
-        with db.connect(autocommit=True) as c:
+        with _소유자_연결(autocommit=True) as c:
             c.cursor().execute("UPDATE tenant.l3_articles SET 본문 = replace(본문, '50만원 한도', '30만원 한도') WHERE article_id = %s", (조["한도"],))
         t.append(("5-15 ⑤ 질문 뒤 조문의 숫자가 바뀌면(30만원 → 50만원 한도) 저장한 라벨을 버린다: 불가가 나지 않고 판정 LLM 이 1회 불린다", 바뀐.get("판정") != "불가" and _고정.호출수 == 1))
         # 효력: L2 가 우선하는 사업은 조건 줄만, L3 조문은 판정 문맥에 그대로
@@ -1348,7 +1393,7 @@ def _L3숫자_시험() -> list[tuple[str, bool]]:
         중심_아래 = 흐름(한도라벨, 사업명=중심, 금액=200_000)
         중심_기준2 = 흐름(None, 사업명=중심, 금액=200_000)
         t.append(("5-15 ⑤ L2 우선 사업에서도 아래면 지금과 같다(조건 줄 없음)", 같음(중심_아래, 중심_기준2)))
-        with db.connect(autocommit=True) as c:
+        with _소유자_연결(autocommit=True) as c:
             cur = c.cursor()
             우선 = (O._l3_우선(cur, 초격차, []), O._l3_우선(cur, 중심, []), O._l3_우선(cur, "등록 안 된 사업", []), O._l3_우선(cur, None, []),
                   O._l3_우선(cur, 초격차, [{"종류": "우선순위", "조건": {"상위": "L2", "하위": "L3", "범위": "상충시"}}]))
@@ -1368,7 +1413,7 @@ def _L3숫자_시험() -> list[tuple[str, bool]]:
         a1 = 흐름(None)
         a2 = 흐름(None, 비우기=False)
         response_cache._메모리.pop(a2["질문"].get("질문세트"), None)
-        with db.connect(autocommit=True) as c:             # 질문세트는 DB 캐시에도 남는다. 지워야 질문 LLM 이 다시 라벨을 낸다
+        with _소유자_연결(autocommit=True) as c:             # 질문세트는 DB 캐시에도 남는다. 지워야 질문 LLM 이 다시 라벨을 낸다
             c.cursor().execute("DELETE FROM tenant.judge_cache WHERE org_id = %s AND 종류 = 'questions'", (org,))
         a3 = 흐름(한도라벨, 비우기=False)
         a4 = 흐름(한도라벨, 비우기=False)
@@ -1377,10 +1422,10 @@ def _L3숫자_시험() -> list[tuple[str, bool]]:
         재 = 흐름(한도라벨, 재점검=True)
         t.append(("5-15 ⑤ 다시 점검(질문세트 · 질문원문 없음): 보조 키에서 라벨을 읽어 같은 불가가 난다", 재["코드"] == "한도초과" and 재["질문호출"] == 1))
         # 연결을 지우면(미확인) 후보가 없어 질문 스키마에도 필드가 없다 · 라벨이 있어도 지금과 같다
-        with db.connect(autocommit=True) as c:
+        with _소유자_연결(autocommit=True) as c:
             c.cursor().execute("UPDATE tenant.l3_articles SET concept_ids = NULL WHERE org_id = %s", (org,))
         미확인 = 흐름(한도라벨)
-        with db.connect(autocommit=True) as c:
+        with _소유자_연결(autocommit=True) as c:
             c.cursor().execute("UPDATE tenant.l3_articles SET concept_ids = %s WHERE article_id = ANY(%s)", ([노드], [조["한도"], 조["이하"], 조["비율"], 조["검토"]]))
             c.cursor().execute("UPDATE tenant.l3_documents SET 파싱품질 = 'review' WHERE doc_id = %s", (문서통,))
         검토됨 = 흐름(한도라벨)
@@ -1405,14 +1450,16 @@ def _L3숫자_시험() -> list[tuple[str, bool]]:
         # 인원당 · 하루 · 월 · 연 · 누적 기준은 이번 지출 한 번과 비교할 수 없어 후보에서 뺀다(1회 · 건당은 둔다). 조율 검토
         뺄 = ["회의비는 1인당 3만원 이하로 한다.", "숙박비는 1일 10만원 이내로 한다.", "자문료는 월 50만원 한도로 지급한다.",
              "연간 300만원 이내에서 집행한다.", "누적 2,000만원 이하로 한다.",
-             "③ 견적서(30만원 이하의 금액 결제 시 견적서 제출 생략)", "50만원 이상인 경우 비교견적서를 받는다.", "100만원 이하 시 생략한다."]
+             "견적서는 30만원 이하의 금액 결제 시 생략한다.", "50만원 이상인 경우 비교견적서를 받는다.", "100만원 이하 시 생략한다."]
         둘 = ["회의비는 1회 50만원 이하로 한다.", "건당 30만원 이내로 집행한다."]
-        t.append(("5-15 ⑤ 인원당 · 1일 · 월 · 연간 · 누적 기준은 L3 숫자 후보가 아니다(실제 경상국립대 「1인 1일 최대 30만원 한도」 포함) · 1회 · 건당은 후보다",
+        t.append(("5-15 ⑤ 인원당 · 1일 · 월 · 연간 · 누적 기준은 L3 숫자 후보가 아니다(같은 구조의 합성 문장 포함) · 1회 · 건당은 후보다",
                   all(G._L3_숫자들(s) == [] for s in [*뺄, 원문_한도]) and all(len(G._L3_숫자들(s)) == 1 for s in 둘)))
     finally:
-        auth.검증된_org, auth.검증된_account, routes_judge._판정_저장_시도, O._프로필값_읽기, os.environ["SUDDOE_ONTOLOGY_PROGRAMS"], Q.llm_호출, O._종료 = 원
+        auth._서명키, routes_judge._판정_저장_시도, O._프로필값_읽기, os.environ["SUDDOE_ONTOLOGY_PROGRAMS"], Q.llm_호출, O._종료 = 원
         L.적용_규범, L.비목_품목금지, L.세목_한도_있음 = 고정
-        with db.connect(autocommit=True) as c:
+        O.rule_lookup._precedence = 원_우선순위
+        with _소유자_연결(autocommit=True) as c:
+            c.cursor().execute("DELETE FROM corpus.precedence_rules WHERE prec_id = ANY(%s)", (추가_우선순위,))
             c.cursor().execute("DELETE FROM tenant.judge_cache WHERE org_id = %s", (org,))
             c.cursor().execute("DELETE FROM tenant.orgs WHERE org_id = %s", (org,))
     return t
@@ -1736,21 +1783,18 @@ def _시점_시험() -> list[tuple[str, bool]]:
                   and O.유효_날짜("2026-12-05") == "2026-12-05" and O.유효_날짜("내일") is None and O.유효_날짜("") is None
                   and "사용일자" in 질의변환_스키마(["x"])["required"] and "사용일자" in 질의변환_스키마(["x"])["properties"]))
         # 실제 SQL 읽기: 롤백 행으로 프로필 → 게이트 입력까지(org 경로의 부품)
-        with db.connect() as c:
+        with _소유자_연결() as c:
             cur = c.cursor()
-            org = cur.execute("SELECT org_id FROM tenant.orgs LIMIT 1").fetchone()
-            if org:
-                cur.execute('INSERT INTO tenant.profile_agreements (org_id, account_id, "사업명", "협약시작일", "협약종료일") VALUES (%s, NULL, %s, %s, %s)',
-                            (org[0], "시점시험사업", datetime.date(2026, 3, 1), datetime.date(2026, 11, 30)))
-                읽음 = _원_프로필읽기(cur, org[0], None)[1]
-                입력 = O.게이트_입력(300_000, "포함", {}, "2026-12-05", 읽음, "질문")
-                t.append(("5-15 ① 프로필 SQL 읽기 → 게이트 입력: 협약시작일 · 협약종료일이 날짜 글자로 실리고 프로필이 없으면 실리지 않는다",
-                          입력.get("협약시작일") == "2026-03-01" and 입력.get("협약종료일") == "2026-11-30" and 입력.get("사용일자") == "2026-12-05"
-                          and 입력.get("사용일자출처") == "질문"
-                          and "협약시작일" not in O.게이트_입력(1, "포함", {}, None, {}) and "협약종료일" not in O.게이트_입력(1, "포함", {}, None, None)
-                          and "사용일자출처" not in O.게이트_입력(1, "포함", {}, None, {}, "질문")))
-            else:
-                t.append(("5-15 ① 프로필 SQL 읽기: 시험용 org 가 DB 에 없어 건너뜀", True))
+            org = cur.execute("INSERT INTO tenant.orgs (기관명, 사업명) VALUES (%s, %s) RETURNING org_id", ("시점 시험 기관", [사업])).fetchone()[0]
+            cur.execute('INSERT INTO tenant.profile_agreements (org_id, account_id, "사업명", "협약시작일", "협약종료일") VALUES (%s, NULL, %s, %s, %s)',
+                        (org, "시점시험사업", datetime.date(2026, 3, 1), datetime.date(2026, 11, 30)))
+            읽음 = _원_프로필읽기(cur, org, None)[1]
+            입력 = O.게이트_입력(300_000, "포함", {}, "2026-12-05", 읽음, "질문")
+            t.append(("5-15 ① 프로필 SQL 읽기 → 게이트 입력: 협약시작일 · 협약종료일이 날짜 글자로 실리고 프로필이 없으면 실리지 않는다",
+                      입력.get("협약시작일") == "2026-03-01" and 입력.get("협약종료일") == "2026-11-30" and 입력.get("사용일자") == "2026-12-05"
+                      and 입력.get("사용일자출처") == "질문"
+                      and "협약시작일" not in O.게이트_입력(1, "포함", {}, None, {}) and "협약종료일" not in O.게이트_입력(1, "포함", {}, None, None)
+                      and "사용일자출처" not in O.게이트_입력(1, "포함", {}, None, {}, "질문")))
             c.rollback()
         if not all(ok for _, ok in t):             # 실패했을 때 어느 흐름이 어떤 결과였는지 보인다
             for 이름, x in (("안", 안), ("전", 전), ("후", 후), ("프없", 프없), ("일없음", 일없음), ("늘림", 늘림), ("예비", 예비), ("화면먼저", 화면먼저), ("나쁜값", 나쁜값), ("창업", 창업)):
@@ -1775,13 +1819,12 @@ def _협약경고_시험() -> list[tuple[str, bool]]:
     재도전 = "재도전성공패키지"
     org, 계정 = str(uuid.uuid4()), str(uuid.uuid4())
     내부값 = re.compile(r"규범:|norm|절차:|LIMIT|ONTOLOGY")
-    with db.connect(autocommit=True) as c:
+    with _소유자_연결(autocommit=True) as c:
         cur = c.cursor()
         cur.execute("INSERT INTO tenant.orgs (org_id, 기관명, 사업명) VALUES (%s, %s, %s)", (org, "협약경고 시험 기관", [재도전]))
         cur.execute("INSERT INTO tenant.accounts (account_id, org_id, email) VALUES (%s, %s, %s)", (계정, org, f"warn-{계정}@example.test"))
-    원 = (auth.검증된_org, auth.검증된_account)
-    auth.검증된_org, auth.검증된_account = (lambda req: org), (lambda req: 계정)
-    client = TestClient(app, raise_server_exceptions=False)
+    원 = auth._서명키
+    client = _계정_클라이언트(app, f"warn-{계정}@example.test")
 
     def 저장(정부, 현금, 현물="없음"):
         협약 = {"정부지원_현금": 정부, "자기부담_현금": 현금, **({} if 현물 == "없음" else {"자기부담_현물": 현물})}
@@ -1815,14 +1858,14 @@ def _협약경고_시험() -> list[tuple[str, bool]]:
         t.append(("5-15 ② 협약경고: 가까운 값의 표시가 기준과 같아 보이지 않는다(정부 75.04% 를 「75%」 로 줄여 보이지 않는다)",
                   len(경고(r7, g7)[1]) == 1 and "총사업비의 75.04%예요" in 경고(r7, g7)[1][0]))
         # (d) 사업을 정할 수 없을 때
-        with db.connect(autocommit=True) as c:
+        with _소유자_연결(autocommit=True) as c:
             c.cursor().execute("UPDATE tenant.orgs SET 사업명 = %s WHERE org_id = %s", (["예비창업패키지", 재도전], org))
             c.cursor().execute("UPDATE tenant.profile_agreements SET 사업명 = '미지정' WHERE org_id = %s", (org,))
         행 = 저장(30_000_000, 8_000_000, 12_000_000)
         요청 = client.get("/api/profile", params={"사업명": 재도전}).json()["협약경고"]
         요청표기 = client.get("/api/profile", params={"사업명": " 2026 재도전성공패키지 "}).json()["협약경고"]
         요청put = client.put("/api/profile", params={"사업명": 재도전}, json={"협약": {"정부지원_현금": 30_000_000, "자기부담_현금": 8_000_000, "자기부담_현물": 12_000_000}}).json()
-        with db.connect(autocommit=True) as c:
+        with _소유자_연결(autocommit=True) as c:
             저장사업 = c.cursor().execute("SELECT 사업명 FROM tenant.profile_agreements WHERE org_id = %s", (org,)).fetchone()[0]
         t.append(("5-15 ② 협약경고: 기관 사업이 둘이어도 요청 ?사업명=재도전성공패키지(GET · PUT)면 그 사업 규범으로 경고 · 「2026 」 접두와 공백도 표준 표기로 · 요청 사업명은 저장하지 않는다",
                   len(요청) == 1 and 요청 == 요청표기 == 요청put["협약경고"] and "자기부담 현물은 총사업비의 24%" in 요청[0] and 저장사업 == "미지정"))
@@ -1830,13 +1873,13 @@ def _협약경고_시험() -> list[tuple[str, bool]]:
                   client.get("/api/profile").json()["협약경고"] == [] and client.get("/api/profile", params={"사업명": "  "}).json()["협약경고"] == []
                   and client.get("/api/profile", params={"사업명": "없는 사업"}).json()["협약경고"] == []))
         t.append(("5-15 ② 협약경고 (d) 기관의 사업이 둘 이상이고 행 사업명이 미지정이면 사업을 모르니 경고하지 않는다", 경고(*행) == ([], [])))
-        with db.connect(autocommit=True) as c:
+        with _소유자_연결(autocommit=True) as c:
             c.cursor().execute("UPDATE tenant.profile_agreements SET 사업명 = %s WHERE org_id = %s", (재도전, org))
         t.append(("5-15 ② 협약경고: 행의 사업명이 정해져 있으면 기관의 사업이 여럿이어도 그 사업의 규범을 쓴다", len(client.get("/api/profile").json()["협약경고"]) == 1))
-        with db.connect(autocommit=True) as c:
+        with _소유자_연결(autocommit=True) as c:
             c.cursor().execute("UPDATE tenant.profile_agreements SET 사업명 = %s WHERE org_id = %s", ("모르는 사업", org))
         t.append(("5-15 ② 협약경고 (d) 규범이 없는 사업(알 수 없는 사업명)은 []", client.get("/api/profile").json()["협약경고"] == []))
-        with db.connect(autocommit=True) as c:
+        with _소유자_연결(autocommit=True) as c:
             c.cursor().execute("UPDATE tenant.profile_agreements SET 사업명 = %s WHERE org_id = %s", ("모두의 창업 프로젝트", org))
         t.append(("5-15 ② 협약경고: 구성 비율 규범이 없는 사업(모두의 창업)은 []", client.get("/api/profile").json()["협약경고"] == []))
         # 오류는 []: 규범 조회가 죽어도 프로필 요청은 성공한다
@@ -1847,7 +1890,7 @@ def _협약경고_시험() -> list[tuple[str, bool]]:
             raise RuntimeError("시험용 오류")
         ontology_lookup.비율_규범 = 터짐
         try:
-            with db.connect(autocommit=True) as c:
+            with _소유자_연결(autocommit=True) as c:
                 c.cursor().execute("UPDATE tenant.profile_agreements SET 사업명 = %s WHERE org_id = %s", (재도전, org))
             r8, g8 = client.put("/api/profile", json={"협약": {"정부지원_현금": 30_000_000, "자기부담_현금": 8_000_000, "자기부담_현물": 12_000_000}}), client.get("/api/profile")
         finally:
@@ -1875,8 +1918,8 @@ def _협약경고_시험() -> list[tuple[str, bool]]:
         t.append(("5-15 ② 협약경고: 자기부담사업비 규범은 현금 + 현물 합계로 잰다(초격차 30% 이상, 합계 20% → 경고)",
                   합계 == ["자기부담사업비(현금과 현물 합계)는 총사업비의 20%예요. 초격차 스타트업 프로젝트 기준은 30% 이상이에요."]))
     finally:
-        auth.검증된_org, auth.검증된_account = 원
-        with db.connect(autocommit=True) as c:
+        auth._서명키 = 원
+        with _소유자_연결(autocommit=True) as c:
             c.cursor().execute("DELETE FROM tenant.orgs WHERE org_id = %s", (org,))
     return t
 

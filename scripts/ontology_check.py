@@ -128,7 +128,7 @@ def _json_읽기(경로: Path) -> dict:
 
 
 def 원천_읽기(폴더: Path | str = 원천_기본폴더, 사업키들: Iterable[str] | None = None) -> dict:
-    """schema.json · 공통_L1.json · 사업 파일을 읽는다. 사업키들이 None 이면 파일이 있는 사업 전부다.
+    """schema.json · 공통_L1.json · 사업 파일을 읽는다. 사업키들이 None 이면 모든 사업 파일을 요구한다.
 
     반환 {schema, 파일: {이름: 해시}, 공통: 묶음, 사업: {사업명: 묶음}, 폴더}. 묶음은 {개념, 관계, 규범, 파일}.
     """
@@ -136,7 +136,7 @@ def 원천_읽기(폴더: Path | str = 원천_기본폴더, 사업키들: Iterab
     schema = _json_읽기(폴더 / "schema.json")
     사업표 = schema.get("사업키") or {}
     if 사업키들 is None:
-        대상 = [k for k in 사업표 if (폴더 / f"{k}.json").exists()]
+        대상 = list(사업표)
     else:
         대상 = list(사업키들)
         for k in 대상:

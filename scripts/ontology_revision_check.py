@@ -89,7 +89,8 @@ def _새판_활성화(dsn: str, 옛: str) -> dict:
 def _원천_사본(폴더: Path, 문서키값: str) -> Path:
     """레포 원천은 건드리지 않는다. schema.json 문서키만 새 판으로 바꾼 사본(판이 바뀐 뒤 하는 일과 같다)."""
     원천 = ROOT / "ontology"
-    for 이름 in ("schema.json", "공통_L1.json", f"{문서키}.json", ontology_terms.원천_파일):
+    schema = json.loads((원천 / "schema.json").read_text(encoding="utf-8"))
+    for 이름 in ("schema.json", "공통_L1.json", *(f"{키}.json" for 키 in schema["사업키"]), ontology_terms.원천_파일):
         shutil.copy(원천 / 이름, 폴더 / 이름)
     for md in (원천 / "추출").rglob("입력_원문.md"):
         대상 = 폴더 / md.relative_to(원천)
