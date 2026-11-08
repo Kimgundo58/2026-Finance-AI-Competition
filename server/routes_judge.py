@@ -70,6 +70,9 @@ def judge(req: Request, body: 판정요청, mock: str | None = None,
     # 질문이 0개라 질문세트가 오지 않아도 노드 결정은 판정을 바꾸므로, 결정 전 결과가 캐시에서 나오면 안 된다
     노드결정 = (_노드결정_읽기(body, account_id)
               if 반영 and not MOCK and 온톨로지_사업(body.사업명) else None)
+    # 자연어 조건 확인 질문의 답(5-14 B). 서버 저장값의 규범 ID · 조건 번호에 화면 답 값만 맞춘다. 판정을 바꾸므로 키에 넣는다
+    조건답 = (_조건답_읽기(body, account_id)
+             if 반영 and not MOCK and body.질문세트 and 온톨로지_사업(body.사업명) else None)
 
     k = response_cache.캐시키(
         # 계정을 키에 넣는다. 다른 계정의 응답(그 계정의 계획·판정 id·프로필 전제)이 나가면 안 된다.
@@ -91,7 +94,9 @@ def judge(req: Request, body: 판정요청, mock: str | None = None,
         # ?mock= 은 mock 모드에서만 응답을 바꾼다. live 에서 키에 넣으면 캐시를 우회할 수 있다.
         *([mock] if MOCK else []),
         # 노드 결정이 없으면 조각을 더하지 않는다(지금 키 그대로)
-        *([json.dumps(노드결정, ensure_ascii=False, sort_keys=True)] if 노드결정 else []))
+        *([json.dumps(노드결정, ensure_ascii=False, sort_keys=True)] if 노드결정 else []),
+        # 조건 확인 질문이 없으면 조각을 더하지 않는다(지금 키 그대로)
+        *([json.dumps(조건답, ensure_ascii=False, sort_keys=True)] if 조건답 else []))
     캐시 = response_cache.조회(k, body.org_id, account_id)
     # 검색 전에 계산한다. 판정 도중 규정이 활성화되면 결과는 옛 해시로 저장되어 이후 요청에 적중하지 않는다.
     데이터버전해시 = response_cache.요청_해시()
@@ -118,7 +123,7 @@ def judge(req: Request, body: 판정요청, mock: str | None = None,
             response_cache.저장(k, out, 종류="judge", org=body.org_id, account=account_id,
                                데이터버전_해시=데이터버전해시)
         else:
-            out, 실패 = yield from _판정_실행(body, account_id, 사용자답변, 답변유실, 노드결정)
+            out, 실패 = yield from _판정_실행(body, account_id, 사용자답변, 답변유실, 노드결정, 조건답)
             # decision_id 를 캐시에 넣으면 다른 요청이 남의 판정 행을 자기 계획에 연결한다.
             decision_id = out.pop("decision_id", None)
             if not 실패:              # 일시적 장애의 판단불가를 캐시에 고정하지 않는다
@@ -181,6 +186,20 @@ def _노드결정_읽기(body: 판정요청, account_id: str | None) -> dict | N
         return None
 
 
+def _조건답_읽기(body: 판정요청, account_id: str | None) -> list[dict] | None:
+    """저장한 질문세트의 조건 확인 질문(5-14 B) + 화면 답 → [{규범ID, 조건번호, 조건, 질문문, 답}]. 없거나 못 읽으면 None(지금 길).
+
+    질문세트가 올 때만 읽는다(답은 질문세트와 함께만 온다). 규범 ID 는 판정 게이트가 지금 규범과 다시 맞춘다.
+    """
+    try:
+        import question_generate
+        저장값 = response_cache.질문세트_조회(body.질문세트, body.org_id, account_id)
+        return question_generate.조건_답(저장값, [a.model_dump() for a in body.답변]) or None
+    except Exception as e:                                    # noqa: BLE001
+        _log.warning("조건 답 읽기 실패: %s", type(e).__name__)
+        return None
+
+
 def _판정_이벤트(out: dict):
     """판정 → 해야할일 → 인용 → 전제 → 참조관계 → (문의초안) → 결과 이벤트를 고정 순서로 yield 한다.
 
@@ -204,7 +223,7 @@ def _판정_이벤트(out: dict):
 
 
 def _판정_실행(body: 판정요청, account_id: str | None, 사용자답변: list[dict] | None = None,
-            답변유실: bool = False, 노드결정: dict | None = None):
+            답변유실: bool = False, 노드결정: dict | None = None, 조건답: list[dict] | None = None):
     """_live_판정 을 워커 스레드에서 실행하고, 기다리는 동안 SSE keep-alive 주석을 yield 한다.
 
     `out, 실패 = yield from _판정_실행(body, account_id, 사용자답변, 답변유실)` 로 쓴다. 예외나 타임아웃은 판단불가 결과와
@@ -213,7 +232,7 @@ def _판정_실행(body: 판정요청, account_id: str | None, 사용자답변: 
     """
     ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     # submit 은 컨텍스트 변수를 복사하지 않는다. 미들웨어가 설정한 현재_org 를 워커에 넘긴다.
-    future = ex.submit(contextvars.copy_context().run, _live_판정, body, account_id, 사용자답변, 답변유실, 노드결정)
+    future = ex.submit(contextvars.copy_context().run, _live_판정, body, account_id, 사용자답변, 답변유실, 노드결정, 조건답)
     만료시각 = time.monotonic() + _판정_타임아웃초
     try:
         while True:
@@ -256,7 +275,7 @@ def _실패_결과(body: 판정요청) -> dict:
 
 
 def _live_판정(body: 판정요청, account_id: str | None = None, 사용자답변: list[dict] | None = None,
-             답변유실: bool = False, 노드결정: dict | None = None) -> dict:
+             답변유실: bool = False, 노드결정: dict | None = None, 조건답: list[dict] | None = None) -> dict:
     """orchestrate.판정() 을 호출하고 응답 계약으로 바꾼다. 워커 스레드에서 실행된다."""
     import orchestrate
     # 질문 원문이 없을 때만 품목·용도·금액으로 문장을 재구성한다. 합성 문장(_합성_질문)을 다시
@@ -277,7 +296,7 @@ def _live_판정(body: 판정요청, account_id: str | None = None, 사용자답
                        사용자프로필값=_사용자프로필값_구성(body.답변),
                        사용자답변=사용자답변, 답변유실=답변유실,
                        확정세목=body.확정세목, 추가입력값=body.추가입력값, 부가세구분=body.부가세구분, 사용일자=body.사용일자,
-                       노드결정=노드결정)
+                       노드결정=노드결정, 조건답=조건답)
     return 파이프라인결과_매핑(r, body)
 
 
