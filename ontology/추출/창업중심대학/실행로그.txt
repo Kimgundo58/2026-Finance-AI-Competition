@@ -10,7 +10,7 @@
 08:50 사업변환(임시 원천): 검사 오류 3(고아 품목 선급금보증보험료 · 체제비 · 해외거래수수료) → 조율 세션 수정(블록 비목 · 세목에 상위, 연결종류 해석)
 08:55 `판정 수정` 인데 AI검증 인 17행(1: 3 · 2: 14, 관계 1 포함) → AI대조 + 재추출 대상(5-7b:80, 앞 사업은 모두 AI대조). 변환기에 같은 검사를 넣음(self-test 55/55, 5-7d 판정 칸)
 08:58 사업변환(임시 원천) 1 · 2 다시: 검사 통과, 이 사업 경고 39(조건없는_금지 15 · 전제표현_조건없음 24)
-09:00 3_재추출_창업중심대학 준비(14블록 4,967자, 1차 입력과 글 같음, 인용대응에 제14조5호 → 조:창업지원법#제2조). scratchpad 의 1차 초안 파일을 _보관_창업중심대학_1차/ 로 옮김(지우지 않음)
+09:00 3_재추출_창업중심대학 준비(14블록, 블록 본문 합 4,469자(검토 세션 지적으로 다시 셈), 1차 입력과 글 같음, 인용대응에 제14조5호 → 조:창업지원법#제2조). scratchpad 의 1차 초안 파일을 _보관_창업중심대학_1차/ 로 옮김(지우지 않음)
 09:00 재추출 추출자 시작 A a1f0110d4b94706e1 · B ad2304cd0e87fba88(프롬프트_X.md 글자 그대로). 바로 뒤 각자에 scratch 개인 폴더(reext_A · reext_B) 안내 메시지(지시 내용 바꾸지 않음)
 09:10 3_재추출_창업중심대학 마감(구독 경로, 읽기 확인 구독_읽기확인.json 통과, 두 추출자 scratch 는 각자 폴더만 씀) A a1f0110d4b94706e1 · B ad2304cd0e87fba88. 비교: 발췌오류 0 · 블록누락 0 · 규범 일치 65 · A만 16 · B만 15
 09:11 3_재추출_창업중심대학 검증자(구독) a1a6fd8eb87365a91 시작(프롬프트_검증자.md 해시 d89a9495b256, 덧붙임 포함)
@@ -20,3 +20,8 @@
 09:25 이후(시각 미기록) 전수 대조 끝: 74행 중 틀림 3(기계장치/금지/1 · 제31조①/금지/1 · 붙임4/금지/1, 대상이 넓은 금지) → 확정.md 에 조건을 넣고 AI대조, API $1.70. 사업변환 --목록 --실제: 원천 반영, 전수대조_목록.md 71행(내려간 3행이 빠짐) · 잔여 규범 8
 09:53 커밋 d50ce6c(로컬)
 이후 독립 확인(구독 에이전트 2개, 결론 없이 질문만): scratch 충돌 · 판정 수정 17행 · 수치 · 잔여 · 변환기 검사 · dry 가 조율 세션 점검과 맞음. 묶음 2 · 3 확정.md 집계 줄이 전수 대조 전 값이라 고쳤고, 잔여 목록에 사유 줄을 더했다
+
+추출자에 보낸 프롬프트 밖 메시지 원문(SendMessage, 지시 내용은 바꾸지 않음):
+08:26 → 1 B(a4114f7d257881920): "Warning: scratchpad files p4.md and p5.md were written by another agent working on a different bundle, so don't use them. That agent also wrote p1.md and p2.md before you replaced them. Keep your remaining drafts in a private subfolder, for example scratchpad/extB_bundle1/, and don't read or merge any p*.md file you didn't write yourself. Before you finish, confirm that every `### 조:` block in 추출_B.md is a block of 1_창업중심대학_사업비/작업_B/입력_원문.md (44 blocks) and that no block appears twice. This message contains no content from the other extractor of your bundle."
+09:00 → 재추출 A(a1f0110d4b94706e1): "Note on scratch files: you share the session scratchpad with another agent. If you need draft or helper files outside your input folder, put them only in scratchpad/reext_A/ and don't read anything elsewhere in the scratchpad. Your input folder must still hold only the three inputs plus 추출_A.md. This message changes none of your instructions."
+09:00 → 재추출 B(ad2304cd0e87fba88): 위와 같고 reext_A → reext_B, 추출_A.md → 추출_B.md.
