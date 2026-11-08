@@ -62,7 +62,7 @@ _decisions_컬럼: tuple[str, ...] = (
     "org_id", "account_id", "사업명", "기관id", "질문원문", "plan_id", "정규화", "비목", "금액", "판정",
     "신뢰등급", "요약", "규정버전", "인용", "해야할일", "전제", "참조관계", "미매핑전제",
     "검증사유", "검증코드", "처리단계", "실패단계", "지연ms", "모델", "검색스냅샷", "코퍼스버전",
-    "사용자답변", "경로", "온톨로지결과", "기준문서",
+    "사용자답변", "경로", "온톨로지결과", "기준문서", "규범",
 )
 # 판정 행 `온톨로지결과` 에 남기는 화면 값. 판정 기록과 캐시 연결(server/persist.py)이 같이 쓴다
 온톨로지결과_칸: tuple[str, ...] = ("분류", "근거경로", "코드판정", "조건", "기한조건", "금지조건", "해당시조건", "공통사항", "확인한조건", "용어풀이", "문의처")
@@ -252,7 +252,21 @@ def _decisions_행(상태: _판정상태, 응답: dict) -> dict:
         코퍼스버전=코퍼스버전(상태.cur),
         경로="온톨로지" if 상태.새경로 else "옛",
         # 계획을 다시 열 때 결과 화면에 그대로 보여 줄 값(server/routes_plans.py _live_상세)
-        온톨로지결과=json.dumps({k: 응답.get(k) for k in 온톨로지결과_칸}, ensure_ascii=False, default=str) if 상태.새경로 else None)
+        온톨로지결과=json.dumps({k: 응답.get(k) for k in 온톨로지결과_칸}, ensure_ascii=False, default=str) if 상태.새경로 else None,
+        규범=json.dumps(_판정_규범(상태), ensure_ascii=False) if 상태.새경로 and 상태.게이트결과 else None)
+
+
+def _판정_규범(상태: _판정상태) -> dict:
+    """판정 기록 decisions.규범(5-15 ④): 이 판정에 쓴 규범 ID. 규범별 적중 · 오판 집계(eval."v_규범별_판정")가 읽는다. 화면에는 안 나간다.
+
+    코드판정 = 코드 불가 · 한도초과 등을 낸 규범(없으면 None) / 조건 = 조건 줄을 만든 규범 / 문맥 = 판정 프롬프트 B4 에 넣은 규범
+    (판정 LLM 을 부르지 않은 코드 판정은 빈 목록) / 자연어답 = 확인 질문으로 답한 자연어 조건(5-14 B, 게이트가 다시 검사한 것)."""
+    g = 상태.게이트결과
+    제외 = set(g.get("제외규범") or [])
+    문맥 = [n.get("norm_id") for n in (상태.온톨로지.get("적용") or {}).get("규범") or []
+          if n.get("종류") != "우선순위" and n.get("norm_id") not in 제외] if 상태.문맥 else []
+    return {"코드판정": (g.get("발동규범") or {}).get("norm_id") if g.get("종류") else None,
+            "조건": list(g.get("조건규범") or []), "문맥": 문맥, "자연어답": g.get("자연어답") or {}}
 
 
 def decisions_저장(cur, 행: dict) -> int | None:

@@ -74,6 +74,20 @@ ALTER TABLE tenant.decisions ADD CONSTRAINT "decisions_경로_check"
     CHECK ("경로" IN ('옛', '온톨로지'));
 -- 온톨로지결과 : 결과 화면 값(분류 · 근거경로 · 코드판정 · 조건 · 용어풀이). 계획 다시 열기가 읽는다. 옛 경로는 NULL.
 ALTER TABLE tenant.decisions ADD COLUMN IF NOT EXISTS "온톨로지결과" JSONB;
+-- 규범 : 온톨로지 경로 판정에 쓴 규범 ID {코드판정, 조건, 문맥, 자연어답}(5-15 ④). 옛 경로는 NULL. 집계는 eval."v_규범별_판정"
+ALTER TABLE tenant.decisions ADD COLUMN IF NOT EXISTS "규범" JSONB;
+CREATE OR REPLACE VIEW eval."v_규범별_판정" AS
+SELECT x."역할", x."규범ID", d."판정", d."경로", count(*) AS "건수", max(d.created_at) AS "최근"
+  FROM tenant.decisions d
+ CROSS JOIN LATERAL (
+        SELECT '코드판정'::text AS "역할", d."규범"->>'코드판정' AS "규범ID" WHERE d."규범"->>'코드판정' IS NOT NULL
+        UNION ALL
+        SELECT '조건', jsonb_array_elements_text(COALESCE(d."규범"->'조건', '[]'::jsonb))
+        UNION ALL
+        SELECT '문맥', jsonb_array_elements_text(COALESCE(d."규범"->'문맥', '[]'::jsonb))
+       ) x
+ WHERE d."규범" IS NOT NULL
+ GROUP BY x."역할", x."규범ID", d."판정", d."경로";
 
 -- 검증코드 허용 목록. 목록 밖의 코드는 거부해 오타가 지표를 갈라놓지 못하게 한다.
 -- 기준 목록은 scripts/llm_validate.py 의 검증코드_전체 이고, 이 CHECK 는 같은 순서로 맞춘다.
