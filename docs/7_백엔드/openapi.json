@@ -2102,15 +2102,45 @@
    "get": {
     "summary": "Profile Get",
     "operationId": "profile_get_api_profile_get",
+    "parameters": [
+     {
+      "name": "사업명",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "화면이 고른 사업. 협약경고가 볼 규범만 고른다(저장하지 않음)",
+       "title": "사업명"
+      },
+      "description": "화면이 고른 사업. 협약경고가 볼 규범만 고른다(저장하지 않음)"
+     }
+    ],
     "responses": {
      "200": {
       "description": "Successful Response",
       "content": {
        "application/json": {
         "schema": {
-         "additionalProperties": true,
          "type": "object",
+         "additionalProperties": true,
          "title": "Response Profile Get Api Profile Get"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
         }
        }
       }
@@ -2120,15 +2150,35 @@
    "put": {
     "summary": "Profile Put",
     "operationId": "profile_put_api_profile_put",
+    "parameters": [
+     {
+      "name": "사업명",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "화면이 고른 사업. 협약경고가 볼 규범만 고른다(저장하지 않음)",
+       "title": "사업명"
+      },
+      "description": "화면이 고른 사업. 협약경고가 볼 규범만 고른다(저장하지 않음)"
+     }
+    ],
     "requestBody": {
+     "required": true,
      "content": {
       "application/json": {
        "schema": {
         "$ref": "#/components/schemas/___-Input"
        }
       }
-     },
-     "required": true
+     }
     },
     "responses": {
      "200": {
@@ -2136,8 +2186,8 @@
       "content": {
        "application/json": {
         "schema": {
-         "additionalProperties": true,
          "type": "object",
+         "additionalProperties": true,
          "title": "Response Profile Put Api Profile Put"
         }
        }

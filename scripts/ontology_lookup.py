@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """온톨로지 조회 함수(읽기 전용, docs/5_룰/5-8_저장과_조회.md). 판정 · 질문 생성의 새 경로가 쓴다.
 
-노드_결정 · 품목_노드 · 경로밖_품목 · 품목_후보 · 노드결정_적용 · 상위_세목 · 경로밖_규범 · 비목_품목금지 · 조문_행 · 세목_한도_있음 · 적용_규범 · 근거_조문 · 새경로_대상 · 근거경로_문장. 쓰지 않는다. 어떤 예외도 호출자에게 그대로 올린다
+노드_결정 · 품목_노드 · 경로밖_품목 · 품목_후보 · 노드결정_적용 · 상위_세목 · 경로밖_규범 · 비율_규범 · 비목_품목금지 · 조문_행 · 세목_한도_있음 · 적용_규범 · 근거_조문 · 새경로_대상 · 근거경로_문장. 쓰지 않는다. 어떤 예외도 호출자에게 그대로 올린다
 (호출자 orchestrate 가 판단불가로 바꾼다). 없는 노드 ID 는 LookupError 다.
 L3 는 여기서 다루지 않는다(능력 질문 시험의 `문맥_구성` 호출만 판정과 같은 문맥 구성 함수로 L3 연결을 본다). 읽는 테이블: corpus.concepts · concept_labels · concept_relations · norms · provenance ·
 documents · doc_articles.
@@ -574,6 +574,23 @@ def 경로밖_규범(cur, 사업명: str | None, 품목들: list[str], 적용: d
                 이미.add(n["norm_id"])
                 out.append(n)
     return out
+
+
+def 비율_규범(cur, 사업명: str | None) -> list[dict]:
+    """총사업비 대비 비율을 말하는 `AI검증` 이상 의무(근거 포함, 5-15 ②). 적용사업이 NULL 이거나 그 사업인 것.
+
+    이 규범들은 협약 구성 규칙(「…로 구성해야」)이고 대상이 절차 노드(`절차:정부지원사업비` · `절차:자기부담현물` 등)라 비목 · 세목 · 품목에서 시작한
+    조회에 닿지 않는다. 판정은 읽지 않고, 프로필 화면의 협약경고(server/routes_profile)만 쓴다. 고르는 기준은 문장 글자(총사업비 + % 또는 퍼센트)다.
+    """
+    사업들 = [사업명] if 사업명 else []
+    행들 = cur.execute(
+        f"""SELECT {", ".join(f'n."{c}"' for c in _규범_컬럼)} FROM corpus.norms n
+             WHERE n.종류 = '의무' AND n.verified AND NOT n.해석미결 AND (n.적용사업 IS NULL OR n.적용사업 = ANY(%s))
+               AND (n.결과->>'문장') ~ '[0-9]\\s*(%%|퍼센트)' AND (n.결과->>'문장') ~ '총\\s*사업비'
+             ORDER BY n.norm_id""", (사업들,)).fetchall()
+    규범들 = [dict(zip(_규범_컬럼, r)) for r in 행들]
+    _근거_붙이기(cur, 규범들)
+    return 규범들
 
 
 def 비목_품목금지(cur, 사업명: str | None, 비목들: list[str]) -> list[dict]:

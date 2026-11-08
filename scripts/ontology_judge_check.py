@@ -590,6 +590,7 @@ def _시험() -> list[tuple[str, bool]]:
     t.extend(_노드결정_시험())
     t.extend(_조건답_시험())
     t.extend(_시점_시험())
+    t.extend(_협약경고_시험())
     with db.connect(autocommit=True) as c:
         cur = c.cursor()
         for (사업명,) in cur.execute("SELECT DISTINCT 적용사업 FROM corpus.norms WHERE 적용사업 IS NOT NULL ORDER BY 1").fetchall():
@@ -1123,6 +1124,125 @@ def _시점_시험() -> list[tuple[str, bool]]:
         규범표.pop(외주_id, None)
         규범표[창업활동비_id].remove(실제)
         L.적용_규범, L.비목_품목금지, L.세목_한도_있음, O._프로필값_읽기, os.environ["SUDDOE_ONTOLOGY_PROGRAMS"] = 원
+    return t
+
+
+def _협약경고_시험() -> list[tuple[str, bool]]:
+    """5-15 ② 프로필 협약경고: PUT 으로 저장한 협약 금액이 협약 구성 규범(실제 DB 값, 재도전 제15조①표-1: 현금 5% 이상 · 정부지원 75% 이하 · 현물 20% 이하)을
+    어기면 PUT · GET /api/profile 응답의 `협약경고` 에 쉬운 한국어 문장이 온다. 임시 기관 · 계정을 만들어 쓰고 끝에 지운다(CASCADE). 판정에는 영향이 없다."""
+    import uuid
+
+    from fastapi.testclient import TestClient
+
+    from server import auth
+    from server.main import app
+    t: list[tuple[str, bool]] = []
+    재도전 = "재도전성공패키지"
+    org, 계정 = str(uuid.uuid4()), str(uuid.uuid4())
+    내부값 = re.compile(r"규범:|norm|절차:|LIMIT|ONTOLOGY")
+    with db.connect(autocommit=True) as c:
+        cur = c.cursor()
+        cur.execute("INSERT INTO tenant.orgs (org_id, 기관명, 사업명) VALUES (%s, %s, %s)", (org, "협약경고 시험 기관", [재도전]))
+        cur.execute("INSERT INTO tenant.accounts (account_id, org_id, email) VALUES (%s, %s, %s)", (계정, org, f"warn-{계정}@example.test"))
+    원 = (auth.검증된_org, auth.검증된_account)
+    auth.검증된_org, auth.검증된_account = (lambda req: org), (lambda req: 계정)
+    client = TestClient(app, raise_server_exceptions=False)
+
+    def 저장(정부, 현금, 현물="없음"):
+        협약 = {"정부지원_현금": 정부, "자기부담_현금": 현금, **({} if 현물 == "없음" else {"자기부담_현물": 현물})}
+        r = client.put("/api/profile", json={"협약": 협약})
+        g = client.get("/api/profile")
+        return r, g
+
+    def 경고(r, g):
+        return r.json().get("협약경고"), g.json().get("협약경고")
+    try:
+        r, g = 저장(30_000_000, 8_000_000, 12_000_000)          # 총사업비 5,000만원: 현물 24% · 현금 16% · 정부 60%
+        a_put, a_get = 경고(r, g)
+        t.append(("5-15 ② 협약경고 (a) 재도전 현물 24% > 20% 이하: PUT · GET 모두 같은 한 문장, 숫자 · 기준 · 규정 출처가 쉬운 말로",
+                  r.status_code == 200 and g.status_code == 200 and a_put == a_get and len(a_put) == 1
+                  and a_put[0].startswith("자기부담 현물은 총사업비의 24%예요. 2026년 재도전성공패키지 세부관리기준(11차 개정) 제15조 기준은 20% 이하예요.")
+                  and not 내부값.search(a_put[0])))
+        r2, g2 = 저장(30_000_000, 8_000_000, 5_000_000)          # 현물 500만원: 11.6%
+        t.append(("5-15 ② 협약경고 (b) 효과: 현물만 1,200만 → 500만원으로 고치면 경고가 사라진다(PUT · GET)", 경고(r2, g2) == ([], [])))
+        r3, g3 = 저장(60_000_000, 8_000_000, 12_000_000)         # 총사업비 8,000만원: 현물 15% · 정부 75%(이하라 안 어김)
+        t.append(("5-15 ② 협약경고 효과: 정부지원만 3,000만 → 6,000만원으로 바꿔도 현물이 15%라 풀린다 · 정부 75.0% 는 「75% 이하」 를 어기지 않는다", 경고(r3, g3) == ([], [])))
+        r4, g4 = 저장(30_000_000, 8_000_000)                     # 현물 보내지 않음 = NULL(미입력)
+        t.append(("5-15 ② 협약경고 (c) 자기부담 현물이 NULL(미입력)이면 총사업비를 몰라 경고하지 않는다", g4.json()["협약"]["자기부담_현물"] is None and 경고(r4, g4) == ([], [])))
+        r5, g5 = 저장(40_000_000, 500_000, 0)                    # 총사업비 4,050만원: 정부 98.8% > 75% · 현금 1.2% < 5% · 현물 0%
+        문장들 = 경고(r5, g5)[1]
+        t.append(("5-15 ② 협약경고: 어긴 규범마다 한 문장(규범 순서: 현금 하한 · 정부 상한) · 「5% 이상이에요」 「75% 이하예요」",
+                  len(문장들) == 2 and 문장들[0].startswith("자기부담 현금은 총사업비의 1.2%예요.") and "5% 이상이에요." in 문장들[0]
+                  and 문장들[1].startswith("정부지원사업비는 총사업비의 98.8%예요.") and "75% 이하예요." in 문장들[1]))
+        r6, g6 = 저장(75_000_000, 5_000_000, 20_000_000)         # 총 1억원: 정부 75.0% · 현금 5.0% · 현물 20.0% 모두 경계(어기지 않음)
+        t.append(("5-15 ② 협약경고 경계: 75.0% 이하 · 5.0% 이상 · 20.0% 이하는 어기지 않는다", 경고(r6, g6) == ([], [])))
+        r7, g7 = 저장(75_040_000, 5_000_000, 19_960_000)         # 정부 75.04%(반올림하면 75.0% 로 기준과 같아 보인다) · 현금 5.0% · 현물 19.96%
+        t.append(("5-15 ② 협약경고: 가까운 값의 표시가 기준과 같아 보이지 않는다(정부 75.04% 를 「75%」 로 줄여 보이지 않는다)",
+                  len(경고(r7, g7)[1]) == 1 and "총사업비의 75.04%예요" in 경고(r7, g7)[1][0]))
+        # (d) 사업을 정할 수 없을 때
+        with db.connect(autocommit=True) as c:
+            c.cursor().execute("UPDATE tenant.orgs SET 사업명 = %s WHERE org_id = %s", (["예비창업패키지", 재도전], org))
+            c.cursor().execute("UPDATE tenant.profile_agreements SET 사업명 = '미지정' WHERE org_id = %s", (org,))
+        행 = 저장(30_000_000, 8_000_000, 12_000_000)
+        요청 = client.get("/api/profile", params={"사업명": 재도전}).json()["협약경고"]
+        요청표기 = client.get("/api/profile", params={"사업명": " 2026 재도전성공패키지 "}).json()["협약경고"]
+        요청put = client.put("/api/profile", params={"사업명": 재도전}, json={"협약": {"정부지원_현금": 30_000_000, "자기부담_현금": 8_000_000, "자기부담_현물": 12_000_000}}).json()
+        with db.connect(autocommit=True) as c:
+            저장사업 = c.cursor().execute("SELECT 사업명 FROM tenant.profile_agreements WHERE org_id = %s", (org,)).fetchone()[0]
+        t.append(("5-15 ② 협약경고: 기관 사업이 둘이어도 요청 ?사업명=재도전성공패키지(GET · PUT)면 그 사업 규범으로 경고 · 「2026 」 접두와 공백도 표준 표기로 · 요청 사업명은 저장하지 않는다",
+                  len(요청) == 1 and 요청 == 요청표기 == 요청put["협약경고"] and "자기부담 현물은 총사업비의 24%" in 요청[0] and 저장사업 == "미지정"))
+        t.append(("5-15 ② 협약경고: 같은 기관 · 같은 값에서 사업명을 안 보내면 [] (지금과 같다) · 빈 문자열 · 모르는 사업명도 []",
+                  client.get("/api/profile").json()["협약경고"] == [] and client.get("/api/profile", params={"사업명": "  "}).json()["협약경고"] == []
+                  and client.get("/api/profile", params={"사업명": "없는 사업"}).json()["협약경고"] == []))
+        t.append(("5-15 ② 협약경고 (d) 기관의 사업이 둘 이상이고 행 사업명이 미지정이면 사업을 모르니 경고하지 않는다", 경고(*행) == ([], [])))
+        with db.connect(autocommit=True) as c:
+            c.cursor().execute("UPDATE tenant.profile_agreements SET 사업명 = %s WHERE org_id = %s", (재도전, org))
+        t.append(("5-15 ② 협약경고: 행의 사업명이 정해져 있으면 기관의 사업이 여럿이어도 그 사업의 규범을 쓴다", len(client.get("/api/profile").json()["협약경고"]) == 1))
+        with db.connect(autocommit=True) as c:
+            c.cursor().execute("UPDATE tenant.profile_agreements SET 사업명 = %s WHERE org_id = %s", ("모르는 사업", org))
+        t.append(("5-15 ② 협약경고 (d) 규범이 없는 사업(알 수 없는 사업명)은 []", client.get("/api/profile").json()["협약경고"] == []))
+        with db.connect(autocommit=True) as c:
+            c.cursor().execute("UPDATE tenant.profile_agreements SET 사업명 = %s WHERE org_id = %s", ("모두의 창업 프로젝트", org))
+        t.append(("5-15 ② 협약경고: 구성 비율 규범이 없는 사업(모두의 창업)은 []", client.get("/api/profile").json()["협약경고"] == []))
+        # 오류는 []: 규범 조회가 죽어도 프로필 요청은 성공한다
+        import ontology_lookup
+        원조회 = ontology_lookup.비율_규범
+
+        def 터짐(*a, **k):
+            raise RuntimeError("시험용 오류")
+        ontology_lookup.비율_규범 = 터짐
+        try:
+            with db.connect(autocommit=True) as c:
+                c.cursor().execute("UPDATE tenant.profile_agreements SET 사업명 = %s WHERE org_id = %s", (재도전, org))
+            r8, g8 = client.put("/api/profile", json={"협약": {"정부지원_현금": 30_000_000, "자기부담_현금": 8_000_000, "자기부담_현물": 12_000_000}}), client.get("/api/profile")
+        finally:
+            ontology_lookup.비율_규범 = 원조회
+        t.append(("5-15 ② 협약경고: 규범 조회가 오류를 내도 PUT · GET 은 200 이고 협약경고는 []", r8.status_code == 200 and g8.status_code == 200 and 경고(r8, g8) == ([], [])
+                  and g8.json()["협약"]["자기부담_현물"] == 12_000_000))
+        # 순수 함수: 문장이 한 개의 비율 + 연산으로 풀리지 않는 규범 · 모르는 대상 · 총사업비 0 은 건너뛴다
+        from decimal import Decimal
+
+        import server.routes_profile as P
+        값 = {"정부지원_현금": Decimal(30_000_000), "자기부담_현금": Decimal(8_000_000), "자기부담_현물": Decimal(12_000_000)}
+
+        def 규범(문장, 대상=("절차:자기부담현물",)):
+            return {"결과": {"문장": 문장}, "대상": list(대상), "근거": []}
+        건너뜀 = [규범("자기부담사업비 중 현물은 총사업비의 20% 이하 또는 10% 이상이어야 합니다."), 규범("현물은 총사업비 기준을 따릅니다."), 규범("현물은 총사업비의 20% 이하여야 합니다.", ("절차:모르는대상",)),
+               규범("현물은 총사업비의 20% 이하여야 합니다.", ("절차:자기부담현물", "절차:자기부담현금")), 규범("현물은 취득가액의 20% 이하여야 합니다.")]
+        t.append(("5-15 ② 협약경고 순수 함수: 비율 둘 · 비율 없음 · 모르는 대상 · 대상 둘 · 총사업비 아닌 분모는 건너뛴다 · 총사업비 0 · 모르는 값은 []",
+                  P._협약경고_문장들(건너뜀, 값, "재도전성공패키지") == []
+                  and P._협약경고_문장들([규범("현물은 총사업비의 20% 이하여야 합니다.")], {k: Decimal(0) for k in 값}, "x") == []
+                  and P._협약경고_문장들([규범("현물은 총사업비의 20% 이하여야 합니다.")], {**값, "자기부담_현물": None}, "x") == []
+                  and P._협약경고_문장들([규범("현물은 총사업비의 20% 이하여야 합니다.")], 값, "재도전성공패키지")
+                  == ["자기부담 현물은 총사업비의 24%예요. 재도전성공패키지 기준은 20% 이하예요."]))
+        합계 = P._협약경고_문장들([규범("자기부담사업비는 총사업비의 30% 이상으로 구성해야 하며 현금과 현물의 비율에는 제한이 없습니다.", ("절차:창업기업등자기부담사업비",))],
+                              {"정부지원_현금": Decimal(80_000_000), "자기부담_현금": Decimal(10_000_000), "자기부담_현물": Decimal(10_000_000)}, "초격차 스타트업 프로젝트")
+        t.append(("5-15 ② 협약경고: 자기부담사업비 규범은 현금 + 현물 합계로 잰다(초격차 30% 이상, 합계 20% → 경고)",
+                  합계 == ["자기부담사업비(현금과 현물 합계)는 총사업비의 20%예요. 초격차 스타트업 프로젝트 기준은 30% 이상이에요."]))
+    finally:
+        auth.검증된_org, auth.검증된_account = 원
+        with db.connect(autocommit=True) as c:
+            c.cursor().execute("DELETE FROM tenant.orgs WHERE org_id = %s", (org,))
     return t
 
 
