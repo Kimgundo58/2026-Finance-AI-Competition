@@ -1,0 +1,118 @@
+{
+ "묶음": "ontology/추출/창업중심대학/1_창업중심대학_사업비",
+ "검사": "scripts/extraction_run.py 로그_읽기(구독 transcript 를 init 줄 + assistant 줄로 바꿔 넣음)",
+ "추출자": {
+  "A": {
+   "에이전트ID": "a7976decbf34d4c37",
+   "transcript": "C:\\Users\\dogun\\.claude\\projects\\C--Users-dogun-Downloads-Desktop-Desktop-Desktop-Desktop-----3-1------------github----\\01377b18-d61a-4565-af8b-80e9cf3c38dc\\subagents\\agent-a7976decbf34d4c37.jsonl",
+   "모델": [
+    "claude-opus-5-5"
+   ],
+   "effort": [
+    "high"
+   ],
+   "effort_출처": "transcript assistant 줄",
+   "프롬프트_글자같음": true,
+   "프롬프트해시_LF": "f8da748db9d5d462a1d184795fb6ec18e3004ea280746d63c266181ce4a49bb6",
+   "시작": "2026-11-07T22:58:21.934Z",
+   "끝": "2026-11-07T23:13:25.909Z",
+   "읽은파일": [
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\docs\\5_룰\\5-5_규범_구조.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\docs\\5_룰\\5-7_원문_추출_절차.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\docs\\5_룰\\5-8b_원천_JSON_형식.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\docs\\5_룰\\5-7b_추출_에이전트_지침.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\ontology\\추출\\창업중심대학\\1_창업중심대학_사업비\\작업_A\\입력_원문.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\ontology\\추출\\창업중심대학\\1_창업중심대학_사업비\\작업_A\\입력_문서키.json",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\ontology\\추출\\창업중심대학\\1_창업중심대학_사업비\\작업_A\\입력_기존노드.json"
+   ],
+   "명령": [
+    {
+     "도구": "Glob",
+     "pattern": "*",
+     "path": "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\ontology\\추출\\창업중심대학\\1_창업중심대학_사업비\\작업_A"
+    },
+    {
+     "도구": "Bash",
+     "명령": "cd \"/c/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본/ontology/추출/창업중심대학/1_창업중심대학_사업비/작업_A\" && PYTHONIOENCODING=utf-8 python -I \"C:/Users/dogun/AppData/Local/Temp/claude/27e28e8e3953af44/01377b18-d61a-4565-af8b-80e9cf3c38dc/scratchpad/check_excerpts.py\" 입력_원문.md 추출_A.md"
+    },
+    {
+     "도구": "Bash",
+     "명령": "cd \"/c/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본/ontology/추출/창업중심대학/1_창업중심대학_사업비/작업_A\" && grep -cE '^(규범: |      )규범:창업중심대학/' 추출_A.md; grep -oE '^(규범: |      )규범:창업중심대학/[^ ]+' 추출_A.md | sed -E 's#.*/(금지|허용|한도|임계값|의무|요건|우선순위)/[0-9]+$#\\1#' | sort | uniq -c; ls"
+    }
+   ],
+   "허용밖읽기": [],
+   "로그_읽기_원래": [
+    "Glob C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\ontology\\추출\\창업중심대학\\1_창업중심대학_사업비\\작업_A"
+   ],
+   "자기폴더_Glob_허용": [
+    "Glob C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\ontology\\추출\\창업중심대학\\1_창업중심대학_사업비\\작업_A *"
+   ],
+   "작업폴더_Read": 3,
+   "문제": []
+  },
+  "B": {
+   "에이전트ID": "a4114f7d257881920",
+   "transcript": "C:\\Users\\dogun\\.claude\\projects\\C--Users-dogun-Downloads-Desktop-Desktop-Desktop-Desktop-----3-1------------github----\\01377b18-d61a-4565-af8b-80e9cf3c38dc\\subagents\\agent-a4114f7d257881920.jsonl",
+   "모델": [
+    "claude-opus-5-5"
+   ],
+   "effort": [
+    "high"
+   ],
+   "effort_출처": "transcript assistant 줄",
+   "프롬프트_글자같음": true,
+   "프롬프트해시_LF": "a6c9d2c8cafdae62a205dc2a468b8f23ac3e0637facfbe8e44e61fbdbd8b89de",
+   "시작": "2026-11-07T22:58:30.064Z",
+   "끝": "2026-11-07T23:28:52.358Z",
+   "읽은파일": [
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\docs\\5_룰\\5-5_규범_구조.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\docs\\5_룰\\5-7_원문_추출_절차.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\docs\\5_룰\\5-8b_원천_JSON_형식.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\docs\\5_룰\\5-7b_추출_에이전트_지침.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\ontology\\추출\\창업중심대학\\1_창업중심대학_사업비\\작업_B\\입력_원문.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\ontology\\추출\\창업중심대학\\1_창업중심대학_사업비\\작업_B\\입력_문서키.json",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\ontology\\추출\\창업중심대학\\1_창업중심대학_사업비\\작업_B\\입력_기존노드.json",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\ontology\\추출\\창업중심대학\\1_창업중심대학_사업비\\작업_B\\추출_B.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\ontology\\추출\\창업중심대학\\1_창업중심대학_사업비\\작업_B\\추출_B.md"
+   ],
+   "명령": [
+    {
+     "도구": "Grep",
+     "pattern": "규범:(?!창업중심대학/)",
+     "path": "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\ontology\\추출\\창업중심대학\\1_창업중심대학_사업비\\작업_B\\추출_B.md"
+    },
+    {
+     "도구": "Grep",
+     "pattern": "^규범: ",
+     "path": "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\ontology\\추출\\창업중심대학\\1_창업중심대학_사업비\\작업_B\\추출_B.md"
+    },
+    {
+     "도구": "Bash",
+     "명령": "cd \"/c/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본/ontology/추출/창업중심대학/1_창업중심대학_사업비/작업_B\" && PYTHONIOENCODING=utf-8 python -I \"C:/Users/dogun/AppData/Local/Temp/claude/27e28e8e3953af44/01377b18-d61a-4565-af8b-80e9cf3c38dc/scratchpad/extB_bundle1/chk.py\" 입력_원문.md 추출_B.md"
+    },
+    {
+     "도구": "Bash",
+     "명령": "cd \"/c/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본/ontology/추출/창업중심대학/1_창업중심대학_사업비/작업_B\" && python -I -X utf8 \"C:/Users/dogun/AppData/Local/Temp/claude/27e28e8e3953af44/01377b18-d61a-4565-af8b-80e9cf3c38dc/scratchpad/extB_bundle1/chk.py\" 입력_원문.md 추출_B.md"
+    },
+    {
+     "도구": "Bash",
+     "명령": "cd \"/c/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본/ontology/추출/창업중심대학/1_창업중심대학_사업비/작업_B\" && python -I -X utf8 \"C:/Users/dogun/AppData/Local/Temp/claude/27e28e8e3953af44/01377b18-d61a-4565-af8b-80e9cf3c38dc/scratchpad/extB_bundle1/chk.py\" 입력_원문.md 추출_B.md && grep -c '^### 조:' 추출_B.md && grep '^### 조:' 추출_B.md | sort | uniq -d | wc -l && ls"
+    },
+    {
+     "도구": "Bash",
+     "명령": "cd \"/c/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본/ontology/추출/창업중심대학/1_창업중심대학_사업비/작업_B\" && grep -o '| 문장 [^|]*' 추출_B.md | grep -c '\"'; grep -E '/(금지|의무)/[0-9]+ ' 추출_B.md | grep -vc '| 문장 '; grep -oE '규범:창업중심대학/[^ ]+' 추출_B.md | wc -l; grep -c '(신규' 추출_B.md"
+    },
+    {
+     "도구": "Bash",
+     "명령": "cd \"/c/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본/ontology/추출/창업중심대학/1_창업중심대학_사업비/작업_B\" && awk '/^### /{c=0} /^개념:/{c=1} /^관계:|^규범:|^모르는/{c=0} c' 추출_B.md | grep -oE '(비목|세목|품목|주체|증빙|절차|시간):[^ ·,()]+' | sort -u | wc -l; awk '/^### /{c=0} /^개념:/{c=1} /^관계:|^규범:|^모르는/{c=0} c' 추출_B.md | grep -oE '(비목|세목|품목|주체|증빙|절차|시간):[^ ·,()]+ \\(신규' | sort -u | wc -l"
+    }
+   ],
+   "허용밖읽기": [],
+   "로그_읽기_원래": [],
+   "자기폴더_Glob_허용": [],
+   "작업폴더_Read": 5,
+   "문제": []
+  }
+ },
+ "통과": true
+}
