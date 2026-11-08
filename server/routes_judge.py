@@ -89,7 +89,8 @@ def judge(req: Request, body: 판정요청, mock: str | None = None,
         response_cache.프로필_해시(body.org_id, account_id),
         # 온톨로지 경로의 입력. 값이 달라지면 코드 판정이 달라진다.
         body.확정세목, json.dumps(body.추가입력값, ensure_ascii=False, sort_keys=True), body.부가세구분,
-        # 사용일자는 새 경로의 지난 기한 문장에만 쓴다. 옛 경로는 날짜가 달라도 같은 결과라 키를 나누지 않는다.
+        # 사용일자는 새 경로의 지난 기한 문장과 협약 기간 비교(시점 규범)에 쓴다. 옛 경로는 날짜가 달라도 같은 결과라 키를 나누지 않는다.
+        # 협약 기간은 프로필 해시(위)에 있고, 정규화가 뽑은 날짜는 정규화 JSON(위)에 있다.
         body.사용일자 if 온톨로지_사업(body.사업명) else None,
         # ?mock= 은 mock 모드에서만 응답을 바꾼다. live 에서 키에 넣으면 캐시를 우회할 수 있다.
         *([mock] if MOCK else []),

@@ -107,7 +107,8 @@ class 판정요청(BaseModel):
     확정세목: str | None = None
     추가입력값: dict[str, Any] = Field(default_factory=dict)
     부가세구분: 부가세구분타입 | None = None
-    # 화면의 예상 지출일(YYYY-MM-DD). 이 날짜보다 앞선 기한의 조건 문장을 뺄 때만 쓴다. 날짜가 아니면 없는 것으로 본다
+    # 화면의 예상 지출일(YYYY-MM-DD). 지난 기한의 조건 문장을 빼고, 프로필 협약 기간과 비교하는 시점 규범(5-14 D)에 쓴다. 날짜가 아니면 없는 것으로 본다.
+    # 비어 있으면 정규화가 질문 글에서 뽑은 날짜를 쓴다(화면 입력이 먼저)
     사용일자: str | None = None
 
 
