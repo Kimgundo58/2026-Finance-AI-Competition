@@ -94,6 +94,7 @@ class _판정상태:
     추가입력값: dict = field(default_factory=dict)
     부가세구분: str | None = None
     사용일자: str | None = None     # 화면의 예상 지출일. 지난 기한 문장을 조건에서 뺄 때만 쓴다(판정을 올리지 않는다)
+    노드결정: dict | None = None    # 확인 질문 LLM 이 고른 품목 노드 {id, 확신}(5-13). 서버 저장값에서만 온다
     온톨로지: dict = field(default_factory=dict)
     게이트결과: dict = field(default_factory=dict)
     게이트입력: dict = field(default_factory=dict)
@@ -685,29 +686,41 @@ def 게이트_입력(금액, 부가세구분: str | None, 추가입력값: dict 
 
 
 def 온톨로지_조회(cur, 사업명: str | None, 비목: str, 세목: str | None, 입력: dict, *, 확정: bool,
-              품목: str | None = None) -> dict:
+              품목: str | None = None, 노드결정: dict | None = None) -> dict:
     """대상 노드 → 적용 규범 → 근거 조문 → 코드 게이트. 판정과 질문 생성이 같은 값을 쓴다. 조회 오류는 그대로 올린다.
 
     품목 표현이 확정 노드 아래 품목과 정확히 일치하면 그 품목을 시작 노드로 삼는다(품목 금지 · 상위 규범 상속).
     일치한 품목이 확정 세목 밖이지만 같은 비목(또는 모든 비목) 아래면 그 규범을 `적용["경로밖_품목규범"]` 으로 둔다:
     발췌 · 근거 조는 문맥에 넣고 금지는 조건 문장으로 알리되 코드 불가는 내지 않는다(5-6 ③).
+    `노드결정`({id, 확신}, 5-13): 별칭 일치가 없을 때만 쓴다. 확인 질문 LLM 이 고른 품목 노드다(판정 라우트가 서버 저장값에서 읽는다).
+    동일이면 별칭 일치와 같은 규칙, 유사면 경로밖 길이다(`ontology_lookup.노드결정_적용`). `적용["품목노드"]` 에 어디서 왔는지 남긴다.
     """
     대상 = ontology_lookup.대상_노드(cur, 사업명, 비목, 세목)
-    품목_id = ontology_lookup.품목_노드(cur, 사업명, 품목, 대상["대상_id"]) if 확정 else None
+    자금 = ontology_fund.경로_자금(사업명, 대상["비목_id"])
+    모든비목_포함 = 자금 != ontology_fund.창업활동자금
+    품목_id = 별칭_품목 = ontology_lookup.품목_노드(cur, 사업명, 품목, 대상["대상_id"]) if 확정 else None
+    밖품목 = ontology_lookup.경로밖_품목(cur, 사업명, 품목, 대상["비목_id"]) if 확정 and not 품목_id else []
+    별칭일치 = bool(품목_id or 밖품목)
+    품목노드 = {"출처": "별칭", "확신": "동일" if 품목_id else "유사"} if 별칭일치 else None
+    if 확정 and 품목 and not 별칭일치 and 노드결정:
+        품목_id, 밖품목, 확신 = ontology_lookup.노드결정_적용(cur, 사업명, 대상, 노드결정, 모든비목_포함)
+        if 확신:
+            품목노드 = {"출처": "노드결정", "확신": 확신}
     시작 = 품목_id or 대상["대상_id"]
     적용 = ontology_lookup.적용_규범(cur, 사업명, 시작)
     노드들 = {시작, *(p for _, p in 적용["경로"]), ontology_lookup.모든비목}
-    자금 = ontology_fund.경로_자금(사업명, 대상["비목_id"])
     적용["규범"], 공통미정 = ontology_fund.공통규범_나누기(자금, 적용["규범"], 노드들)
     적용["공통미정"] = 공통미정
-    밖품목 = ontology_lookup.경로밖_품목(cur, 사업명, 품목, 대상["비목_id"]) if 확정 and not 품목_id else []
     밖규범 = ontology_lookup.경로밖_규범(cur, 사업명, 밖품목, {"규범": [*적용["규범"], *공통미정]})
-    적용["경로밖_품목규범"], 적용["경로밖_품목"] = 밖규범, 밖품목
-    # 품목 표현이 어느 별칭과도 일치하지 않으면 이 비목의 금지 품목을 판정 문맥에 대조 재료로 넣는다. 유사 일치를 코드로 하지 않고 코드 불가도 내지 않는다
+    적용["경로밖_품목규범"], 적용["경로밖_품목"], 적용["품목노드"] = 밖규범, 밖품목, 품목노드
+    # 품목 표현이 어느 별칭과도 일치하지 않으면 이 비목의 금지 품목을 판정 문맥에 대조 재료로 넣는다. 유사 일치를 코드로 하지 않고 코드 불가도 내지 않는다.
+    # LLM 노드 결정이 있어도 넣는다(별칭 일치만 뺀다). 결정이 틀렸을 때 판정 LLM 이 대조할 재료를 잃지 않게 한다. 그때는 이미 적용 · 경로밖 규범에 든 것을 뺀다
     품목표: list[dict] = []
-    if 확정 and 품목 and not 품목_id and not 밖품목:
-        비목들 = [대상["비목_id"], *([] if 자금 == ontology_fund.창업활동자금 else [ontology_lookup.모든비목])]
-        품목표 = [n for n in ontology_lookup.비목_품목금지(cur, 사업명, 비목들) if ontology_gate.경로밖금지_구분(n, None) == "묶음"]
+    if 확정 and 품목 and not 별칭일치:
+        비목들 = [대상["비목_id"], *([ontology_lookup.모든비목] if 모든비목_포함 else [])]
+        이미 = {n["norm_id"] for n in [*적용["규범"], *공통미정, *밖규범]} if 품목노드 else set()
+        품목표 = [n for n in ontology_lookup.비목_품목금지(cur, 사업명, 비목들)
+                if ontology_gate.경로밖금지_구분(n, None) == "묶음" and n["norm_id"] not in 이미]
     적용["품목표"] = 품목표
     금지미정_id = ontology_fund.금지문장_조문ID(자금)
     적용["금지미정"] = bool(금지미정_id)
@@ -720,7 +733,8 @@ def 온톨로지_조회(cur, 사업명: str | None, 비목: str, 세목: str | N
         cur, [n for n in [*적용["규범"], *밖규범] if n["norm_id"] not in 공통우선_id], 3, 시작, 사업=사업명), 자금, 문서키표)
     실효 = [n for n in 적용["규범"] if n["종류"] != "우선순위"]
     위임만 = not 실효 and ontology_lookup.위임_있음(근거행)
-    세목미정 = 확정 and not 세목 and not 품목_id and ontology_lookup.세목_한도_있음(cur, 사업명, 대상["대상_id"])
+    # 세목 안내는 별칭으로 정한 품목만 없앤다. LLM 이 고른 품목(5-13)으로 없애면 조건부 상한이 빠져 판정이 올라갈 수 있다(코드는 내리기만)
+    세목미정 = 확정 and not 세목 and not 별칭_품목 and ontology_lookup.세목_한도_있음(cur, 사업명, 대상["대상_id"])
     공통품목 = ontology_fund.공통_품목규범(자금, 밖규범)
     게이트결과 = ontology_gate.게이트(적용["규범"], 입력, 확정=확정, 세목표시=세목,
                               우선순위_적용=적용["우선순위_적용"], 위임만=위임만, 세목미정=세목미정,
@@ -772,7 +786,7 @@ def _온톨로지단계(상태: _판정상태) -> dict | None:
     if 비목:
         try:
             상태.온톨로지 = 온톨로지_조회(상태.cur, 상태.사업명, 비목, 세목, 입력, 확정=확정,
-                                      품목=상태.정규화결과.get("품목"))
+                                      품목=상태.정규화결과.get("품목"), 노드결정=상태.노드결정)
         except LookupError as e:
             return _실패응답(상태, "온톨로지", "고른 분류를 규정에서 찾지 못해 판정을 내리지 않았습니다. 분류를 다시 골라 주세요.",
                           f"온톨로지 조회 실패: {e}")
@@ -783,6 +797,8 @@ def _온톨로지단계(상태: _판정상태) -> dict | None:
                       "게이트": 상태.게이트결과, "노드들": set()}
     상태._지연기록("온톨로지", t)
     상태.처리단계.append("온톨로지")
+    if (품목노드 := (상태.온톨로지.get("적용") or {}).get("품목노드")) and 품목노드["출처"] == "노드결정":
+        상태.처리단계.append(f"품목노드:{품목노드['확신']}")     # 노드 ID 는 넣지 않는다(응답에 나간다)
     g = 상태.게이트결과
     if not g.get("종류"):
         return None
@@ -1122,7 +1138,7 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, account_id
        사용자프로필값: dict | None = None,
        사용자답변: list[dict] | None = None, 답변유실: bool = False,
        확정세목: str | None = None, 추가입력값: dict | None = None, 부가세구분: str | None = None,
-       사용일자: str | None = None,
+       사용일자: str | None = None, 노드결정: dict | None = None,
        dry: bool = False, 기록: bool = True, 주입: str | None = None,
        참조확장_사용: bool = True) -> dict:
     """질문 하나를 판정해 응답 dict 를 돌려준다. 어떤 실패도 예외로 올리지 않고 판단불가로 반환한다.
@@ -1132,7 +1148,8 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, account_id
     `정규화결과`(이미 실행한 정규화 결과. 주면 정규화 LLM 을 다시 부르지 않는다), `사용자프로필값`(심층질문 답.
     프로필 값과 같은 컬럼명 키이며 DB 값보다 우선한다), `사용자답변`(확인 질문 답. 프롬프트 B5.7 과 검증 하향에 쓴다),
     `답변유실`(답이 왔는데 저장된 질문을 읽지 못함. 「가능」을 내지 않는다).
-    새 경로 인자: `확정세목`(화면에서 확정한 세목 표기), `추가입력값`(화면 숫자 칸), `부가세구분`(포함 · 공급가액 · 모름), `사용일자`(YYYY-MM-DD, 지난 기한 문장을 뺄 때만 쓴다).
+    새 경로 인자: `확정세목`(화면에서 확정한 세목 표기), `추가입력값`(화면 숫자 칸), `부가세구분`(포함 · 공급가액 · 모름), `사용일자`(YYYY-MM-DD, 지난 기한 문장을 뺄 때만 쓴다),
+    `노드결정`({id, 확신: 동일|유사}, 확인 질문 LLM 이 고른 품목 노드. 판정 라우트가 서버 저장값에서 읽어 넘긴다. 별칭 일치가 있으면 쓰지 않는다).
     평가용 인자: `dry`(LLM 없이 규칙 정규화와 프롬프트 구성까지만), `기록`(tenant.decisions 기록 여부),
     `주입`(장애 주입 'db'|'timeout'|'schema'|'empty'|'cite'|'onto'), `참조확장_사용`(False 면 B3 을 넣지 않는다).
     부수 효과: `기록` 이면 게이트·정상 종료를 tenant.decisions 에 넣는다. 실패 종료는 기록하지 않는다.
@@ -1141,7 +1158,8 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, account_id
                    plan_id=plan_id, 기록=기록,
                    dry=dry, 주입=주입, 참조확장_사용=참조확장_사용,
                    사용자답변=list(사용자답변 or []), 답변유실=답변유실,
-                   확정비목=확정비목, 확정세목=확정세목, 추가입력값=dict(추가입력값 or {}), 부가세구분=부가세구분, 사용일자=사용일자)
+                   확정비목=확정비목, 확정세목=확정세목, 추가입력값=dict(추가입력값 or {}), 부가세구분=부가세구분, 사용일자=사용일자,
+                   노드결정=노드결정)
     try:
         if 주입 == "db":
             raise 주입실패("DB 연결 실패(주입)")

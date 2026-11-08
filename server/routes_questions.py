@@ -66,13 +66,21 @@ def questions(req: Request, body: 질문요청) -> dict:
         return dict(_실패_응답)
 
 
+def 질문세트_키(org: str | None, account: str | None, 사업명, 확정비목, 확정세목, 부가세구분, 세부유형, 품목, 금액, 용도,
+             질문원문) -> str:
+    """질문세트(캐시 키). 캐시 행은 계정 단위라(RLS) 키에도 org·계정을 넣는다. L3 를 새로 올리면 키가 바뀐다.
+
+    판정 라우트가 질문세트 없이 온 요청(질문 0개)에서 같은 키를 다시 만들어 노드 결정만 읽는다(routes_judge._노드결정_읽기).
+    """
+    return response_cache.캐시키("questions", org, account, 사업명, 확정비목, 확정세목, 부가세구분,
+                              세부유형, 품목, 금액, 용도, 질문원문, response_cache.l3_해시(org))
+
+
 def _live_질문(body: 질문요청, org: str | None, account: str | None, ip: str, t0: float) -> dict:
     import question_generate
 
-    # 캐시 행은 계정 단위라(RLS) 키에도 org·계정을 넣는다. L3 를 새로 올리면 키가 바뀐다.
-    k = response_cache.캐시키("questions", org, account, body.사업명, body.확정비목, body.확정세목, body.부가세구분,
-                            body.세부유형, body.품목, body.금액, body.용도, body.질문원문,
-                            response_cache.l3_해시(org))
+    k = 질문세트_키(org, account, body.사업명, body.확정비목, body.확정세목, body.부가세구분,
+                body.세부유형, body.품목, body.금액, body.용도, body.질문원문)
 
     def 응답(저장값: dict) -> dict:
         return {"상태": 저장값["상태"], "질문세트": k,
@@ -104,7 +112,9 @@ def _live_질문(body: 질문요청, org: str | None, account: str | None, ip: s
     _로그(r["상태"], len(r["질문"]), 버린사유 or ([메타["사유"]] if 메타.get("사유") else []), False, t0)
     if r["상태"] == "실패":                             # 일시적 장애를 24시간 고정하지 않는다
         return dict(_실패_응답)
-    저장값 = {"상태": r["상태"], "질문": r["질문"], "추가입력": r.get("추가입력") or [], "용어풀이": r.get("용어풀이") or []}
+    # 노드결정(5-13)은 서버에만 둔다. 응답() 은 내보내지 않고 판정 라우트가 읽는다
+    저장값 = {"상태": r["상태"], "질문": r["질문"], "추가입력": r.get("추가입력") or [], "용어풀이": r.get("용어풀이") or [],
+             **({"노드결정": r["노드결정"]} if r.get("노드결정") else {})}
     저장됨 = response_cache.저장(k, 저장값, 종류="questions", org=org, account=account, 데이터버전_해시=데이터버전해시,
                               ttl초=_임시_TTL초 if 메타.get("사유") == "LLM실패" else _질문세트_TTL초)
     if not 저장됨 and 저장값["질문"]:                    # 답을 받아도 판정에서 질문을 찾지 못하니 묻지 않는다

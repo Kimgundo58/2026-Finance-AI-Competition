@@ -109,6 +109,11 @@ def _임시기관(client, m: 문항, 만든기관: list[str], 잠금: threading.
                     files={"파일": (파일명, ux._hwpx(["평가기관 사업비 집행 규정", m.기관규정문 or ""]), "application/octet-stream")})
     doc = r.json().get("doc_id") if r.status_code == 202 else None
     상태 = client.get(f"/api/l3/{doc}", headers=헤더).json() if doc else {}
+    if 상태.get("상태") == "확인필요":
+        # 화면: 문서 점검이 의심한 파일은 「이 문서를 세부기준으로 쓸까요?」 를 묻고 사용자가 「적용」 을 누른다
+        # (server/routes_l3.py 적용_확인). 문항의 기관규정문은 그 기관의 규정이라 사용자는 적용한다. 진행상황 E108
+        rc = client.post(f"/api/l3/{doc}/confirm", headers=헤더)
+        상태 = client.get(f"/api/l3/{doc}", headers=헤더).json() if rc.status_code == 200 else {"상태": f"적용 {rc.status_code}"}
     if 상태.get("상태") != "완료":
         raise RuntimeError(f"L3 업로드 {r.status_code} · 상태 {상태.get('상태')} · 실패사유 {상태.get('실패사유')}")
     return 헤더, org, _l3표시명(파일명)     # 응답 인용의 doc_id 는 UUID 가 아니라 이 이름이다(llm_validate._메타_행)

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """온톨로지 조회 함수(읽기 전용, docs/5_룰/5-8_저장과_조회.md). 판정 · 질문 생성의 새 경로가 쓴다.
 
-노드_결정 · 품목_노드 · 경로밖_품목 · 경로밖_규범 · 비목_품목금지 · 조문_행 · 세목_한도_있음 · 적용_규범 · 근거_조문 · 새경로_대상 · 근거경로_문장. 쓰지 않는다. 어떤 예외도 호출자에게 그대로 올린다
+노드_결정 · 품목_노드 · 경로밖_품목 · 품목_후보 · 노드결정_적용 · 경로밖_규범 · 비목_품목금지 · 조문_행 · 세목_한도_있음 · 적용_규범 · 근거_조문 · 새경로_대상 · 근거경로_문장. 쓰지 않는다. 어떤 예외도 호출자에게 그대로 올린다
 (호출자 orchestrate 가 판단불가로 바꾼다). 없는 노드 ID 는 LookupError 다.
 L3 는 여기서 다루지 않는다(능력 질문 시험의 `문맥_구성` 호출만 판정과 같은 문맥 구성 함수로 L3 연결을 본다). 읽는 테이블: corpus.concepts · concept_labels · concept_relations · norms · provenance ·
 documents · doc_articles.
@@ -477,6 +477,55 @@ def 경로밖_품목(cur, 사업명: str | None, 표현: str | None, 비목_id: 
     사업들 = [사업명] if 사업명 else []
     return [행["concept_id"] for 행 in 노드_결정(cur, 표현 or "", 사업명)
             if 행["종류"] in ("품목", "세목") and {비목_id, 모든비목} & {p for _, p in _상위_경로(cur, 행["concept_id"], 사업들)}]
+
+
+def 품목_후보(cur, 사업명: str | None, 비목_id: str, 모든비목_포함: bool = True) -> list[dict]:
+    """확인 질문 LLM 이 품목 노드를 고를 후보(5-13). 비목_id 또는 모든 비목(`비목:창업/*`) 아래 세목 · 품목 노드 [{id, 정식명, 별칭:[...]}].
+
+    `경로밖_품목` 과 같은 범위다. 창업활동자금(모두의 창업 창업활동비)은 모든 비목을 빼고 부른다(`온톨로지_조회` 품목표와 같은 규칙).
+    노드 · 관계 · 별칭은 적용사업이 NULL 이거나 그 사업인 것만. 정의는 넣지 않는다(대부분 비어 있다). concept_id 순.
+    """
+    사업들 = [사업명] if 사업명 else []
+    뿌리 = [비목_id, *([모든비목] if 모든비목_포함 and 비목_id != 모든비목 else [])]
+    행들 = cur.execute(
+        """WITH RECURSIVE 하위(id, 방문) AS (
+             SELECT r.src_id, ARRAY[r.dst_id, r.src_id] FROM corpus.concept_relations r
+              WHERE r.관계 = '상위' AND r.dst_id = ANY(%(뿌리)s) AND (r.적용사업 IS NULL OR r.적용사업 = ANY(%(사업들)s))
+             UNION ALL
+             SELECT r.src_id, h.방문 || r.src_id FROM 하위 h JOIN corpus.concept_relations r ON r.dst_id = h.id
+              WHERE r.관계 = '상위' AND (r.적용사업 IS NULL OR r.적용사업 = ANY(%(사업들)s)) AND NOT r.src_id = ANY(h.방문))
+           SELECT DISTINCT c.concept_id, c.pref_label FROM 하위 h JOIN corpus.concepts c ON c.concept_id = h.id
+            WHERE c.종류 IN ('세목', '품목') AND (c.적용사업 IS NULL OR c.적용사업 = ANY(%(사업들)s))
+            ORDER BY c.concept_id""", {"뿌리": 뿌리, "사업들": 사업들}).fetchall()
+    별칭: dict[str, list[str]] = {}
+    for cid, 글 in cur.execute("""SELECT concept_id, alt_label FROM corpus.concept_labels
+                                  WHERE concept_id = ANY(%s) AND (적용사업 IS NULL OR 적용사업 = ANY(%s))
+                                  ORDER BY concept_id, alt_label""", ([r[0] for r in 행들], 사업들)).fetchall():
+        if 글 not in 별칭.setdefault(cid, []):
+            별칭[cid].append(글)
+    return [{"id": r[0], "정식명": r[1], "별칭": [x for x in 별칭.get(r[0], []) if x != r[1]]} for r in 행들]
+
+
+def 노드결정_적용(cur, 사업명: str | None, 대상: dict, 노드결정: dict | None, 모든비목_포함: bool) -> tuple[str | None, list[str], str | None]:
+    """확인 질문 LLM 이 고른 품목 노드(5-13) → (시작 품목 노드, 경로밖 노드들, 확신). 별칭 일치가 없을 때만 호출자가 부른다.
+
+    ID 가 이번 범위의 후보(`품목_후보`)에 없거나 확신이 동일 · 유사가 아니면 쓰지 않는다(지금 길). 판정 때 다시 확인한다.
+    동일 + 품목 + 확정 대상 아래 → 시작 노드(`품목_노드` 와 같은 규칙, 게이트를 켠다).
+    그 밖(유사, 동일인데 확정 세목 밖이거나 세목 노드) → 경로밖 길(`경로밖_품목` 과 같다. 문맥 · 조건 문장만, 코드 불가 없음).
+    고른 노드가 확정 대상 자신이면 바뀌는 것이 없다.
+    """
+    if not isinstance(노드결정, dict):
+        return None, [], None
+    nid, 확신 = 노드결정.get("id"), 노드결정.get("확신")
+    if not isinstance(nid, str) or 확신 not in ("동일", "유사") or nid == 대상["대상_id"]:
+        return None, [], None
+    if nid not in {c["id"] for c in 품목_후보(cur, 사업명, 대상["비목_id"], 모든비목_포함)}:
+        return None, [], None
+    사업들 = [사업명] if 사업명 else []
+    종류 = cur.execute("SELECT 종류 FROM corpus.concepts WHERE concept_id = %s", (nid,)).fetchone()[0]
+    if 확신 == "동일" and 종류 == "품목" and 대상["대상_id"] in {p for _, p in _상위_경로(cur, nid, 사업들)}:
+        return nid, [], 확신
+    return None, [nid], 확신
 
 
 def 경로밖_규범(cur, 사업명: str | None, 품목들: list[str], 적용: dict) -> list[dict]:

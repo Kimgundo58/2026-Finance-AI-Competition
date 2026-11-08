@@ -26,6 +26,8 @@ for _s in (sys.stdout, sys.stderr):
 os.environ["SUDDOE_MOCK"] = "0"
 os.environ["SUDDOE_ONTOLOGY_PROGRAMS"] = 사업
 os.environ.setdefault("SUDDOE_DEMO_SECRET", "ontology-judge-check")
+os.environ.setdefault("SUDDOE_IP_HOURLY_LIMIT", "1000000")      # 노드 결정 시험은 /api/questions · /api/judge 를 여러 번 부른다
+os.environ.pop("SUDDOE_JUDGE_ANSWERS", None)
 
 import llm_validate as V  # noqa: E402
 import normalize_run  # noqa: E402
@@ -584,11 +586,141 @@ def _시험() -> list[tuple[str, bool]]:
     t.extend(_항호_시험())
     t.extend(_폼_품목_시험())
     t.extend(_용어_시험())
+    t.extend(_노드결정_시험())
     with db.connect(autocommit=True) as c:
         cur = c.cursor()
         for (사업명,) in cur.execute("SELECT DISTINCT 적용사업 FROM corpus.norms WHERE 적용사업 IS NOT NULL ORDER BY 1").fetchall():
             t.extend(_라벨_스윕(cur, 사업명))           # 원천에 든 사업 전부
         t.extend(_문턱_시험(c.cursor()))
+    return t
+
+
+def _노드결정_시험() -> list[tuple[str, bool]]:
+    """5-13 품목 노드 결정: 화면 경로(/api/questions → /api/judge, 프로세스 안)로 돈다. 질문 LLM · 판정 LLM 은 고정 출력이다.
+    규범은 실제 값을 쓴다(창업중심대학 참고3 「선급금보증보험증권 발급 비용」 금지, 품목:창업/선급금보증보험료). 검색은 고정 그대로."""
+    from fastapi.testclient import TestClient
+
+    from server import response_cache
+    from server.main import app
+    t: list[tuple[str, bool]] = []
+    노드, 중심 = "품목:창업/선급금보증보험료", "창업중심대학"
+    고정 = L.적용_규범, L.비목_품목금지, L.세목_한도_있음
+    원_프로그램, 원_질문llm = os.environ["SUDDOE_ONTOLOGY_PROGRAMS"], Q.llm_호출
+    질문출력: dict = {}
+    잡음: dict = {"질문": 0}
+
+    def 질문_llm(프롬프트, 스키마, **_k):
+        잡음["질문"] += 1
+        잡음["프롬프트"], 잡음["스키마"] = 프롬프트, 스키마
+        return ({"질문": [], **({"품목노드": 질문출력.get("품목노드") or {"id": None, "확신": "동일"}, "확인질문": 질문출력.get("확인질문")}
+                               if "품목노드" in 스키마["properties"] else {})}, {})
+    client = TestClient(app, raise_server_exceptions=False)
+
+    def sse(글: str, 이름: str):
+        for 덩이 in 글.split("\n\n"):
+            줄 = 덩이.splitlines()
+            if f"event: {이름}" in 줄:
+                return json.loads("\n".join(x[6:] for x in 줄 if x.startswith("data: ")))
+        return None
+
+    def 흐름(사업명: str, 노드결정: dict | None, *, 품목="선급금보증보험증권 발급비", 답="예", 확인질문=None, 비우기=True, 용도바꿈=None) -> dict:
+        """화면(lib/questions.ts · eval_screen_path 화면_흐름)과 같다: 질문이 하나라도 있을 때만 질문세트를 보낸다."""
+        if 비우기:
+            response_cache._메모리.clear()
+        질문출력.update(품목노드=노드결정, 확인질문=확인질문)
+        잡음.update(프롬프트="", 스키마={})
+        전 = (잡음["질문"], _고정.호출수)
+        _고정.출력, _고정.호출수 = {"판정": "가능", "요약": "고정 출력 시험 요약입니다. 규정을 확인했습니다."}, 0
+        원문 = f"{품목} 30만원 써도 되나요?"
+        q = client.post("/api/questions", json={"사업명": 사업명, "확정비목": "외주용역비", "확정세목": None, "부가세구분": "포함",
+                                               "품목": 품목, "금액": 300_000, "용도": "외주 계약 선급금", "질문원문": 원문})
+        qa = q.json()
+        질문들 = (qa.get("질문") or []) if qa.get("상태") == "있음" and qa.get("질문세트") else []
+        정 = {"품목": 품목, "금액": 300_000, "금액_추정여부": False, "용도": 용도바꿈 or "외주 계약 선급금", "질문원문": 원문, "질의문": 품목,
+             "분류후보": [{"비목": "외주용역비", "세목": None, "표시문": "외주용역비"}], "비목후보": [{"비목": "외주용역비", "신뢰도": 1.0}],
+             "수치": {"부가세구분": "포함"}, "누락필드": []}
+        j = client.post("/api/judge", json={"사업명": 사업명, "확정비목": "외주용역비", "정규화": 정, "답변": [{"code": x["id"], "값": 답} for x in 질문들],
+                                           "질문세트": qa.get("질문세트") if 질문들 else None, "추가입력값": {}, "확정세목": None, "부가세구분": "포함"})
+        r = sse(j.text, "결과") or {}
+        return {"판정": r.get("판정"), "코드": (r.get("코드판정") or {}).get("종류"), "근거경로": r.get("근거경로"), "금지": r.get("금지조건") or [],
+                "조건": r.get("조건") or [],
+                "질문들": 질문들, "캐시": (sse(j.text, "완료") or {}).get("캐시"), "글": q.text + j.text, "질문세트": qa.get("질문세트"),
+                "후보": (잡음["스키마"].get("properties") or {}).get("품목노드", {}).get("properties", {}).get("id", {}).get("enum"),
+                "프롬프트": 잡음["프롬프트"], "질문호출": 잡음["질문"] - 전[0], "판정호출": _고정.호출수}
+
+    L.적용_규범, L.비목_품목금지, L.세목_한도_있음 = _원_적용, _원_품목금지, _원_세목한도
+    os.environ["SUDDOE_ONTOLOGY_PROGRAMS"] = f"{사업},{중심}"
+    Q.llm_호출 = 질문_llm
+    try:
+        response_cache.데이터버전_해시_무효화()
+        없음, 동일 = 흐름(중심, None), 흐름(중심, {"id": 노드, "확신": "동일"})
+        아니오 = 흐름(중심, {"id": 노드, "확신": "유사"}, 답="아니오", 확인질문="선급금보증보험료에 해당하나요?")
+        예 = 흐름(중심, {"id": 노드, "확신": "유사"}, 답="예", 확인질문=f"{노드}에 해당하나요?")
+        밖 = 흐름(중심, {"id": "품목:창업/없는노드", "확신": "동일"})
+        키다름 = 흐름(중심, {"id": 노드, "확신": "동일"}, 용도바꿈="다른 용도")
+        모두없음, 모두동일 = 흐름(사업, None), 흐름(사업, {"id": 노드, "확신": "동일"})
+        별칭 = 흐름(사업, {"id": "품목:창업/위약금", "확신": "동일"}, 품목="선급금보증보험증권")
+        # 캐시: 결정 없이 판정한 뒤 질문세트가 다시 만들어져(만료) 동일이 나오면 그 판정이 캐시에서 나오면 안 된다
+        c1 = 흐름(중심, None)
+        response_cache._메모리.pop(c1["질문세트"], None)
+        c2 = 흐름(중심, {"id": 노드, "확신": "동일"}, 비우기=False)
+        c3 = 흐름(중심, {"id": 노드, "확신": "동일"}, 비우기=False)
+        os.environ["SUDDOE_JUDGE_ANSWERS"] = "0"
+        try:
+            끔 = 흐름(중심, {"id": 노드, "확신": "동일"})
+        finally:
+            os.environ.pop("SUDDOE_JUDGE_ANSWERS", None)
+        with db.connect(autocommit=True) as c:
+            cur = c.cursor()
+            입력 = O.게이트_입력(300_000, "포함", {})
+            별칭_조회 = [O.온톨로지_조회(cur, 중심, "외주용역비", None, 입력, 확정=True, 품목="선급금보증보험증권", 노드결정=x)
+                     for x in (None, {"id": "품목:창업/위약금", "확신": "동일"})]
+    finally:
+        L.적용_규범, L.비목_품목금지, L.세목_한도_있음 = 고정
+        os.environ["SUDDOE_ONTOLOGY_PROGRAMS"] = 원_프로그램
+        Q.llm_호출 = 원_질문llm
+        response_cache._메모리.clear()
+        response_cache.데이터버전_해시_무효화()
+    t.append(("5-13 별칭 불일치: 질문 프롬프트 · 스키마에 품목 후보(정답 노드 포함)와 질문 원문이 들어간다",
+              노드 in (없음["후보"] or []) and None in 없음["후보"] and "<품목후보>" in 없음["프롬프트"] and "질문원문" in 없음["프롬프트"]))
+    t.append(("5-13 결정 없음: 코드 불가가 아니다", 없음["코드"] is None and 없음["판정"] != "불가"))
+    t.append(("5-13 동일(금지 품목): 코드 불가 · 판정 LLM 0회", 동일["판정"] == "불가" and 동일["코드"] == "금지" and 동일["판정호출"] == 0))
+    t.append(("5-13 유사 + 아니오: 코드 불가 아님 · 그 금지가 금지 칸에 · 화면 첫 질문이 노드 확인",
+              아니오["코드"] is None and 아니오["판정"] != "불가" and any("선급금보증보험증권" in x for x in 아니오["금지"])
+              and not any("선급금보증보험증권" in x for x in 없음["금지"]) and 아니오["질문들"][:1] and 아니오["질문들"][0]["id"] == "NODE"))
+    t.append(("5-13 유사 + 예: 동일로 올라가 코드 불가 · 노드 ID 든 확인질문은 정식명 질문으로 바뀐다",
+              예["코드"] == "금지" and 예["질문들"][:1] and 예["질문들"][0]["질문문"] == "선급금보증보험료에 해당하나요?"))
+    t.append(("5-13 후보 밖 ID: 결정 없음과 같다", 밖["판정"] == 없음["판정"] and 밖["코드"] is None and 밖["근거경로"] == 없음["근거경로"]))
+    t.append(("5-13 질문세트 없이 다시 만든 키가 안 맞으면(용도 다름) 지금 길", 키다름["코드"] is None))
+    # 모두의 창업에는 이 품목에 걸린 규범 · 개념 근거가 비목 것 말고 없다. 노드를 골라도 없는 금지가 생기지 않는다
+    t.append(("5-13 모두의 창업: 이 품목은 사업 규범이 없어 동일이어도 판정 · 근거 경로가 그대로(코드 불가 없음)",
+              모두동일["근거경로"] == 모두없음["근거경로"] and 모두동일["판정"] == 모두없음["판정"] and 모두동일["코드"] is None))
+    t.append(("5-13 LLM 이 고른 품목은 세목 안내(조건부 상한)를 없애지 않는다(코드는 내리기만)",
+              "세목을 고르면 한도를 확인해요" in 모두없음["조건"] and "세목을 고르면 한도를 확인해요" in 모두동일["조건"]))
+    t.append(("5-13 별칭 일치: 질문 프롬프트에 후보가 없다(스키마 그대로)", 별칭["질문호출"] == 1 and 별칭["후보"] is None and "<품목후보>" not in 별칭["프롬프트"]))
+    t.append(("5-13 별칭 일치: 판정은 노드 결정을 무시한다", 별칭_조회[0]["게이트"] == 별칭_조회[1]["게이트"]
+              and 별칭_조회[0]["적용"]["품목노드"] == 별칭_조회[1]["적용"]["품목노드"] == {"출처": "별칭", "확신": "동일"}))
+    t.append(("5-13 캐시: 결정 전 판정이 나오지 않고 같은 요청은 캐시", c1["캐시"] is False and c1["코드"] is None and c2["캐시"] is False
+              and c2["코드"] == "금지" and c3["캐시"] is True))
+    t.append(("5-13 SUDDOE_JUDGE_ANSWERS=0: 질문 LLM 0회 · 노드 결정을 쓰지 않는다", 끔["질문호출"] == 0 and 끔["코드"] is None))
+    t.append(("5-13 LLM 호출 수: 질문 1회 · 판정 1회(코드 불가는 0회) 그대로",
+              all(x["질문호출"] == 1 for x in (없음, 동일, 아니오, 예, 밖, 모두없음, 모두동일))
+              and all(x["판정호출"] == 1 for x in (없음, 아니오, 밖, 모두없음, 모두동일)) and 동일["판정호출"] == 예["판정호출"] == 0))
+    t.append(("5-13 화면 응답(질문 · 판정)에 노드 ID · 노드결정이 없다",
+              not any(re.search(r"품목:|세목:|비목:창업|노드결정|품목노드", x["글"]) for x in (없음, 동일, 아니오, 예, 밖, 모두동일, 별칭))))
+    # 코드 검사(LLM 출력 이상)
+    후보 = [{"id": 노드, "정식명": "선급금보증보험료", "별칭": ["선급금보증보험증권"]}]
+    t.append(("5-13 노드 출력 검사: 후보 밖 · 잘못된 확신 · null 은 버린다",
+              [Q.노드_결정_읽기(x, 후보, "p")[2] for x in ({"품목노드": {"id": "품목:창업/x", "확신": "동일"}}, {"품목노드": {"id": 노드, "확신": "아마"}},
+                                                         {"품목노드": {"id": None, "확신": "동일"}}, None)] == ["후보밖", "확신", "없음", "없음"]))
+    t.append(("5-13 확인질문: 정식명 · 별칭이 든 질문은 그대로, 없으면 코드가 정식명으로 만든다",
+              Q.노드_결정_읽기({"품목노드": {"id": 노드, "확신": "유사"}, "확인질문": "선급금보증보험증권 발급비인가요?"}, 후보, "p")[1]["질문문"] == "선급금보증보험증권 발급비인가요?"
+              and Q.노드_결정_읽기({"품목노드": {"id": 노드, "확신": "유사"}, "확인질문": "보증 관련 비용인가요?"}, 후보, "p")[1]["질문문"] == "선급금보증보험료에 해당하나요?"))
+    저장 = {"질문": [{"id": "NODE", "종류": "노드확인", "충족답": "예"}], "노드결정": {"id": 노드, "확신": "유사", "품목": "p"}}
+    t.append(("5-13 노드 답: 예 → 동일, 모름 → 유사, 품목이 다르면 없음 · 답변_구성 은 노드 질문을 판정 답으로 넘기지 않는다",
+              Q.노드_결정(저장, [{"code": "NODE", "값": "예"}], "p") == {"id": 노드, "확신": "동일"}
+              and Q.노드_결정(저장, [{"code": "NODE", "값": "모름"}], "p") == {"id": 노드, "확신": "유사"}
+              and Q.노드_결정(저장, [{"code": "NODE", "값": "예"}], "q") is None and Q.답변_구성(저장, [{"code": "NODE", "값": "예"}]) == []))
     return t
 
 
