@@ -380,7 +380,27 @@ def _새경로_준비(cur, 입력: dict, org_id) -> dict:
     품목후보 = (ontology_lookup.품목_후보(cur, 사업명, 조회["대상"]["비목_id"], 조회.get("자금") != ontology_fund.창업활동자금)
             if 입력.get("품목") and not 조회["적용"].get("품목노드") else [])
     return {"문맥": 문맥, "코드질문": 코드질문, "추가입력": ontology_gate.추가입력_칸(규범들, 입력.get("확정세목")),
-            "노드들": 조회.get("노드들") or set(), "품목후보": 품목후보}
+            "노드들": 조회.get("노드들") or set(), "품목후보": 품목후보, "비목_id": 조회["대상"]["비목_id"]}
+
+
+def _채운세목_칸(cur, 입력: dict, 결정: dict | None, 비목_id: str, 있는칸: list[dict]) -> list[dict]:
+    """5-14 A: 세목을 비웠고 노드 결정이 「동일」이면 판정이 채울 세목(orchestrate.온톨로지_조회 세목채움과 같은 함수)의
+    숫자 · 선택 칸을 더한다(코드, LLM 아님). 칸이 없으면 판정이 그 세목 한도를 비교하지 못한다. 유사는 더하지 않는다.
+    실패하면 칸만 빼고 질문은 그대로 낸다."""
+    if 입력.get("확정세목") or not isinstance(결정, dict) or 결정.get("확신") != "동일":
+        return []
+    try:
+        채움 = ontology_lookup.상위_세목(cur, 입력.get("사업명"), 결정["id"], 비목_id)
+        if not 채움:
+            return []
+        조회 = orchestrate.온톨로지_조회(cur, 입력.get("사업명"), 입력["비목"], 채움["세목"],
+                                   orchestrate.게이트_입력(입력.get("금액"), 입력.get("부가세구분"), None), 확정=True,
+                                   품목=입력.get("품목"))
+        있는키 = {c["키"] for c in 있는칸}
+        return [c for c in ontology_gate.추가입력_칸(조회["적용"]["규범"], 채움["세목"]) if c["키"] not in 있는키]
+    except Exception as e:                                    # noqa: BLE001
+        _log.warning("채운 세목 칸 실패: %s", type(e).__name__)
+        return []
 
 
 def _풀이_목록(cur, 사업명: str | None) -> list[dict]:
@@ -456,7 +476,8 @@ def _새경로_질문(cur, conn, 입력: dict, org_id, 모델: str, 타임아웃
     메타["용어풀이_프롬프트"] = len(넣을풀이)
     r = _질문_작성(입력, 블록, 번호.문장맵, 조문메타, 모델, 타임아웃, 메타, t0, 온톨로지경로=True,
                   용어블록=ontology_terms.프롬프트_블록(넣을풀이), 품목후보=준비["품목후보"] or None)
-    코드질문, 칸 = 준비["코드질문"], 준비["추가입력"]
+    코드질문 = 준비["코드질문"]
+    칸 = [*준비["추가입력"], *_채운세목_칸(cur, 입력, r.get("노드결정"), 준비["비목_id"], 준비["추가입력"])]
     # 노드 확인 질문은 질문 묶음(최대 3개)의 첫째다. 부가세 질문은 지금처럼 묶음 밖에 따로 붙는다
     노드질문 = [q] if (q := r.pop("노드질문", None)) else []
     질문들 = [*노드질문, *r["질문"][:최대_질문수 - len(노드질문)], *코드질문]
