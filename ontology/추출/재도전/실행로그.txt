@@ -1,0 +1,15 @@
+재도전 실행 로그 (조율 세션 github-2b, 2026-11-08, 시각 KST)
+
+10:40 창업중심대학 검토 6차 OK(github-ce) 뒤 시작
+10:41 입력 명세: 출입국관리법시행령 제23조 문서를 뺐다(도약이 공통으로 추출, ontology/공통_L1.json). 인용대응 「출입국관리법 시행령 제23조 → 조:출입국관리법시행령#제23조」 줄은 남김. 인용대응에 「제23조① 「중소기업창업 지원법 상의 재창업」 → 조:창업지원법#제2조」 를 넣고(5-5, 창업중심대학 제14조와 같은 처리, DB 창업지원법 제2조 5호가 재창업 정의), 미특정 줄을 「그 밖에 조를 특정하지 않은 인용과 입력에 없는 법령(공무원보수규정 등)」 으로 넓혔다. 메모.md · 범위.md · 묶음_계획.json 의 낡은 줄(제30조[2] 조문 ID, 출입국 포함, 글자 수)을 고쳤다
+10:42 ontology_input: 49블록(재도전 48 · 공무원여비규정 별표1 1), 블록 본문 합 7,946자. extraction_run.py 준비 → 프롬프트_A · B(3,109자, 차이는 A/B 표기만)
+10:43 추출자 시작(구독 경로, opus · high, 프롬프트_X.md 글자 그대로) A a1df52606977452a2 · B a12b28fb8ea176a03. 바로 뒤 각자에 scratch 개인 폴더 안내 메시지(지시 내용 바꾸지 않음). 원문:
+  → A: "Note on scratch files: you share the session scratchpad with another agent. If you need draft or helper files outside your input folder, put them only in scratchpad/jaedojeon_A/ and don't read anything elsewhere in the scratchpad. Your input folder must still hold only the three inputs plus 추출_A.md. This message changes none of your instructions."
+  → B: 위와 같고 jaedojeon_A → jaedojeon_B, 추출_A.md → 추출_B.md
+10:53 추출자 끝. A 49블록 · 개념 92 · 관계 29 · 규범 74, B 49블록 · 개념 89 · 관계 34 · 규범 72. 구독_읽기확인.py 통과(A 읽은 파일 7 · B 7), 두 추출자 scratch 는 각자 폴더만 씀(jaedojeon_A · jaedojeon_B, transcript 확인). 마감 통과. 비교: 발췌오류 0 · 블록누락 0 · 규범 일치 65 · A만 9 · B만 7 · 규범 일치율 0.80 · 개념 0.83 · 관계 0.37
+10:55 검증자(구독) ae0caa85c5ca189e6 시작(프롬프트_검증자.md 해시 fdd43c48d782, 글자 그대로). 바로 뒤 안내 메시지 원문: "Note on scratch files: you share the session scratchpad with other agents. If you need draft or helper files outside the bundle folder, put them only in scratchpad/jaedojeon_V/ and don't read anything elsewhere in the scratchpad. This message changes none of your instructions."
+11:08 검증자 끝(--기록, 01:54:42Z ~ 02:07:41Z, 하위 에이전트 토큰 313k): 규범 75(AI검증 75 · AI대조 0) · 개념 줄 11 · 관계 36 · 재추출 0 · 변환 실패 0. 판정 수정 행 0. scratch 는 jaedojeon_V 만 씀
+11:10 사업변환 --목록(임시 원천): 검사 통과(필터 없는 전체 검사 오류 0) · 재도전 개념 4 · 관계 27 · 규범 75, 공통_L1 개념 +2 · 관계 +3 · 규범 +0 · 전수 대조 목록 14행 · 잔여 0
+11:11 전수 대조(API, --상한 5) 14행 + 경고 1행: 틀림 0, $0.63(장부 합계 $184.06)
+11:16 사업변환 --목록 --실제: 실제 원천 반영, 검사 통과. 능력 질문 S-재도전 12개 추가 → 116/116. final_check(적재 · CQ · CI 재현) 전부 통과. ontology_judge_check --self-test 124/124
+11:20 dry 3건(dry기록.md): 기장대행 수수료 코드 한도초과(제18조④), 3D프린터 · 유니폼 판정 LLM 경로, 모델 호출 0, 다른 사업 문서 0. 제30조[2] 관계 근거가 조번호 제30조[2] 로 적재됨을 확인해 확정.md 결정 로그에 조율 세션 수정(사실 확인) 줄을 더했다
