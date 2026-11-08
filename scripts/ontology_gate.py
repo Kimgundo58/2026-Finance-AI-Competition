@@ -489,6 +489,72 @@ def _분자금액(n: dict, 입력: dict) -> float | None:
         return None
 
 
+# 5-15 ③: 누적 금액을 지출 계획 기록으로. 입력["기록누적"] = {"계획": [{금액, 거래처(정규화), 월(YYYY-MM), 세목}], "이번거래처", "이번월"} (orchestrate.지출기록_읽기).
+_누적머리 = {"동일업체합계": "같은 거래처의 ", "월": "이번 달 ", "협약기간": ""}
+
+
+def _금액말(v: float) -> str:
+    return f"{round(v / 10000):,}만원" if round(v) % 10000 == 0 else f"{round(v):,}원"
+
+
+def _기록_합(n: dict, 입력: dict) -> tuple[float, list] | None:
+    """규범의 누적범위에 드는 기록된 지출 계획의 (금액 합, 합친 plan_id 들). 기록이 없거나 범위를 가를 값(이번 거래처 · 이번 달)이 없으면 None(지금과 같다).
+
+    동일업체합계 = 같은 정규화 거래처, 월 = 같은 달, 협약기간 = 전부. 규범이 세목을 대상으로 하면 세목을 아는 계획은 그 세목이어야 하고, 세목을 모르는 계획은 비목 수준으로 센다."""
+    수치 = n.get("수치") or {}
+    범위 = 수치.get("누적범위")
+    기록 = 입력.get("기록누적")
+    if 범위 not in _누적표 or not isinstance(기록, dict) or not isinstance(기록.get("계획"), list):
+        return None
+    세목들 = {str(v).split(":", 1)[1].split("@")[0].split("/")[-1] for v in n.get("대상") or [] if str(v).startswith("세목:")}
+
+    def 맞음(p: dict) -> bool:
+        if 세목들 and p.get("세목") and p["세목"] not in 세목들:
+            return False
+        if 범위 == "동일업체합계":
+            return bool(기록.get("이번거래처")) and p.get("거래처") == 기록["이번거래처"]
+        if 범위 == "월":
+            return bool(기록.get("이번월")) and p.get("월") == 기록["이번월"]
+        return True
+    try:
+        행 = [p for p in 기록["계획"] if isinstance(p, dict) and 맞음(p)]
+        합 = sum(float(p["금액"]) for p in 행)
+    except (TypeError, ValueError, KeyError):
+        return None
+    return (합, [p.get("plan_id") for p in 행]) if 행 and math.isfinite(합) and 합 > 0 else None
+
+
+def _기록으로_초과(n: dict, 입력: dict, 연산: str) -> tuple[dict, dict] | None:
+    """기록된 합 + 이번 금액이 사용자가 적은 누적 금액보다 크고, 그 값으로 비교하면 모든 비교값이 기준을 넘을 때만 (바꾼 입력, 출처 정보). 아니면 None.
+
+    내리는 쪽으로만 쓴다: 넘지 않거나 부가세 기준에 따라 갈리거나 입력이 모자라면 기록은 없는 것으로 보고 지금과 똑같이 간다(누적 칸 · 확인 줄도 그대로)."""
+    합계 = _기록_합(n, 입력)
+    if not 합계:
+        return None
+    기록합, 계획ids = 합계
+    try:
+        이번 = float(입력.get("금액"))
+    except (TypeError, ValueError):
+        return None
+    if not 이번 > 0:
+        return None
+    범위 = (n.get("수치") or {})["누적범위"]
+    키 = _누적표[범위][0]
+    try:
+        사용자 = float(입력.get(키)) if 입력.get(키) not in (None, "") else 0.0
+    except (TypeError, ValueError):
+        사용자 = 0.0
+    합 = 기록합 + 이번
+    if 합 <= 사용자:
+        return None
+    바뀜 = {**입력, 키: 합}
+    값들, 기준 = _비교값들(n, 바뀜)
+    if _모자란입력(n, 바뀜) or not 값들 or not all(_비교(v, 기준, 연산) for v in 값들):
+        return None
+    문장 = f"{_누적머리[범위]}기록된 지출 계획 합계 {_금액말(기록합)} + 이번 {_금액말(이번)} = {_금액말(합)}"
+    return 바뀜, {"norm_id": n.get("norm_id"), "범위": 범위, "기록합": 기록합, "이번": 이번, "합": 합, "건수": len(계획ids), "plan_ids": 계획ids, "문장": 문장}
+
+
 def _비교값들(n: dict, 입력: dict) -> tuple[list[float] | None, float]:
     """(비교값 후보, 기준값). 입력이 모자라면 (None, 기준)."""
     수치 = n.get("수치") or {}
@@ -753,7 +819,7 @@ def 게이트(규범들: list[dict], 입력: dict[str, Any], *, 확정: bool, �
     """
     r: dict[str, Any] = {"종류": None, "코드판정": None, "검증코드": [], "조건": [], "상한": None,
                          "활성의무": [], "미검증만": False, "쓴규범": [], "제외규범": [], "발동임계값": [], "미확정초과": False, "초과규범": [],
-                         "진술평가": {}, "답변": {}, "자연어답": {}, "조건규범": []}
+                         "진술평가": {}, "답변": {}, "자연어답": {}, "조건규범": [], "누적기록": []}
     답표 = _조건답_표(규범들, 조건답)
     # 「확인한 내용」 칸의 항목 이름 = 사용자가 답한 질문문(서버 저장값). 없으면 조건 글
     질문표 = {(a.get("규범ID"), a.get("조건번호")): str(a.get("질문문") or "").strip() for a in 조건답 or [] if isinstance(a, dict)}
@@ -801,6 +867,11 @@ def 게이트(규범들: list[dict], 입력: dict[str, Any], *, 확정: bool, �
             있음["공통"] = False            # 같은 문장이 이번 지출에도 걸리면 이번 지출 칸에 한 번만 낸다
         if not 상한유지:                    # 안내 줄(시점안내)은 판정 상한을 건드리지 않는다
             r["상한"] = "조건부"
+
+    def 누적출처(n: dict, 기록: dict) -> None:
+        # 5-15 ③: 기록된 지출 계획 합으로 비교했다고 한 줄 알린다(상한은 건드리지 않는다). 한도초과 요약에도 같은 문장을 쓴다
+        r["누적기록"].append(기록)
+        조건추가(f"{기록['문장']}이에요", "누적출처", 상한유지=True, 규범=n)
 
     실효 = [n for n in 규범들 if n.get("종류") != "우선순위"]
     지난기한 = {n.get("norm_id") for n in [*규범들, *(경로밖_품목규범 or [])] if n.get("종류") == "의무" and _기한_지남(n, 입력)}
@@ -965,15 +1036,19 @@ def 게이트(규범들: list[dict], 입력: dict[str, Any], *, 확정: bool, �
         if 지역맞음 is False:
             r["제외규범"].append(n.get("norm_id"))     # 다른 지역 행이다. 판정 문맥의 "비교하지 못했다" 에서도 뺀다
             continue
-        없음 = _모자란입력(n, 입력)
-        값들, 기준 = _비교값들(n, 입력)
+        연산 = (n.get("수치") or {}).get("위반연산") or "초과"
+        기록 = _기록으로_초과(n, 입력, 연산)           # 5-15 ③: 기록된 지출 계획 합으로 확실히 넘을 때만 그 합으로 비교한다. 아니면 지금과 같다
+        입력_n = 기록[0] if 기록 else 입력
+        없음 = _모자란입력(n, 입력_n)
+        값들, 기준 = _비교값들(n, 입력_n)
         if 없음 or 값들 is None:
             빠짐 = 없음 or ["금액"]
             for k in 빠짐:
                 조건추가(_필요문구(k, n, 세목표시), "입력비움", 규범=n)
             continue
-        연산 = (n.get("수치") or {}).get("위반연산") or "초과"
         결과들 = {_비교(v, 기준, 연산) for v in 값들}
+        if 기록:
+            누적출처(n, 기록[1])
         if ((n.get("결과") or {}).get("종류") or "불가") != "불가":
             # 초과분 자부담처럼 넘어도 집행 자체는 되는 한도: 불가를 내지 않고 원문으로 알린다
             r["쓴규범"].append(n.get("norm_id"))
@@ -1021,14 +1096,18 @@ def 게이트(규범들: list[dict], 입력: dict[str, Any], *, 확정: bool, �
     for n in 규범들:
         if n.get("종류") != "임계값" or not _사용가능(n) or (n.get("수치") or {}).get("값") is None:
             continue
-        없음 = _모자란입력(n, 입력)
-        값들, 기준 = _비교값들(n, 입력)
+        연산 = (n.get("수치") or {}).get("발동연산") or "초과"
+        기록 = _기록으로_초과(n, 입력, 연산)           # 5-15 ③: 한도와 같다. 기록된 합으로 확실히 넘을 때만 발동으로 본다
+        입력_n = 기록[0] if 기록 else 입력
+        없음 = _모자란입력(n, 입력_n)
+        값들, 기준 = _비교값들(n, 입력_n)
         if 없음 or 값들 is None:
             for k in 없음 or ["금액"]:
                 조건추가(_필요문구(k, n, 세목표시), "입력비움", 규범=n)
             continue
-        연산 = (n.get("수치") or {}).get("발동연산") or "초과"
         결과들 = {_비교(v, 기준, 연산) for v in 값들}
+        if 기록:
+            누적출처(n, 기록[1])
         if len(결과들) > 1:
             r.update(종류="부가세기준미정", 검증코드=["VAT_BASIS_UNKNOWN"],
                      코드판정={"종류": "부가세기준미정", "비교값": _수치표시(n, 값들[0]), "한도": _수치표시(n, 기준),

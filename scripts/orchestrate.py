@@ -19,6 +19,7 @@ import os
 import re
 import time
 import traceback
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import date
@@ -99,6 +100,7 @@ class _판정상태:
     프로필요약문: str | None = None
     프로필읽음: bool = False        # 온톨로지 단계가 게이트 입력(협약 기간) 때문에 프로필을 먼저 읽었다
     노드결정: dict | None = None    # 확인 질문 LLM 이 고른 품목 노드 {id, 확신}(5-13). 서버 저장값에서만 온다
+    기록누적: dict | None = None    # 같은 계정의 지출 계획 기록(5-15 ③, `지출기록_읽기`). 판정 라우트가 읽어 넘긴다. 없으면 지금과 같다
     상황노드: list[str] = field(default_factory=list)    # 확인 질문 LLM 이 고른 상황 노드 ID(절차 · 시간 · 주체, 5-14 C). 서버 저장값에서만 온다
     # 자연어 조건 확인 질문의 답 [{규범ID, 조건번호, 조건, 질문문, 답}](5-14 B). 서버 저장값에서만 온다. 게이트와 화면 「확인한 내용」 이 쓴다
     조건답: list[dict] = field(default_factory=list)
@@ -268,7 +270,10 @@ def _판정_규범(상태: _판정상태) -> dict:
     문맥 = [n.get("norm_id") for n in [*(적용.get("규범") or []), *(적용.get("상황규범") or [])]      # 상황규범(5-14 C)도 B4 문맥에 들어간다
           if n.get("종류") != "우선순위" and n.get("norm_id") not in 제외] if 상태.문맥 else []
     return {"코드판정": (g.get("발동규범") or {}).get("norm_id") if g.get("종류") else None,
-            "조건": list(g.get("조건규범") or []), "문맥": 문맥, "자연어답": g.get("자연어답") or {}}
+            "조건": list(g.get("조건규범") or []), "문맥": 문맥, "자연어답": g.get("자연어답") or {},
+            # 5-15 ③: 기록된 지출 계획 합으로 비교한 규범마다 어느 계획을 합쳤는지(중복 계획 때문에 틀린 불가를 추적한다). 쓰지 않았으면 키 자체가 없다
+            **({"누적": [{"규범ID": x.get("norm_id"), "범위": x.get("범위"), "plan_ids": x.get("plan_ids"), "합계": x.get("합"), "이번": x.get("이번")}
+                       for x in g["누적기록"]]} if g.get("누적기록") else {})}
 
 
 def decisions_저장(cur, 행: dict) -> int | None:
@@ -710,16 +715,62 @@ def 유효_날짜(값) -> str | None:
         return None
 
 
+def 거래처_정규화(글) -> str | None:
+    """거래처 이름을 같은 업체끼리 맞추려고 정규화한다(NFKC · 소문자 · 법인 표기 · 공백 · 문장부호 제거). 비면 None."""
+    t = unicodedata.normalize("NFKC", str(글 or "")).casefold()
+    t = re.sub(r"\(주\)|주식회사|유한회사|\(유\)|\(사\)|\(재\)", "", t)
+    return re.sub(r"[\s\-_.,·()]+", "", t) or None
+
+
+def 지출기록_읽기(cur, org_id, account_id, 사업명: str | None, 비목: str | None, plan_id: int | None, 사용일자: str | None,
+            사업_표준화=None, 비목_표준화=None) -> dict | None:
+    """같은 계정 · 사업 · 확정 비목의 지출 계획 기록(5-15 ③) → {"계획": [{금액, 거래처, 월, 세목}], "이번거래처", "이번월"}. 없거나 읽지 못하면 None(지금과 같다).
+
+    저장된 계획의 사업명 · 확정비목은 표준화되어 있지 않다(POST /api/plans 가 화면 표기 그대로 저장한다: 「2026 초기창업패키지」 등). 그래서 계정의 계획을 사업 · 비목 조건 없이
+    읽고, 저장값을 표준화한 것이 요청의 (이미 표준화된) 사업명 · 비목과 같은 행만 남긴다. `사업_표준화` · `비목_표준화` 는 글 → 표준 글 또는 None(표준화할 수 없음 → 그 행은 건너뜀)이고
+    판정 라우트가 server.catalog 의 표로 넘긴다(주지 않으면 글자 그대로 비교한다).
+    금액은 실제지출액이 있으면 그것, 없으면 금액. 월은 실제지출일, 없으면 집행예정일. 가장 최근 판정이 불가인 계획과 지금 판정하는 계획(plan_id)은 뺀다.
+    세목은 계획 정규화의 확정세목(모르면 None). 이번 거래처는 plan_id 계획의 거래처, 이번 달은 사용일자의 달이고 사용일자가 없으면 plan_id 계획의 집행예정일의 달이다
+    (둘 다 없으면 None). 각 계획에 plan_id 를 남겨 판정 기록(decisions.규범 「누적」)이 어느 계획을 합쳤는지 추적하게 한다. 계정 조건은 `_프로필값_읽기` 와 같다.
+    """
+    if not org_id or not 사업명 or not 비목:
+        return None
+    계정 = str(account_id) if account_id else None
+    try:
+        이번거래처 = 현재예정일 = None
+        if plan_id is not None:
+            r = cur.execute("SELECT 거래처, 집행예정일 FROM tenant.expense_plans WHERE plan_id = %s AND org_id = %s AND account_id IS NOT DISTINCT FROM %s::uuid",
+                            (plan_id, org_id, 계정)).fetchone()
+            이번거래처, 현재예정일 = (거래처_정규화(r[0]), r[1]) if r else (None, None)
+        행들 = cur.execute(
+            """SELECT COALESCE(p.실제지출액, p.금액), p.거래처, COALESCE(p.실제지출일, p.집행예정일), p.정규화->>'확정세목', p.plan_id, p.사업명, p.확정비목
+                 FROM tenant.expense_plans p LEFT JOIN tenant.decisions d ON d.decision_id = p.latest_decision_id
+                WHERE p.org_id = %s AND p.account_id IS NOT DISTINCT FROM %s::uuid
+                  AND (%s::bigint IS NULL OR p.plan_id <> %s::bigint) AND COALESCE(d.판정, '') <> '불가' AND COALESCE(p.실제지출액, p.금액) > 0
+                ORDER BY p.plan_id DESC LIMIT 5000""", (org_id, 계정, plan_id, plan_id)).fetchall()
+        행들 = sorted(([a, b, c, d, e] for a, b, c, d, e, 사, 비 in 행들
+                     if (사업_표준화 or (lambda v: v))(사) == 사업명 and (비목_표준화 or (lambda v: v))(비) == 비목), key=lambda x: x[4])
+    except Exception:                                    # noqa: BLE001
+        _log.exception("지출 기록 조회 실패(expense_plans)")
+        return None
+    if not 행들:
+        return None
+    return {"계획": [{"plan_id": e, "금액": float(a), "거래처": 거래처_정규화(b), "월": c.isoformat()[:7] if c else None, "세목": (d or None)} for a, b, c, d, e in 행들],
+            "이번거래처": 이번거래처, "이번월": (유효_날짜(사용일자) or (현재예정일.isoformat() if 현재예정일 else "") or "")[:7] or None}
+
+
 def 게이트_입력(금액, 부가세구분: str | None, 추가입력값: dict | None, 사용일자: str | None = None, 프로필값: dict | None = None,
-            사용일자출처: str | None = None) -> dict:
+            사용일자출처: str | None = None, 기록누적: dict | None = None) -> dict:
     """코드 게이트 입력. 화면이 준 값만 쓴다. LLM 이 뽑은 수치는 비교에 쓰지 않는다(칸 미리 채우기용).
     선택 칸의 답(거래 상대 …)은 진술이라 `진술` 아래에 따로 둔다. 게이트가 입력 값처럼 코드 불가 · 상한 해제에 쓰지 않게 한다.
     `프로필값`(`_프로필값_읽기` 의 값)에서 협약시작일 · 협약종료일을 날짜 입력으로 싣는다(5-15 ①). 프로필이 없으면 싣지 않는다.
-    `사용일자출처`: 사용일자가 화면이 아니라 질문 글에서 왔으면 「질문」(요약이 그렇게 말한다)."""
+    `사용일자출처`: 사용일자가 화면이 아니라 질문 글에서 왔으면 「질문」(요약이 그렇게 말한다).
+    `기록누적`(`지출기록_읽기`): 지출 계획 기록. 게이트가 누적범위 규범(동일업체합계 · 월 · 협약기간)의 누적 금액을 이 합으로 대신 비교한다(5-15 ③)."""
     협약 = {k: d for k in ("협약시작일", "협약종료일") if (d := 유효_날짜((프로필값 or {}).get(k)))}
     값 = {k: v for k, v in (추가입력값 or {}).items() if k in ontology_gate.입력키 and v not in (None, "")}
     진술 = {k: v.strip() for k, v in (추가입력값 or {}).items() if k in ontology_gate.진술항목 and isinstance(v, str) and v.strip()}
-    return {"금액": 금액, "부가세구분": 부가세구분 or "모름", **값, **({"사용일자": 사용일자} if 사용일자 else {}), **({"사용일자출처": 사용일자출처} if 사용일자 and 사용일자출처 else {}), **협약, **({"진술": 진술} if 진술 else {})}
+    return {"금액": 금액, "부가세구분": 부가세구분 or "모름", **값, **({"사용일자": 사용일자} if 사용일자 else {}), **({"사용일자출처": 사용일자출처} if 사용일자 and 사용일자출처 else {}), **협약, **({"진술": 진술} if 진술 else {}),
+            **({"기록누적": 기록누적} if isinstance(기록누적, dict) and 기록누적.get("계획") else {})}
 
 
 def 온톨로지_조회(cur, 사업명: str | None, 비목: str, 세목: str | None, 입력: dict, *, 확정: bool,
@@ -818,7 +869,10 @@ def _새_문의_안내(종류: str) -> str:
 def _코드판정_요약(g: dict, 부가세구분: str | None, 문의처: str = "주관기관에") -> str:
     종류, 코드판정 = g["종류"], g.get("코드판정") or {}
     if 종류 == "한도초과":
-        return f"{코드판정.get('비교값')}으로 한도({코드판정.get('한도')})를 넘어 집행할 수 없습니다."
+        글 = f"{코드판정.get('비교값')}으로 한도({코드판정.get('한도')})를 넘어 집행할 수 없습니다."
+        # 5-15 ③: 기록된 지출 계획 합으로 비교했으면 어떻게 계산했는지 한 줄 더한다(내부 ID 없음)
+        기록 = next((x for x in g.get("누적기록") or [] if x.get("norm_id") == (g.get("발동규범") or {}).get("norm_id")), None)
+        return f"{글} {기록['문장']}이에요." if 기록 else 글
     if 종류 == "부가세기준미정" and 부가세구분 in ("포함", "공급가액"):
         return f"규정에 금액의 부가세 기준이 적혀 있지 않아 판정을 내리지 않았습니다. {문의처} 확인해 주세요."
     return _새_문의_안내(종류)
@@ -846,7 +900,8 @@ def _온톨로지단계(상태: _판정상태) -> dict | None:
     상태.사용일자 = 유효_날짜(상태.사용일자)
     if not 상태.사용일자 and (질문날짜 := 유효_날짜(상태.정규화결과.get("사용일자"))):
         상태.사용일자, 상태.사용일자출처 = 질문날짜, "질문"
-    입력 = 상태.게이트입력 = 게이트_입력(상태.정규화결과.get("금액"), 상태.부가세구분, 상태.추가입력값, 상태.사용일자, 상태.프로필값, 상태.사용일자출처)
+    입력 = 상태.게이트입력 = 게이트_입력(상태.정규화결과.get("금액"), 상태.부가세구분, 상태.추가입력값, 상태.사용일자, 상태.프로필값, 상태.사용일자출처,
+                                    기록누적=상태.기록누적 if 확정 else None)
     if 비목:
         try:
             상태.온톨로지 = 온톨로지_조회(상태.cur, 상태.사업명, 비목, 세목, 입력, 확정=확정,
@@ -1231,7 +1286,7 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, account_id
        사용자답변: list[dict] | None = None, 답변유실: bool = False,
        확정세목: str | None = None, 추가입력값: dict | None = None, 부가세구분: str | None = None,
        사용일자: str | None = None, 노드결정: dict | None = None, 조건답: list[dict] | None = None, 상황노드: list[str] | None = None,
-       dry: bool = False, 기록: bool = True, 주입: str | None = None,
+       기록누적: dict | None = None, dry: bool = False, 기록: bool = True, 주입: str | None = None,
        참조확장_사용: bool = True) -> dict:
     """질문 하나를 판정해 응답 dict 를 돌려준다. 어떤 실패도 예외로 올리지 않고 판단불가로 반환한다.
 
@@ -1243,6 +1298,7 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, account_id
     새 경로 인자: `확정세목`(화면에서 확정한 세목 표기), `추가입력값`(화면 숫자 칸), `부가세구분`(포함 · 공급가액 · 모름), `사용일자`(YYYY-MM-DD, 지난 기한 문장을 뺄 때만 쓴다),
     `노드결정`({id, 확신: 동일|유사}, 확인 질문 LLM 이 고른 품목 노드. 판정 라우트가 서버 저장값에서 읽어 넘긴다. 별칭 일치가 있으면 쓰지 않는다),
     `조건답`([{규범ID, 조건번호, 조건, 질문문, 답}], 자연어 조건 확인 질문의 답(5-14 B). 판정 라우트가 서버 저장값에서 읽어 넘긴다. 게이트와 화면 「확인한 내용」 에만 쓴다),
+    `기록누적`(`지출기록_읽기` 의 값, 5-15 ③. 판정 라우트가 읽어 넘긴다. 누적범위 한도 · 임계값을 기록된 지출 계획 합으로 비교한다. 없으면 지금과 같다),
     `상황노드`([ID], 확인 질문 LLM 이 고른 절차 · 시간 · 주체 노드(5-14 C). 판정 라우트가 서버 저장값에서 읽어 넘긴다. 그 노드의 규범을 문맥 · 조건 문장에만 더하고 코드 불가는 내지 않는다).
     평가용 인자: `dry`(LLM 없이 규칙 정규화와 프롬프트 구성까지만), `기록`(tenant.decisions 기록 여부),
     `주입`(장애 주입 'db'|'timeout'|'schema'|'empty'|'cite'|'onto'), `참조확장_사용`(False 면 B3 을 넣지 않는다).
@@ -1254,7 +1310,8 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, account_id
                    사용자답변=list(사용자답변 or []), 답변유실=답변유실,
                    확정비목=확정비목, 확정세목=확정세목, 추가입력값=dict(추가입력값 or {}), 부가세구분=부가세구분, 사용일자=사용일자,
                    노드결정=노드결정, 조건답=[a for a in 조건답 or [] if isinstance(a, dict)],
-                   상황노드=[x for x in 상황노드 or [] if isinstance(x, str)])
+                   상황노드=[x for x in 상황노드 or [] if isinstance(x, str)],
+                   기록누적=기록누적 if isinstance(기록누적, dict) else None)
     try:
         if 주입 == "db":
             raise 주입실패("DB 연결 실패(주입)")

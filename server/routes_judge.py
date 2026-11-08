@@ -73,6 +73,9 @@ def judge(req: Request, body: 판정요청, mock: str | None = None,
     # 확인 질문 LLM 이 고른 상황 노드(5-14 C). 같은 서버 저장값에서 읽는다. 문맥 · 조건 문장을 바꾸므로 키에 넣는다
     상황노드 = (_상황노드_읽기(body, account_id)
               if 반영 and not MOCK and 온톨로지_사업(body.사업명) else None)
+    # 같은 계정의 지출 계획 기록(5-15 ③). 누적 한도 · 임계값을 바꾸므로 키에 넣는다. 읽은 값을 판정에 그대로 넘겨 키와 계산이 어긋나지 않게 한다
+    기록누적 = (_기록누적_읽기(body, account_id)
+              if 반영 and not MOCK and 온톨로지_사업(body.사업명) else None)
     # 자연어 조건 확인 질문의 답(5-14 B). 서버 저장값의 규범 ID · 조건 번호에 화면 답 값만 맞춘다. 판정을 바꾸므로 키에 넣는다
     조건답 = (_조건답_읽기(body, account_id)
              if 반영 and not MOCK and body.질문세트 and 온톨로지_사업(body.사업명) else None)
@@ -101,6 +104,8 @@ def judge(req: Request, body: 판정요청, mock: str | None = None,
         *([json.dumps(노드결정, ensure_ascii=False, sort_keys=True)] if 노드결정 else []),
         # 상황 노드가 없으면 조각을 더하지 않는다(지금 키 그대로)
         *([json.dumps(상황노드, ensure_ascii=False)] if 상황노드 else []),
+        # 지출 계획 기록이 없으면 조각을 더하지 않는다(지금 키 그대로). 기록 금액 · 거래처 · 달이 바뀌면 키가 바뀐다
+        *([json.dumps(기록누적, ensure_ascii=False, sort_keys=True)] if 기록누적 else []),
         # 조건 확인 질문이 없으면 조각을 더하지 않는다(지금 키 그대로)
         *([json.dumps(조건답, ensure_ascii=False, sort_keys=True)] if 조건답 else []))
     캐시 = response_cache.조회(k, body.org_id, account_id)
@@ -129,7 +134,7 @@ def judge(req: Request, body: 판정요청, mock: str | None = None,
             response_cache.저장(k, out, 종류="judge", org=body.org_id, account=account_id,
                                데이터버전_해시=데이터버전해시)
         else:
-            out, 실패 = yield from _판정_실행(body, account_id, 사용자답변, 답변유실, 노드결정, 조건답, 상황노드)
+            out, 실패 = yield from _판정_실행(body, account_id, 사용자답변, 답변유실, 노드결정, 조건답, 상황노드, 기록누적)
             # decision_id 를 캐시에 넣으면 다른 요청이 남의 판정 행을 자기 계획에 연결한다.
             decision_id = out.pop("decision_id", None)
             if not 실패:              # 일시적 장애의 판단불가를 캐시에 고정하지 않는다
@@ -178,6 +183,27 @@ def _질문저장값_읽기(body: 판정요청, account_id: str | None) -> dict 
             노드결정_키(body.org_id, account_id, body.사업명, body.확정비목, body.확정세목, n.get("품목")),
             body.org_id, account_id)
     return 저장값
+
+
+def _기록누적_읽기(body: 판정요청, account_id: str | None) -> dict | None:
+    """같은 계정 · 사업 · 확정 비목의 지출 계획 기록(5-15 ③, orchestrate.지출기록_읽기). 없거나 못 읽으면 None 이고 판정은 지금 길로 간다."""
+    try:
+        import orchestrate
+        from server._common import 트랜잭션
+        from server.catalog import _비목_표준화, _사업명_키, _사업명_표
+        if not body.org_id or not body.확정비목:
+            return None
+        # 저장된 계획의 사업명 · 비목은 화면 표기 그대로라(「2026 초기창업패키지」) 요청과 같은 표준 표기로 맞춰 비교한다. 표준화할 수 없는 값은 None(그 계획은 건너뜀)
+        사업표 = _사업명_표()
+        사업표준 = lambda v: 사업표.get(_사업명_키(v)) if v else None
+        비목표준 = lambda v: (_비목_표준화(v) if v else None) if _비목_표준화(v) in 비목_ENUM else None
+        사용일자 = orchestrate.유효_날짜(body.사용일자) or orchestrate.유효_날짜(body.정규화.get("사용일자"))
+        with 트랜잭션(body.org_id, account_id) as cur:
+            return orchestrate.지출기록_읽기(cur, body.org_id, account_id, body.사업명, body.확정비목, body.plan_id, 사용일자,
+                                        사업_표준화=사업표준, 비목_표준화=비목표준)
+    except Exception as e:                                    # noqa: BLE001
+        _log.warning("지출 기록 읽기 실패: %s", type(e).__name__)
+        return None
 
 
 def _상황노드_읽기(body: 판정요청, account_id: str | None) -> list[str] | None:
@@ -247,7 +273,7 @@ def _판정_이벤트(out: dict):
 
 def _판정_실행(body: 판정요청, account_id: str | None, 사용자답변: list[dict] | None = None,
             답변유실: bool = False, 노드결정: dict | None = None, 조건답: list[dict] | None = None,
-            상황노드: list[str] | None = None):
+            상황노드: list[str] | None = None, 기록누적: dict | None = None):
     """_live_판정 을 워커 스레드에서 실행하고, 기다리는 동안 SSE keep-alive 주석을 yield 한다.
 
     `out, 실패 = yield from _판정_실행(body, account_id, 사용자답변, 답변유실)` 로 쓴다. 예외나 타임아웃은 판단불가 결과와
@@ -256,7 +282,7 @@ def _판정_실행(body: 판정요청, account_id: str | None, 사용자답변: 
     """
     ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     # submit 은 컨텍스트 변수를 복사하지 않는다. 미들웨어가 설정한 현재_org 를 워커에 넘긴다.
-    future = ex.submit(contextvars.copy_context().run, _live_판정, body, account_id, 사용자답변, 답변유실, 노드결정, 조건답, 상황노드)
+    future = ex.submit(contextvars.copy_context().run, _live_판정, body, account_id, 사용자답변, 답변유실, 노드결정, 조건답, 상황노드, 기록누적)
     만료시각 = time.monotonic() + _판정_타임아웃초
     try:
         while True:
@@ -300,7 +326,7 @@ def _실패_결과(body: 판정요청) -> dict:
 
 def _live_판정(body: 판정요청, account_id: str | None = None, 사용자답변: list[dict] | None = None,
              답변유실: bool = False, 노드결정: dict | None = None, 조건답: list[dict] | None = None,
-             상황노드: list[str] | None = None) -> dict:
+             상황노드: list[str] | None = None, 기록누적: dict | None = None) -> dict:
     """orchestrate.판정() 을 호출하고 응답 계약으로 바꾼다. 워커 스레드에서 실행된다."""
     import orchestrate
     # 질문 원문이 없을 때만 품목·용도·금액으로 문장을 재구성한다. 합성 문장(_합성_질문)을 다시
@@ -321,7 +347,7 @@ def _live_판정(body: 판정요청, account_id: str | None = None, 사용자답
                        사용자프로필값=_사용자프로필값_구성(body.답변),
                        사용자답변=사용자답변, 답변유실=답변유실,
                        확정세목=body.확정세목, 추가입력값=body.추가입력값, 부가세구분=body.부가세구분, 사용일자=body.사용일자,
-                       노드결정=노드결정, 조건답=조건답, 상황노드=상황노드)
+                       노드결정=노드결정, 조건답=조건답, 상황노드=상황노드, 기록누적=기록누적)
     return 파이프라인결과_매핑(r, body)
 
 
