@@ -39,9 +39,8 @@ def public_url(url: str) -> bool:
             numeric = {"id", "article", "article_id", "articleid", "doc", "doc_id", "document_id",
                        "page", "p", "post", "post_id", "postid", "no", "seq", "idx"}
             languages = {"lang", "language", "locale"}
-            # 사이트별 공개 글·영상 식별자. 다른 사이트에서는 받지 않는다.
+            # 사이트별 공개 글 식별자. 다른 사이트에서는 받지 않는다. 영상 페이지는 본문이 없어 받지 않는다.
             naver_blog = host in {"blog.naver.com", "m.blog.naver.com"}
-            youtube = host in {"www.youtube.com", "youtube.com", "m.youtube.com"}
             for key, value in pairs:
                 key = key.lower()
                 if key in numeric and re.fullmatch(r"[0-9]{1,9}", value):
@@ -49,8 +48,6 @@ def public_url(url: str) -> bool:
                 if naver_blog and key == "blogid" and re.fullmatch(r"[A-Za-z0-9_-]{1,50}", value):
                     continue
                 if naver_blog and key == "logno" and re.fullmatch(r"[0-9]{12,15}", value):
-                    continue
-                if youtube and key == "v" and re.fullmatch(r"[A-Za-z0-9_-]{11}", value):
                     continue
                 if key in languages and re.fullmatch(r"(?:en|ko|en-us|ko-kr)", value, re.I):
                     continue

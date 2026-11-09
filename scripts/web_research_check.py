@@ -129,12 +129,12 @@ def main():
     deadlines = []
     def late_plan(prompt, schema, timeout):
         deadlines.append(timeout)
-        clock[0] = 46
+        clock[0] = 61
         return {"행동": "검색", "유형": "제품성격", "검색어": "Example official product", "부족정보": [], "URL": "", "후보": []}
     fake_client = Client(body)
     with patch("web_research.time.monotonic", side_effect=lambda: clock[0]):
         assert research("Example", budget=Budget(), client=fake_client, llm_call=late_plan)["상태"] == "미확인"
-    assert deadlines == [45] and not fake_client.calls
+    assert deadlines == [60] and not fake_client.calls
     fake_client = Client(body)
     bad_query = lambda p, s, t: {"행동": "검색", "유형": "판매자", "검색어": "Example secret-contact official company", "부족정보": [], "URL": "", "후보": []}
     research("Example", requirements=[{"내용": "secret-contact"}], context={"거래처": "secret-contact"}, budget=Budget(), client=fake_client, llm_call=bad_query)
@@ -153,14 +153,34 @@ def main():
     ])
     confirmed = research("Example", budget=Budget(), client=first_confirm, llm_call=lambda p, s, t: next(confirm_plans))
     assert [c[0] for c in first_confirm.calls] == ["google_search", "url_to_markdown"], first_confirm.calls
-    assert first_confirm.calls[0][1] == {"keyword": "Example"}
+    assert first_confirm.calls[0][1] == {"keyword": "Example 요금 가격"}
     assert len(confirmed["후보"]) == 1 and confirmed["상태"] == "확인필요"
     assert [x["항목"] for x in confirmed["사용자확인"]] == ["실제결제", "실제사용"]
+    # 두 주소를 동시에 읽고 한 페이지가 실패해도 다른 본문으로 다음 계획이 발췌를 고른다.
+    class TwoLinks(Client):
+        def call(self, name, args, timeout):
+            self.calls.append((name, args, timeout))
+            if name == "google_search":
+                return {"content": [{"type": "text", "text": '[{"link":"https://a.example.com/x"},{"link":"https://b.example.com/y"}]'}]}
+            if "a.example" in args["url"]:
+                raise ApickError("MCP 도구 오류")
+            return {"content": [{"type": "text", "text": self.body}]}
+    two = TwoLinks(body)
+    two_plans = iter([
+        {"행동": "사용자확인", "유형": "가격", "검색어": "", "부족정보": ["가격"], "확인항목": [], "URL": "", "후보": []},
+        {"행동": "사용자확인", "유형": "가격", "검색어": "", "부족정보": ["가격"], "확인항목": [], "URL": "", "후보": []},
+        {"행동": "완료", "유형": "가격", "검색어": "", "부족정보": [], "확인항목": [], "URL": "", "후보": [{"유형": "가격", "내용": "x", "발췌": "This is a search API for developers.", "URL": "https://b.example.com/y"}]},
+    ])
+    got = research("Example", budget=Budget(), client=two, llm_call=lambda p, s, t: next(two_plans))
+    assert sorted(c[1].get("url", "") for c in two.calls[1:]) == ["https://a.example.com/x", "https://b.example.com/y"], two.calls
+    assert len(got["후보"]) == 1 and got["출처"] == ["https://b.example.com/y"]
+    # 도구 호출별 상한: 검색 20초, 본문 15초
+    assert two.calls[0][2] <= 20 and all(c[2] <= 15 for c in two.calls[1:])
     # 검색 결과 주소의 추적 query 제거와 사이트별 공개 식별자
     from apick_mcp import strip_tracking
     naver = "https://m.blog.naver.com/PostView.naver?blogId=ikso2000&logNo=223456789012&categoryNo=3&proxyReferer=&noTrackingCode=true"
     assert public_url(strip_tracking(naver)) and "proxyReferer" not in strip_tracking(naver)
-    assert public_url("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+    assert not public_url("https://www.youtube.com/watch?v=dQw4w9WgXcQ")  # 영상 페이지는 본문이 없다
     assert public_url(strip_tracking("https://www.reddit.com/r/x/comments/1j/abc/?tl=ko"))
     # 검색이 막혀도 부족한 공개 정보가 있으면 확인필요, 같은 검색어는 한 번만 보낸다.
     blocked_plan = lambda p, s, t: {"행동": "사용자확인", "유형": "가격", "검색어": "", "부족정보": ["가격"], "확인항목": [], "URL": "", "후보": []}
