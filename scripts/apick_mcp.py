@@ -57,6 +57,10 @@ def public_url(url: str) -> bool:
             return False
         if host == "localhost" or host.endswith((".localhost", ".local", ".internal")) or "." not in host:
             return False
+        # 영상·설문 페이지는 읽을 본문이 없어 조사 시간만 쓴다(운영 2026-11-10: 「노션 플러스」 검색 결과가 youtube·forms.gle 뿐).
+        if (host in {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be", "forms.gle", "vimeo.com", "www.vimeo.com"}
+                or (host == "docs.google.com" and p.path.startswith("/forms"))):
+            return False
         try:
             if not ipaddress.ip_address(host).is_global:
                 return False

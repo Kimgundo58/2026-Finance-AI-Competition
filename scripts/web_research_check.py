@@ -194,6 +194,9 @@ def main():
     naver = "https://m.blog.naver.com/PostView.naver?blogId=ikso2000&logNo=223456789012&categoryNo=3&proxyReferer=&noTrackingCode=true"
     assert public_url(strip_tracking(naver)) and "proxyReferer" not in strip_tracking(naver)
     assert not public_url("https://www.youtube.com/watch?v=dQw4w9WgXcQ")  # 영상 페이지는 본문이 없다
+    for 없음 in ("https://www.youtube.com/@notion", "https://youtu.be/abc", "https://forms.gle/abc123", "https://docs.google.com/forms/d/e/x/viewform"):
+        assert not public_url(없음), 없음
+    assert public_url("https://docs.google.com/document/d/abc/edit")
     assert public_url(strip_tracking("https://www.reddit.com/r/x/comments/1j/abc/?tl=ko"))
     # 검색이 막혀도 부족한 공개 정보가 있으면 확인필요, 같은 검색어는 한 번만 보낸다.
     blocked_plan = lambda p, s, t: {"행동": "사용자확인", "유형": "가격", "검색어": "", "부족정보": ["가격"], "확인항목": [], "URL": "", "후보": []}
