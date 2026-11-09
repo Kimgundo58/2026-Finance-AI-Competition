@@ -176,6 +176,19 @@ def main():
     assert len(got["후보"]) == 1 and got["출처"] == ["https://b.example.com/y"]
     # 도구 호출별 상한: 검색 20초, 본문 15초
     assert two.calls[0][2] <= 20 and all(c[2] <= 15 for c in two.calls[1:])
+    # 동시에 읽은 묶음에 연결 설정 오류가 있으면 성공한 본문도 쓰지 않고 실패로 끝낸다.
+    class MixedDenied(TwoLinks):
+        def call(self, name, args, timeout):
+            if name == "url_to_markdown" and "a.example" in args["url"]:
+                raise ApickError("x", code="APICK_IP_DENIED")
+            return TwoLinks.call(self, name, args, timeout)
+    mixed_plans = iter([{"행동": "사용자확인", "유형": "가격", "검색어": "", "부족정보": ["가격"], "확인항목": [], "URL": "", "후보": []}] * 3)
+    ev = []
+    with patch("web_research._log.warning"):
+        mixed = research("Example", budget=Budget(), client=MixedDenied(body), llm_call=lambda p, s, t: next(mixed_plans), emit=ev.append)
+    assert mixed["상태"] == "실패" and mixed["출처"] == [], mixed
+    열림 = {e["id"] for e in ev if e["상태"] == "진행중"}
+    assert 열림 and 열림 <= {e["id"] for e in ev if e["상태"] in ("완료", "실패")}
     # 검색 결과 주소의 추적 query 제거와 사이트별 공개 식별자
     from apick_mcp import strip_tracking
     naver = "https://m.blog.naver.com/PostView.naver?blogId=ikso2000&logNo=223456789012&categoryNo=3&proxyReferer=&noTrackingCode=true"
