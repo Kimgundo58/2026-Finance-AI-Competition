@@ -1303,8 +1303,14 @@ def _새_판정준비단계(상태: _판정상태) -> dict | None:
         조사상태 = 조회.get("추가조사상태") or {}
         새규범 = set(ontology_evidence._규범_모으기(조회)) - 이전규범
         새위치 = {(r.get('doc_id'), r.get('조번호'), r.get('항호')) for r in 조회.get('근거행') or [] if r.get('article_id') is not None} - 이전위치
-        if 조사상태.get("상태") != "완료" or not (새규범 or 새위치):
-            raise ValueError("추가 근거 없음")
+        # 조회가 정상으로 끝났는데 새 규범이 없으면 필요한 규정은 이미 제시돼 있다. 기존 근거로 판정한다.
+        # 예외·예산 소진('건너뜀')·실패·결과 상한('부분')은 아래에서 판단불가로 남긴다.
+        if 조사상태.get("상태") in ("0건", "추가없음") or (조사상태.get("상태") == "완료" and not (새규범 or 새위치)):
+            상태.처리단계.append("추가조회새근거없음")
+            research_runtime.emit("규정추가조회", "더 확인할 규정이 없어 앞서 찾은 규정으로 판정해요.", "완료", id=조회_id)
+            return None
+        if 조사상태.get("상태") != "완료":
+            raise ValueError("추가 조회 미완료")
         상태.온톨로지 = 조회
         if 응답 := _새_검색단계(상태, 재구성=True):
             research_runtime.emit("규정추가조회", "추가 규정 확인을 마치지 못했어요.", "실패", id=조회_id)
