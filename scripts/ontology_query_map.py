@@ -57,7 +57,11 @@ def map_for(cur, *, 사업, 비목_id, 자금, budget, 질문='', 품목='', 용
     with readonly(cur, budget):
         version = ontology_age.준비_버전(cur)
         labels = ontology_lookup.레이블_목록(cur, 사업)
-        if 비목_id not in {x['노드'] for x in labels if x.get('세목') is None}:
+        # 판정 경로(ontology_lookup.대상_노드)와 같은 범위: 사업이 쓰는 비목이거나, 모든 사업에 적용되는
+        # 공통 비목(적용사업 NULL, 예: 재도전의 재료비는 통합관리지침으로 적용)만 받는다.
+        if 비목_id not in {x['노드'] for x in labels if x.get('세목') is None} and not cur.execute(
+                "SELECT 1 FROM corpus.age_concepts WHERE concept_id = %s AND 종류 = '비목' AND 적용사업 IS NULL",
+                (비목_id,)).fetchone():
             raise ValueError('사업의 선택 비목이 아님')
         rows = ontology_research.후보_목록(cur, 사업=사업, 비목_id=비목_id, 자금=자금)
         # 지도에 등장하지 않는 값을 모델이 파라미터로 새로 만들 수 없다.
