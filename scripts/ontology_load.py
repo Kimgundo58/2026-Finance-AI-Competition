@@ -33,6 +33,7 @@ from _lib import db, paths  # noqa: E402
 ROOT = paths.ensure_on_path()
 
 import ontology_terms  # noqa: E402
+import ontology_age  # noqa: E402
 from ontology_check import DB_원문, 검사오류, 복원본_읽기, 원천_기본폴더, 원천_읽기, 전체_검사, 행_해시, _목록, _원본  # noqa: E402
 from ontology_norm import 모든비목, 조문ID_풀이  # noqa: E402
 from psycopg.types.json import Jsonb  # noqa: E402
@@ -363,6 +364,11 @@ def 적재(폴더: Path | str, 사업키들: list[str] | None, dry: bool, dsn: s
                         끊김 = ontology_terms.쓰기(cur, 용어새, 용어옛, 범위, 용어유지)
                     _참조_확인(cur)
                     정리 = _l3_정리(cur)
+                    # 관계형 원천과 AGE를 한 트랜잭션으로 바꾼다. 그래프 실패 시 원천도 롤백한다.
+                    try:
+                        그래프행수 = ontology_age.동기화(cur)
+                    except Exception as e:
+                        raise 적재실패(f"AGE 그래프 동기화 실패: {type(e).__name__}") from e
                     후 = _데이터버전(cur)
                     핵심변경 = any(차이[t][k] for t in ("개념", "라벨", "관계", "규범", "용어") if t in 차이 for k in ("추가", "변경", "삭제"))
                     if 핵심변경 and 전 == 후:
@@ -395,6 +401,7 @@ def 적재(폴더: Path | str, 사업키들: list[str] | None, dry: bool, dsn: s
         "원천파일": 원천["파일"], "행수": 행수, "검사": 결과.요약(),
         "차이": {t: {k: (len(v) if isinstance(v, list) else v) for k, v in d.items()} for t, d in 차이.items()},
         "재검토_유지": 유지수, "l3_정리_article_id": 정리, "판정캐시_삭제": 삭제캐시, "데이터버전": {"전": 전, "후": 후},
+        "AGE": 그래프행수,
         "용어": {**용어집계, "원천해시": 용어원천["해시"] if 용어원천 else None, "concept_끊김": 끊김}})
     print(f"행 수: {json.dumps(행수, ensure_ascii=False)}")
     print(f"적재 로그: {로그}")

@@ -3,7 +3,7 @@
 
 노드_결정 · 품목_노드 · 경로밖_품목 · 품목_후보 · 노드결정_적용 · 상위_세목 · 경로밖_규범 · 상황_후보 · 상황_규범 · 비율_규범 · 비목_품목금지 · 조문_행 · 세목_한도_있음 · 적용_규범 · 근거_조문 · 새경로_대상 · 근거경로_문장. 쓰지 않는다. 어떤 예외도 호출자에게 그대로 올린다
 (호출자 orchestrate 가 판단불가로 바꾼다). 없는 노드 ID 는 LookupError 다.
-L3 는 여기서 다루지 않는다(능력 질문 시험의 `문맥_구성` 호출만 판정과 같은 문맥 구성 함수로 L3 연결을 본다). 읽는 테이블: corpus.concepts · concept_labels · concept_relations · norms · provenance ·
+L3 는 여기서 다루지 않는다(능력 질문 시험의 `문맥_구성` 호출만 판정과 같은 문맥 구성 함수로 L3 연결을 본다). 읽는 테이블: corpus.age_concepts · concept_labels · concept_relations · norms · provenance ·
 documents · doc_articles.
 
     python scripts/ontology_lookup.py --cq-test ontology/테스트/능력질문.json     # 전부 일치해야 0 으로 끝난다(DB 필요)
@@ -15,6 +15,7 @@ import argparse
 import functools
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -30,6 +31,8 @@ ROOT = paths.ensure_on_path()
 
 from ontology_norm import 모든비목, 조문ID_풀이, 조번호_표시  # noqa: E402
 from rule_lookup import _norm  # noqa: E402
+import ontology_graph  # noqa: E402
+import ontology_age  # noqa: E402
 
 준용_관계 = ("준용", "위임")
 _스키마_경로 = ROOT / "ontology" / "schema.json"
@@ -52,7 +55,7 @@ def _별칭_일치(cur, 표현: str, 사업: str | None) -> list[tuple]:
         return []
     return cur.execute(
         """SELECT c.concept_id, c.종류, c.pref_label, c.정의, c.적용사업, c.검수단계, l.적용사업 IS NULL AS 공통
-             FROM corpus.concept_labels l JOIN corpus.concepts c USING (concept_id)
+             FROM corpus.age_concept_labels l JOIN corpus.age_concepts c USING (concept_id)
             WHERE l.정규화 = %s AND (l.적용사업 IS NULL OR l.적용사업 = %s)
             ORDER BY 공통, c.concept_id""", (키, 사업)).fetchall()
 
@@ -68,23 +71,13 @@ def 노드_결정(cur, 표현: str, 사업: str | None) -> list[dict]:
 
 def _상위_경로(cur, 대상_id: str, 사업들: list[str]) -> list[tuple[str, str]]:
     """대상에서 위로 올라가는 (하위, 상위) 목록. 가까운 것부터."""
-    행들 = cur.execute(
-        """WITH RECURSIVE 상위경로(하위, 상위, 깊이, 방문) AS (
-             SELECT r.src_id, r.dst_id, 1, ARRAY[r.src_id, r.dst_id]
-               FROM corpus.concept_relations r
-              WHERE r.관계 = '상위' AND r.src_id = %(대상)s AND (r.적용사업 IS NULL OR r.적용사업 = ANY(%(사업들)s))
-             UNION ALL
-             SELECT r.src_id, r.dst_id, p.깊이 + 1, p.방문 || r.dst_id
-               FROM 상위경로 p JOIN corpus.concept_relations r ON r.src_id = p.상위
-              WHERE r.관계 = '상위' AND (r.적용사업 IS NULL OR r.적용사업 = ANY(%(사업들)s))
-                AND NOT r.dst_id = ANY(p.방문))
-           SELECT DISTINCT 하위, 상위, 깊이 FROM 상위경로 ORDER BY 깊이, 하위, 상위""",
-        {"대상": 대상_id, "사업들": 사업들}).fetchall()
-    return [(r[0], r[1]) for r in 행들]
+    paths = ontology_graph.경로(cur, [대상_id], ["상위"], 사업들=사업들)
+    rows = {(path[-2], dst, depth) for _, dst, _, depth, path in paths}
+    return [(src, dst) for src, dst, depth in sorted(rows, key=lambda r: (r[2], r[0], r[1]))]
 
 
 def _노드_확인(cur, 대상_id: str) -> None:
-    if cur.execute("SELECT 1 FROM corpus.concepts WHERE concept_id = %s", (대상_id,)).fetchone() is None:
+    if cur.execute("SELECT 1 FROM corpus.age_concepts WHERE concept_id = %s", (대상_id,)).fetchone() is None:
         raise LookupError(f"없는 노드 ID: {대상_id}")
 
 
@@ -95,7 +88,7 @@ _규범_컬럼 = ("norm_id", "종류", "계층", "적용사업", "대상", "수�
 def _근거_붙이기(cur, 규범들: list[dict]) -> None:
     묶음: dict[str, list[dict]] = {n["norm_id"]: [] for n in 규범들}
     for r in cur.execute(
-            """SELECT owner_id, 칸, doc_id, 조번호, 항호, 발췌 FROM corpus.provenance
+            """SELECT owner_id, 칸, doc_id, 조번호, 항호, 발췌 FROM corpus.age_provenance
                 WHERE owner_kind = '규범' AND owner_id = ANY(%s)
                 ORDER BY owner_id, 칸, doc_id, 조번호, 항호, 발췌""", (list(묶음),)).fetchall():
         묶음[r[0]].append({"칸": r[1], "doc_id": r[2], "조번호": r[3], "항호": r[4], "발췌": r[5]})
@@ -154,7 +147,7 @@ def 적용_규범(cur, 사업: str | None, 대상_id: str) -> dict:
     노드들 = [대상_id, *{p for _, p in 경로}, 모든비목]
     컬럼 = ", ".join(_규범_컬럼)
     행들 = cur.execute(
-        f"""SELECT {컬럼} FROM corpus.norms
+        f"""SELECT {컬럼} FROM corpus.age_norms
              WHERE 대상 && %s::text[] AND (적용사업 IS NULL OR 적용사업 = ANY(%s))
              ORDER BY 계층, norm_id""", (노드들, 사업들)).fetchall()
     규범들 = [dict(zip(_규범_컬럼, r)) for r in 행들]
@@ -264,46 +257,43 @@ def 근거_조문(cur, 규범들: list[dict], 깊이: int = 3, 대상_id: str | 
             시작_넣기(g["doc_id"], g["조번호"], g["항호"], "규범근거", 순위)
     if 대상_id:
         for r in cur.execute(
-                """SELECT DISTINCT doc_id, 조번호, 항호, owner_id FROM corpus.provenance
+                """SELECT DISTINCT doc_id, 조번호, 항호, owner_id FROM corpus.age_provenance
                     WHERE owner_kind = '개념' AND owner_id = ANY(%s) AND doc_id <> ALL(%s)
                     ORDER BY doc_id, 조번호, 항호, owner_id""", (사슬노드, _다른사업_문서(사업들))).fetchall():
             시작_넣기(r[0], r[1], r[2], "개념근거", 노드순위[r[3]])
 
     시작목록 = sorted(시작)
-    조단위_시작 = _조단위_식.format("시작.id")
-    앞_행들 = cur.execute(
-        f"""SELECT DISTINCT 시작.id, r.src_id, r.관계
-              FROM unnest(%(시작)s::text[]) AS 시작(id)
-              JOIN corpus.concept_relations r
-                ON r.관계 = ANY(%(관계)s) AND (r.dst_id = 시작.id OR r.dst_id = {조단위_시작})
-             WHERE r.src_id LIKE '조:%%' AND r.src_id <> 시작.id
-               AND (r.적용사업 IS NULL OR r.적용사업 = ANY(%(사업들)s))
-             ORDER BY 시작.id, r.src_id""",
-        {"시작": 시작목록, "관계": list(준용_관계), "사업들": 사업들}).fetchall()
+    # SQL의 조 단위 정규식과 동일하게 항·호 등 조 뒤의 부분을 제거한다.
+    조단위 = re.compile(r"^(조:[^#]+#(?:제[0-9]+조(?:의[0-9]+)?|(?:별지|별표|붙임)\s*[0-9]*|부칙(?:\s*제[0-9]+조(?:의[0-9]+)?)?|(?:참고[0-9]+-)?p[0-9]+-[0-9]+|제[0-9]+편(?:[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]+(?:-[0-9]+)?)?|표지)).*$")
+    def 조단위_id(value):
+        return 조단위.sub(r"\1", value)
+
+    역방향_edges = ontology_graph.간선(cur, list({x for start in 시작목록 for x in (start, 조단위_id(start))}), 준용_관계, 역방향=True, 사업들=사업들)
+    앞_행들 = sorted({(start, src, kind) for start in 시작목록 for src, dst, kind, _ in 역방향_edges
+                    if dst in (start, 조단위_id(start)) and src.startswith("조:") and src != start},
+                   key=lambda r: (r[0], r[1]))
     앞: dict[str, str] = {}
     앞_출처: dict[str, str] = {}
-    for s, src, 관계 in 앞_행들:
-        앞.setdefault(s, src)                       # 여럿이면 첫 번째를 경로에 쓴다. 나머지도 아래에서 행으로 나온다
-        앞_출처.setdefault(src, f"{관계}_앞")
+    for start, src, kind in 앞_행들:
+        앞.setdefault(start, src)
+        앞_출처.setdefault(src, f"{kind}_앞")
 
     사슬: list[tuple] = []
-    if 깊이 > 0:
-        조단위_s = _조단위_식.format("s.dst_id")
-        사슬 = cur.execute(
-            f"""WITH RECURSIVE 사슬(시작id, dst_id, 관계, 깊이, 경로) AS (
-                  SELECT 시작.id, r.dst_id, r.관계, 1, ARRAY[시작.id, r.dst_id]
-                    FROM unnest(%(시작)s::text[]) AS 시작(id)
-                    JOIN corpus.concept_relations r
-                      ON r.관계 = ANY(%(관계)s) AND (r.src_id = 시작.id OR r.src_id = {조단위_시작})
-                   WHERE r.dst_id <> 시작.id AND (r.적용사업 IS NULL OR r.적용사업 = ANY(%(사업들)s))
-                  UNION ALL
-                  SELECT s.시작id, r.dst_id, r.관계, s.깊이 + 1, s.경로 || r.dst_id
-                    FROM 사슬 s JOIN corpus.concept_relations r
-                      ON r.관계 = ANY(%(관계)s) AND (r.src_id = s.dst_id OR r.src_id = {조단위_s})
-                   WHERE s.깊이 < %(깊이)s AND NOT r.dst_id = ANY(s.경로)
-                     AND (r.적용사업 IS NULL OR r.적용사업 = ANY(%(사업들)s)))
-                SELECT 시작id, dst_id, 관계, 깊이, 경로 FROM 사슬 ORDER BY 깊이, 시작id, dst_id""",
-            {"시작": 시작목록, "관계": list(준용_관계), "사업들": 사업들, "깊이": 깊이}).fetchall()
+    current = [(start, start, [start]) for start in 시작목록]
+    for level in range(1, 깊이 + 1):
+        nxt = []
+        ids = list({x for _, node, _ in current for x in (node, 조단위_id(node))})
+        edges = ontology_graph.간선(cur, ids, 준용_관계, 사업들=사업들)
+        for start, node, path in current:
+            for src, dst, kind, _ in edges:
+                if src in (node, 조단위_id(node)) and dst not in path:
+                    newpath = [*path, dst]
+                    사슬.append((start, dst, kind, level, newpath))
+                    nxt.append((start, dst, newpath))
+        current = nxt
+        if not current:
+            break
+    사슬.sort(key=lambda r: (r[3], r[0], r[1], tuple(r[4]), r[2]))
 
     조문들 = set(시작목록) | set(앞_출처) | {r[1] for r in 사슬 if r[1].startswith("조:")} | set(우선순위_근거)
     정보 = _조문_정보(cur, sorted(조문들), schema)
@@ -397,21 +387,18 @@ def 레이블_목록(cur, 사업명: str | None) -> list[dict]:
     if not 사업키:
         return []
     사업들 = [사업명]
-    행들 = cur.execute(
-        """SELECT b.concept_id, b.pref_label, NULL::text, NULL::text
-             FROM corpus.concept_relations r JOIN corpus.concepts b ON b.concept_id = r.dst_id
-            WHERE r.관계 = '사용' AND b.종류 = '비목' AND (r.src_id = %(사업id)s OR r.적용사업 = ANY(%(사업들)s))
-           UNION ALL
-           SELECT s.concept_id, b.pref_label, s.pref_label, b.concept_id
-             FROM corpus.concept_relations r
-             JOIN corpus.concepts b ON b.concept_id = r.dst_id
-             JOIN corpus.concept_relations h ON h.관계 = '상위' AND h.dst_id = b.concept_id
-                  AND (h.적용사업 IS NULL OR h.적용사업 = ANY(%(사업들)s))
-             JOIN corpus.concepts s ON s.concept_id = h.src_id AND s.종류 = '세목'
-            WHERE r.관계 = '사용' AND b.종류 = '비목' AND (r.src_id = %(사업id)s OR r.적용사업 = ANY(%(사업들)s))
-            ORDER BY 2, 3 NULLS FIRST""", {"사업id": f"사업:{사업키}", "사업들": 사업들}).fetchall()
+    uses = [dst for _, dst, _, _ in ontology_graph.사업_사용(cur, f"사업:{사업키}", 사업명)]
+    부모 = {r[0]: r[1] for r in cur.execute("SELECT concept_id, pref_label FROM corpus.age_concepts WHERE 종류 = '비목' AND concept_id = ANY(%s)", (uses,)).fetchall()}
+    children = [(src, dst) for src, dst, _, _ in ontology_graph.간선(cur, list(부모), ["상위"], 역방향=True, 사업들=사업들)]
+    세목 = {r[0]: r[1] for r in cur.execute("SELECT concept_id, pref_label FROM corpus.age_concepts WHERE 종류 = '세목' AND concept_id = ANY(%s)", ([src for src, _ in children],)).fetchall()}
+    행들 = []
+    for parent in uses:
+        if parent in 부모:
+            행들.append((parent, 부모[parent], None, None))
+            행들.extend((child, 부모[parent], 세목[child], parent) for child, dst in children if dst == parent and child in 세목)
+    행들.sort(key=lambda r: (r[1], r[2] is not None, r[2] or ""))
     별칭: dict[str, list[str]] = {}
-    for cid, 글 in cur.execute("""SELECT concept_id, alt_label FROM corpus.concept_labels
+    for cid, 글 in cur.execute("""SELECT concept_id, alt_label FROM corpus.age_concept_labels
                                   WHERE concept_id = ANY(%s) AND (적용사업 IS NULL OR 적용사업 = %s)
                                   ORDER BY concept_id, alt_label""", ([r[0] for r in 행들], 사업명)).fetchall():
         별칭.setdefault(cid, []).append(글)
@@ -438,7 +425,7 @@ def 별칭_후보(cur, 표현: str | None, 사업명: str | None, 레이블: lis
 def 대상_노드(cur, 사업명: str | None, 비목: str, 세목: str | None = None) -> dict:
     """화면에서 확정한 비목 · 세목 표기 → 노드 ID. 세목이 주어졌는데 그 비목 아래에 없으면 LookupError(판단불가)."""
     사업들 = [사업명] if 사업명 else []
-    행 = cur.execute("""SELECT concept_id FROM corpus.concepts WHERE 종류 = '비목' AND pref_label = %s
+    행 = cur.execute("""SELECT concept_id FROM corpus.age_concepts WHERE 종류 = '비목' AND pref_label = %s
                          AND (적용사업 IS NULL OR 적용사업 = ANY(%s)) ORDER BY 적용사업 NULLS LAST LIMIT 1""",
                      (비목, 사업들)).fetchone()
     if 행 is None:
@@ -446,11 +433,11 @@ def 대상_노드(cur, 사업명: str | None, 비목: str, 세목: str | None = 
     비목_id = 행[0]
     if not 세목:
         return {"대상_id": 비목_id, "비목_id": 비목_id, "표시문": 비목, "비목": 비목, "세목": None}
-    행 = cur.execute("""SELECT s.concept_id FROM corpus.concepts s
-                          JOIN corpus.concept_relations h ON h.src_id = s.concept_id AND h.관계 = '상위' AND h.dst_id = %s
-                         WHERE s.종류 = '세목' AND s.pref_label = %s AND (s.적용사업 IS NULL OR s.적용사업 = ANY(%s))
-                           AND (h.적용사업 IS NULL OR h.적용사업 = ANY(%s))
-                         ORDER BY s.적용사업 NULLS LAST LIMIT 1""", (비목_id, 세목, 사업들, 사업들)).fetchone()
+    하위 = [src for src, _, _, _ in ontology_graph.간선(cur, [비목_id], ["상위"], 역방향=True, 사업들=사업들)]
+    행 = cur.execute("""SELECT concept_id FROM corpus.age_concepts
+                         WHERE concept_id = ANY(%s) AND 종류 = '세목' AND pref_label = %s
+                           AND (적용사업 IS NULL OR 적용사업 = ANY(%s))
+                         ORDER BY 적용사업 NULLS LAST LIMIT 1""", (하위, 세목, 사업들)).fetchone()
     if 행 is None:
         raise LookupError(f"{비목} 아래에 없는 세목: {세목}")
     return {"대상_id": 행[0], "비목_id": 비목_id, "표시문": f"{비목} > {세목}", "비목": 비목, "세목": 세목}
@@ -487,18 +474,12 @@ def 품목_후보(cur, 사업명: str | None, 비목_id: str, 모든비목_포�
     """
     사업들 = [사업명] if 사업명 else []
     뿌리 = [비목_id, *([모든비목] if 모든비목_포함 and 비목_id != 모든비목 else [])]
-    행들 = cur.execute(
-        """WITH RECURSIVE 하위(id, 방문) AS (
-             SELECT r.src_id, ARRAY[r.dst_id, r.src_id] FROM corpus.concept_relations r
-              WHERE r.관계 = '상위' AND r.dst_id = ANY(%(뿌리)s) AND (r.적용사업 IS NULL OR r.적용사업 = ANY(%(사업들)s))
-             UNION ALL
-             SELECT r.src_id, h.방문 || r.src_id FROM 하위 h JOIN corpus.concept_relations r ON r.dst_id = h.id
-              WHERE r.관계 = '상위' AND (r.적용사업 IS NULL OR r.적용사업 = ANY(%(사업들)s)) AND NOT r.src_id = ANY(h.방문))
-           SELECT DISTINCT c.concept_id, c.pref_label FROM 하위 h JOIN corpus.concepts c ON c.concept_id = h.id
-            WHERE c.종류 IN ('세목', '품목') AND (c.적용사업 IS NULL OR c.적용사업 = ANY(%(사업들)s))
-            ORDER BY c.concept_id""", {"뿌리": 뿌리, "사업들": 사업들}).fetchall()
+    하위 = {r[1] for r in ontology_graph.경로(cur, 뿌리, ["상위"], 역방향=True, 사업들=사업들)}
+    행들 = cur.execute("""SELECT concept_id, pref_label FROM corpus.age_concepts
+        WHERE concept_id = ANY(%s) AND 종류 IN ('세목', '품목')
+          AND (적용사업 IS NULL OR 적용사업 = ANY(%s)) ORDER BY concept_id""", (list(하위), 사업들)).fetchall()
     별칭: dict[str, list[str]] = {}
-    for cid, 글 in cur.execute("""SELECT concept_id, alt_label FROM corpus.concept_labels
+    for cid, 글 in cur.execute("""SELECT concept_id, alt_label FROM corpus.age_concept_labels
                                   WHERE concept_id = ANY(%s) AND (적용사업 IS NULL OR 적용사업 = ANY(%s))
                                   ORDER BY concept_id, alt_label""", ([r[0] for r in 행들], 사업들)).fetchall():
         if 글 not in 별칭.setdefault(cid, []):
@@ -522,7 +503,7 @@ def 노드결정_적용(cur, 사업명: str | None, 대상: dict, 노드결정: 
     if nid not in {c["id"] for c in 품목_후보(cur, 사업명, 대상["비목_id"], 모든비목_포함)}:
         return None, [], None
     사업들 = [사업명] if 사업명 else []
-    종류 = cur.execute("SELECT 종류 FROM corpus.concepts WHERE concept_id = %s", (nid,)).fetchone()[0]
+    종류 = cur.execute("SELECT 종류 FROM corpus.age_concepts WHERE concept_id = %s", (nid,)).fetchone()[0]
     if 확신 == "동일" and 종류 == "품목" and 대상["대상_id"] in {p for _, p in _상위_경로(cur, nid, 사업들)}:
         return nid, [], 확신
     return None, [nid], 확신
@@ -536,7 +517,7 @@ def 상위_세목(cur, 사업명: str | None, 노드_id: str, 비목_id: str) ->
     같은 노드가 나올 때만 돌려준다. 노드 · 관계는 적용사업이 NULL 이거나 그 사업인 것만.
     """
     사업들 = [사업명] if 사업명 else []
-    행 = cur.execute("SELECT 종류 FROM corpus.concepts WHERE concept_id = %s AND (적용사업 IS NULL OR 적용사업 = ANY(%s))",
+    행 = cur.execute("SELECT 종류 FROM corpus.age_concepts WHERE concept_id = %s AND (적용사업 IS NULL OR 적용사업 = ANY(%s))",
                      (노드_id, 사업들)).fetchone()
     if 행 is None or 행[0] not in ("세목", "품목"):
         return None
@@ -546,7 +527,7 @@ def 상위_세목(cur, 사업명: str | None, 노드_id: str, 비목_id: str) ->
         if 하 in 깊이 and 상 not in 깊이:
             깊이[상] = 깊이[하] + 1
     후보 = [노드_id] if 행[0] == "세목" else [p for p in 깊이 if p != 노드_id]
-    종류표 = dict(cur.execute("SELECT concept_id, 종류 FROM corpus.concepts WHERE concept_id = ANY(%s)", (후보,)).fetchall())
+    종류표 = dict(cur.execute("SELECT concept_id, 종류 FROM corpus.age_concepts WHERE concept_id = ANY(%s)", (후보,)).fetchall())
     세목들 = [s for s in 후보 if 종류표.get(s) == "세목"
              and 비목_id in {p for _, p in (경로 if s == 노드_id else _상위_경로(cur, s, 사업들))}]
     if not 세목들:
@@ -555,8 +536,8 @@ def 상위_세목(cur, 사업명: str | None, 노드_id: str, 비목_id: str) ->
     세목들 = [s for s in 세목들 if 깊이[s] == 가까움]
     if len(세목들) != 1:
         return None
-    이름 = cur.execute("SELECT pref_label FROM corpus.concepts WHERE concept_id = %s", (세목들[0],)).fetchone()[0]
-    비목 = cur.execute("SELECT pref_label FROM corpus.concepts WHERE concept_id = %s", (비목_id,)).fetchone()[0]
+    이름 = cur.execute("SELECT pref_label FROM corpus.age_concepts WHERE concept_id = %s", (세목들[0],)).fetchone()[0]
+    비목 = cur.execute("SELECT pref_label FROM corpus.age_concepts WHERE concept_id = %s", (비목_id,)).fetchone()[0]
     try:
         풀이 = 대상_노드(cur, 사업명, 비목, 이름)
     except LookupError:
@@ -591,11 +572,13 @@ def 상황_후보(cur, 사업명: str | None, 상한: int | None = 상황후보_
     """
     사업들 = [사업명] if 사업명 else []
     행들 = cur.execute(
-        """SELECT c.concept_id, c.pref_label,
+        """WITH 대상_규범 AS MATERIALIZED (SELECT * FROM corpus.age_norms),
+                대상_개념 AS MATERIALIZED (SELECT * FROM corpus.age_concepts)
+           SELECT c.concept_id, c.pref_label,
                   count(*) FILTER (WHERE n.종류 = ANY(%s)) AS 먼저수
-             FROM corpus.norms n
+             FROM 대상_규범 n
              CROSS JOIN LATERAL unnest(n.대상) AS d(id)
-             JOIN corpus.concepts c ON c.concept_id = d.id
+             JOIN 대상_개념 c ON c.concept_id = d.id
             WHERE n.verified AND NOT n.해석미결 AND n.종류 <> '우선순위' AND (n.적용사업 IS NULL OR n.적용사업 = ANY(%s))
               AND c.종류 = ANY(%s) AND (c.적용사업 IS NULL OR c.적용사업 = ANY(%s))
             GROUP BY c.concept_id, c.pref_label
@@ -618,7 +601,7 @@ def 상황_규범(cur, 사업명: str | None, 노드들: list[str], 이미: set[
         return []
     사업들 = [사업명] if 사업명 else []
     행들 = cur.execute(
-        f"""SELECT {", ".join(f'n."{c}"' for c in _규범_컬럼)} FROM corpus.norms n
+        f"""SELECT {", ".join(f'n."{c}"' for c in _규범_컬럼)} FROM corpus.age_norms n
              WHERE n.verified AND NOT n.해석미결 AND n.종류 <> '우선순위' AND (n.적용사업 IS NULL OR n.적용사업 = ANY(%s)) AND n.대상 && %s
              ORDER BY n.norm_id""", (사업들, 노드들)).fetchall()
     규범들 = [n for n in (dict(zip(_규범_컬럼, r)) for r in 행들) if n["norm_id"] not in 이미]
@@ -636,7 +619,7 @@ def 비율_규범(cur, 사업명: str | None) -> list[dict]:
     """
     사업들 = [사업명] if 사업명 else []
     행들 = cur.execute(
-        f"""SELECT {", ".join(f'n."{c}"' for c in _규범_컬럼)} FROM corpus.norms n
+        f"""SELECT {", ".join(f'n."{c}"' for c in _규범_컬럼)} FROM corpus.age_norms n
              WHERE n.종류 = '의무' AND n.verified AND NOT n.해석미결 AND (n.적용사업 IS NULL OR n.적용사업 = ANY(%s))
                AND (n.결과->>'문장') ~ '[0-9]\\s*(%%|퍼센트)' AND (n.결과->>'문장') ~ '총\\s*사업비'
              ORDER BY n.norm_id""", (사업들,)).fetchall()
@@ -651,17 +634,12 @@ def 비목_품목금지(cur, 사업명: str | None, 비목들: list[str]) -> lis
     유사 일치를 코드로 하지 않는다(5-6 불변식). 코드 불가 · 조건 문장에 쓰지 않고 판정 문맥에만 넣는다.
     """
     사업들 = [사업명] if 사업명 else []
+    하위 = {r[1] for r in ontology_graph.경로(cur, 비목들, ["상위"], 역방향=True, 사업들=사업들)}
+    품목들 = [r[0] for r in cur.execute("SELECT concept_id FROM corpus.age_concepts WHERE concept_id = ANY(%s) AND 종류 = '품목'", (list(하위),)).fetchall()]
     행들 = cur.execute(
-        f"""WITH RECURSIVE 하위(id, 방문) AS (
-             SELECT r.src_id, ARRAY[r.dst_id, r.src_id] FROM corpus.concept_relations r
-              WHERE r.관계 = '상위' AND r.dst_id = ANY(%(비목들)s) AND (r.적용사업 IS NULL OR r.적용사업 = ANY(%(사업들)s))
-             UNION ALL
-             SELECT r.src_id, h.방문 || r.src_id FROM 하위 h JOIN corpus.concept_relations r ON r.dst_id = h.id
-              WHERE r.관계 = '상위' AND (r.적용사업 IS NULL OR r.적용사업 = ANY(%(사업들)s)) AND NOT r.src_id = ANY(h.방문))
-           SELECT {", ".join(f'n."{c}"' for c in _규범_컬럼)} FROM corpus.norms n
-            WHERE n.종류 = '금지' AND (n.적용사업 IS NULL OR n.적용사업 = ANY(%(사업들)s))
-              AND n.대상 && (SELECT array_agg(h.id) FROM 하위 h JOIN corpus.concepts c ON c.concept_id = h.id AND c.종류 = '품목')
-            ORDER BY n.norm_id""", {"비목들": 비목들, "사업들": 사업들}).fetchall()
+        f"""SELECT {", ".join(f'n."{c}"' for c in _규범_컬럼)} FROM corpus.age_norms n
+            WHERE n.종류 = '금지' AND (n.적용사업 IS NULL OR n.적용사업 = ANY(%s))
+              AND n.대상 && %s::text[] ORDER BY n.norm_id""", (사업들, 품목들)).fetchall()
     규범들 = [dict(zip(_규범_컬럼, r)) for r in 행들]
     _근거_붙이기(cur, 규범들)
     return 규범들
@@ -679,18 +657,11 @@ def 조문_행(cur, 조문들: list[str], 출처: str) -> list[dict]:
 def 세목_한도_있음(cur, 사업명: str | None, 대상_id: str) -> bool:
     """대상 아래 세목 노드에 한도 규범이 있나. 비목만 확정했을 때 세목을 고르라고 알리는 데 쓴다(품목은 세지 않는다)."""
     사업들 = [사업명] if 사업명 else []
-    행 = cur.execute(
-        """WITH RECURSIVE 하위(id, 방문) AS (
-             SELECT r.src_id, ARRAY[r.dst_id, r.src_id] FROM corpus.concept_relations r
-               JOIN corpus.concepts c ON c.concept_id = r.src_id AND c.종류 = '세목'
-              WHERE r.관계 = '상위' AND r.dst_id = %(대상)s AND (r.적용사업 IS NULL OR r.적용사업 = ANY(%(사업들)s))
-             UNION ALL
-             SELECT r.src_id, h.방문 || r.src_id FROM 하위 h JOIN corpus.concept_relations r ON r.dst_id = h.id
-               JOIN corpus.concepts c ON c.concept_id = r.src_id AND c.종류 = '세목'
-              WHERE r.관계 = '상위' AND (r.적용사업 IS NULL OR r.적용사업 = ANY(%(사업들)s)) AND NOT r.src_id = ANY(h.방문))
-           SELECT 1 FROM corpus.norms n
-            WHERE n.종류 = '한도' AND (n.적용사업 IS NULL OR n.적용사업 = ANY(%(사업들)s))
-              AND n.대상 && (SELECT array_agg(id) FROM 하위) LIMIT 1""", {"대상": 대상_id, "사업들": 사업들}).fetchone()
+    세목들 = {r[0] for r in cur.execute("SELECT concept_id FROM corpus.age_concepts WHERE 종류 = '세목'").fetchall()}
+    하위 = {r[1] for r in ontology_graph.경로(cur, [대상_id], ["상위"], 역방향=True, 사업들=사업들, 노드허용=세목들)}
+    행 = cur.execute("""SELECT 1 FROM corpus.age_norms n
+        WHERE n.종류 = '한도' AND (n.적용사업 IS NULL OR n.적용사업 = ANY(%s))
+          AND n.대상 && %s::text[] LIMIT 1""", (사업들, list(하위))).fetchone()
     return 행 is not None
 
 
@@ -700,14 +671,42 @@ def 위임_있음(근거행: list[dict]) -> bool:
 
 
 def 새경로_대상(cur, 사업명: str | None) -> bool:
-    """SUDDOE_ONTOLOGY_PROGRAMS(쉼표 구분) 목록에 있고 corpus.norms 에 그 사업 행이 있으면 참(5-11). 비면 모두 옛 경로."""
+    """SUDDOE_ONTOLOGY_PROGRAMS(쉼표 구분) 목록에 있고 corpus.age_norms 에 그 사업 행이 있으면 참(5-11). 비면 모두 옛 경로."""
     if not 사업명:
         return False
     목록 = [x.strip() for x in os.environ.get("SUDDOE_ONTOLOGY_PROGRAMS", "").split(",") if x.strip()]
     if 사업명 not in 목록:
         return False
-    return cur.execute("SELECT 1 FROM corpus.norms WHERE 적용사업 = %s LIMIT 1", (사업명,)).fetchone() is not None
+    ontology_graph.준비(cur)
+    return cur.execute("SELECT 1 FROM corpus.age_norms WHERE 적용사업 = %s LIMIT 1", (사업명,)).fetchone() is not None
 
+
+
+def _age_필수(fn):
+    @functools.wraps(fn)
+    def checked(cur, *args, **kwargs):
+        ontology_graph.준비(cur)
+        return fn(cur, *args, **kwargs)
+    return checked
+
+노드_결정 = _age_필수(노드_결정)
+적용_규범 = _age_필수(적용_규범)
+근거_조문 = _age_필수(근거_조문)
+레이블_목록 = _age_필수(레이블_목록)
+별칭_후보 = _age_필수(별칭_후보)
+대상_노드 = _age_필수(대상_노드)
+품목_노드 = _age_필수(품목_노드)
+경로밖_품목 = _age_필수(경로밖_품목)
+품목_후보 = _age_필수(품목_후보)
+노드결정_적용 = _age_필수(노드결정_적용)
+상위_세목 = _age_필수(상위_세목)
+경로밖_규범 = _age_필수(경로밖_규범)
+상황_후보 = _age_필수(상황_후보)
+상황_규범 = _age_필수(상황_규범)
+비율_규범 = _age_필수(비율_규범)
+비목_품목금지 = _age_필수(비목_품목금지)
+조문_행 = _age_필수(조문_행)
+세목_한도_있음 = _age_필수(세목_한도_있음)
 
 # 능력 질문 테스트 ─────────────────────────────────────────────────────────
 
@@ -881,7 +880,8 @@ def _자체시험() -> int:
         with db.connect(connect_timeout=3, autocommit=True) as conn:
             cur = conn.cursor()
             사업 = "모두의 창업 프로젝트"
-            if cur.execute("SELECT 1 FROM corpus.concepts WHERE concept_id = '품목:창업활동자금/키보드@모두의창업'").fetchone():
+            ontology_graph.준비(cur)
+            if cur.execute("SELECT 1 FROM corpus.age_concepts WHERE concept_id = '품목:창업활동자금/키보드@모두의창업'").fetchone():
                 재료구입 = 대상_노드(cur, 사업, "창업활동비", "재료구입비")
                 t.append(("노드_결정: 사업한정 먼저, 공통도 돌려준다", [r["concept_id"] for r in 노드_결정(cur, "귀금속", 사업)]
                           == ["품목:창업활동자금/귀금속@모두의창업", "품목:창업/귀금속"]))

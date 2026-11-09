@@ -1145,7 +1145,7 @@ def _증빙_안내(cur, 조건들: list[dict]) -> dict[str, str]:
         return {}
     발급처 = dict(cur.execute(
         """SELECT c.concept_id, c.pref_label || ': ' || e."발급처"
-             FROM corpus.concepts c JOIN corpus.evidence_sources e ON e."증빙명" = c.pref_label
+             FROM corpus.age_concepts c JOIN corpus.evidence_sources e ON e."증빙명" = c.pref_label
             WHERE c.concept_id = ANY(%s) AND e."발급처" IS NOT NULL""", (ids,)).fetchall())
     return {c["문장"]: " · ".join(발급처[i] for i in c.get("증빙") or [] if i in 발급처)
             for c in 조건들 if any(i in 발급처 for i in c.get("증빙") or [])}
@@ -1169,7 +1169,7 @@ def _승인_안내(cur, 조건들: list[dict]) -> dict[str, str]:
     ids = sorted({i for c in 조건들 for i in c.get("승인주체") or []})
     if not ids:
         return {}
-    이름 = dict(cur.execute("SELECT concept_id, pref_label FROM corpus.concepts WHERE concept_id = ANY(%s)", (ids,)).fetchall())
+    이름 = dict(cur.execute("SELECT concept_id, pref_label FROM corpus.age_concepts WHERE concept_id = ANY(%s)", (ids,)).fetchall())
     out = {}
     for c in 조건들:
         붙임 = re.sub(r"\s+", "", c["문장"])

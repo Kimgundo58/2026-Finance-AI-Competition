@@ -342,6 +342,24 @@ def main() -> int:
     확인("질문세트_조회 는 일일 카운트를 되돌리지 않는다",
          response_cache.질문세트_조회("selftest-유지", None) == {"질문": []} and 제한.오늘_호출 == 전_호출)
 
+    # DB/AGE 장애가 동일한 unknown 해시로 캐시에 적중하면 검증 경로를 우회한다.
+    from unittest.mock import patch
+    with patch.object(response_cache, "_게스트_해시", return_value="unknown"), \
+         patch.object(response_cache, "_데이터버전_해시", return_value="unknown"), \
+         patch.object(response_cache, "_질의") as 캐시질의:
+        확인("버전 미확인 응답은 메모리·DB에 저장하지 않는다",
+             not response_cache.저장("selftest-unknown", {}, 종류="judge", org=None)
+             and not response_cache.저장("selftest-unknown", {}, 종류="judge", org="org"))
+        확인("버전 미확인 때 기존 메모리·DB 캐시를 사용하지 않는다",
+             response_cache.질문세트_조회("selftest-유지", None) is None
+             and response_cache.질문세트_조회("selftest-유지", "org") is None
+             and not 캐시질의.called)
+    with patch.object(response_cache, "_게스트_해시", return_value="source-age-old"):
+        response_cache.저장("selftest-age", {"판정": "가능"}, 종류="judge", org=None)
+    with patch.object(response_cache, "_게스트_해시", return_value="source-age-new"):
+        확인("AGE 적재 버전이 바뀌면 원천 해시가 같아도 캐시를 재사용하지 않는다",
+             response_cache.질문세트_조회("selftest-age", None) is None)
+
     print("\n[확인 질문 답변 — 판정 하향]")
     from llm_validate import 검증
     메타 = {"S01": {"doc_id": "D1", "조번호": "제1조", "조제목": "ㄱ", "원문": "ㄴ", "extraction": "native",

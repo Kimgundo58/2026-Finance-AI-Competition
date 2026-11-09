@@ -20,7 +20,7 @@ import threading
 import time
 from typing import Any
 
-from server._common import MOCK, _jsonb, _계정조건, _실행, _정수_환경변수, _질의, ttl_캐시
+from server._common import MOCK, _jsonb, _계정조건, _실행, _정수_환경변수, _질의, ttl_캐시, 트랜잭션
 from server.rate_limit import 제한
 
 _TTL초 = _정수_환경변수("SUDDOE_RESPONSE_CACHE_TTL", 900, 구이름="SUDDOE_CACHE_TTL")  # 구 이름 호환(제거 예정: 다음 릴리스)
@@ -109,6 +109,8 @@ def 저장(k: str, 값: Any, *, 종류: str, org: str | None, account: str | Non
     ttl초 = _TTL초 if ttl초 is None else ttl초
     if 데이터버전_해시 is None:
         데이터버전_해시 = _게스트_해시() if org is None else _데이터버전_해시()
+    if 데이터버전_해시 == "unknown":
+        return False
     if org is None:
         해시 = 데이터버전_해시
         with _락:
@@ -151,6 +153,8 @@ def _게스트_해시() -> str:
 def _메모리_조회(k: str) -> Any | None:
     # 규정 활성화·룰 수정으로 데이터 버전 해시가 바뀌면 TTL 이 남았어도 버린다(DB 캐시와 같은 기준).
     해시 = _게스트_해시()
+    if 해시 == "unknown":
+        return None
     with _락:
         v = _메모리.get(k)
         if not v:
@@ -164,11 +168,14 @@ def _메모리_조회(k: str) -> Any | None:
 
 def _db_조회(k: str, org: str, account: str | None) -> Any | None:
     # 게스트는 여기 오지 않는다. RLS 정책은 org_id = current_org() 라 org 가 NULL 이면 통과하지 못한다.
+    해시 = _데이터버전_해시()
+    if 해시 == "unknown":
+        return None
     조건, 인자 = _계정조건(org, "c", account)
     행 = _질의(
         'SELECT value FROM tenant.judge_cache c '
         f'WHERE c.key=%s AND {조건} AND c.expires_at > now() AND c.데이터버전_해시=%s',
-        (k, *인자, _데이터버전_해시()))
+        (k, *인자, 해시))
     return 행[0][0] if 행 else None
 
 
@@ -243,4 +250,17 @@ def _데이터버전_해시_조회() -> str:
 
 
 def _데이터버전_해시() -> str:
-    return _데이터버전_해시_조회() or "unknown"
+    기본 = _데이터버전_해시_조회()
+    if not 기본:
+        return "unknown"
+    if MOCK or not os.environ.get("SUDDOE_ONTOLOGY_PROGRAMS", "").strip():
+        return 기본
+    # 그래프 재적재·미동기화·누락은 300초짜리 원천 해시 캐시와 무관하게 확인한다.
+    # 장애 중 저장된 응답이 AGE 조회를 우회하지 않도록 캐시 적중도 금지한다.
+    try:
+        from scripts.ontology_age import 준비_버전
+        with 트랜잭션() as cur:
+            버전 = 준비_버전(cur)
+        return f"{기본}-age{버전}"
+    except Exception:
+        return "unknown"

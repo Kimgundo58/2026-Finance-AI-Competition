@@ -19,9 +19,12 @@ x-logging: &logging
     max-file: "5"
 
 services:
-  # PostgreSQL 17 + pgvector. 백업 덤프는 이 이미지로 복원한다(restore.sh).
+  # PostgreSQL 17 + pgvector + AGE. 운영 반영 전 DB 이미지 별도 빌드·복원 리허설 필요.
   db:
-    image: pgvector/pgvector:pg17
+    image: suddoe-db-age:prod
+    build:
+      context: ../..
+      dockerfile: db/Dockerfile.age
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres

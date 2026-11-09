@@ -951,6 +951,10 @@ def _재검토_하향(cur, 이전_doc_id: str) -> list[str]:
             WHERE 검수단계 <> '재검토' AND term_id IN (
                   SELECT owner_id FROM corpus.provenance WHERE owner_kind = '용어' AND doc_id = %s)""",
         (이전_doc_id,)).rowcount
+    # UPDATE가 0행이어도 statement trigger는 dirty를 표시한다. 같은 활성화 트랜잭션에서
+    # AGE까지 갱신해야 옛 판의 검증된 규범이 그래프에 남지 않는다. 실패는 활성화도 롤백한다.
+    import ontology_age
+    ontology_age.동기화(cur)
     if not 규범 and not 개념 and not 용어:
         return []
     return [f"이전 판을 근거로 가진 규범 {규범}건 · 노드 {개념}건 · 용어 풀이 {용어}건을 재검토로 내렸습니다. 원천(ontology/)을 새 판과 대조해 고치고, "

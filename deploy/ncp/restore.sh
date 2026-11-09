@@ -46,7 +46,7 @@ n=$(psql_admin -tA <<'SQL'
 select count(*) from pg_namespace where nspname in ('corpus', 'tenant');
 SQL
 )
-[ "$n" = "0" ] || fail "corpus/tenant schemas already exist. To restore again, delete the volume first with 'docker compose down -v'"
+[ "$n" = "0" ] || fail "corpus/tenant schemas already exist. Preserve the existing volume and use a separate empty restore target"
 
 # ── 1. 앱 롤 생성 ────────────────────────────────────────────────────
 # RLS 정책은 PUBLIC 대상이라 롤 생성 순서와 무관하지만, 3단계 GRANT 전에는 있어야 한다.
@@ -56,6 +56,9 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'suddoe_app') THEN
         CREATE ROLE suddoe_app LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
     END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'suddoe_ingest') THEN
+        CREATE ROLE suddoe_ingest NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION;
+    END IF;
 END
 $$;
 ALTER ROLE suddoe_app WITH LOGIN PASSWORD :'pw' NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
@@ -63,17 +66,61 @@ SQL
 ok "role suddoe_app"
 
 # ── 2. 덤프 복원 ─────────────────────────────────────────────────────
+# 완전 백업은 그대로 보존한다. AGE 1.6 논리 복원에서 그래프 OID가 바뀌므로
+# 파생 그래프·AGE catalog 데이터·뷰만 목록에서 빼고 원천을 복원해 다시 생성한다.
+AGE_LIST=$(mktemp)
+AGE_FILTERED=$(mktemp)
+trap 'rm -f "$AGE_LIST" "$AGE_FILTERED"' EXIT
+docker compose exec -T db pg_restore --list < "$DUMP" > "$AGE_LIST"
+AGE_REBUILD=0
+if grep -Eq ' EXTENSION - age([[:space:]]|$)' "$AGE_LIST"; then
+    AGE_REBUILD=1
+    [ -n "${SUDDOE_INGEST_DSN:-}" ] || fail "AGE 복원에는 설정된 SUDDOE_INGEST_DSN이 필요합니다"
+    login=$(psql_admin -tA -c "SELECT rolcanlogin AND NOT rolsuper AND NOT rolbypassrls AND NOT rolcreatedb AND NOT rolcreaterole AND NOT rolreplication FROM pg_roles WHERE rolname='suddoe_ingest'")
+    [ "$login" = "t" ] || fail "suddoe_ingest 비특권 로그인 계정을 별도로 설정한 뒤 다시 실행하세요"
+    awk -f age_restore_filter.awk "$AGE_LIST" > "$AGE_FILTERED" || fail "AGE 덤프 목록을 안전하게 해석하지 못했습니다"
+    # 복원 시작 전에 로컬 소스와 동일한 재구축 코드가 API 이미지에 있는지 확인한다.
+    expected=$(sha256sum ../../scripts/ontology_age_rebuild.py ../../scripts/ontology_age.py ../../scripts/ontology_age_validate.py | awk '{print $1}' | paste -sd ':' -)
+    actual=$(docker compose run -T --no-deps --pull never --entrypoint python api -I -X utf8 -c \
+        "import hashlib; print(':'.join(hashlib.sha256(open('/app/scripts/'+n,'rb').read()).hexdigest() for n in ('ontology_age_rebuild.py','ontology_age.py','ontology_age_validate.py')))") \
+        || fail "AGE 재구축 API 이미지를 사용할 수 없습니다"
+    [ "$expected" = "$actual" ] || fail "API 이미지의 AGE 재구축 코드가 현재 소스와 다릅니다"
+elif grep -Eq ' SCHEMA - suddoe_ontology([[:space:]]|$)' "$AGE_LIST"; then
+    fail "AGE 확장 없는 그래프 덤프는 복원할 수 없습니다"
+fi
+
 echo "restoring dump..."
-docker compose exec -T db pg_restore -U postgres -d suddoe --no-owner --no-privileges --exit-on-error < "$DUMP"
+if [ "$AGE_REBUILD" = "1" ]; then
+    container_list=$(docker compose exec -T db mktemp /tmp/suddoe-age-restore.XXXXXX)
+    docker compose cp "$AGE_FILTERED" "db:$container_list"
+    docker compose exec -T db pg_restore -U postgres -d suddoe --no-owner --no-privileges --exit-on-error \
+        -L "$container_list" < "$DUMP"
+else
+    docker compose exec -T db pg_restore -U postgres -d suddoe --no-owner --no-privileges --exit-on-error < "$DUMP"
+fi
 psql_admin <<'SQL'
 ANALYZE;
 SQL
 ok "pg_restore + ANALYZE"
 
 # ── 3. 권한·search_path ──────────────────────────────────────────────
-# 로컬 init 과 같은 파일이다. GRANT/ALTER 만 있어 다시 실행해도 같은 상태가 된다.
 psql_admin < ../../db/init/10b_app_grants.sql
 ok "10b_app_grants.sql"
+if [ "$AGE_REBUILD" = "1" ]; then
+    psql_admin < age_restore_grants.sql
+    docker compose exec -T db psql -U postgres -d suddoe -X --single-transaction -v ON_ERROR_STOP=1 \
+        < ../../db/migrations/2026-11-09_온톨로지_AGE.sql
+    restore_token=$(psql_admin -tA -c "UPDATE corpus.ontology_age_state SET dirty=true, counts=jsonb_build_object('restore_nonce', gen_random_uuid()::text) WHERE id=true RETURNING counts->>'restore_nonce'")
+    [ -n "$restore_token" ] || fail "AGE 복원 확인 토큰을 만들지 못했습니다"
+    docker compose run -T --no-deps --pull never --entrypoint python api -I -X utf8 /app/scripts/ontology_age_rebuild.py --restore-token "$restore_token" \
+        || fail "AGE 재구축 실패: DB는 dirty 상태입니다. 수집 DSN을 바로잡은 뒤 --restore-token $restore_token 으로 재개하고 API를 켜기 전에 검증하세요"
+    psql_app <<'SQL'
+LOAD '$libdir/plugins/age';
+SET search_path = ag_catalog, extensions, corpus, public;
+SELECT * FROM cypher('suddoe_ontology', $$ MATCH (n:Entity) RETURN count(n) $$) AS (n agtype);
+SQL
+    ok "AGE 그래프 재구축·원천 대조·앱 Cypher"
+fi
 
 # ── 4. 권한 검증 1~5 ──────────────────────────────────────────────────
 r=$(psql_admin -tA <<'SQL'
@@ -203,4 +250,5 @@ case "$out" in
     *)       fail "6-c INSERT into another org was not denied with 42501: $out" ;;
 esac
 
-echo "restore and verification complete. next: docker compose up -d --build"
+echo "DB restore and verification complete. Restore the separately backed up plan_attachments volume as needed before enabling the API."
+echo "next: docker compose up -d --build"

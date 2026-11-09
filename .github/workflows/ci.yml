@@ -81,30 +81,36 @@ jobs:
 
   ontology-db:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    services:
-      postgres:
-        image: pgvector/pgvector:pg17
-        env:
-          POSTGRES_PASSWORD: devpw
-          POSTGRES_DB: suddoe
-          POSTGRES_INITDB_ARGS: --locale=C.UTF-8
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d suddoe"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 20
+    timeout-minutes: 45
     env:
       PYTHONIOENCODING: utf-8
       PGCLIENTENCODING: UTF8
       # db/init 의 로컬 전용 비밀번호다. 이 잡의 서비스 컨테이너 밖에서는 쓰지 않는다.
-      OWNER_DSN: postgresql://postgres:devpw@localhost:5432/suddoe
-      SUDDOE_DSN: postgresql://suddoe_app:devpw@localhost:5432/suddoe
-      SUDDOE_INGEST_DSN: postgresql://suddoe_ingest:devpw@localhost:5432/suddoe
+      OWNER_DSN: postgresql://postgres:devpw@127.0.0.1:5432/suddoe_ci
+      SUDDOE_DSN: postgresql://suddoe_app:devpw@127.0.0.1:5432/suddoe_ci
+      SUDDOE_INGEST_DSN: postgresql://suddoe_ingest:devpw@127.0.0.1:5432/suddoe_ci
     steps:
       - uses: actions/checkout@v4
+
+      # 서비스 컨테이너는 steps 전에 생성되므로, PR의 Dockerfile을 먼저 빌드하고
+      # 이 잡 전용의 빈 컨테이너를 띄운다. 기존 서비스 볼륨은 사용하지 않는다.
+      - name: PostgreSQL 17 + pgvector + AGE 이미지 빌드
+        run: docker build -f db/Dockerfile.age -t suddoe-ci-age:local db
+
+      - name: 빈 DB 시작
+        run: |
+          docker run -d --name suddoe-ci-age-db \
+            -e POSTGRES_PASSWORD=devpw -e POSTGRES_DB=suddoe_ci \
+            -e POSTGRES_INITDB_ARGS=--locale=C.UTF-8 \
+            -p 127.0.0.1:5432:5432 suddoe-ci-age:local
+          for _ in $(seq 1 90); do
+            if docker exec suddoe-ci-age-db pg_isready -h 127.0.0.1 -U postgres -d suddoe_ci >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo 'DB readiness timeout' >&2
+          exit 1
 
       - uses: actions/setup-python@v5
         with:
@@ -126,6 +132,25 @@ jobs:
             psql "$OWNER_DSN" -X -q -v ON_ERROR_STOP=1 -f "$f" > /dev/null
           done
 
+      - name: AGE 확장과 그래프 적용
+        run: psql "$OWNER_DSN" -X --single-transaction -v ON_ERROR_STOP=1 -f db/migrations/2026-11-09_온톨로지_AGE.sql
+
+      - name: 제한된 앱 롤 AGE 조회 및 pgvector 확인
+        run: |
+          psql "$SUDDOE_DSN" -X -v ON_ERROR_STOP=1 <<'SQL'
+          LOAD '$libdir/plugins/age';
+          SET search_path = ag_catalog, corpus, extensions, public;
+          SET jit = on;
+          SET jit_above_cost = 0;
+          SET jit_inline_above_cost = 0;
+          SELECT * FROM cypher('suddoe_ontology', $$ MATCH (v) RETURN count(v) $$) AS (total agtype);
+          DO $$ BEGIN
+            IF '[1,2]'::extensions.vector <-> '[1,2]'::extensions.vector <> 0 THEN
+              RAISE EXCEPTION 'pgvector distance mismatch';
+            END IF;
+          END $$;
+          SQL
+
       - name: 조문 넣기 (ontology/테스트/CI_원문.json)
         run: python scripts/ontology_ci_seed.py
 
@@ -140,6 +165,15 @@ jobs:
 
       - name: 판정 경로 시험 (판정 LLM 출력 고정, 화면 경로)
         run: python scripts/ontology_judge_check.py --self-test
+
+      - name: AGE 동등성 및 권한 회귀
+        env:
+          AGE_TEST_APP_DSN: postgresql://suddoe_app:devpw@127.0.0.1:5432/suddoe_ci
+          AGE_TEST_INGEST_DSN: postgresql://suddoe_ingest:devpw@127.0.0.1:5432/suddoe_ci
+        run: python -I -X utf8 scripts/ontology_age_check.py --버리는-DB
+
+      - name: AGE API 캐시 및 장애 회귀
+        run: python scripts/ontology_age_api_check.py --버리는-DB --dsn "$SUDDOE_DSN"
 
       # 문서를 실제로 활성화한다. DB 를 바꾸므로 마지막에 둔다.
       - name: 개정 처리 점검

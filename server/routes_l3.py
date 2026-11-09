@@ -199,7 +199,7 @@ def _연결_정보(cur, doc_id: str) -> dict:
     조문들 = l3_link.연결대상_조문(cur, doc_id)
     모르는 = sorted({x for a in 조문들 for x in a["concept_ids"] or () if x not in 표})
     if 모르는:                                         # 확인값이 지금 고를 분류 밖이면(사업 설정이 바뀜) 개념 이름으로 보인다
-        표.update(dict(cur.execute("SELECT concept_id, pref_label FROM corpus.concepts WHERE concept_id = ANY(%s)",
+        표.update(dict(cur.execute("SELECT concept_id, pref_label FROM corpus.age_concepts WHERE concept_id = ANY(%s)",
                                   (모르는,)).fetchall()))
     연결 = []
     for a in 조문들:

@@ -445,13 +445,10 @@ def 조문_연결조회(cur, org_id: str) -> list[dict[str, Any]]:
         개념들 = sorted({c for ids in 연결.values() for c in ids or ()})
         상위: dict[str, set[str]] = {}
         if 개념들:
-            for 시작, 위 in cur.execute(
-                    """WITH RECURSIVE t(시작, id) AS (
-                           SELECT x, x FROM unnest(%s::text[]) AS x
-                           UNION SELECT t.시작, r.dst_id FROM t JOIN corpus.concept_relations r
-                                                     ON r.src_id = t.id AND r."관계" = '상위')
-                       SELECT 시작, id FROM t WHERE id <> 시작""", (개념들,)).fetchall():
-                상위.setdefault(시작, set()).add(위)
+            import ontology_graph
+            for 시작, 위, _, _, _ in ontology_graph.경로(cur, 개념들, ["상위"]):
+                if 시작 != 위:
+                    상위.setdefault(시작, set()).add(위)
     return [{**a, "concept_ids": 연결.get(a["article_id"]),
              "연결상위": sorted({p for c in 연결.get(a["article_id"]) or () for p in 상위.get(c, ())})} for a in 조문]
 
