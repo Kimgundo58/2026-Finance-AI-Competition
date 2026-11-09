@@ -20,7 +20,7 @@ def 내부_표_구간(본문: str, 조번호: str, 항호: str) -> tuple[int, in
     상위 = 항시작[0].start()
     참조 = 제목식.search(본문, 상위)
     if not 참조:
-        raise ValueError('내부 표 참조 또는 표제 불일치')
+        return _괄호_표제_구간(본문, 상위, 번호)
     # 앞의 참조 <표-N> 하나 다음에 표제 < 표-N >가 와야 한다.
     제목 = 제목식.search(본문, 참조.end())
     if not 제목 or len(제목식.findall(본문[상위:제목.start()])) != 1:
@@ -51,6 +51,28 @@ def 내부_표_구간(본문: str, 조번호: str, 항호: str) -> tuple[int, in
     if not all(re.search(r'(?m)^\s*' + x, 표본문) for x in ('①', '②', '③')):
         raise ValueError('내부 표 항목 구조 불명')
     return 제목.start(), 경계.start()
+
+
+def _괄호_표제_구간(본문: str, 상위: int, 번호: str) -> tuple[int, int]:
+    """② 본문이 「아래 표-N」으로 가리키고 표제가 `< (표-N) 제목 >`인 형식(초격차 제18조).
+
+    표제는 조문 전체에서 하나, ② 안에서 표제 앞에 평문 참조가 있어야 하고,
+    표는 표제 다음 줄부터 바로 다음 ③ 항 앞까지다. 하나라도 어긋나면 추측하지 않는다.
+    """
+    제목식 = re.compile(r'<\s*\(\s*표\s*-\s*' + 번호 + r'\s*\)[^<>\n]*>')
+    제목들 = list(제목식.finditer(본문))
+    if len(제목들) != 1 or 제목들[0].start() < 상위:
+        raise ValueError('내부 표 참조 또는 표제 불일치')
+    제목 = 제목들[0]
+    if not re.search(r'표\s*-\s*' + 번호 + r'(?!\d)', 본문[상위:제목.start()]):
+        raise ValueError('내부 표 참조 없음')
+    다음항 = list(re.finditer(r'(?m)^③\s+', 본문[제목.end():]))
+    if not 다음항 or re.search(r'(?m)^[②③]\s+', 본문[상위 + 1:제목.start()]):
+        raise ValueError('내부 표 끝 경계 불명')
+    끝 = 제목.end() + 다음항[0].start()
+    if not 본문[제목.end():끝].strip():
+        raise ValueError('내부 표 내용 없음')
+    return 제목.start(), 끝
 
 
 def 앞쪽_표_구간(본문: str, 조번호: str, 항호: str) -> tuple[int, int]:
