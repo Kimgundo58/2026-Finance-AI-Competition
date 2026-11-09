@@ -48,7 +48,7 @@ def public_url(url: str) -> bool:
                     continue
                 if naver_blog and key == "blogid" and re.fullmatch(r"[A-Za-z0-9_-]{1,50}", value):
                     continue
-                if naver_blog and key == "logno" and re.fullmatch(r"[0-9]{9,15}", value):
+                if naver_blog and key == "logno" and re.fullmatch(r"[0-9]{12,15}", value):
                     continue
                 if youtube and key == "v" and re.fullmatch(r"[A-Za-z0-9_-]{11}", value):
                     continue

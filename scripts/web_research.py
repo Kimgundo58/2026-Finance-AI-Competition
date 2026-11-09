@@ -172,6 +172,7 @@ def research(public_query: str | None = None, *, product_name: str | None = None
     bodies = {}
     tool_count = 0
     searches = set()
+    보낸검색어 = set()
     계획자료 = _계획자료(requirements, context)
     for _ in range(3):
         remaining = min(deadline - time.monotonic(), web_deadline - time.monotonic(), budget.remaining_seconds())
@@ -240,6 +241,9 @@ def research(public_query: str | None = None, *, product_name: str | None = None
                     break
                 # 계획이 다른 낱말을 넣으면 그 낱말은 보내지 않고 사용자가 적은 공개 검색어만 쓴다.
                 검색어 = _검색어(public_query, kind, proposed) or public_query
+                if 검색어 in 보낸검색어:      # 같은 검색어를 유형만 바꿔 다시 보내지 않는다
+                    break
+                보낸검색어.add(검색어)
                 name, args = "google_search", {"keyword": 검색어}
                 searches.add(kind)
             elif action == "본문" and plan.get("URL") in urls and plan["URL"] not in bodies:
@@ -291,6 +295,6 @@ def research(public_query: str | None = None, *, product_name: str | None = None
                     emit({"id": event_id, "단계": label, "상태": "실패", "문장": f"{target} 본문을 확인하지 못했어요."})
         except Exception:
             break
-    if output["후보"] or (output["상태"] == "미확인" and output.get("사용자확인")):
+    if output["후보"] or (output["상태"] == "미확인" and (output.get("사용자확인") or output.get("부족정보"))):
         output["상태"] = "확인필요"
     return output

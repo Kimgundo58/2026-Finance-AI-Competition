@@ -162,7 +162,14 @@ def main():
     assert public_url(strip_tracking(naver)) and "proxyReferer" not in strip_tracking(naver)
     assert public_url("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
     assert public_url(strip_tracking("https://www.reddit.com/r/x/comments/1j/abc/?tl=ko"))
-    for url in ("https://example.com/?logNo=01012345678", "https://example.com/?v=abcdefghijk",
+    # 검색이 막혀도 부족한 공개 정보가 있으면 확인필요, 같은 검색어는 한 번만 보낸다.
+    blocked_plan = lambda p, s, t: {"행동": "사용자확인", "유형": "가격", "검색어": "", "부족정보": ["가격"], "확인항목": [], "URL": "", "후보": []}
+    assert research("Example", budget=Budget(tools=0), client=Client(body), llm_call=blocked_plan)["상태"] == "확인필요"
+    repeat = Client(body)
+    kinds = iter(["판매자", "가격", "통화"])
+    research("Example", budget=Budget(), client=repeat, llm_call=lambda p, s, t: {"행동": "검색", "유형": next(kinds), "검색어": "Example secret", "부족정보": [], "URL": "", "후보": []})
+    assert [c[1] for c in repeat.calls if c[0] == "google_search"] == [{"keyword": "Example"}], repeat.calls
+    for url in ("https://example.com/?logNo=01012345678", "https://m.blog.naver.com/PostView.naver?blogId=a&logNo=01012345678", "https://example.com/?v=abcdefghijk",
                 "https://m.blog.naver.com/PostView.naver?blogId=a&logNo=1&token=x"):
         assert not public_url(strip_tracking(url)), url
     pages = Client(body)
