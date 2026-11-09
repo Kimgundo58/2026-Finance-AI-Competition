@@ -35,7 +35,7 @@ def _규범_모으기(조회):
     return 표
 
 
-def _위치_확인(본문, 항호, 조번호=None):
+def _위치_확인(본문, 항호, 조번호=None, 발췌들=None):
     if ontology_context._표_항호(항호):
         try:
             ontology_context._표_범위(본문, 조번호, 항호)
@@ -46,11 +46,16 @@ def _위치_확인(본문, 항호, 조번호=None):
     if not 키:
         return True
     if 키.startswith('/'):
-        return bool(ontology_context.별지_행_내용(본문, 키))
+        if ontology_context.별지_행_내용(본문, 키, 대체=False):
+            return True
+        # 괄호 뺀 이름·합쳐진 기준 칸으로 찾은 칸은 그 위치의 저장 발췌가 모두 그 칸에 있을 때만 쓴다.
+        # 발췌를 모르면 쓰지 않는다(다른 칸 문장이 근거로 붙지 않게).
+        내용 = ontology_context.별지_행_내용(본문, 키)
+        return bool(내용 and 발췌들 and all(발췌_포함(e, 내용) for e in 발췌들))
     return any((k or '').split('#')[0] == 키 for k, _ in ontology_context._조_조각(본문))
 
 
-def _행_검증(cur, 행들, *, 사업, 자금, 기준일, 키표, 시행일미확인=None):
+def _행_검증(cur, 행들, *, 사업, 자금, 기준일, 키표, 시행일미확인=None, 발췌표=None):
     조문, 미해결 = [], []
     for 행 in 행들:
         if (행.get('건너뜀') == '조문 아님' and 행.get('경로')
@@ -83,7 +88,13 @@ def _행_검증(cur, 행들, *, 사업, 자금, 기준일, 키표, 시행일미�
             raise ValueError('다른 사업의 원문')
         if not 행.get('공통미정') and ontology_fund.다른_자금(자금, 문서키, row[2], 행.get('항호')):
             raise ValueError('다른 자금의 원문')
-        if not _위치_확인(row[3], 행.get('항호'), row[2]):
+        발췌들 = None
+        if str(행.get('항호') or '').startswith('/'):
+            # 이 위치에 저장된 모든 발췌(규범·개념 출처). 대체 칸 검증에만 쓴다.
+            발췌들 = [r[0] for r in cur.execute(
+                "SELECT 발췌 FROM corpus.age_provenance WHERE doc_id = %s AND 조번호 = %s AND 항호 = %s",
+                (row[1], row[2], 행.get('항호'))).fetchall()] + list((발췌표 or {}).get((row[1], row[2], 행.get('항호'))) or [])
+        if not _위치_확인(row[3], 행.get('항호'), row[2], 발췌들):
             raise ValueError('원문 항 위치 확인 실패')
     return 표, 미해결
 
@@ -108,9 +119,13 @@ def 예외_근거(cur, 조회, 사업, *, 기준일=None, l3있음=False):
     기존행 = 조회.get('근거행') or []
     기존위치 = {(r.get('doc_id'), r.get('조번호'), r.get('항호')) for r in 기존행}
     시행일미확인 = set()
-    문서, 미해결 = _행_검증(cur, 기존행, 사업=사업, 자금=자금, 기준일=기준일, 키표=키표, 시행일미확인=시행일미확인)
-
     표 = _규범_모으기(조회)
+    발췌표 = {}
+    for n in 표.values():
+        for g in n.get('근거') or []:
+            발췌표.setdefault((g.get('doc_id'), g.get('조번호'), g.get('항호')), []).append(g.get('발췌'))
+    문서, 미해결 = _행_검증(cur, 기존행, 사업=사업, 자금=자금, 기준일=기준일, 키표=키표, 시행일미확인=시행일미확인, 발췌표=발췌표)
+
     적용 = 조회.get('적용') or {}
     공통ids = {n.get('norm_id') for n in 적용.get('공통미정') or []}
     일반ids = {n.get('norm_id') for k in ('경로밖_품목규범', '상황규범', '품목표') for n in 적용.get(k) or []}
