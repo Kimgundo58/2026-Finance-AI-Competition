@@ -11,6 +11,7 @@ import json
 import logging
 import re
 import time
+import unicodedata
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -69,6 +70,21 @@ def _숫자토큰(text: str) -> list[str]:
     return [x.replace(",", "") for x in _숫자.findall(붙임)]
 
 
+# 숫자 바로 뒤에 올 수 있는 단위. 이 밖의 단위(위안·불·파운드·CAD 등)는 대조할 수 없으므로 기본 문장으로 바꾼다.
+_허용단위 = ("원", "달러", "유로", "엔", "won", "krw", "usd", "eur", "jpy", "%", "인", "명", "개", "년", "월", "일",
+          "회", "건", "시간", "분", "초", "주", "석", "장", "대", "팀", "차", "번", "단계", "호", "조", "항",
+          "부", "종", "가지", "곳", "천", "만")
+_금액뒤 = r"\s*(?:원|달러|유로|엔|won|krw|usd|eur|jpy)"
+
+
+def _금액들(text: str) -> set[str]:
+    """화폐 기호·단위와 붙은 숫자만 금액으로 본다."""
+    붙임 = re.sub(r"(?<=\d)[\s,]+(?=\d)", "", text)
+    앞 = re.findall(r"[₩$€¥]\s*(\d[\d,]*(?:\.\d+)?)", 붙임)
+    뒤 = re.findall(r"(\d[\d,]*(?:\.\d+)?)" + _금액뒤, 붙임, re.I)
+    return {x.replace(",", "") for x in 앞 + 뒤}
+
+
 def _통화들(text: str) -> set[str]:
     return {code for code, 식 in _통화표기.items() if re.search(식, text)}
 
@@ -91,6 +107,17 @@ def _확인질문(sentence, excerpt: str, kind: str) -> tuple[str, str]:
     # 숫자는 경계까지 같은 토큰이어야 한다. 「14,000」 안의 「1,400」·「4,000」은 다른 값이다.
     본문수 = set(_숫자토큰(excerpt))
     if any(값 not in 본문수 for 값 in _숫자토큰(s)):
+        return 기본
+    # 0~9 가 아닌 숫자 문자(위 첨자·전각 등)와 ₩$€¥ 밖의 화폐 기호는 대조할 수 없다.
+    if any((unicodedata.category(c) in ("Nd", "No") and c not in "0123456789")
+           or (unicodedata.category(c) == "Sc" and c not in "₩$€¥") for c in s):
+        return 기본
+    for m in re.finditer(r"\d(?:[\d,.]*\d)?\s*([^\s\d.,!?()\[\]~\-/]+)?", s):
+        단위 = (m.group(1) or "").casefold()
+        if 단위 and not 단위.startswith(_허용단위):
+            return 기본
+    # 금액은 금액끼리 대조한다. 「1인당」의 1을 「1원」으로 쓰면 안 된다.
+    if not _금액들(s) <= _금액들(excerpt):
         return 기본
     통화 = _통화들(s)
     if 통화 and not 통화 <= _통화들(excerpt):
