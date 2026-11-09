@@ -59,6 +59,16 @@ _통화표기 = {"KRW": r"₩|\d\s*원|원화|KRW", "USD": r"\$|달러|USD", "EU
 _숫자 = re.compile(r"\d[\d,]*(?:\.\d+)?%?")
 
 
+_한글수 = (r"\d\s*[십백천만억]|[일이삼사오육칠팔구십백천만억]+\s*(?:원|달러|엔|유로|퍼센트|프로)"
+         r"|(?:한|두|세|네|다섯|여섯|일곱|여덟|아홉|열)\s*(?:달|개월|명|개|번)")
+
+
+def _숫자토큰(text: str) -> list[str]:
+    """숫자 사이의 쉼표·공백을 지우고 숫자 토큰 목록을 돌려준다."""
+    붙임 = re.sub(r"(?<=\d)[\s,]+(?=\d)", "", text)
+    return [x.replace(",", "") for x in _숫자.findall(붙임)]
+
+
 def _통화들(text: str) -> set[str]:
     return {code for code, 식 in _통화표기.items() if re.search(식, text)}
 
@@ -75,10 +85,13 @@ def _확인질문(sentence, excerpt: str, kind: str) -> tuple[str, str]:
     s = " ".join(sentence.split())
     if not 4 <= len(s) <= 120 or re.search(r"https?://|www\.|[#*`|<>\[\]{}_~]", s):
         return 기본
-    본문 = re.sub(r"[\s,]", "", excerpt)
-    for 값 in _숫자.findall(s):
-        if 값.replace(",", "") not in 본문:
-            return 기본
+    # 한글로 쓴 금액·단위(「만 사천 원」, 「1만 4천원」)는 코드로 대조할 수 없으므로 쓰지 않는다.
+    if re.search(_한글수, s):
+        return 기본
+    # 숫자는 경계까지 같은 토큰이어야 한다. 「14,000」 안의 「1,400」·「4,000」은 다른 값이다.
+    본문수 = set(_숫자토큰(excerpt))
+    if any(값 not in 본문수 for 값 in _숫자토큰(s)):
+        return 기본
     통화 = _통화들(s)
     if 통화 and not 통화 <= _통화들(excerpt):
         return 기본
