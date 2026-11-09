@@ -11,7 +11,7 @@ from unittest.mock import patch
 from types import SimpleNamespace
 from apick_mcp import ApickClient, ApickError, _key, parse_response, public_url
 from research_runtime import Budget as RuntimeBudget, activate, current_budget, final_call, is_final_call
-from web_research import _links, research
+from web_research import _links, _확인질문, research
 
 
 class Budget:
@@ -290,6 +290,40 @@ def main():
             raise AssertionError("취소 후 호출")
         except llm_qwen.LLM실패:
             assert len(sent) == 3
+    # 확인 질문: 발췌에 있는 숫자·통화만 쓴 문장은 그대로, 아니면 기본 문장. 내용은 언제나 발췌다.
+    발췌 = "### 플러스\n\n₩14,000\n\n멤버 1인당 / 1개월"
+    assert _확인질문("노션 플러스 요금은 멤버 1인당 월 14,000원이에요. 맞나요?", 발췌, "가격") == ("노션 플러스 요금은 멤버 1인당 월 14,000원이에요. 맞나요?", "문장")
+    assert _확인질문("플러스 요금은 월 15,000원이에요. 맞나요?", 발췌, "가격") == ("가격 정보가 맞나요?", "기본")
+    assert _확인질문("플러스 요금은 월 14,000달러예요. 맞나요?", 발췌, "가격")[1] == "기본"
+    assert _확인질문("### 플러스 요금은 14,000원", 발췌, "가격")[1] == "기본"
+    assert _확인질문("자세한 내용은 https://example.com 을 보세요", 발췌, "가격")[1] == "기본"
+    assert _확인질문("가" * 121, 발췌, "가격")[1] == "기본" and _확인질문(None, 발췌, "결제안내") == ("결제 방법 정보가 맞나요?", "기본")
+    # URL만 받은 조사: 검색 없이 그 주소 본문 하나만 읽고, 발췌는 본문 그대로일 때만 후보가 된다.
+    page = "https://example.com/product"
+    body = "Example Pro is a hosted design service billed monthly in KRW for business teams."
+    plans = iter([{"행동": "완료", "유형": "제품성격", "검색어": "", "부족정보": [], "확인항목": [], "URL": "",
+                   "후보": [{"유형": "제품성격", "내용": "x", "발췌": "hosted design service billed monthly", "URL": page}]}])
+    client = Client(body)
+    prompts = []
+    result = research("", public_url=page, budget=Budget(), client=client,
+                      llm_call=lambda p, s, t: (prompts.append(p), next(plans))[1])
+    assert [c[0] for c in client.calls] == ["url_to_markdown"], client.calls
+    assert client.calls[0][1]["url"] == page
+    assert result["상태"] == "확인필요" and len(result["후보"]) == 1 and len(prompts) == 1, result
+    후보 = result["후보"][0]
+    assert 후보["내용"] == "hosted design service billed monthly" == 후보["출처"][0]["발췌"], 후보
+    assert (후보["질문"], 후보["질문종류"]) == ("제품·서비스 성격 정보가 맞나요?", "기본"), 후보   # 「x」는 너무 짧다
+    # 계획이 검색을 골라도 URL만 받은 조사는 검색하지 않는다.
+    plans = iter([{"행동": "검색", "유형": "가격", "검색어": "Example pricing", "부족정보": ["가격"], "확인항목": [], "URL": "", "후보": []}] * 3)
+    client = Client(body)
+    research(None, public_url=page, budget=Budget(), client=client, llm_call=lambda p, s, t: next(plans))
+    assert all(c[0] != "google_search" for c in client.calls), client.calls
+    # 검색어도 URL도 없거나, URL이 공개 주소가 아니면 아무 호출도 하지 않는다.
+    for query, url in (("", None), (None, None), ("", "http://127.0.0.1/a"), ("", "https://example.com/?token=secret")):
+        client = Client(body)
+        out = research(query, public_url=url, budget=Budget(), client=client,
+                       llm_call=lambda p, s, t: (_ for _ in ()).throw(AssertionError("LLM 호출")))
+        assert client.calls == [] and out["후보"] == [], (query, url, client.calls)
     print("웹 조사 모의 검사 통과")
 
 

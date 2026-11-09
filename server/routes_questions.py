@@ -91,7 +91,8 @@ def questions(req: Request, body: 질문요청):
                 if body.웹조사 and body.조사답변 is None:
                     if not 세션.조사완료:
                         try:
-                            if not body.공개검색어:
+                            # 검색어나 공개 판매 URL 중 하나는 있어야 조사한다. URL만 있으면 그 페이지만 읽는다(web_research).
+                            if not body.공개검색어 and not body.판매URL:
                                 세션.조사 = {'상태': '미확인', '후보': [], '출처': []}
                             else:
                                 준비 = {'요건': [], '문맥': {}}
