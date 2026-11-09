@@ -7,12 +7,15 @@
 우선순위: L3 연결 조문 → 규범 근거 → 대상의 근거 조 전체 → 준용 깊이 1 → L3 미연결 전부 → 자금 적용 미정 공통 조 → 준용 깊이 2~3 → 검색 후보.
 같은 조 · 항은 한 번만 넣고 경로를 합친다. 글자 상한을 넘으면 뒤에서 뺀다. L3 미연결 조문이나 B2.6(금지 문장이 든다)까지 못 넣으면 `L3_초과` 다(판단불가 + 화면 안내).
 다른 자금의 조문(ontology_fund)은 온톨로지 후보 · 검색 후보 어느 쪽으로 들어와도 뺀다. L3 는 거르지 않는다.
+최종 판정의 근거한정 모드는 조회한 조·항만 넣고 조 전체 자동 확장과 검색 보충을 하지 않는다.
 공개: 문맥_구성, 규범_요약, 근거경로들, 코드판정_문장맵, 항호_키.
 실행: PYTHONIOENCODING=utf-8 python scripts/ontology_context.py --self-test
 """
 from __future__ import annotations
 
 import sys
+import re
+import unicodedata
 from pathlib import Path
 
 if __name__ == "__main__":
@@ -24,8 +27,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from assemble_context import 항_분할  # noqa: E402
 import ontology_fund  # noqa: E402
+import ontology_table_evidence  # noqa: E402
 from ontology_gate import _자연어조건, 경로밖금지_구분  # noqa: E402
-from ontology_norm import 모든비목, 별지_행_내용, 조번호_표시  # noqa: E402
+from ontology_norm import 모든비목, 별지_행_내용, 조번호_표시, 발췌_정규화, 발췌_포함  # noqa: E402
 
 글자_상한 = 40_000
 
@@ -79,6 +83,131 @@ def _고른_조각(본문: str, 항호: str | None) -> list[tuple[str | None, st
     return _조_조각(본문)
 
 
+def _표_항호(항호: str | None) -> bool:
+    return bool(re.fullmatch(r'[①②]?표-\d+', 항호 or ''))
+
+
+def _표_범위(본문: str, 조번호: str, 항호: str) -> tuple[int, int]:
+    if 항호.startswith('②'):
+        return ontology_table_evidence.내부_표_구간(본문, 조번호, 항호)
+    return ontology_table_evidence.앞쪽_표_구간(본문, 조번호, 항호)
+
+
+def _근거_조각(본문: str, 항호: str | None, 조번호: str | None = None) -> list[tuple[str | None, str]]:
+    """조회한 위치만 읽는다. 위치를 못 찾았다고 조 전체로 넓히지 않는다.
+
+    항호가 없는 근거는 원래 조 단위 근거다. 호·표의 항 기호는 해당 항을
+    보존하고, 별지 경로와 반복 항 번호는 인용 문장맵에서 같은 위치를 쓴다.
+    """
+    if not 본문 or not 본문.strip():
+        raise ValueError("선택 근거의 원문이 비어 있음")
+    if not 항호:
+        # 항호가 없는 출처는 조 전체가 지정 범위다. 본문 속 표·목록의
+        # ①②가 발췌 문장 중간에 있어도 구조상 별도 항으로 분해하지 않는다.
+        return [(None, 본문)]
+    if _표_항호(항호):
+        시작, 끝 = _표_범위(본문, 조번호, 항호)
+        return [(None, 본문[시작:끝])]
+    키 = 항호_키(항호)
+    if 키 and 키.startswith("/"):
+        내용 = 별지_행_내용(본문, 키)
+        if 내용:
+            return [(키, 내용)]
+    elif 키:
+        조각들 = _조_조각(본문)
+        if "#" in 항호:
+            고름 = [(k, c) for k, c in 조각들 if k == 항호]
+        else:
+            고름 = [(k, c) for k, c in 조각들 if (k or "").split("#")[0] == 키]
+        if 고름:
+            return 고름
+    raise ValueError("선택 근거의 원문 위치를 확인하지 못함")
+
+
+def _정규화_원문위치(원문: str) -> tuple[str, list[tuple[int, int]]]:
+    """발췌 검사와 같은 정규화를 하되 각 글자의 원문 좌표를 보존한다."""
+    따옴표 = str.maketrans({"“": '"', "”": '"', "″": '"', "‘": "'", "’": "'"})
+    글자: list[str] = []
+    좌표: list[tuple[int, int]] = []
+    i = 0
+    while i < len(원문):
+        시작 = i
+        i += 1
+        # NFC 결합 문자와 한글 자모는 원문 범위를 함께 잡는다.
+        def 자모(c: str) -> bool:
+            n = ord(c)
+            return 0x1100 <= n <= 0x11FF or 0xA960 <= n <= 0xA97F or 0xD7B0 <= n <= 0xD7FF
+        while i < len(원문) and (unicodedata.combining(원문[i]) or (자모(원문[i - 1]) and 자모(원문[i]))):
+            i += 1
+        for c in unicodedata.normalize("NFC", 원문[시작:i]).translate(따옴표):
+            글자.append(c)
+            좌표.append((시작, i))
+    중간 = "".join(글자)
+    if 중간 != unicodedata.normalize("NFC", 원문).translate(따옴표):
+        raise ValueError("원문 정규화 위치를 확인하지 못함")
+    페이지 = re.compile(r"(?:(?<=\s)|^)-\s*\d{1,3}\s*-(?=\s|$)")
+    문, 위치, 다음 = [], [], 0
+    for match in 페이지.finditer(중간):
+        문.extend(중간[다음:match.start()])
+        위치.extend(좌표[다음:match.start()])
+        문.append(" ")
+        위치.append((좌표[match.start()][0], 좌표[match.end() - 1][1]))
+        다음 = match.end()
+    문.extend(중간[다음:])
+    위치.extend(좌표[다음:])
+    결과, 범위 = [], []
+    for c, (start, end) in zip(문, 위치):
+        if c.isspace():
+            if 결과 and 결과[-1] == " ":
+                범위[-1] = (범위[-1][0], end)
+            else:
+                결과.append(" ")
+                범위.append((start, end))
+        else:
+            결과.append(c)
+            범위.append((start, end))
+    if 결과 and 결과[0] == " ":
+        결과.pop(0)
+        범위.pop(0)
+    if 결과 and 결과[-1] == " ":
+        결과.pop()
+        범위.pop()
+    정규화 = "".join(결과)
+    if 정규화 != 발췌_정규화(원문):
+        raise ValueError("원문 정규화 결과가 일치하지 않음")
+    return 정규화, 범위
+
+
+def _발췌_구간(조각들: list[tuple[str | None, str]], 발췌들: list[str],
+           전체키: set[str | None] | None = None, *, 중복모두: bool = False) -> dict[str | None, list[tuple[int, int]]]:
+    """축소할 발췌는 유일한 연속 구간, 전체를 보존할 곳은 포함 여부를 확인한다."""
+    정규화된 = [(키, 글, *_정규화_원문위치(글)) for 키, 글 in 조각들]
+    결과: dict[str | None, list[tuple[int, int]]] = {}
+    for 발췌 in dict.fromkeys(발췌들):
+        찾을말 = 발췌_정규화(발췌)
+        if not 찾을말:
+            raise ValueError("선택 근거의 발췌가 비어 있음")
+        발견: list[tuple[str | None, int, int]] = []
+        for 키, _글, 정규화, 위치 in 정규화된:
+            시작 = 정규화.find(찾을말)
+            while 시작 >= 0:
+                발견.append((키, 위치[시작][0], 위치[시작 + len(찾을말) - 1][1]))
+                시작 = 정규화.find(찾을말, 시작 + 1)
+        if not 발견:
+            raise ValueError("선택 발췌의 원문 위치가 없거나 모호함")
+        if len(발견) > 1:
+            if 전체키 is not None and all(키 in 전체키 for 키, _, _ in 발견):
+                continue
+            if not 중복모두:
+                raise ValueError("선택 발췌의 원문 위치가 없거나 모호함")
+            for 키, 시작, 끝 in 발견:
+                결과.setdefault(키, []).append((시작, 끝))
+            continue
+        키, 시작, 끝 = 발견[0]
+        결과.setdefault(키, []).append((시작, 끝))
+    return 결과
+
+
 class _모음:
     """(문서, 조, 키) 단위로 항목을 모은다. 같은 조 · 항은 더 앞선 순위로 한 번만 남고 경로를 합친다."""
 
@@ -87,7 +216,7 @@ class _모음:
         self.조: set[tuple] = set()
 
     def 넣기(self, 순위: int, 종류: str, id_: int, 문서: str, 조번호: str, 헤더: str, 키: str | None, 조각: str,
-           경로: list[str] | None = None) -> None:
+           경로: list[str] | None = None, 선택위치: set[tuple] | None = None) -> None:
         k = (문서, 조번호, 키)
         있음 = self.표.get(k)
         if 있음 is None:
@@ -97,6 +226,8 @@ class _모음:
         있음["순위"] = min(있음["순위"], 순위)
         if 경로 and 경로 not in 있음["경로"]:
             있음["경로"].append(경로)
+        if 선택위치:
+            있음.setdefault('선택위치', set()).update(선택위치)
 
     def 있나(self, 문서: str, 조번호: str, 키: str | None) -> bool:
         return (문서, 조번호, 키) in self.표
@@ -120,10 +251,12 @@ def _조문_읽기(cur, article_ids: list[int]) -> dict[int, dict]:
     return {r[0]: {"article_id": r[0], "doc_id": r[1], "조번호": r[2], "조제목": r[3], "본문": r[4] or ""} for r in 행들}
 
 
-def _온톨로지_넣기(모음: _모음, 근거행: list[dict], 조문: dict[int, dict], 표시명: dict[str, str]) -> None:
+def _온톨로지_넣기(모음: _모음, 근거행: list[dict], 조문: dict[int, dict], 표시명: dict[str, str], *, 근거한정: bool = False) -> None:
     for 행 in 근거행:
         글 = 조문.get(행.get("article_id"))
         if 글 is None:
+            if 근거한정 and 행.get("건너뜀") != "조문 아님":
+                raise ValueError("선택 근거의 활성 원문을 확인하지 못함")
             continue                                    # 활성 문서에 없거나 조문을 특정하지 못한 대상
         문서, 조번호, 본문 = 글["doc_id"], 글["조번호"], 글["본문"]
         헤더 = _헤더(표시명.get(문서) or 문서, 조번호, 글["조제목"])
@@ -132,6 +265,13 @@ def _온톨로지_넣기(모음: _모음, 근거행: list[dict], 조문: dict[in
         def 넣기(순위: int, 조각들: list[tuple[str | None, str]]) -> None:
             for 키, 조각 in 조각들:
                 모음.넣기(순위, "article", 글["article_id"], 문서, 조번호, 헤더, 키, 조각, 경로)
+
+        if 근거한정:
+            순위 = (품목표 if 행.get("품목표") else 공통미정 if 행.get("공통미정") else
+                  규범근거 if 출처 == "규범근거" else 근거조전체 if 출처 == "개념근거" else
+                  준용1 if 깊이 <= 1 else 준용2)
+            넣기(순위, _근거_조각(본문, 항호, 조번호))
+            continue
 
         if 행.get("품목표"):
             넣기(품목표, _고른_조각(본문, 항호))
@@ -147,6 +287,67 @@ def _온톨로지_넣기(모음: _모음, 근거행: list[dict], 조문: dict[in
             넣기(준용1, _고른_조각(본문, 항호))
         else:
             넣기(준용2, _고른_조각(본문, 항호))
+
+
+def _발췌근거_넣기(모음: _모음, 근거행: list[dict], 조문: dict[int, dict], 표시명: dict[str, str],
+             근거발췌: dict[tuple, list[str]]) -> None:
+    """선택된 근거의 조·항·표 범위를 DB 원문에서 보존한다."""
+    선택 = set()
+    for 위치 in 근거발췌:
+        if not isinstance(위치, tuple) or len(위치) != 3:
+            raise ValueError("선택 근거 위치가 잘못됨")
+        선택.add((위치[0], 위치[1], 위치[2] or None))
+    처리 = set()
+    항목 = {}
+    for 행 in 근거행:
+        글 = 조문.get(행.get("article_id"))
+        if 글 is None:
+            if 행.get("건너뜀") != "조문 아님":
+                raise ValueError("선택 근거의 활성 원문을 확인하지 못함")
+            continue
+        문서, 조번호, 본문 = 글["doc_id"], 글["조번호"], 글["본문"]
+        위치 = (문서, 조번호, 행.get("항호") or None)
+        if 위치 in 선택:
+            처리.add(위치)
+        elif 행.get("출처") == "규범근거":
+            raise ValueError("선택 규범의 근거 위치가 없음")
+        표범위 = _표_범위(본문, 조번호, 행['항호']) if _표_항호(행.get('항호')) else None
+        조각들 = [(None, 본문)] if 표범위 else _근거_조각(본문, 행.get("항호"), 조번호)
+        출처, 깊이 = 행.get("출처"), 행.get("깊이") or 0
+        순위 = (품목표 if 행.get("품목표") else 공통미정 if 행.get("공통미정") else
+              규범근거 if 출처 == "규범근거" else 근거조전체 if 출처 == "개념근거" else
+              준용1 if 깊이 <= 1 else 준용2)
+        for 키, 원문 in 조각들:
+            묶음키 = (문서, 조번호, 키)
+            기존 = 항목.get(묶음키)
+            if 기존 is None:
+                기존 = {"원문": 원문, "전체": False, "구간": [], "순위": 순위,
+                      "id": 글["article_id"], "헤더": _헤더(표시명.get(문서) or 문서, 조번호, 글["조제목"]), "경로": [], "선택위치": set()}
+                항목[묶음키] = 기존
+            elif 기존["원문"] != 원문 or 기존["id"] != 글["article_id"]:
+                raise ValueError("선택 근거의 원문 위치가 중복됨")
+            기존["순위"] = min(기존["순위"], 순위)
+            if 표범위:
+                기존["구간"].append(표범위)
+            else:
+                기존["전체"] = True
+            if 위치 in 선택:
+                기존['선택위치'].add(위치)
+            if 행.get("경로") and 행["경로"] not in 기존["경로"]:
+                기존["경로"].append(행["경로"])
+    if 선택 - 처리:
+        raise ValueError("선택 규범의 근거 위치를 찾지 못함")
+    for (문서, 조번호, 키), 데이터 in 항목.items():
+        if 데이터["전체"]:
+            내용 = 데이터["원문"]
+        else:
+            구간들 = sorted(set(데이터["구간"]))
+            if not 구간들:
+                raise ValueError("선택 근거의 원문 구간이 없음")
+            내용 = "\n\n".join(데이터['원문'][start:end] for start, end in 구간들)
+        for 경로 in 데이터["경로"] or [None]:
+            모음.넣기(데이터["순위"], "article", 데이터["id"], 문서, 조번호, 데이터["헤더"], 키, 내용, 경로,
+                  선택위치=데이터['선택위치'])
 
 
 def _l3_넣기(모음: _모음, l3: list[dict], 대상노드: set[str], 시작노드: str | None = None) -> None:
@@ -223,6 +424,15 @@ def _다른자금_빼기(모음: _모음, 자금: str | None, schema: dict | Non
             del 모음.표[표키]
 
 
+def _선택발췌_보존확인(모음: _모음, 근거발췌: dict[tuple, list[str]]) -> None:
+    """자금 필터 뒤에도 선택된 각 근거 위치의 원문이 남아 있어야 한다."""
+    for 문서, 조번호, 항호 in 근거발췌:
+        위치 = (문서, 조번호, 항호 or None)
+        if not any(v.get("조각") and 위치 in v.get('선택위치', set())
+                   for (d, a, _), v in 모음.표.items() if d == 문서 and a == 조번호):
+            raise ValueError("선택 규범의 원문 위치가 문맥에 보존되지 않음")
+
+
 def 검색청크_거르기(cur, 청크들: list[int], 자금: str | None, schema: dict | None) -> list[int]:
     """검색 RRF 순위에서 `_다른자금_빼기` 가 조각을 하나도 남기지 않을 청크를 뺀다(순서 유지). 상위 10 을 자르기 전에 쓴다(retrieve.검색 `거르기`).
 
@@ -249,7 +459,7 @@ def 검색청크_거르기(cur, 청크들: list[int], 자금: str | None, schema
 
 def 문맥_구성(cur, *, 근거행: list[dict], 대상노드: set[str] | list[str] | None = None, l3: list[dict] | None = None,
           검색: dict | None = None, schema: dict | None = None, 상한: int = 글자_상한, 자금: str | None = None,
-          시작노드: str | None = None) -> dict:
+          시작노드: str | None = None, 근거한정: bool = False, 근거발췌: dict[tuple, list[str]] | None = None) -> dict:
     """반환: {블록: [(제목, [(종류, id, 헤더, 조각, 키)])], 항목수, 글자수, 빠진수, L3_초과, 온톨로지항목수}.
 
     항목수 · 온톨로지항목수는 근거 항목만 센다. 대조 재료(금지 문장 항 · 품목 표)만 있으면 항목수 0 이라 후보 없음으로 끝난다.
@@ -261,11 +471,19 @@ def 문맥_구성(cur, *, 근거행: list[dict], 대상노드: set[str] | list[s
     모음 = _모음()
     조문 = _조문_읽기(cur, sorted({r["article_id"] for r in 근거행 if r.get("article_id") is not None}))
     _l3_넣기(모음, l3 or [], set(대상노드 or ()), 시작노드)
-    _온톨로지_넣기(모음, 근거행, 조문, 표시명)
+    if 근거한정 and 근거발췌 is not None:
+        _발췌근거_넣기(모음, 근거행, 조문, 표시명, 근거발췌)
+    elif 근거한정:
+        _온톨로지_넣기(모음, 근거행, 조문, 표시명, 근거한정=True)
+    else:
+        _온톨로지_넣기(모음, 근거행, 조문, 표시명)
     _다른자금_빼기(모음, 자금, schema)
     온톨로지항목수 = sum(1 for x in 모음.표.values() if x["순위"] in (규범근거, 근거조전체, 준용1, 공통미정, 준용2) and not x.get("보조"))
-    _검색_넣기(cur, 모음, 검색, 표시명)
+    if not 근거한정:
+        _검색_넣기(cur, 모음, 검색, 표시명)
     _다른자금_빼기(모음, 자금, schema)
+    if 근거한정 and 근거발췌 is not None:
+        _선택발췌_보존확인(모음, 근거발췌)
     항목들 = sorted(모음.표.values(), key=lambda x: x["순위"])            # 순위 안에서는 넣은 순서를 지킨다
     남김, 뺌 = _자르기(항목들, 상한)
     블록 = []
@@ -274,7 +492,8 @@ def 문맥_구성(cur, *, 근거행: list[dict], 대상노드: set[str] | list[s
         if 묶음:
             블록.append((제목, 묶음))
     return {"블록": 블록, "항목수": sum(1 for x in 남김 if x["순위"] != 품목표 and not x.get("보조")), "글자수": sum(len(x["조각"]) + len(x["헤더"]) for x in 남김),
-            "빠진수": len(뺌), "L3_초과": any((x["순위"] <= L3미연결 and 모음_L3(x)) or x["순위"] == 공통미정 for x in 뺌), "온톨로지항목수": 온톨로지항목수}
+            "빠진수": len(뺌), "근거초과": 근거한정 and bool(뺌),
+            "L3_초과": any((x["순위"] <= L3미연결 and 모음_L3(x)) or x["순위"] == 공통미정 for x in 뺌), "온톨로지항목수": 온톨로지항목수}
 
 
 def 모음_L3(x: dict) -> bool:
@@ -282,9 +501,13 @@ def 모음_L3(x: dict) -> bool:
 
 
 def _발췌(n: dict, 칸: str | None = None) -> str:
-    근거 = n.get("근거") or []
-    후보 = [g for g in 근거 if not 칸 or g.get("칸") == 칸] or list(근거)
-    return max((g.get("발췌") or "" for g in 후보), key=len).strip() if 후보 else ""     # 짧은 조각보다 뜻이 드러나는 긴 발췌
+    """구조화한 규범 설명. 원문은 별도 조·항·표 문맥에서 제공한다."""
+    결과 = n.get("결과") or {}
+    if isinstance(결과, dict):
+        for 키 in ("문장", "조건문장"):
+            if isinstance(결과.get(키), str) and 결과[키].strip():
+                return 결과[키].strip()
+    return "연결된 규정의 원문을 확인한다" if n else ""
 
 
 def 규범_요약(규범결과: dict, 게이트결과: dict, *, 분류표시: str | None = None, 확정: bool = False, l3있음: bool = False) -> str | None:
@@ -311,16 +534,16 @@ def 규범_요약(규범결과: dict, 게이트결과: dict, *, 분류표시: st
         if 종류 == "우선순위" or not 글 or n.get("norm_id") in 제외:
             continue
         if not n.get("verified") or n.get("해석미결"):
-            줄.append(f"- 확정되지 않은 {종류} 규정: 「{글}」 코드가 비교하지 않았다. 원문을 읽고 판단한다.")
+            줄.append(f"- 확정되지 않은 {종류} 규정: {글} 코드가 비교하지 않았다. 원문을 읽고 판단한다.")
         elif 종류 in ("한도", "임계값") and n.get("norm_id") in 쓴:
-            줄.append((f"- {종류}: 「{글}」 금액 비교를 끝냈고 넘지 않았다." if 종류 == "한도"
-                      else f"- {종류}: 「{글}」 금액 비교를 끝냈다. 생긴 의무는 아래에 있다." if n.get("norm_id") in (게이트결과.get("발동임계값") or [])
-                      else f"- {종류}: 「{글}」 금액 비교를 끝냈다. 이 금액은 기준에 닿지 않아 이 기준으로 생기는 의무는 없다.") + 답꼬리(n))
+            줄.append((f"- {종류}: {글} 금액 비교를 끝냈고 넘지 않았다." if 종류 == "한도"
+                      else f"- {종류}: {글} 금액 비교를 끝냈다. 생긴 의무는 아래에 있다." if n.get("norm_id") in (게이트결과.get("발동임계값") or [])
+                      else f"- {종류}: {글} 금액 비교를 끝냈다. 이 금액은 기준에 닿지 않아 이 기준으로 생기는 의무는 없다.") + 답꼬리(n))
         elif 종류 in ("한도", "임계값"):
-            줄.append(f"- {종류}: 「{글}」 입력이 모자라거나 예외가 있어 비교하지 못했다.{답꼬리(n)}")
+            줄.append(f"- {종류}: {글} 입력이 모자라거나 예외가 있어 비교하지 못했다.{답꼬리(n)}")
         elif 종류 == "금지" and (자연어답.get(n.get("norm_id")) or {}).get("접힘"):
             조건들 = " · ".join(f"「{x}」" for x in 자연어답[n["norm_id"]]["아니오"])
-            줄.append(f"- 금지: 「{글}」 사용자가 이 금지의 조건 {조건들}에 해당하지 않는다고 답했다(해당 없음, 사용자 답). "
+            줄.append(f"- 금지: {글} 사용자가 이 금지의 조건 {조건들}에 해당하지 않는다고 답했다(해당 없음, 사용자 답). "
                      "진술이라 증빙으로 확인되기 전이다. 지출 내용이 이 조건에 해당한다는 사실이 따로 드러나면 그것으로 판단한다.")
         elif 종류 == "금지":
             진술 = (게이트결과.get("진술평가") or {}).get(n.get("norm_id"))
@@ -329,19 +552,19 @@ def 규범_요약(규범결과: dict, 게이트결과: dict, *, 분류표시: st
                   if (v := (게이트결과.get("답변") or {}).get(c.get("항목")))]
             답말 = "(" + " · ".join(dict.fromkeys(str(v["항목"]) + ": " + str(v["답"]) for v in 답들)) + ")" if 답들 else ""
             예외글 = [g for x in n.get("예외") or [] if (g := _발췌(규범표.get(x) or {}))]
-            남은것 = (f" 이 금지에는 예외가 있다: {' / '.join(f'「{g}」' for g in 예외글)}. 예외에 해당하는지까지 원문과 답변으로 판단한다." if 예외글
+            남은것 = (f" 이 금지에는 예외가 있다: {' / '.join(f'{g}' for g in 예외글)}. 예외에 해당하는지까지 원문과 답변으로 판단한다." if 예외글
                     else " 이 금지에는 예외가 있다. 예외에 해당하는지까지 원문과 답변으로 판단한다." if n.get("예외")
                     else f" 답으로 확인하지 않은 조건 「{_자연어조건(n)}」이 더 있다. 그 조건까지 원문과 답변으로 판단한다." if _자연어조건(n) else "")
-            줄.append((f"- 금지: 「{글}」 사용자가 이 조건{답말}에 해당한다고 답했다. 진술이다.{남은것}" if 진술 is True and 남은것
-                      else f"- 금지: 「{글}」 사용자가 이 조건{답말}에 해당한다고 답했다. 진술이지만 해당하면 집행할 수 없다고 판단한다." if 진술 is True
-                      else f"- 금지: 「{글}」 사용자가 이 조건{답말}에 해당하지 않는다고 답했다. 진술이라 증빙으로 확인되기 전이다." if 진술 is False
-                      else f"- 금지: 「{글}」 조건에 해당하는지 원문과 사용자 답변으로 판단한다.") + 답꼬리(n)
+            줄.append((f"- 금지: {글} 사용자가 이 조건{답말}에 해당한다고 답했다. 진술이다.{남은것}" if 진술 is True and 남은것
+                      else f"- 금지: {글} 사용자가 이 조건{답말}에 해당한다고 답했다. 진술이지만 해당하면 집행할 수 없다고 판단한다." if 진술 is True
+                      else f"- 금지: {글} 사용자가 이 조건{답말}에 해당하지 않는다고 답했다. 진술이라 증빙으로 확인되기 전이다." if 진술 is False
+                      else f"- 금지: {글} 조건에 해당하는지 원문과 사용자 답변으로 판단한다.") + 답꼬리(n)
                      # 자연어 조건에 「예」 라고 답했는데 예외가 있는 금지: 코드 불가가 아니다. 예외 해당 여부는 판정 LLM 이 가른다(5-14 B 조건 충족 진술)
                      + (남은것 if 진술 is not True and n.get("예외") and (자연어답.get(n.get("norm_id")) or {}).get("예") else ""))
         elif 종류 == "요건":
-            줄.append(f"- 요건: 「{글}」 충족 여부를 판단한다.")
+            줄.append(f"- 요건: {글} 충족 여부를 판단한다.")
         elif 종류 == "허용":
-            줄.append(f"- 허용: 「{글}」")
+            줄.append(f"- 허용: {글}")
     품목들 = 규범결과.get("경로밖_품목")
     밖 = [(n, 경로밖금지_구분(n, 품목들) if n.get("종류") == "금지" else None) for n in 규범결과.get("경로밖_품목규범") or [] if _발췌(n)]
     if 밖:
@@ -351,22 +574,21 @@ def 규범_요약(규범결과: dict, 게이트결과: dict, *, 분류표시: st
             꼬리 = (f"{f' 조건: 「{자연어}」.' if 자연어 else ''} 지출이 이 조건에 해당할 때만 집행할 수 없다고 판단한다. 해당한다는 것이 확인되지 않으면 이 문장만으로 불가라고 쓰지 않는다." if 구분 == "행위"
                   else " 해당하면 집행할 수 없다고 판단한다. 원문의 단서를 충족한다는 것이 답변이나 원문으로 확인되지 않으면 구입 · 집행할 수 있다고 쓰지 않는다."
                   if 구분 else "")
-            글 = max((g.get("발췌") or "" for g in n.get("근거") or []), key=len).strip()      # 짧은 조각보다 뜻이 드러나는 긴 발췌
-            줄.append(f"  - {n.get('종류')}: 「{글}」{꼬리}")
+            글 = _발췌(n)
+            줄.append(f"  - {n.get('종류')}: {글}{꼬리}")
     상황 = [n for n in 규범결과.get("상황규범") or [] if _발췌(n)]
     if 상황:
         줄.append("- 질문에 드러난 상황(협약 변경 · 거래 상대 등)에 걸린 규정이 따로 있다. 코드는 이 규정으로 판정하지 않았다. 질문 글에 이 상황이 적혀 있으면 "
                  "이 규정으로 판단하고(금지에 해당하면 불가), 적혀 있지 않으면 판단에 쓰지 않는다:")
         for n in 상황:
             자연어 = _자연어조건(n)
-            글 = max((g.get("발췌") or "" for g in n.get("근거") or []), key=len).strip()
-            줄.append(f"  - {n.get('종류')}: 「{글}」{f' 조건: 「{자연어}」.' if 자연어 else ''}")
-    표행 = list(dict.fromkeys(max((g.get("발췌") or "" for g in n.get("근거") or []), key=len).strip()      # 뜻이 드러나는 긴 발췌
-                            for n in 규범결과.get("품목표") or [] if _발췌(n)))
+            글 = _발췌(n)
+            줄.append(f"  - {n.get('종류')}: {글}{f' 조건: 「{자연어}」.' if 자연어 else ''}")
+    표행 = list(dict.fromkeys(_발췌(n) for n in 규범결과.get("품목표") or [] if _발췌(n)))
     if 표행:
         줄.append("- 입력한 품목 표현이 규정의 품목 이름과 글자가 같지 않아 코드가 품목 규정을 찾지 못했다. 아래 금지 품목에 같은 물건이 있는지 대조한다. "
                  "같은 물건이면 그 금지로 판단하고, 같은 물건인지 확실하지 않으면 집행할 수 있다고 쓰지 않는다. 이 목록의 금지를 다른 물건까지 넓혀 쓰지 않는다:")
-        줄.extend(f"  - 「{글}」" for 글 in 표행)
+        줄.extend(f"  - {글}" for 글 in 표행)
     # 자연어 조건 답(키 「자연어:」)은 위 금지 줄이 「해당 없음(사용자 답)」 으로 이미 적는다(5-14 B)
     if 선택답 := [v for k, v in (게이트결과.get("답변") or {}).items() if not str(k).startswith("자연어:")]:
         줄.append("- 사용자가 선택 칸에 답한 것(진술, 증빙 아님): " + " · ".join(f"{v['항목']}: {v['답']}" for v in 선택답))
@@ -391,7 +613,7 @@ def 규범_요약(규범결과: dict, 게이트결과: dict, *, 분류표시: st
     l3순서 = next((n for n in 규범들 if n.get("종류") == "우선순위" and (n.get("조건") or {}).get("범위") == "상충시"
                   and (n.get("조건") or {}).get("하위") == "L3"), None)
     if l3있음 and l3순서:
-        줄.append(f"- 적용 순서: 「{_발췌(l3순서)}」 귀 기관 규정이 상위 규정보다 느슨하면 상위 규정으로 판정하고, 요약에 "
+        줄.append(f"- 적용 순서: {_발췌(l3순서)} 귀 기관 규정이 상위 규정보다 느슨하면 상위 규정으로 판정하고, 요약에 "
                  "「주관기관 안내는 허용하지만 관리기준이 우선」이라고 적는다. 더 엄격하면 귀 기관 규정을 따른다.")
     if 줄:
         줄.append("- 요약에 금액을 쓸 때는 입력 금액과 이 판정에 인용한 규정 원문의 금액만 쓴다. 다른 비목 기준이나 예시의 금액을 옮겨 쓰지 않는다.")
@@ -572,17 +794,17 @@ def _자체시험() -> int:
     요약 = 규범_요약({"규범": [
         {"norm_id": "a", "종류": "한도", "verified": True, "근거": [{"칸": "수치", "발췌": "1인 1일 30만원 한도"}]},
         {"norm_id": "b0", "종류": "우선순위", "verified": True, "조건": {"범위": "상충시", "상위": "L2", "하위": "L1"}, "근거": [{"칸": "대상", "발췌": "지침과 달리 정하는 사항"}]},
-        {"norm_id": "b", "종류": "우선순위", "verified": True, "조건": {"범위": "상충시", "상위": "L2", "하위": "L3"}, "근거": [{"칸": "대상", "발췌": "본 관리기준을 우선"}]},
+        {"norm_id": "b", "종류": "우선순위", "verified": True, "조건": {"범위": "상충시", "상위": "L2", "하위": "L3"}, "결과": {"문장": "본 관리기준을 우선"}, "근거": [{"칸": "대상", "발췌": "저장 발췌"}]},
         {"norm_id": "c", "종류": "금지", "verified": False, "근거": [{"칸": "대상", "발췌": "미확정 금지"}]}]},
         {"쓴규범": ["a"], "조건": [{"문장": "공제 후 집행", "구분": "의무"}, {"문장": "주관기관이 확인", "구분": "다른수범자"}]},
         분류표시="지급수수료 > 멘토링비", 확정=True, l3있음=True)
     t.append(("B4: 비교 끝남 · 의무 · 우선순위 · 미확정 표시, 내부 ID 없음",
               "넘지 않았다" in 요약 and "공제 후 집행" in 요약 and "관리기준이 우선" in 요약 and "확정되지 않은" in 요약 and "규범:" not in 요약))
-    t.append(("B4: 적용 순서 줄은 L3 를 하위로 적은 규범의 발췌를 쓴다", "적용 순서: 「본 관리기준을 우선」" in 요약 and "지침과 달리" not in 요약))
+    t.append(("B4: 적용 순서는 L3 를 하위로 적은 규범의 설명을 쓴다", "적용 순서: 본 관리기준을 우선" in 요약 and "저장 발췌" not in 요약 and "지침과 달리" not in 요약))
     t.append(("B4: 다른 수범자의 의무도 판정 문맥에 남는다", "다른 주체의 의무: 주관기관이 확인" in 요약))
-    요약2 = 규범_요약({"규범": [], "경로밖_품목규범": [{"norm_id": "x", "종류": "금지", "근거": [{"칸": "대상", "발췌": "키보드 | 불가"}]}]},
+    요약2 = 규범_요약({"규범": [], "경로밖_품목규범": [{"norm_id": "x", "종류": "금지", "결과": {"문장": "키보드 불가"}, "근거": [{"칸": "대상", "발췌": "원문 발췌"}]}]},
                   {"조건": []}, 분류표시="창업활동비 > 재료구입비", 확정=True)
-    t.append(("B4: 경로 밖 품목 금지 발췌 · 단서 지시, 내부 ID 없음", "「키보드 | 불가」" in 요약2 and "단서를 충족" in 요약2 and "규범:" not in 요약2))
+    t.append(("B4: 경로 밖 품목 금지 설명 · 단서 지시, 내부 ID 없음", "키보드 불가" in 요약2 and "원문 발췌" not in 요약2 and "단서를 충족" in 요약2 and "규범:" not in 요약2))
     요약3 = 규범_요약({"규범": [{"norm_id": "b0", "종류": "우선순위", "조건": {"범위": "상충시", "하위": "L1"}, "근거": [{"칸": "대상", "발췌": "지침과 달리"}]}]}, {"조건": []}, l3있음=True)
     t.append(("B4: L3 를 하위로 적은 규범이 없으면 적용 순서 줄을 쓰지 않는다", 요약3 is None))
     # 2-3: 다른 자금 조문은 어느 경로로 들어와도 빠지고, 공통 미정 조는 뒤쪽 블록이다
@@ -653,14 +875,14 @@ def _자체시험() -> int:
     t.append(("B4: 공통 미정 안내 · 미확정 한도 초과 · 금액 지시, 내부 ID 없음", "정해지지 않았다" in 요약4 and "확인 필요: 안내 책자의 한도" in 요약4 and "요약에 금액을" in 요약4 and "규범:" not in 요약4))
     # 리뷰 3c R1: 선택 칸 「해당」 답. 예외 · 묻지 않은 조건이 남은 금지는 「집행할 수 없다고 판단한다」 지시 대신 예외를 함께 준다. 답한 값을 줄에 적는다
     조건 = {"구조화": [{"항목": "거래처유형", "연산": "=", "값": "배우자"}], "자연어": []}
-    금지들 = [{"norm_id": "e1", "종류": "금지", "verified": True, "예외": ["h1"], "조건": 조건, "근거": [{"칸": "대상", "발췌": "배우자에게 집행할 수 없다"}]},
-            {"norm_id": "h1", "종류": "허용", "verified": True, "근거": [{"칸": "대상", "발췌": "소속 직원이면 여비는 집행할 수 있다"}]},
-            {"norm_id": "e2", "종류": "금지", "verified": True, "조건": {**조건, "자연어": ["재직 중"]}, "근거": [{"칸": "대상", "발췌": "재직 기업에 집행할 수 없다"}]},
-            {"norm_id": "e3", "종류": "금지", "verified": True, "조건": 조건, "근거": [{"칸": "대상", "발췌": "친족에게 집행할 수 없다"}]}]
+    금지들 = [{"norm_id": "e1", "종류": "금지", "verified": True, "예외": ["h1"], "조건": 조건, "결과": {"문장": "배우자에게 집행할 수 없다"}, "근거": [{"칸": "대상", "발췌": "원문 발췌"}]},
+            {"norm_id": "h1", "종류": "허용", "verified": True, "결과": {"문장": "소속 직원이면 여비는 집행할 수 있다"}, "근거": [{"칸": "대상", "발췌": "원문 발췌"}]},
+            {"norm_id": "e2", "종류": "금지", "verified": True, "조건": {**조건, "자연어": ["재직 중"]}, "결과": {"문장": "재직 기업에 집행할 수 없다"}, "근거": [{"칸": "대상", "발췌": "원문 발췌"}]},
+            {"norm_id": "e3", "종류": "금지", "verified": True, "조건": 조건, "결과": {"문장": "친족에게 집행할 수 없다"}, "근거": [{"칸": "대상", "발췌": "원문 발췌"}]}]
     답g = {"조건": [], "진술평가": {"e1": True, "e2": True, "e3": True}, "답변": {"거래처유형": {"항목": "거래 상대", "답": "배우자"}}}
     줄5 = {x: next((l for l in (규범_요약({"규범": 금지들}, 답g) or "").splitlines() if 글 in l), "") for x, 글 in (("e1", "배우자에게"), ("e2", "재직 기업"), ("e3", "친족에게"))}
-    t.append(("B4 해당 답: 예외 붙은 금지는 예외 발췌를 주고 단정 지시 없음 · 자연어 조건은 그 조건을 준다 · 예외 없는 금지는 단정 · 답한 값을 적는다",
-              "예외가 있다: 「소속 직원이면 여비는 집행할 수 있다」" in 줄5["e1"] and "집행할 수 없다고 판단한다" not in 줄5["e1"]
+    t.append(("B4 해당 답: 예외 붙은 금지는 예외 설명을 주고 단정 지시 없음 · 자연어 조건은 그 조건을 준다 · 예외 없는 금지는 단정 · 답한 값을 적는다",
+              "예외가 있다: 소속 직원이면 여비는 집행할 수 있다" in 줄5["e1"] and "집행할 수 없다고 판단한다" not in 줄5["e1"]
               and "「재직 중」이 더 있다" in 줄5["e2"] and "집행할 수 없다고 판단한다" not in 줄5["e2"]
               and "해당하면 집행할 수 없다고 판단한다" in 줄5["e3"] and all("이 조건(거래 상대: 배우자)에 해당한다고" in v for v in 줄5.values())))
     실패 =[x for x, ok in t if not ok]

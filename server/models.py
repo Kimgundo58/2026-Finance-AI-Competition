@@ -76,6 +76,12 @@ class 답변항목(BaseModel):
 
 # --- 확인 질문 (POST /api/questions) ---
 
+class 조사답변항목(BaseModel):
+    id: str = Field(max_length=200)
+    답: Literal['맞아요', '아니에요', '모르겠어요']
+    정정: str | None = Field(default=None, max_length=1000)
+
+
 class 질문요청(BaseModel):
     """판정 전 확인 질문 요청. org·계정은 토큰에서 정하므로 받지 않는다."""
     사업명: str | None = None
@@ -87,6 +93,11 @@ class 질문요청(BaseModel):
     금액: float | None = None
     용도: str | None = None
     질문원문: str | None = Field(default=None, max_length=2000)
+    조사ID: str | None = Field(default=None, max_length=200)
+    웹조사: bool = False
+    공개검색어: str | None = Field(default=None, max_length=300)
+    판매URL: str | None = Field(default=None, max_length=2048)
+    조사답변: list[조사답변항목] | None = Field(default=None, max_length=30)
 
 
 # --- 판정 (POST /api/judge) ---
@@ -110,6 +121,8 @@ class 판정요청(BaseModel):
     # 화면의 예상 지출일(YYYY-MM-DD). 지난 기한의 조건 문장을 빼고, 프로필 협약 기간과 비교하는 시점 규범(5-14 D)에 쓴다. 날짜가 아니면 없는 것으로 본다.
     # 비어 있으면 정규화가 질문 글에서 뽑은 날짜를 쓴다(화면 입력이 먼저)
     사용일자: str | None = None
+    조사ID: str | None = Field(default=None, max_length=200)
+    조사답변: list[조사답변항목] = Field(default_factory=list, max_length=30)
 
 
 # --- 할일 (plan_tasks) ---

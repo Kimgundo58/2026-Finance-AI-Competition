@@ -11,6 +11,7 @@ LLM · 임베딩 모델을 쓰지 않는다. 필요한 것은 온톨로지와 �
 from __future__ import annotations
 
 import json
+import copy
 import os
 import re
 import sys
@@ -32,8 +33,10 @@ os.environ.pop("SUDDOE_JUDGE_ANSWERS", None)
 import llm_validate as V  # noqa: E402
 import normalize_run  # noqa: E402
 import ontology_context as C  # noqa: E402
+import ontology_evidence as E  # noqa: E402
 import ontology_gate as G  # noqa: E402
 import ontology_lookup as L  # noqa: E402
+import ontology_query_plan  # noqa: E402
 import ontology_terms as T  # noqa: E402
 import orchestrate as O  # noqa: E402
 import question_generate as Q  # noqa: E402
@@ -98,9 +101,14 @@ class _고정:
     프롬프트 = ""
     문장맵: dict = {}
     호출수 = 0
+    준비호출수 = 0
+    계획호출수 = 0
 
 
 def _llm(프롬프트, 스키마, **k):
+    if '행동' in 스키마.get('properties', {}):
+        _고정.준비호출수 += 1
+        return {'행동': '판정', '요청': ''}, {'모델': '고정 준비'}
     _고정.호출수 += 1
     출력 = dict(_고정.출력)
     인용 = 출력.pop("인용", None)
@@ -127,10 +135,40 @@ _원_적용 = L.적용_규범
 _원_품목금지 = L.비목_품목금지
 _원_세목한도 = L.세목_한도_있음
 _원_프로필읽기 = O._프로필값_읽기
+_합성_발췌_캐시: dict[tuple, str] = {}
 
 
 def _적용(cur, 사업명, 대상_id):
-    return {"규범": [dict(n) for n in 규범표.get(대상_id, [])], "경로": [], "우선순위_적용": []}
+    # 합성 규범의 빈 발췌는 현재 원문 검증의 유효 입력이 아니다. 같은 시험 DB의
+    # 실제 위치에서 짧고 유일한 발췌를 채워 원문 검증 자체는 그대로 실행한다.
+    규범들 = copy.deepcopy(규범표.get(대상_id, []))
+    for 규범 in 규범들:
+        for 근거 in 규범.get('근거') or []:
+            if 근거.get('발췌'):
+                continue
+            키 = (근거['doc_id'], 근거['조번호'], 근거.get('항호'))
+            if 키 in _합성_발췌_캐시:
+                근거['발췌'] = _합성_발췌_캐시[키]
+                continue
+            행 = cur.execute('SELECT "본문" FROM corpus.doc_articles WHERE doc_id=%s AND "조번호"=%s',
+                           (근거['doc_id'], 근거['조번호'])).fetchone()
+            if not 행:
+                raise ValueError('합성 시험 규범의 원문 없음')
+            조각 = C._근거_조각(행[0], 근거.get('항호'), 근거.get('조번호'))
+            for _, 글 in 조각:
+                발췌 = 글.strip()[:80]
+                if not 발췌:
+                    continue
+                try:
+                    C._발췌_구간(조각, [발췌])
+                except ValueError:
+                    continue
+                근거['발췌'] = 발췌
+                _합성_발췌_캐시[키] = 발췌
+                break
+            if not 근거.get('발췌'):
+                raise ValueError('합성 시험 규범의 유일한 발췌 없음')
+    return {"규범": 규범들, "경로": [], "우선순위_적용": []}
 
 
 def _조문id(cur, 키: str, 조번호: str) -> int:
@@ -142,6 +180,7 @@ def _조문id(cur, 키: str, 조번호: str) -> int:
 
 _검색표적: dict[str, int] = {}                   # 자금 → 거르기가 있어야 상위 10 에 드는 청크
 _검색_top_k: list[int] = []                      # 검색 대체가 받은 top_k(판정 · 질문 경로가 10 을 넘기는지 본다)
+_검색_ids: list[list[int]] = []
 _상위 = 10                                       # 4-4 ③ 검색 상위 10
 _묶음_최소 = 5                                   # 표적 앞 묶음별 최소 · 거르기 뒤 표적 앞에 남는 그 자금 청크 최소
 
@@ -193,6 +232,63 @@ def _고정_걸기(cur) -> None:
     """검색 후보: AI 솔루션 쪽 · 시제품 조 · 창업활동 쪽을 모두 넣어 자금 거르기를 시험한다."""
     후보 = [_조문id(cur, *x) for x in (("안내책자", "p21-1"), ("모두의창업", "제33조"), ("안내책자", "p9-1"))]
     O.llm_호출 = _llm
+    if os.environ.get('JUDGE_FIXTURE_DEBUG') == '1':
+        원_근거 = E.예외_근거
+        원_위치 = E._위치_확인
+        def 위치진단(본문, 항호, 조번호=None):
+            ok = 원_위치(본문, 항호, 조번호)
+            if not ok:
+                print('fixture 위치 오류', 조번호, 항호, flush=True)
+            return ok
+        E._위치_확인 = 위치진단
+        def 근거진단(*args, **kwargs):
+            try:
+                return 원_근거(*args, **kwargs)
+            except Exception as exc:
+                print('fixture 원문 검증 오류', type(exc).__name__, str(exc))
+                if str(exc) == '필수 조문 미확인':
+                    for 행 in args[1].get('근거행') or []:
+                        if 행.get('건너뜀') or 행.get('article_id') is None:
+                            print('fixture 미확인 근거', 행.get('건너뜀'), 행.get('경로'), flush=True)
+                if str(exc) == '선택 발췌의 원문 위치가 없거나 모호함':
+                    for norm in E._규범_모으기(args[1]).values():
+                        for src in norm.get('근거') or []:
+                            if not C._표_항호(src.get('항호')):
+                                continue
+                            row = args[0].execute('SELECT "본문" FROM corpus.doc_articles WHERE doc_id=%s AND "조번호"=%s',
+                                                  (src.get('doc_id'), src.get('조번호'))).fetchone()
+                            if row:
+                                try:
+                                    시작, 끝 = C._표_범위(row[0], src['조번호'], src['항호'])
+                                    C._발췌_구간([(None, row[0][시작:끝])], [src.get('발췌')])
+                                except ValueError:
+                                    print('fixture 표 발췌 오류', norm['norm_id'], src['조번호'], src['항호'], flush=True)
+                if str(exc) == '원문 항 위치 확인 실패':
+                    for 행 in args[1].get('근거행') or []:
+                        if 행.get('조번호') == '제35조' and 행.get('항호') == '②표-4':
+                            print('fixture 위치 문서', 행.get('doc_id'), flush=True)
+                if str(exc) == '선택 범위 규범 근거 없음':
+                    import ontology_fund
+                    조 = args[1]
+                    키표 = {v: k for k, v in L._스키마()['문서키'].items()}
+                    for n in E._규범_모으기(조).values():
+                        근거들 = n.get('근거') or []
+                        if 근거들 and all(ontology_fund.다른_자금(조.get('자금'), 키표.get(s.get('doc_id')), s.get('조번호'), s.get('항호')) for s in 근거들):
+                            print('fixture 자금범위', n['norm_id'], n.get('종류'), flush=True)
+                if str(exc) == '규범 발췌 불일치':
+                    from ontology_norm import 발췌_포함
+                    for norm in E._규범_모으기(args[1]).values():
+                        for src in norm.get('근거') or []:
+                            r = args[0].execute('SELECT "본문" FROM corpus.doc_articles WHERE doc_id=%s AND "조번호"=%s',
+                                (src.get('doc_id'), src.get('조번호'))).fetchone()
+                            if r and not 발췌_포함(src.get('발췌'), r[0]):
+                                print('fixture 불일치 위치', norm.get('norm_id'), src.get('조번호'), src.get('항호'))
+                raise
+        E.예외_근거 = 근거진단
+    def 조회계획_llm(prompt, schema, **kw):
+        _고정.계획호출수 += 1
+        return {'행동': '완료', '질의': '', '인자': []}, {'모델': '고정 조회계획'}
+    ontology_query_plan.llm_호출 = 조회계획_llm
     O.프롬프트_구성 = _프롬프트
     O.판정 = lambda 질, **k: _원_판정(질, **{**k, "기록": False})
     검색결과 = {**O._빈_검색결과(), "참조확장": 후보}
@@ -245,7 +341,9 @@ def _고정_걸기(cur) -> None:
 
     def _검색(*a, 거르기=None, top_k: int = 5, **k):
         _검색_top_k.append(top_k)
-        return {**검색결과, "top5": (거르기(검색순위) if 거르기 is not None else list(검색순위))[:top_k]}
+        ids = (거르기(검색순위) if 거르기 is not None else list(검색순위))[:top_k]
+        _검색_ids.append(ids)
+        return {**검색결과, "top5": ids}
     retrieve.검색 = _검색
     L.적용_규범 = _적용
     L.비목_품목금지 = lambda *a, **k: []
@@ -271,7 +369,7 @@ def _화면글(r: dict) -> list[str]:
 
 
 def _조각금지(이름: str, 대상: str, 조번호: str, 발췌: str) -> dict:
-    n = _규범(이름, "금지", 대상, [("안내책자", 조번호, None)], verified=False)
+    n = _규범(이름, "금지", 대상, [("모두의창업", 조번호, None)], verified=False)
     n["근거"][0]["발췌"] = 발췌
     return n
 
@@ -293,7 +391,8 @@ def _진술_시험() -> list[tuple[str, bool]]:
     4-1: 승인주체는 할 일 설명, 제재는 조건 문장에 나온다."""
     금지 = _규범("배우자금지", "금지", 재료비_id, [("모두의창업", "제34조", None)], 결과={"문장": "시험용 배우자 금지 문장입니다."})
     금지["조건"] = {"구조화": [{"항목": "거래처유형", "연산": "=", "값": "창업자의 배우자 또는 직계존비속"}], "자연어": []}
-    금지["근거"][0]["발췌"] = "창업자의 배우자 또는 직계존비속에 대해서는 사업비를 집행할 수 없다"
+    # 합성 규범의 증거 위치에 존재하지 않는 문장을 원문 발췌로 위조하지 않는다.
+    # _적용이 시험 DB의 실제 같은 조문에서 발췌를 채운다.
     심의 = _규범("심의의무", "의무", 재료비_id, [("모두의창업", "제35조", None)], 결과={"문장": "시험용 심의 의무 문장입니다.", "시점": "집행 전", "제재": "환수"})
     심의["승인주체"] = ["주체:사업운영위원회"]
     t: list[tuple[str, bool]] = []
@@ -311,6 +410,9 @@ def _진술_시험() -> list[tuple[str, bool]]:
         해당_프롬프트 = _고정.프롬프트
         불가 = 판정("재료비", 300_000, {"판정": "불가", "요약": "배우자와 거래해 쓸 수 없습니다."}, 추가입력값={칸.get("키"): 칸["선택지"][1]})
         불가_호출 = _고정.호출수
+        if os.environ.get('JUDGE_FIXTURE_DEBUG') == '1':
+            for 이름, 값 in [('모름', 모름), ('없음', 없음), ('해당', 해당), ('불가', 불가)]:
+                print('fixture 진단', 이름, 값.get('판정'), 값.get('요약'), 값.get('검증사유'))
     t.append(("3c 모름: 금지 칸에 남고 조건부", 모름["판정"] == "조건부" and 모름.get("금지조건") == ["시험용 배우자 금지 문장입니다."] and 모름.get("확인한조건") == []))
     t.append(("3c 해당 없음: 가능 → 조건부(상한 유지) · 금지 칸에서 확인한 내용으로 · 요약이 답을 말한다", 없음["판정"] == "조건부" and not 없음.get("금지조건")
               and 없음.get("확인한조건") == [{"항목": "거래 상대", "답": "해당 없음", "문장": ["시험용 배우자 금지 문장입니다."], "해당문장": []}]
@@ -446,13 +548,13 @@ def _시험() -> list[tuple[str, bool]]:
         표적글 = _청크_글(_검색표적[자금])
         _검색_top_k.clear()
         판정(비목, 금액, 출력)
-        있음, 받은k = 표적글 in _고정.프롬프트, list(_검색_top_k)
+        있음, 받은k = _검색표적[자금] in _검색_ids[-1], list(_검색_top_k)
         O.자금_거르기 = lambda cur, 자금_: None
         try:
             판정(비목, 금액, 출력)
         finally:
             O.자금_거르기 = 원_거르기
-        t.append((f"판정 검색 자금 거르기({자금}): 표적 청크가 상위 10 에 들고, 거르기를 끊으면 빠진다", 있음 and 표적글 not in _고정.프롬프트))
+        t.append((f"판정 검색 자금 거르기({자금}): 표적 청크가 상위 10 에 들고, 거르기를 끊으면 빠진다", 있음 and _검색표적[자금] not in _검색_ids[-1] and 표적글 not in _고정.프롬프트))
         t.append((f"판정 검색 상위 수({자금}): 검색에 top_k 10 을 넘긴다", 받은k == [_상위]))
     t.append(("문의처: 재료비는 주관기관", r.get("문의처") == "주관기관에"))
     t.append(("정상 요약은 그대로", r["판정"] == "조건부" and r["요약"] == "납품 확인 뒤 집행합니다." and not r.get("_실패")))
@@ -468,23 +570,26 @@ def _시험() -> list[tuple[str, bool]]:
     t.append(("3-3: 되살린 이유도 요약 금액 검사를 거친다", r["판정"] == "판단불가" and "7천7백만" not in r["요약"] and r.get("_실패") is True))
     r = 판정("재료비", 300_000, {"판정": "가능", "요약": "납품 확인 뒤 집행합니다."}, 답변유실=True)
     t.append(("3-3: 검증이 낮춘 경우에도 이유가 남는다", r["판정"] == "조건부" and r["요약"].startswith("납품 확인 뒤 집행합니다. 다만")))
-    with _잠깐(재료비_id, [_재료의무, _조각금지("표금지", 재료비_id, "참고2-p29-1", "미니PC·NUC | 불가 | 렌탈 가능")]):
+    with _잠깐(재료비_id, [_조각금지("표금지", 재료비_id, "별지2", "| 재료비 ·기계장치 | 정의 |")]):
         r = 판정("재료비", 300_000, {"판정": "가능", "요약": "납품 확인 뒤 집행합니다."})
         프롬프트 = _고정.프롬프트
+        if os.environ.get('JUDGE_FIXTURE_DEBUG') == '1': print('표금지 결과', {k: r.get(k) for k in ('판정','요약','금지조건','코드판정')}, flush=True)
     t.append(("3-3: 금지 칸이 있으면 요약이 안 되는 경우를 말한다", r["판정"] == "조건부" and "안 되는 경우에 해당하지 않는지" in r["요약"]))
     # 진단 3-7: 표 행 · 조각은 화면에 내지 않고 상한은 그대로
-    t.append(("3-7: 표 행 발췌를 금지 칸에 내지 않는다 · 쪽을 말로 적는다", r.get("금지조건") == ["안내 책자 참고2 29쪽에 이 지출에 걸릴 수 있는 금지 기준이 있어요. 원문을 확인해 주세요"]
-              and not any("|" in x or "미니PC" in x for x in _화면글(r))))
-    t.append(("3-7: 판정 문맥에는 발췌가 그대로 있다", "미니PC" in 프롬프트))
-    with _잠깐(재료비_id, [_조각금지("조각금지", 재료비_id, "p4-2", "유사 시설 및 동일 지역")]):
+    t.append(("3-7: 표 행 발췌를 금지 칸에 내지 않고 원문 위치를 안내한다", len(r.get("금지조건") or []) == 1 and "별지" in r['금지조건'][0] and "원문" in r['금지조건'][0]
+              and not any("|" in x for x in _화면글(r))))
+    t.append(("3-7: 판정 문맥에는 발췌가 그대로 있다", "재료비 ·기계장치" in 프롬프트))
+    with _잠깐(재료비_id, [_조각금지("조각금지", 재료비_id, "제34조", "시제품 제작과의 연관성이 부족하거나 구매 수량이 과하다고")]):
         r = 판정("재료비", 300_000, {"판정": "가능", "요약": "납품 확인 뒤 집행합니다."})
-    t.append(("3-7: 조각 금지 하나만 있어도 가능이 조건부로 낮아진다 · 화면에 조각이 없다", r["판정"] == "조건부" and bool(r.get("금지조건")) and not any("유사 시설" in x for x in _화면글(r))))
+        if os.environ.get('JUDGE_FIXTURE_DEBUG') == '1': print('조각금지 결과', {k: r.get(k) for k in ('판정','요약','금지조건','코드판정')}, flush=True)
+    t.append(("3-7: 조각 금지 하나만 있어도 가능이 조건부로 낮아진다 · 화면에 조각이 없다", r["판정"] == "조건부" and bool(r.get("금지조건")) and not any("시제품 제작과의 연관성이 부족하거나 구매 수량이 과하다고" in x for x in _화면글(r))))
     # 진단 3-8: 지난 기한은 빼되 판정을 올리지 않는다
-    기한의무 = _규범("기한", "의무", 재료비_id, [("안내책자", "p10-1", None)], 결과={"문장": "시험용 기한 문장입니다.", "시점": "기한: ~ 10.27(화)", "기한일": "2026-10-27"})
-    기한글만 = _규범("기한글", "의무", 재료비_id, [("안내책자", "p10-1", None)], 결과={"문장": "시험용 기한일 없는 문장입니다.", "시점": "기한: ~ 11.30(월)"})
+    기한의무 = _규범("기한", "의무", 재료비_id, [("모두의창업", "제34조", None)], 결과={"문장": "시험용 기한 문장입니다.", "시점": "기한: ~ 10.27(화)", "기한일": "2026-10-27"})
+    기한글만 = _규범("기한글", "의무", 재료비_id, [("모두의창업", "제34조", None)], 결과={"문장": "시험용 기한일 없는 문장입니다.", "시점": "기한: ~ 11.30(월)"})
     with _잠깐(재료비_id, [기한의무, 기한글만]):
-        없음, 전, 후 = (판정("재료비", 300_000, {"판정": "가능", "요약": "납품 확인 뒤 집행합니다."}, 사용일자=d) for d in (None, "2026-10-01", "2026-10-28"))
+        없음, 전, 후 = (판정("재료비", 300_000, {"판정": "가능", "요약": "납품 확인 뒤 집행합니다."}, 사용일자=d) for d in (None, "2026-10-16", "2026-10-28"))
         나쁜값 = 판정("재료비", 300_000, {"판정": "가능", "요약": "납품 확인 뒤 집행합니다."}, 사용일자="내일")
+        if os.environ.get('JUDGE_FIXTURE_DEBUG') == '1': print('기한 결과', [{k: x.get(k) for k in ('판정','요약','기한조건')} for x in (없음, 전, 후, 나쁜값)], flush=True)
     t.append(("3-8: 사용일자 없음 · 기한 전 · 날짜 아님 → 기한 칸에 남는다", all(x.get("기한조건") == ["시험용 기한 문장입니다.", "시험용 기한일 없는 문장입니다."] for x in (없음, 전, 나쁜값))))
     t.append(("3-8: 기한 지남 → 그 문장만 빠진다", 후.get("기한조건") == ["시험용 기한일 없는 문장입니다."] and "시험용 기한 문장입니다." not in _화면글(후)))
     t.append(("3-8: 기한이 지나도 판정은 그대로", 전["판정"] == 후["판정"] == "조건부"))
@@ -605,6 +710,8 @@ def _시험() -> list[tuple[str, bool]]:
     r = 판정("창업활동비", 1_000_000, {"판정": "조건부", "요약": 정상요약})
     저장값 = json.loads(_캐시판정_행(몸, r, None, None, 1).get("온톨로지결과") or "{}")
     t.append(("저장 칸: 공통 사항 · 기한 칸이 판정 행에 남는다(다시 열어도 같다)", 저장값.get("공통사항") == r.get("공통사항") and bool(r.get("공통사항")) and "기한조건" in 저장값))
+    if '--group' in sys.argv and sys.argv[sys.argv.index('--group') + 1] == '기본':
+        return t
     t.extend(_진술_시험())
     t.extend(_항호_시험())
     t.extend(_폼_품목_시험())
@@ -1694,11 +1801,17 @@ def _시점_시험() -> list[tuple[str, bool]]:
     if not 실제:
         return t
     기준문장 = 실제["결과"]["문장"]
-    규범표[외주_id] = [_한도("시점한도", 외주_id, 10_000_000, verified=True), 실제]     # 한도는 줄 · 상한을 안 만든다. 기준 규범의 공통 의무 줄만 남는다
+    시점한도 = _한도("시점한도", 외주_id, 10_000_000, verified=True)
+    # 합성 한도의 근거 위치도 시험 대상인 시제품제작비 자금에 둔다.
+    # 다른 자금인 안내책자 p9-1을 지정하면 유효한 원문 검증이 거부한다.
+    시점한도['근거'] = _규범('시점출처', '한도', 외주_id, [('모두의창업', '제33조', None)])['근거']
+    규범표[외주_id] = [시점한도, 실제]     # 한도는 줄 · 상한을 안 만든다. 기준 규범의 공통 의무 줄만 남는다
     규범표[창업활동비_id].append(실제)                                                 # 창업활동자금 경로에서는 공통 규범 적용 미정이라 쓰이지 않아야 한다
-    원 = (L.적용_규범, L.비목_품목금지, L.세목_한도_있음, O._프로필값_읽기, os.environ["SUDDOE_ONTOLOGY_PROGRAMS"])
+    원 = (L.적용_규범, L.비목_품목금지, L.세목_한도_있음, O._프로필값_읽기, os.environ["SUDDOE_ONTOLOGY_PROGRAMS"], Q.llm_호출)
     L.적용_규범, L.비목_품목금지, L.세목_한도_있음 = _적용, (lambda *a, **k: []), (lambda *a, **k: False)
     O._프로필값_읽기 = lambda cur, org, account=None: (None, dict(프로필))
+    Q.llm_호출 = lambda prompt, schema, **kw: ({'질문': [], **({'품목노드': {'id': None, '확신': '동일'}, '확인질문': None}
+        if '품목노드' in schema.get('properties', {}) else {})}, {})
     os.environ["SUDDOE_ONTOLOGY_PROGRAMS"] = 사업
     client = TestClient(app, raise_server_exceptions=False)
     내부값 = re.compile(r"규범:|norm|절차:|시간:|비목:창업|ONTOLOGY|BAN")
@@ -1802,7 +1915,7 @@ def _시점_시험() -> list[tuple[str, bool]]:
     finally:
         규범표.pop(외주_id, None)
         규범표[창업활동비_id].remove(실제)
-        L.적용_규범, L.비목_품목금지, L.세목_한도_있음, O._프로필값_읽기, os.environ["SUDDOE_ONTOLOGY_PROGRAMS"] = 원
+        L.적용_규범, L.비목_품목금지, L.세목_한도_있음, O._프로필값_읽기, os.environ["SUDDOE_ONTOLOGY_PROGRAMS"], Q.llm_호출 = 원
     return t
 
 
@@ -2081,7 +2194,16 @@ def main() -> int:
         return 0
     with db.connect(autocommit=True) as c:
         _고정_걸기(c.cursor())
-    결과 = [*_시험(), *_판정규범_시험()]
+    if '--group' in sys.argv:
+        인덱스 = sys.argv.index('--group')
+        그룹들 = {'기본': _시험, '진술': _진술_시험, '노드': _노드결정_시험, '상황': _상황노드_시험,
+               '누적': _누적기록_시험, 'L3': _L3숫자_시험, '조건답': _조건답_시험,
+               '시점': _시점_시험, '판정규범': _판정규범_시험}
+        if 인덱스 + 1 >= len(sys.argv) or sys.argv[인덱스 + 1] not in 그룹들:
+            raise SystemExit('지원하지 않는 시험 그룹')
+        결과 = 그룹들[sys.argv[인덱스 + 1]]()
+    else:
+        결과 = [*_시험(), *_판정규범_시험()]
     실패 = [x for x, ok in 결과 if not ok]
     for x, ok in 결과:
         print("ok  " if ok else "FAIL", x)

@@ -356,7 +356,10 @@ def _새경로_준비(cur, 입력: dict, org_id) -> dict:
 
     금지 · 한도 초과는 입력이 더 있어도 불가라 묻지 않는다. 부가세 기준 미정은 물으면 풀리므로 묻는다.
     """
+    import research_runtime
+    import ontology_research_plan
     사업명 = 입력.get("사업명")
+    research_runtime.emit("규정조회", f"{입력['비목']}의 적용 규정과 필요한 확인 항목을 조회하고 있어요.")
     게이트입력 = orchestrate.게이트_입력(입력.get("금액"), 입력.get("부가세구분"), None)
     조회 = orchestrate.온톨로지_조회(cur, 사업명, 입력["비목"], 입력.get("확정세목"), 게이트입력, 확정=True,
                                품목=입력.get("품목"))
@@ -364,12 +367,14 @@ def _새경로_준비(cur, 입력: dict, org_id) -> dict:
         return {"바로": "코드판정"}
     if 조회["게이트"].get("미확정초과") and 입력.get("부가세구분") in ("포함", "공급가액"):
         return {"바로": "미확정한도초과"}       # 답해도 가능 · 조건부가 나오지 않는다(합치기). 부가세를 모르면 답으로 풀릴 수 있어 묻는다
+    조회 = ontology_research_plan.추가_조회(cur, 조회, 입력)
     l3 = l3_load.조문_연결조회(cur, org_id) if org_id else []
     검색 = retrieve.검색(cur, 입력.get("질문") or f"{입력.get('용도') or ''} {입력.get('품목') or ''}".strip(), 사업명,
                        top_k=10, 사업필터=orchestrate.사업필터, 거르기=orchestrate.자금_거르기(cur, 조회.get("자금")))
     문맥 = ontology_context.문맥_구성(cur, 근거행=조회["근거행"], 대상노드=조회["노드들"], l3=l3, 검색=검색,
                                 schema=ontology_lookup._스키마(), 자금=조회.get("자금"),
                                 시작노드=(조회.get("대상") or {}).get("대상_id"))
+    research_runtime.emit("규정조회", f"규정 원문 {문맥['항목수']}개에서 확인할 내용을 준비했어요.", "완료")
     if 문맥["L3_초과"] or not 문맥["항목수"]:
         return {"바로": "L3상한" if 문맥["L3_초과"] else "근거없음"}
     규범들 = 조회["적용"]["규범"]
@@ -537,12 +542,17 @@ def _질문_작성(입력: dict, 블록: str, 문장맵: dict, 조문메타: dic
         프롬프트 += L3숫자_프롬프트(L3숫자후보)
         스키마 = L3숫자_스키마(스키마, L3숫자후보)
         메타["L3숫자후보"] = len(L3숫자후보)
+    if 입력.get("_조사확인"):
+        from ontology_research_plan import 확인정보_문맥
+        프롬프트 += 확인정보_문맥(입력["_조사확인"])
     메타["프롬프트자수"] = len(프롬프트)
     t = time.time()
     try:
         # 노드 출력(ID · 확신 · 확인질문 한 줄) · 조건 질문(규범 ID · 번호 · 질문 최대 3줄)만큼 늘린다. 잘리면 질문 전체가 실패한다. 둘 다 없으면 지금 값 그대로
-        출력, llm메타 = llm_호출(프롬프트, 스키마, 모델=모델, 온도=0.0, 추론=False,
-                            최대토큰=(1400 if 품목후보 else 1200) + (500 if 조건목록 else 0) + (200 if 상황후보 else 0) + (500 if L3숫자후보 else 0), 타임아웃=타임아웃, 재시도=0)
+        import research_runtime
+        with research_runtime.task("확인질문", f"규정 원문 {len(문장맵)}개를 바탕으로 확인 질문을 만들고 있어요.", "확인 질문 작성을 마쳤어요."):
+            출력, llm메타 = llm_호출(프롬프트, 스키마, 모델=모델, 온도=0.0, 추론=False,
+                                최대토큰=(1400 if 품목후보 else 1200) + (500 if 조건목록 else 0) + (200 if 상황후보 else 0) + (500 if L3숫자후보 else 0), 타임아웃=타임아웃, 재시도=0)
     except LLM실패 as e:
         메타["llm_ms"] = int((time.time() - t) * 1000)
         _log.warning("질문생성 LLM 실패: %s", str(e)[:120])
@@ -614,7 +624,8 @@ _노드_규칙 = """
 
 def 노드_프롬프트(품목후보: list[dict]) -> str:
     """질문 프롬프트 끝에 붙는 후보 목록 · 규칙. 별칭이 없으면 「-」."""
-    줄 = [f'{c["id"]} | {c["정식명"]} | {", ".join(c["별칭"]) or "-"}' for c in 품목후보]
+    # 같은 문자열의 정식명·별칭 반복만 제거한다. 후보 ID와 고유 별칭은 모두 보존한다.
+    줄 = [f'{c["id"]} | {c["정식명"]} | {", ".join(dict.fromkeys(a for a in c["별칭"] if a != c["정식명"])) or "-"}' for c in 품목후보]
     return _노드_규칙.replace("{후보}", "\n".join(줄))
 
 

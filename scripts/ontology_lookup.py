@@ -670,15 +670,21 @@ def 위임_있음(근거행: list[dict]) -> bool:
     return any(str(r.get("출처") or "").startswith("위임") for r in 근거행)
 
 
+class 온톨로지_미준비(RuntimeError):
+    """켜진 사업의 온톨로지 규범이 없을 때 기존 경로로 돌아가지 않는다."""
+
+
 def 새경로_대상(cur, 사업명: str | None) -> bool:
-    """SUDDOE_ONTOLOGY_PROGRAMS(쉼표 구분) 목록에 있고 corpus.age_norms 에 그 사업 행이 있으면 참(5-11). 비면 모두 옛 경로."""
+    """목록 밖은 거짓. 목록 안은 AGE와 해당 사업 규범을 확인하고, 없으면 예외다."""
     if not 사업명:
         return False
     목록 = [x.strip() for x in os.environ.get("SUDDOE_ONTOLOGY_PROGRAMS", "").split(",") if x.strip()]
     if 사업명 not in 목록:
         return False
     ontology_graph.준비(cur)
-    return cur.execute("SELECT 1 FROM corpus.age_norms WHERE 적용사업 = %s LIMIT 1", (사업명,)).fetchone() is not None
+    if cur.execute("SELECT 1 FROM corpus.age_norms WHERE 적용사업 = %s LIMIT 1", (사업명,)).fetchone() is None:
+        raise 온톨로지_미준비("선택한 사업의 규정을 사용할 수 없습니다")
+    return True
 
 
 

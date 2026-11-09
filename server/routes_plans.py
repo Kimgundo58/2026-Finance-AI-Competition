@@ -161,6 +161,8 @@ def _계획_org(요청: Request, 요청_org_id: str | None) -> str | None:
 
 @router.post("", response_model=계획상세, status_code=201)
 def 생성(요청: Request, body: 계획생성) -> 계획상세:
+    # 조사ID는 현재 조사 세션의 자격증명이라 계획 데이터에 보관하지 않는다.
+    body.정규화 = {k: v for k, v in body.정규화.items() if k != '조사ID'}
     if MOCK:
         새 = max((p["plan_id"] for p in mock_data.mock_계획), default=0) + 1
         행 = {

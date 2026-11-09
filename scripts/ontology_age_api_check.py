@@ -70,6 +70,8 @@ def main() -> int:
 
     def fixed_llm(prompt, schema, **kw):
         calls['llm'] += 1
+        if '행동' in schema.get('properties', {}):
+            return {'행동': '판정', '요청': ''}, {'모델': '고정', '입력토큰': 0, '출력토큰': 0}
         ids = (schema['properties']['인용']['items'].get('enum') or [])[:1]
         return {'판정': '조건부', '요약': '고정 출력 시험', '해야할일': [], '인용': ids, '전제': []}, {'모델': '고정', '입력토큰': 0, '출력토큰': 0}
 
@@ -100,7 +102,7 @@ def main() -> int:
     response_cache.데이터버전_해시_무효화()
     outcome, done = request()
     assert outcome.get('판정') == '조건부' and done.get('캐시') is False
-    assert calls['cypher'] > 0 and calls['llm'] == 1
+    assert calls['cypher'] > 0 and calls['llm'] == 2
     before = dict(calls)
     outcome, done = request()
     assert outcome.get('판정') == '조건부' and done.get('캐시') is True and calls == before
@@ -132,7 +134,8 @@ def main() -> int:
         SA.준비_버전 = lambda cur, m=mode: original_version(Proxy(cur, m))
         A.준비_확인 = lambda cur, m=mode: original_version(Proxy(cur, m))
         outcome, done = request()
-        assert outcome.get('판정') == '판단불가' and done.get('캐시') is False and calls == before, mode
+        # 사전 준비 확인에서 중단하면 완료 이벤트에는 실패만 있고 캐시 키가 없다.
+        assert outcome.get('판정') == '판단불가' and done.get('캐시') is not True and calls == before, mode
         cache_key = next(iter(response_cache._메모리), 'not-found')
         assert response_cache.조회(cache_key, None) is None, mode
         print(f'통과 {mode}: 캐시 우회·판단불가')

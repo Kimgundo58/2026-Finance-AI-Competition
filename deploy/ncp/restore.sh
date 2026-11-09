@@ -250,5 +250,5 @@ case "$out" in
     *)       fail "6-c INSERT into another org was not denied with 42501: $out" ;;
 esac
 
-echo "DB restore and verification complete. Restore the separately backed up plan_attachments volume as needed before enabling the API."
+echo "DB restore and verification complete. Restore and verify the separately backed up plan_attachments and l3_uploads volumes before enabling the API."
 echo "next: docker compose up -d --build"

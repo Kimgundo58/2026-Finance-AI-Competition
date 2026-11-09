@@ -16,7 +16,7 @@ from llm_validate import 체크항목_본문
 
 # 판정 기록(decisions.모델.프롬프트버전, eval 라벨)에 남기는 프롬프트 버전 이름. 시스템 프롬프트 문구를 바꾸면
 # 함께 바꾼다.
-프롬프트_버전 = "V8"
+프롬프트_버전 = "V9"
 
 # 시스템 지시. 가변 값을 넣지 않는다(프롬프트 캐시 프리픽스가 깨진다). 바이트가 바뀌면 판정이 바뀌므로
 # 평가 없이 고치지 않는다.
@@ -113,6 +113,7 @@ class _문장ID_생성기:
     def __init__(self) -> None:
         self.n = 0
         self.문장맵: dict[str, tuple[str, int, str | None]] = {}
+        self.원문: dict[str, str] = {}
 
     def 원문블록(self, 제목: str, 항목들: list[tuple[str, int, str, str, str | None]]) -> str:
         """항목 (종류, id, 표시헤더, 본문, 항호) 를 항 단위로 나눠 문장 ID 를 붙인 블록 문자열."""
@@ -139,6 +140,7 @@ class _문장ID_생성기:
         for 종류, _id, 표시헤더, 조각, 키 in 항목들:
             self.n += 1
             self.문장맵[_s(self.n)] = (종류, _id, 키)
+            self.원문[_s(self.n)] = 조각
             줄.append(f"[{_s(self.n)}] {이스케이프(표시헤더)}\n{이스케이프(조각)}")
         줄.append(래퍼_끝)
         return "\n\n".join(줄)
@@ -174,6 +176,27 @@ def _참조조항_블록(cur, 번호: _문장ID_생성기, 참조확장: list[in
 def _룰요약_블록(룰결과: str) -> str:
     # 비교가 끝난 문장만 넣는다. 원시 한도값을 주면 LLM 이 다시 계산하려 든다
     return f"## B4. 룰 조회 결과 (금액 비교는 이미 끝났다)\n{룰결과}"
+
+
+_규범발췌_줄 = re.compile(r"^([ \t]*-[ \t]*(?:(?:확정되지 않은 [^\n:]+ 규정)|한도|임계값|금지|요건|허용|의무|적용 순서)[ \t]*:[ \t]*)「([^「」]+)」", re.MULTILINE)
+
+
+def _중복발췌_참조(룰결과: str, 원문: dict[str, str]) -> str:
+    """고유하게 일치하는 규범 발췌만 이미 표시한 문장 ID로 가리킨다.
+
+    원문·예외·조건·금액·계산 결과는 그대로 유지한다. 여러 원문에 있거나
+    원문이 잘려 빠진 발췌, 짧은 값과 사용자 진술은 바꾸지 않는다.
+    """
+    def 바꾸기(m: re.Match) -> str:
+        발췌 = " ".join(m.group(2).split())
+        if len(발췌) < 24:
+            return m.group(0)
+        일치 = [(sid, 정규화.count(발췌)) for sid, 본문 in 원문.items()
+              if 발췌 in (정규화 := " ".join(본문.split()))]
+        if len(일치) != 1 or 일치[0][1] != 1:
+            return m.group(0)
+        return m.group(1) + f"「[{일치[0][0]}]의 원문」"
+    return _규범발췌_줄.sub(바꾸기, 룰결과)
 
 
 def _프로필요약_블록(프로필요약: str) -> str:
@@ -226,7 +249,8 @@ def 프롬프트_구성(cur, 질문: str, 정규화: dict, *,
               체크코드: list[str] | None = None,
               체크항목: dict[str, dict] | None = None,
               사용자답변: list[dict] | None = None,
-              문맥: dict | None = None) -> tuple[str, dict, list[dict]]:
+              문맥: dict | None = None,
+              제시원문: dict[str, str] | None = None) -> tuple[str, dict, list[dict]]:
     """판정 프롬프트를 구성해 (프롬프트, 문장맵, 참조관계) 를 돌려준다.
 
     블록 순서는 B0(시스템 프롬프트), B1(L3), B2(검색 청크), B3(참조 확장 조문), B4(룰 결과),
@@ -247,7 +271,7 @@ def 프롬프트_구성(cur, 질문: str, 정규화: dict, *,
         if 참조확장:
             블록.append(_참조조항_블록(cur, 번호, 참조확장))
     if 룰결과:
-        블록.append(_룰요약_블록(룰결과))
+        블록.append(_룰요약_블록(_중복발췌_참조(룰결과, 번호.원문) if 문맥 is not None else 룰결과))
     if 프로필요약:
         블록.append(_프로필요약_블록(프로필요약))
     if 체크코드:
@@ -258,4 +282,7 @@ def 프롬프트_구성(cur, 질문: str, 정규화: dict, *,
     if 사용자답변:
         블록.append(_사용자답변_블록(사용자답변))
     블록.append(_질문_블록(질문, 정규화, _s(번호.n)))
+    if 제시원문 is not None:
+        제시원문.clear()
+        제시원문.update(번호.원문)
     return "\n\n".join(블록), 번호.문장맵, list(참조관계 or [])

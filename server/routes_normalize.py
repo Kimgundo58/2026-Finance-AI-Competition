@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
 
-from server import auth, response_cache
+from server import auth, response_cache, research_sessions, ontology_readiness
 from server._common import MOCK, _sse, _sse응답, 구키_추가, 비목_ENUM, 온톨로지_사업, 클라이언트_ip
 from server.catalog import _사업_비목, _사업명_표준화, _심층질문마스터
 from server.models import 정규화요청
@@ -33,6 +33,8 @@ def normalize(req: Request, body: 정규화요청):
     # 되므로 키에 넣는다. 집행예정일·거래처는 정규화에 쓰이지 않아 넣지 않는다.
     org = auth.검증된_org(req)
     account = auth.검증된_account(req)
+    조사ID = research_sessions.생성(org, account)
+    조사세션 = research_sessions.조회(조사ID, org, account)
     # 캐시 행은 계정 단위라(RLS) 키에도 org·계정을 넣는다. 키가 같으면 다른 계정 행과 PRIMARY KEY 가 겹친다.
     k = response_cache.캐시키("normalize", org, account, (body.질문 or "").strip(),
                             body.품목, body.금액, body.용도, body.추가설명, body.사업명,
@@ -42,13 +44,23 @@ def normalize(req: Request, body: 정규화요청):
     캐시 = response_cache.조회(k, org, account)
 
     def gen():
-        yield _sse("진행", {"단계": "정규화", "설명": "입력에서 정보를 추출하는 중"})
+        try:
+            if not MOCK:
+                ontology_readiness.확인(body.사업명)
+        except Exception:  # noqa: BLE001
+            yield _sse("오류", {"메시지": "선택한 사업의 규정을 확인할 수 없습니다. 잠시 후 다시 시도해 주세요."})
+            yield _sse("완료", {"실패": True})
+            return
         if 캐시 is not None:
-            yield _sse("결과", 캐시)
+            yield _sse("진행", {"단계": "정규화", "상태": "완료", "문장": "저장된 입력 분석 결과를 불러왔어요.", "설명": "저장된 분석 결과 사용"})
+            yield _sse("결과", {**캐시, "조사ID": 조사ID})
             yield _sse("완료", {"캐시": True})
             return
+        yield _sse("진행", {"단계": "정규화", "상태": "진행중", "문장": "입력에서 지출 정보를 추출하고 있어요." if not MOCK else "연결 확인용 분석 결과를 준비하고 있어요.", "설명": "입력 분석"})
         try:
-            out, 실패 = (dict(mock_정규화), False) if MOCK else _live_정규화(body)
+            import research_runtime
+            with research_runtime.activate(조사세션.budget):
+                out, 실패 = (dict(mock_정규화), False) if MOCK else _live_정규화(body)
         except Exception as e:                                # noqa: BLE001
             # 500 을 내지 않고 오류 이벤트로 끝낸다.
             yield _sse("오류", {"메시지": "정규화에 실패했습니다", "종류": type(e).__name__})
@@ -60,7 +72,7 @@ def normalize(req: Request, body: 정규화요청):
         for 필드 in ("품목", "금액", "금액_추정여부", "용도", "비목후보", "분류후보", "수치"):
             if 필드 in out:
                 yield _sse("필드", {필드: out[필드]})
-        yield _sse("결과", out)
+        yield _sse("결과", {**out, "조사ID": 조사ID})
         yield _sse("완료", {"캐시": False})
 
     return _sse응답(gen())
@@ -70,8 +82,9 @@ def _live_정규화(body: 정규화요청) -> tuple[dict, bool]:
     """live 정규화. (결과, 실패) — 실패는 폼 경로 LLM 오류로 비목후보가 비었다는 뜻이다."""
     if 온톨로지_사업(body.사업명):
         결과 = _온톨로지_정규화(body)
-        if 결과 is not None:
-            return 결과
+        if 결과 is None:
+            raise RuntimeError('선택한 사업의 규정을 확인할 수 없습니다')
+        return 결과
     실패 = False
     # 사업에 없는 비목을 후보로 받으면 화면에 고를 칸이 없고, 심층질문도 그 비목 기준으로 걸러진다.
     비목들 = _사업_비목(body.사업명)

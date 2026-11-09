@@ -17,6 +17,7 @@ import time
 from typing import Any
 
 from openai import OpenAI
+from research_runtime import current_budget, is_final_call
 
 
 class LLM실패(Exception):
@@ -87,8 +88,18 @@ def _호출_1회(client: OpenAI, 모델: str, 프롬프트: str, 스키마: dict
     if 추론 is False or _추론_비활성_대상(모델):
         kwargs["extra_body"] = _추론_끄기_옵션()
 
+    budget = current_budget()
+    if budget is not None:
+        if not budget.reserve_llm(final=is_final_call()):
+            raise LLM실패("LLM 호출 예산 또는 시간 초과")
+        남은시간 = budget.remaining_seconds()
+        if 남은시간 <= 0:
+            raise LLM실패("LLM 호출 시간 초과")
+        kwargs["timeout"] = min(타임아웃, 남은시간)
     t = time.time()
     r = client.chat.completions.create(**kwargs)
+    if budget is not None and budget.remaining_seconds() <= 0:
+        raise LLM실패("LLM 응답 시간 초과")
     msg = r.choices[0].message
     내용 = msg.content or ""
     # DashScope 는 reasoning_content, 게이트웨이는 reasoning 필드에 추론 텍스트를 담는다
@@ -104,6 +115,8 @@ def _호출_1회(client: OpenAI, 모델: str, 프롬프트: str, 스키마: dict
                "total_tokens": getattr(usage, "total_tokens", None)},
         "종료이유": r.choices[0].finish_reason,
         "모델": 모델,
+        "프롬프트자수": len(프롬프트),
+        "스키마자수": len(json.dumps(스키마, ensure_ascii=False)) if 스키마 is not None else 0,
         "최대토큰": 최대토큰,        # 실제로 보낸 max_tokens (_최소_출력토큰 적용 후)
         "추론내용있음": bool(추론내용),
         "추론내용길이": len(추론내용),

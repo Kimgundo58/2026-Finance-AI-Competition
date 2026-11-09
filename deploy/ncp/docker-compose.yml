@@ -68,6 +68,10 @@ services:
       SUDDOE_DEMO_SECRET: ${SUDDOE_DEMO_SECRET:?SUDDOE_DEMO_SECRET is not set in .env}
       SUDDOE_SLUG_SECRET: ${SUDDOE_SLUG_SECRET:?SUDDOE_SLUG_SECRET is not set in .env}
       SUDDOE_ALLOW_ORG_PARAM: "0"
+      # 지정한 사업은 새 온톨로지 경로를 사용한다. 빈 값이면 기존 경로다.
+      SUDDOE_ONTOLOGY_PROGRAMS: ${SUDDOE_ONTOLOGY_PROGRAMS:-}
+      # 별도 읽기 전용 볼륨에 둔 공개 검색 키 파일. 키 값은 이미지에 넣지 않는다.
+      SUDDOE_APICK_API_KEY_FILE: /run/suddoe-secrets/apick.key
       SUDDOE_QWEN_MODEL: ${SUDDOE_QWEN_MODEL:-qwen3.7-plus}
       SUDDOE_QWEN_FALLBACK_MODEL: ${SUDDOE_QWEN_FALLBACK_MODEL:-qwen3.8-flash}
       SUDDOE_QUESTION_MODEL: ${SUDDOE_QUESTION_MODEL:-}
@@ -89,6 +93,7 @@ services:
       - l3_uploads:/app/_l3_업로드
       # 지출계획 첨부파일(견적서·증빙). backup.sh 가 tar 로 백업한다.
       - plan_attachments:/app/_plan_attachments
+      - apick_secrets:/run/suddoe-secrets:ro
     mem_limit: 6g
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/api/health', timeout=5).status == 200 else 1)"]
@@ -117,6 +122,7 @@ services:
     logging: *logging
 
 volumes:
+  apick_secrets:
   pgdata:
   l3_uploads:
   plan_attachments:

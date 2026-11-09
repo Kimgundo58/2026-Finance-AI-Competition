@@ -20,6 +20,7 @@ jobs:
     timeout-minutes: 20
     env:
       PYTHONIOENCODING: utf-8
+      HF_HUB_OFFLINE: "1"
     steps:
       - uses: actions/checkout@v4
 
@@ -55,6 +56,26 @@ jobs:
       - name: 판정 문맥 self-test (DB·LLM 없음)
         run: python scripts/ontology_context.py --self-test
 
+      - name: 조사·근거·AGE 질의 회귀 (합성 자료, DB·외부 호출 없음)
+        run: |
+          set -euo pipefail
+          for check in \
+            scripts/ontology_query_check.py \
+            scripts/ontology_query_plan_check.py \
+            scripts/ontology_research_check.py \
+            scripts/ontology_evidence_check.py \
+            scripts/ontology_table_evidence_check.py \
+            scripts/ontology_final_research_check.py \
+            scripts/ontology_no_fallback_check.py \
+            scripts/agentic_loop_check.py \
+            scripts/web_research_check.py \
+            server/research_sessions_check.py; do
+            python -I -X utf8 -c "import runpy,sys; sys.path[:0]=['.','scripts']; runpy.run_path(sys.argv[1],run_name='__main__')" "$check"
+          done
+
+      - name: DB·첨부·L3 백업 합성 검사
+        run: bash deploy/ncp/backup_check.sh
+
       # 온톨로지 원천 검사는 HermiT(Java)를 쓴다. Java · owlready2 는 CI 잡에만 있고 API 이미지에는 넣지 않는다.
       - uses: actions/setup-java@v4
         with:
@@ -85,6 +106,7 @@ jobs:
     env:
       PYTHONIOENCODING: utf-8
       PGCLIENTENCODING: UTF8
+      HF_HUB_OFFLINE: "1"
       # db/init 의 로컬 전용 비밀번호다. 이 잡의 서비스 컨테이너 밖에서는 쓰지 않는다.
       OWNER_DSN: postgresql://postgres:devpw@127.0.0.1:5432/suddoe_ci
       SUDDOE_DSN: postgresql://suddoe_app:devpw@127.0.0.1:5432/suddoe_ci

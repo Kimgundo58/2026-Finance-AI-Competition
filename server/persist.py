@@ -97,6 +97,10 @@ def _계획에_연결(plan_id: int, body, out: dict, org_id: str | None, account
         else:
             cur.execute("UPDATE tenant.decisions SET plan_id = %s WHERE decision_id = %s",
                         (plan_id, decision_id))
+        if out.get('조사') is not None:
+            cur.execute('''UPDATE tenant.decisions SET "온톨로지결과" =
+                COALESCE("온톨로지결과", '{}'::jsonb) || jsonb_build_object('조사', %s::jsonb)
+                WHERE decision_id = %s''', (json.dumps(out['조사'], ensure_ascii=False), decision_id))
         # 비목 없이 임시저장한 계획은 판정 때 고른 비목을 남긴다. 이미 있는 비목은 바꾸지 않는다.
         cur.execute("UPDATE tenant.expense_plans "
                     "SET latest_decision_id = %s, 상태 = 'judged', updated_at = now(), "

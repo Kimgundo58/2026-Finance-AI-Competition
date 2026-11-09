@@ -93,12 +93,31 @@ def 별지_행(본문: str) -> list[tuple[str, str]]:
     """별지 마크다운 표를 (`<비목>/<칸>`, 내용) 으로 푼다. 첫 칸이 비면 앞 비목, 둘째 칸이 비면 앞 칸의 이어짐이다."""
     행: dict[str, list[str]] = {}
     비목, 칸 = "", ""
+    두칸_증빙표 = False
     for 줄 in 본문.splitlines():
         if not 줄.lstrip().startswith("|"):
+            두칸_증빙표 = False
             continue
         셀 = [c.strip() for c in 줄.strip().strip("|").split("|")]
         if set("".join(셀)) <= set("-: "):
             continue
+        # 페이지를 넘길 때 반복되는 세 칸 표 머리글은 앞 행의 비목·칸을 바꾸지 않는다.
+        if len(셀) == 3 and _칸이름(셀[0]) == '비목' and _칸이름(셀[1]) == '주요내용' and not 셀[2]:
+            continue
+        if len(셀) == 2 and _칸이름(셀[0]) == '비목' and _칸이름(셀[1]) in ('집행증빙서류', '기준'):
+            이전표 = 두칸_증빙표
+            두칸_증빙표 = True
+            if not 이전표:
+                비목, 칸 = '', ''
+            continue
+        if len(셀) == 2 and 두칸_증빙표:
+            if 셀[0]:
+                비목 = _칸이름(셀[0])
+            if 비목 and 셀[1]:
+                행.setdefault(비목, []).append(셀[1])
+            continue
+        if len(셀) >= 3 and 셀[0] == '비목':
+            두칸_증빙표 = False
         if len(셀) < 3 or 셀[0] == "비목":
             continue
         a, b, 내용 = 셀[0], 셀[1], " | ".join(셀[2:])
@@ -116,7 +135,131 @@ def 별지_행(본문: str) -> list[tuple[str, str]]:
 def 별지_행_내용(본문: str, 항호: str) -> str | None:
     """조문 ID 의 별지 행 키(`/지급수수료/유의사항`)에 해당하는 칸 내용. 없으면 None."""
     키 = (항호 or "").lstrip("/")
-    return dict(별지_행(본문 or "")).get(키)
+    찾음 = dict(별지_행(본문 or "")).get(키)
+    if not 찾음 and 키 == '교육훈련비/유의사항' and (본문 or '').count('창업중심대학 창업기업 사업비 집행기준') == 1:
+        # 참고3 복원표는 교육훈련비 유의사항을 같은 비목의 기준 셀에 합쳤다.
+        # 빈 유의사항과 바로 뒤 다음 비목이 모두 명시된 유일한 표만 허용한다.
+        줄들 = (본문 or '').splitlines()
+        셀들 = [[c.strip() for c in 줄.strip().strip('|').split('|')]
+                if 줄.lstrip().startswith('|') else [] for 줄 in 줄들]
+        후보 = []
+        for i in range(len(셀들) - 2):
+            a, b, c = 셀들[i:i + 3]
+            if (len(a) == len(b) == len(c) == 3 and _칸이름(a[0]) == '교육훈련비'
+                    and _칸이름(a[1]) == '기준' and a[2] and not b[0]
+                    and _칸이름(b[1]) == '유의사항' and not b[2]
+                    and _칸이름(c[0]) == '광고선전비' and _칸이름(c[1]) == '기준' and c[2]):
+                후보.append(a[2])
+        if len(후보) == 1:
+            return 후보[0]
+    if 찾음:
+        # 초격차 참고2는 표의 기술이전 세부항목이 같은 조의 평문으로
+        # 이동되어 있다. 두 소항목 표제가 유일할 때만 해당 구간을 잇는다.
+        if 키 == '지급수수료' and (본문 or '').count('[참고2] 초격차 창업기업 사업비 집행기준') == 1:
+            시작표제 = '· (기술이전비)'
+            끝표제 = '· (학회·세미나 참가비)'
+            if 본문.count(시작표제) == 본문.count(끝표제) == 1:
+                시작, 끝 = 본문.index(시작표제), 본문.index(끝표제)
+                if 시작 < 끝:
+                    찾음 += ' ' + 본문[시작:끝].strip()
+        return 찾음
+    # 참고3: 유일한 집행기준 제목 바로 뒤의 고지 문단만 지정한다.
+    if 키 == '집행기준':
+        제목 = '창업중심대학 창업기업 사업비 집행기준'
+        if (본문 or '').count(제목) == 1:
+            뒤 = 본문.split(제목, 1)[1].lstrip()
+            문단 = re.split(r'\n\s*\n', 뒤, maxsplit=1)[0].strip()
+            if 문단.startswith('※'):
+                return 문단
+    if 키 == '사업비지급제한및환수':
+        표들 = re.findall(r'(?m)^\|\s*구분\s*\|\s*내용\s*\|[^\n]*\n(?:\|[^\n]*\|[^\n]*(?:\n|$))+', 본문 or '')
+        후보 = [표 for 표 in 표들 if re.search(r'(?m)^\|\s*지급불가\s*대상\s*\|', 표)
+              and re.search(r'(?m)^\|\s*사업비\s*환수\s*\|', 표)]
+        return 후보[0].strip() if len(후보) == 1 else None
+    if 키 == '사업비집행및처리기간':
+        if (본문 or '').count('□ 사업비 집행 및 처리기간') != 1:
+            return None
+        표들 = re.findall(r'(?m)^\|\s*구분\s*\|\s*내용\s*\|[^\n]*\n(?:\|[^\n]*\|[^\n]*(?:\n|$))+', 본문 or '')
+        후보 = [표 for 표 in 표들 if re.search(r'(?m)^\|\s*사업비\s*집행\s*(?:가능기간|기간)\s*\|', 표)]
+        return 후보[0].strip() if len(후보) == 1 else None
+    if 키 == '사업비집행·청구':
+        if (본문 or '').count('□ 사업비 집행·청구') != 1:
+            return None
+        표들 = re.findall(r'(?m)^\|\s*구분\s*\|\s*\|\s*내용\s*\|[^\n]*\n(?:\|[^\n]*\|[^\n]*(?:\n|$))+', 본문 or '')
+        유의 = [표 for 표 in 표들 if re.search(r'(?m)^\|\s*유\s*의\s*사\s*항\s*\|', 표)]
+        금액 = [표 for 표 in 표들 if re.search(r'(?m)^\|\s*금\s*액\s*별\s*\|', 표)]
+        if len(유의) == len(금액) == 1 and 유의[0] != 금액[0]:
+            return 유의[0].strip() + '\n' + 금액[0].strip()
+        return None
+    if 키 in ('지급수수료/기술이전비', '지급수수료/기계장치수리비',
+             '지급수수료/기자재임차비', '지급수수료/사무실임차료', '지급수수료/시험·인증비'):
+        # 비목·기준 표의 해당 그룹 안에서 번호가 붙은 소항목을 찾는다.
+        묶음, 활성 = [], False
+        for 줄 in (본문 or '').splitlines():
+            if not 줄.lstrip().startswith('|'):
+                if not 줄.strip():
+                    continue
+                if 활성:
+                    break
+                continue
+            셀 = [c.strip() for c in 줄.strip().strip('|').split('|')]
+            if len(셀) < 3:
+                continue
+            if set(''.join(셀)) <= set('-: '):
+                continue
+            if 셀[0]:
+                if 활성 and _칸이름(셀[0]) == '비목':
+                    continue
+                if 활성:
+                    break
+                활성 = _칸이름(셀[0]) == '지급수수료' and '유의사항' in _칸이름(셀[1])
+            if 활성:
+                묶음.extend(x for x in 셀[2:] if x)
+        글 = ' '.join(묶음)
+        이름 = 키.rsplit('/', 1)[-1]
+        이름식 = r'\s*'.join(map(re.escape, 이름))
+        식 = re.compile(r'(?<!\d)(\d{1,2})\)\s*' + 이름식 + r'\s*[:：]')
+        찾음 = list(식.finditer(글))
+        if len(찾음) != 1:
+            return None
+        시작 = 찾음[0].start()
+        다음 = re.search(r'(?<!\d)' + str(int(찾음[0].group(1)) + 1) + r'\)\s*[^:：]{1,50}[:：]', 글[찾음[0].end():])
+        끝 = 찾음[0].end() + 다음.start() if 다음 else len(글)
+        return 글[시작:끝].strip()
+    # 참고5: 이동된 3열 표의 그룹명과 명시적 부모 절을 함께 확인한다.
+    if 키 in ('사업비집행·청구/유의사항', '사업비집행·청구/결제수단별',
+             '사업비집행·청구/금액별', '사업비집행·청구/항목별'):
+        if (본문 or '').count('□ 사업비 집행·청구') != 1:
+            return None
+        그룹 = 키.rsplit('/', 1)[-1]
+        수집, 활성, 머리, 결과 = [], False, False, []
+        for 줄 in 본문.splitlines():
+            if not 줄.lstrip().startswith('|'):
+                if 수집:
+                    결과.append(수집)
+                    수집 = []
+                활성 = 머리 = False
+                continue
+            셀 = [c.strip() for c in 줄.strip().strip('|').split('|')]
+            if len(셀) != 3:
+                continue
+            if _칸이름(셀[0]) == '구분' and not 셀[1] and _칸이름(셀[2]) == '내용':
+                머리 = True
+                continue
+            if not 머리 or set(''.join(셀)) <= set('-: '):
+                continue
+            if 셀[0]:
+                if 수집:
+                    결과.append(수집)
+                    수집 = []
+                활성 = _칸이름(셀[0]) == 그룹
+            if 활성 and 셀[2]:
+                수집.append(' | '.join(x for x in 셀[1:] if x))
+        if 수집:
+            결과.append(수집)
+        if len(결과) == 1:
+            return ' '.join(결과[0])
+    return None
 
 
 def 조번호_표시(조번호: str | None) -> str | None:

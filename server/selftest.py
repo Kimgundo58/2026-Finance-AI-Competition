@@ -479,7 +479,10 @@ def main() -> int:
     _, e2 = sse("/api/normalize", 본)
     확인("같은 질문은 캐시로 답한다",
          response_cache.상태()["적중"] == 전 + 1 and e2["완료"][0]["캐시"] is True)
-    확인("캐시 응답이 첫 응답과 같다", e1["결과"][0] == e2["결과"][0])
+    확인("캐시 응답은 조사ID를 제외하고 같고 조사 세션은 구분된다",
+         {k: v for k, v in e1["결과"][0].items() if k != "조사ID"} ==
+         {k: v for k, v in e2["결과"][0].items() if k != "조사ID"} and
+         e1["결과"][0].get("조사ID") != e2["결과"][0].get("조사ID"))
     확인("캐시 적중 수가 /admin/status 에 나온다",
          c.get("/admin/status", headers=관리).json()["캐시"]["적중"] > 0)
 
