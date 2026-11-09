@@ -9,7 +9,7 @@ import re
 import urllib.error
 import urllib.request
 from pathlib import Path
-from urllib.parse import parse_qsl, unquote, urlsplit
+from urllib.parse import parse_qsl, unquote, urlencode, urlsplit, urlunsplit
 
 ENDPOINT = "https://apick.app/mcp/web"
 MAX_RESPONSE = 400_000
@@ -39,9 +39,15 @@ def public_url(url: str) -> bool:
             numeric = {"id", "article", "article_id", "articleid", "doc", "doc_id", "document_id",
                        "page", "p", "post", "post_id", "postid", "no", "seq", "idx"}
             languages = {"lang", "language", "locale"}
+            # 사이트별 공개 글 식별자. 다른 사이트에서는 받지 않는다. 영상 페이지는 본문이 없어 받지 않는다.
+            naver_blog = host in {"blog.naver.com", "m.blog.naver.com"}
             for key, value in pairs:
                 key = key.lower()
                 if key in numeric and re.fullmatch(r"[0-9]{1,9}", value):
+                    continue
+                if naver_blog and key == "blogid" and re.fullmatch(r"[A-Za-z0-9_-]{1,50}", value):
+                    continue
+                if naver_blog and key == "logno" and re.fullmatch(r"[0-9]{12,15}", value):
                     continue
                 if key in languages and re.fullmatch(r"(?:en|ko|en-us|ko-kr)", value, re.I):
                     continue
@@ -66,6 +72,27 @@ def public_url(url: str) -> bool:
         return True
     except (ValueError, UnicodeError):
         return False
+
+
+# 검색 결과 주소의 추적·표시용 query. 지워도 같은 페이지를 가리킨다.
+_TRACKING = re.compile(r"(?:utm_[a-z_]+|srsltid|fbclid|gclid|proxyreferer|notrackingcode|categoryno|tl|ref|from)", re.I)
+
+
+def strip_tracking(url: str) -> str:
+    """추적용 query 를 지운 주소. 나머지 query 는 그대로 두고 public_url 이 판단한다."""
+    if not isinstance(url, str):
+        return url
+    try:
+        p = urlsplit(url)
+        if not p.query:
+            return url
+        pairs = parse_qsl(p.query, keep_blank_values=True, strict_parsing=True, max_num_fields=16)
+    except ValueError:
+        return url
+    kept = [(k, v) for k, v in pairs if not _TRACKING.fullmatch(k)]
+    if len(kept) == len(pairs):
+        return url
+    return urlunsplit((p.scheme, p.netloc, p.path, urlencode(kept), p.fragment))
 
 
 def _key() -> str:

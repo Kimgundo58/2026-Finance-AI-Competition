@@ -11,10 +11,11 @@ import logging
 import re
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
-from apick_mcp import ApickClient, ApickError, public_url as url_ok
+from apick_mcp import ApickClient, ApickError, public_url as url_ok, strip_tracking
 
 _log = logging.getLogger("uvicorn.error")
 
@@ -23,6 +24,10 @@ _검색용어 = {"제품성격": "official product service", "판매자": "offic
          "공개등록": "official company registration", "결제안내": "official payment methods",
          "통화": "official billing currency", "가격": "official pricing",
          "증빙안내": "official invoice receipt", "업체이용조건": "official terms commercial use"}
+# 국내 검색 결과를 위한 유형별 고정 낱말. 사용자 값이 아니므로 외부로 보내도 된다.
+_한국어검색 = {"제품성격": "공식 서비스 소개", "판매자": "운영사 회사 정보", "공개등록": "사업자등록번호 사업자정보",
+           "결제안내": "결제 방법", "통화": "결제 통화", "가격": "요금 가격",
+           "증빙안내": "영수증 세금계산서 발급", "업체이용조건": "이용약관"}
 _사용자확인 = {"실제사용": "실제 사용 목적을 확인해 주세요.", "실제결제": "실제로 결제했는지 확인해 주세요.",
           "결제수단": "실제로 사용할 결제수단을 확인해 주세요.", "승인여부": "필요한 승인을 받았는지 확인해 주세요.",
           "증빙발급": "실제 증빙 발급 여부를 확인해 주세요."}
@@ -37,6 +42,13 @@ _SCHEMA = {"type": "object", "additionalProperties": False, "properties": {
     "확인항목": {"type": "array", "items": {"type": "string", "enum": list(_사용자확인)}},
     "URL": {"type": "string"}, "후보": {"type": "array", "items": _FIELDS}},
     "required": ["행동", "유형", "검색어", "부족정보", "확인항목", "URL", "후보"]}
+
+
+# 계획 LLM 3회와 검색·본문 호출이 들어가는 시간. 운영 측정: 계획 3~8초, 검색 0.4~22.9초, 본문 4~10초.
+_웹_제한초 = 60
+# 도구 한 번이 창을 다 쓰지 않도록 호출별 상한을 두고, 읽은 본문에서 발췌를 고를 마지막 계획 시간을 남긴다.
+_도구상한초 = {"google_search": 20, "url_to_markdown": 15}
+_추출여유초 = 10
 
 
 def _product_ok(name: str) -> bool:
@@ -92,29 +104,28 @@ def _links(result):
             for item in value:
                 yield from structured(item)
     for u in structured(obj):
+        u = strip_tracking(u)
         if url_ok(u) and u not in found:
             found.append(u)
     for s in _strings(obj):
         for u in re.findall(r"https?://[^\s\"'<>\)\]]+", s):
-            u = u.rstrip(".,;:）")
+            u = strip_tracking(u.rstrip(".,;:）"))
             if url_ok(u) and u not in found:
                 found.append(u)
     return found[:12]
 
 
 def _body(result):
-    """출력 제한이나 제공자의 명시적 잘림 표시가 있으면 자료로 사용하지 않는다."""
+    """페이지 본문. 30000자 상한으로 잘린 긴 페이지도 쓴다.
+
+    후보 발췌는 본문과 글자 그대로 일치해야 하고 사용자 확인 전에는 근거가 아니므로,
+    잘린 뒷부분이 근거로 들어가지 않는다.
+    """
     obj = _text(result)
-    serialized = json.dumps(obj, ensure_ascii=False)
-    if re.search(r'"(?:truncated|is_truncated|isTruncated)"\s*:\s*true', serialized, re.I):
-        return None
     texts = [s for s in _strings(obj) if len(s) >= 40 and not s.startswith("http")]
     if not texts:
         return None
-    body = max(texts, key=len)
-    if len(body) >= 30000 or re.search(r"(?:\.\.\.|…|\[truncated\]|\[생략\])\s*$", body, re.I):
-        return None
-    return body
+    return max(texts, key=len)
 
 
 def _normal(s):
@@ -127,7 +138,7 @@ def _검색어(public_query: str, kind: str, proposed: object) -> str | None:
     if isinstance(proposed, str) and len(proposed) <= 200:
         words = proposed.split()
         required = public_query.split()
-        allowed = {word.casefold() for word in required + suffix.split()}
+        allowed = {word.casefold() for word in required + suffix.split() + _한국어검색[kind].split()}
         if (words and all(word.casefold() in allowed for word in words)
                 and all(word.casefold() in {x.casefold() for x in words} for word in required)):
             return " ".join(words)
@@ -164,11 +175,13 @@ def research(public_query: str | None = None, *, product_name: str | None = None
     client = client or ApickClient()
     started = time.monotonic()
     deadline = started + 120
-    web_deadline = started + 20
+    web_deadline = started + _웹_제한초
     urls = [public_url] if public_url else []
     bodies = {}
     tool_count = 0
     searches = set()
+    보낸검색어 = set()
+    읽기실패 = set()   # 본문을 못 가져온 주소는 다시 읽지 않는다
     계획자료 = _계획자료(requirements, context)
     for _ in range(3):
         remaining = min(deadline - time.monotonic(), web_deadline - time.monotonic(), budget.remaining_seconds())
@@ -182,7 +195,7 @@ def research(public_query: str | None = None, *, product_name: str | None = None
                   "부족한 공개 정보는 부족정보에 유형을, 사용자에게 물어야 하는 실제 거래 사실은 확인항목에 적어라. "
                   "공개 조사로 해결할 수 없으면 사용자확인을 선택하라. "
                   "불확실한 내용은 생략하라.\n" + json.dumps({"공개검색어": public_query, **계획자료,
-                  "검색용어": _검색용어, "URL목록": urls, "본문": bodies}, ensure_ascii=False))
+                  "검색용어": {k: _한국어검색[k] + " / " + v for k, v in _검색용어.items()}, "URL목록": urls, "본문": bodies}, ensure_ascii=False))
         try:
             plan = llm_call(prompt, _SCHEMA, remaining)
             if isinstance(plan, tuple):
@@ -210,77 +223,126 @@ def research(public_query: str | None = None, *, product_name: str | None = None
                 output["부족정보"] = list(dict.fromkeys(x for x in 부족 if isinstance(x, str) and x in KINDS))[:len(KINDS)]
             확인항목 = plan.get("확인항목")
             if isinstance(확인항목, list):
+                이전 = [x["항목"] for x in output.get("사용자확인", [])]
                 output["사용자확인"] = [{"항목": x, "질문": _사용자확인[x]} for x in dict.fromkeys(
-                    x for x in 확인항목 if isinstance(x, str) and x in _사용자확인)]
+                    이전 + [x for x in 확인항목 if isinstance(x, str) and x in _사용자확인])]
+            proposed = plan.get("검색어")
             if action == "사용자확인":
-                if output.get("사용자확인") or output.get("부족정보"):
-                    output["상태"] = "확인필요"
-                break
+                # 실제 거래 사실은 사용자에게 묻되, 공개 정보가 부족한데 아직 찾아보지 않았으면 먼저 찾는다.
+                남은유형 = [k for k in output.get("부족정보", []) if k in _검색용어 and k not in searches]
+                읽을주소 = [u for u in urls if u not in bodies and u not in 읽기실패]
+                if not searches and 남은유형:
+                    action, plan = "검색", {**plan, "유형": 남은유형[0]}
+                    proposed = public_query + " " + _한국어검색[남은유형[0]]
+                elif not bodies and 읽을주소:
+                    # 한 페이지에 정보가 없을 수 있어 앞의 두 주소를 읽는다.
+                    action, plan = "본문", {**plan, "URL": 읽을주소[0], "_추가URL": 읽을주소[1:2]}
+                else:
+                    if output.get("사용자확인") or output.get("부족정보"):
+                        output["상태"] = "확인필요"
+                    break
             if action == "완료":
                 break
             if tool_count >= 6 or time.monotonic() >= web_deadline:
                 break
+            calls = []
             if action == "검색" and plan.get("유형") in _검색용어:
                 kind = plan["유형"]
                 if kind in searches:
                     break
-                검색어 = _검색어(public_query, kind, plan.get("검색어"))
-                if 검색어 is None:
-                    output["상태"] = "확인필요"
-                    output["사유"] = "공개 검색어를 다시 확인해 주세요."
-                    output["부족정보"] = [kind]
+                # 계획이 다른 낱말을 넣으면 그 낱말은 보내지 않고 사용자가 적은 공개 검색어만 쓴다.
+                검색어 = _검색어(public_query, kind, proposed) or public_query
+                if 검색어 in 보낸검색어:      # 같은 검색어를 유형만 바꿔 다시 보내지 않는다
                     break
-                name, args = "google_search", {"keyword": 검색어}
+                보낸검색어.add(검색어)
+                calls = [("google_search", {"keyword": 검색어})]
                 searches.add(kind)
-            elif action == "본문" and plan.get("URL") in urls and plan["URL"] not in bodies:
-                name, args = "url_to_markdown", {"url": plan["URL"], "format": "markdown", "max_chars": 30000}
+            elif action == "본문" and plan.get("URL") in urls and plan["URL"] not in bodies and plan["URL"] not in 읽기실패:
+                calls = [("url_to_markdown", {"url": u, "format": "markdown", "max_chars": 30000})
+                         for u in [plan["URL"], *plan.get("_추가URL", [])] if u in urls and u not in bodies and u not in 읽기실패]
             else:
                 break
-            if not budget.reserve_tool():
-                break
-            tool_count += 1
-            timeout = min(web_deadline - time.monotonic(), deadline - time.monotonic(), budget.remaining_seconds())
-            if timeout <= 0:
-                break
-            event_id = uuid.uuid4().hex
-            label = "공개 검색" if name == "google_search" else "공개 페이지 확인"
-            target = public_query if name == "google_search" else urlsplit(args["url"]).hostname
-            if emit:
-                emit({"id": event_id, "단계": label, "상태": "진행중", "문장": f"{target} {label} 중"})
-            try:
-                result = client.call(name, args, timeout)
-            except ApickError as exc:
-                if exc.code == "APICK_IP_DENIED":
-                    _log.warning("APICK_IP_DENIED")
-                    output = {"상태": "실패", "사유": "검색 서비스 연결 설정을 확인해야 합니다.",
-                              "후보": [], "출처": []}
+            # 예약·시간 확인·진행 표시는 이 스레드에서 하고, 본문 여러 개는 동시에 읽는다.
+            stop = False
+            jobs = []
+            for name, args in calls:
+                if tool_count >= 6 or not budget.reserve_tool():
+                    stop = True
+                    break
+                tool_count += 1
+                # 도구 응답 뒤 발췌를 고를 계획 한 번의 시간을 남긴다. 그 시간이 안 되면 시작하지 않는다.
+                timeout = min(web_deadline - time.monotonic() - _추출여유초, deadline - time.monotonic(),
+                              budget.remaining_seconds(), _도구상한초[name])
+                if timeout <= 1:
+                    stop = True
+                    break
+                event_id = uuid.uuid4().hex
+                label = "공개 검색" if name == "google_search" else "공개 페이지 확인"
+                target = public_query if name == "google_search" else urlsplit(args["url"]).hostname
                 if emit:
-                    emit({"id": event_id, "단계": label, "상태": "실패", "문장": "검색 서비스 연결을 확인하지 못했어요."})
-                break
-            except Exception:
-                if emit:
-                    emit({"id": event_id, "단계": label, "상태": "실패", "문장": f"{target} {label}을 완료하지 못했어요."})
-                raise
-            if time.monotonic() >= web_deadline or time.monotonic() >= deadline or budget.remaining_seconds() <= 0:
-                if emit:
-                    emit({"id": event_id, "단계": label, "상태": "실패", "문장": f"{target} 응답이 시간 제한을 넘었어요."})
-                break
-            if name == "google_search":
-                links = _links(result)
-                urls = list(dict.fromkeys(urls + links))[:12]
-                if emit:
-                    emit({"id": event_id, "단계": label, "상태": "완료", "문장": f"공개 주소 {len(links)}개를 찾았어요."})
+                    emit({"id": event_id, "단계": label, "상태": "진행중", "문장": f"{target} {label} 중"})
+                jobs.append((name, args, timeout, event_id, label, target))
+            if len(jobs) > 1:
+                with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
+                    futures = [pool.submit(client.call, n, a, t) for n, a, t, *_ in jobs]
+                    done = [(f.exception(), None if f.exception() else f.result()) for f in futures]
             else:
-                body = _body(result)
-                if body and budget.add_evidence(body):
-                    bodies[args["url"]] = body
-                    output["출처"].append(args["url"])
+                done = []
+                for n, a, t, *_ in jobs:
+                    try:
+                        done.append((None, client.call(n, a, t)))
+                    except Exception as exc:
+                        done.append((exc, None))
+            denied = any(isinstance(e, ApickError) and e.code == "APICK_IP_DENIED" for e, _ in done)
+            other = next((e for e, _ in done if e is not None and not isinstance(e, ApickError)), None)
+            if denied or other is not None:
+                # 연결 설정 오류나 예상 밖 오류면 같은 묶음의 결과를 쓰지 않는다. 진행중 표시는 모두 닫는다.
+                for name, args, timeout, event_id, label, target in jobs:
                     if emit:
-                        emit({"id": event_id, "단계": label, "상태": "완료", "문장": f"{target} 본문을 확인했어요."})
-                elif emit:
-                    emit({"id": event_id, "단계": label, "상태": "실패", "문장": f"{target} 본문을 확인하지 못했어요."})
+                        문장 = "검색 서비스 연결을 확인하지 못했어요." if denied else f"{target} {label}을 완료하지 못했어요."
+                        emit({"id": event_id, "단계": label, "상태": "실패", "문장": 문장})
+                if other is not None:
+                    raise other
+                _log.warning("APICK_IP_DENIED")
+                output = {"상태": "실패", "사유": "검색 서비스 연결 설정을 확인해야 합니다.", "후보": [], "출처": []}
+                break
+            for (name, args, timeout, event_id, label, target), (exc, result) in zip(jobs, done):
+                if isinstance(exc, ApickError):
+                    if emit:
+                        문장 = ("검색 서비스 연결을 확인하지 못했어요." if name == "google_search"
+                              else f"{target} 본문을 가져오지 못했어요.")
+                        emit({"id": event_id, "단계": label, "상태": "실패", "문장": 문장})
+                    # 검색이 안 되면 더 할 일이 없다. 본문 하나가 실패해도 다른 본문과 다음 계획은 계속한다.
+                    if name == "google_search":
+                        stop = True
+                    else:
+                        읽기실패.add(args["url"])
+                    continue
+                if time.monotonic() >= web_deadline or time.monotonic() >= deadline or budget.remaining_seconds() <= 0:
+                    if emit:
+                        emit({"id": event_id, "단계": label, "상태": "실패", "문장": f"{target} 응답이 시간 제한을 넘었어요."})
+                    stop = True
+                    continue
+                if name == "google_search":
+                    links = _links(result)
+                    urls = list(dict.fromkeys(urls + links))[:12]
+                    if emit:
+                        emit({"id": event_id, "단계": label, "상태": "완료", "문장": f"공개 주소 {len(links)}개를 찾았어요."})
+                else:
+                    body = _body(result)
+                    if body and budget.add_evidence(body):
+                        bodies[args["url"]] = body
+                        output["출처"].append(args["url"])
+                        if emit:
+                            emit({"id": event_id, "단계": label, "상태": "완료", "문장": f"{target} 본문을 확인했어요."})
+                    else:
+                        읽기실패.add(args["url"])
+                        if emit:
+                            emit({"id": event_id, "단계": label, "상태": "실패", "문장": f"{target} 본문을 확인하지 못했어요."})
+            if stop:
+                break
         except Exception:
             break
-    if output["후보"]:
+    if output["후보"] or (output["상태"] == "미확인" and (output.get("사용자확인") or output.get("부족정보"))):
         output["상태"] = "확인필요"
     return output
