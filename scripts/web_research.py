@@ -14,7 +14,7 @@ import uuid
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
-from apick_mcp import ApickClient, ApickError, public_url as url_ok
+from apick_mcp import ApickClient, ApickError, public_url as url_ok, strip_tracking
 
 _log = logging.getLogger("uvicorn.error")
 
@@ -37,6 +37,10 @@ _SCHEMA = {"type": "object", "additionalProperties": False, "properties": {
     "확인항목": {"type": "array", "items": {"type": "string", "enum": list(_사용자확인)}},
     "URL": {"type": "string"}, "후보": {"type": "array", "items": _FIELDS}},
     "required": ["행동", "유형", "검색어", "부족정보", "확인항목", "URL", "후보"]}
+
+
+# 계획 LLM 3회와 검색·본문 호출이 들어가는 시간. 운영 측정: 계획 3~5초, 검색 5.6~22.9초, 본문 3~5초.
+_웹_제한초 = 45
 
 
 def _product_ok(name: str) -> bool:
@@ -92,29 +96,28 @@ def _links(result):
             for item in value:
                 yield from structured(item)
     for u in structured(obj):
+        u = strip_tracking(u)
         if url_ok(u) and u not in found:
             found.append(u)
     for s in _strings(obj):
         for u in re.findall(r"https?://[^\s\"'<>\)\]]+", s):
-            u = u.rstrip(".,;:）")
+            u = strip_tracking(u.rstrip(".,;:）"))
             if url_ok(u) and u not in found:
                 found.append(u)
     return found[:12]
 
 
 def _body(result):
-    """출력 제한이나 제공자의 명시적 잘림 표시가 있으면 자료로 사용하지 않는다."""
+    """페이지 본문. 30000자 상한으로 잘린 긴 페이지도 쓴다.
+
+    후보 발췌는 본문과 글자 그대로 일치해야 하고 사용자 확인 전에는 근거가 아니므로,
+    잘린 뒷부분이 근거로 들어가지 않는다.
+    """
     obj = _text(result)
-    serialized = json.dumps(obj, ensure_ascii=False)
-    if re.search(r'"(?:truncated|is_truncated|isTruncated)"\s*:\s*true', serialized, re.I):
-        return None
     texts = [s for s in _strings(obj) if len(s) >= 40 and not s.startswith("http")]
     if not texts:
         return None
-    body = max(texts, key=len)
-    if len(body) >= 30000 or re.search(r"(?:\.\.\.|…|\[truncated\]|\[생략\])\s*$", body, re.I):
-        return None
-    return body
+    return max(texts, key=len)
 
 
 def _normal(s):
@@ -164,7 +167,7 @@ def research(public_query: str | None = None, *, product_name: str | None = None
     client = client or ApickClient()
     started = time.monotonic()
     deadline = started + 120
-    web_deadline = started + 20
+    web_deadline = started + _웹_제한초
     urls = [public_url] if public_url else []
     bodies = {}
     tool_count = 0
@@ -210,12 +213,23 @@ def research(public_query: str | None = None, *, product_name: str | None = None
                 output["부족정보"] = list(dict.fromkeys(x for x in 부족 if isinstance(x, str) and x in KINDS))[:len(KINDS)]
             확인항목 = plan.get("확인항목")
             if isinstance(확인항목, list):
+                이전 = [x["항목"] for x in output.get("사용자확인", [])]
                 output["사용자확인"] = [{"항목": x, "질문": _사용자확인[x]} for x in dict.fromkeys(
-                    x for x in 확인항목 if isinstance(x, str) and x in _사용자확인)]
+                    이전 + [x for x in 확인항목 if isinstance(x, str) and x in _사용자확인])]
+            proposed = plan.get("검색어")
             if action == "사용자확인":
-                if output.get("사용자확인") or output.get("부족정보"):
-                    output["상태"] = "확인필요"
-                break
+                # 실제 거래 사실은 사용자에게 묻되, 공개 정보가 부족한데 아직 찾아보지 않았으면 먼저 찾는다.
+                남은유형 = [k for k in output.get("부족정보", []) if k in _검색용어 and k not in searches]
+                읽을주소 = [u for u in urls if u not in bodies]
+                if not searches and 남은유형:
+                    action, plan = "검색", {**plan, "유형": 남은유형[0]}
+                    proposed = public_query
+                elif not bodies and 읽을주소:
+                    action, plan = "본문", {**plan, "URL": 읽을주소[0]}
+                else:
+                    if output.get("사용자확인") or output.get("부족정보"):
+                        output["상태"] = "확인필요"
+                    break
             if action == "완료":
                 break
             if tool_count >= 6 or time.monotonic() >= web_deadline:
@@ -224,12 +238,8 @@ def research(public_query: str | None = None, *, product_name: str | None = None
                 kind = plan["유형"]
                 if kind in searches:
                     break
-                검색어 = _검색어(public_query, kind, plan.get("검색어"))
-                if 검색어 is None:
-                    output["상태"] = "확인필요"
-                    output["사유"] = "공개 검색어를 다시 확인해 주세요."
-                    output["부족정보"] = [kind]
-                    break
+                # 계획이 다른 낱말을 넣으면 그 낱말은 보내지 않고 사용자가 적은 공개 검색어만 쓴다.
+                검색어 = _검색어(public_query, kind, proposed) or public_query
                 name, args = "google_search", {"keyword": 검색어}
                 searches.add(kind)
             elif action == "본문" and plan.get("URL") in urls and plan["URL"] not in bodies:
@@ -281,6 +291,6 @@ def research(public_query: str | None = None, *, product_name: str | None = None
                     emit({"id": event_id, "단계": label, "상태": "실패", "문장": f"{target} 본문을 확인하지 못했어요."})
         except Exception:
             break
-    if output["후보"]:
+    if output["후보"] or (output["상태"] == "미확인" and output.get("사용자확인")):
         output["상태"] = "확인필요"
     return output
