@@ -52,3 +52,9 @@ scratchpad/
 CLAUDE.md
 MEMORY.md
 README_참고용.md
+
+# 온톨로지 적재 로그(실행 기록)
+ontology/적재로그/
+
+# 받은 근거 파일. 이용 조건 미확인이라 커밋하지 않는다(해시: ontology/수집/받은파일_해시.txt)
+ontology/수집/받은파일/

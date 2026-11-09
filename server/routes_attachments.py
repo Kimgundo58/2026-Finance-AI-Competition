@@ -87,12 +87,6 @@ def 계획_첨부목록(plan_id: int) -> list[첨부항목]:
             for r in 행들]
 
 
-def 계획_첨부id(plan_id: int) -> list[str]:
-    """계획을 지우기 전에 파일 이름을 모은다. CASCADE 뒤에는 알 수 없다."""
-    return [r[0] for r in _질의(
-        "SELECT a.attachment_id::text FROM tenant.plan_attachments a WHERE a.plan_id = %s", (plan_id,))]
-
-
 def 파일들_지우기(id목록: list[str]) -> None:
     """DB 행을 지운 뒤 부른다. 파일 삭제 실패는 고아 파일이 남을 뿐이므로 기록만 한다."""
     for 첨부id in id목록:

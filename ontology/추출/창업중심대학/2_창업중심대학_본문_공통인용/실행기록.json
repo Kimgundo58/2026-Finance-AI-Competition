@@ -1,0 +1,99 @@
+{
+ "묶음": "ontology/추출/창업중심대학/2_창업중심대학_본문_공통인용",
+ "마감": "2026-11-08T08:26:42+09:00",
+ "추출자": {
+  "A": {
+   "에이전트ID": "a65d7c170e3876f0b",
+   "모델": "claude-opus-5-5",
+   "effort": "high",
+   "effort_출처": "인자",
+   "시작": "2026-11-07T22:58:38.345Z",
+   "끝": "2026-11-07T23:25:01.462Z",
+   "읽은파일": "미확인",
+   "명령": "미확인",
+   "허용밖읽기": "미확인",
+   "비용": null,
+   "경로": "구독",
+   "프롬프트해시_출처": "파일",
+   "프롬프트해시": "6427de183b04544f07ffe284e6197f540e29800cd6cafb741725edbfa93f076a",
+   "덧붙인문장": {
+    "앞": "Input folder: ontology/추출/창업중심대학/2_창업중심대학_본문_공통인용/작업_A\nYou are extractor A. Work independently: another extractor works on the same provisions; do not look for, open or ask about its folder, its output or any file outside the input folder except the documents the prompt below allows.\nIn the prompt below, 입력_원문.md, 입력_문서키.json, 입력_기존노드.json and \"the input folder\" mean the files in ontology/추출/창업중심대학/2_창업중심대학_본문_공통인용/작업_A.",
+    "뒤": "Output format: follow the section 출력 형식 of docs/5_룰/5-7b_추출_에이전트_지침.md exactly, and write the output as ontology/추출/창업중심대학/2_창업중심대학_본문_공통인용/작업_A/추출_A.md.\nKeep this session under 300k tokens of context."
+   },
+   "입력폴더": [
+    {
+     "이름": "입력_기존노드.json",
+     "sha256": "b6dc13c68083718a09bc7dcb1390f55644a86acabeef8f1762755b8bfb181463"
+    },
+    {
+     "이름": "입력_문서키.json",
+     "sha256": "8735931852f0837cf30fcb1b087acd489b1248e897d34a65e77b17c439cf35d4"
+    },
+    {
+     "이름": "입력_원문.md",
+     "sha256": "04249ffb0def0118fa0c30ef9fa99dac2aa09f1d10dc6657ea7f29a4461da664"
+    },
+    {
+     "이름": "추출_A.md",
+     "sha256": "6e5aefa32c736f6735ddf365654fdec5ea4cfda25a5925d9d0807cd56621a252"
+    }
+   ],
+   "추가파일": [],
+   "문제": []
+  },
+  "B": {
+   "에이전트ID": "a347cedc5f7f4b64f",
+   "모델": "claude-opus-5-5",
+   "effort": "high",
+   "effort_출처": "인자",
+   "시작": "2026-11-07T22:58:46.950Z",
+   "끝": "2026-11-07T23:14:42.725Z",
+   "읽은파일": "미확인",
+   "명령": "미확인",
+   "허용밖읽기": "미확인",
+   "비용": null,
+   "경로": "구독",
+   "프롬프트해시_출처": "파일",
+   "프롬프트해시": "d223a8e6ce3d71b62b1aa2ab630c31a25142ae79990ddf561650c269bf703701",
+   "덧붙인문장": {
+    "앞": "Input folder: ontology/추출/창업중심대학/2_창업중심대학_본문_공통인용/작업_B\nYou are extractor B. Work independently: another extractor works on the same provisions; do not look for, open or ask about its folder, its output or any file outside the input folder except the documents the prompt below allows.\nIn the prompt below, 입력_원문.md, 입력_문서키.json, 입력_기존노드.json and \"the input folder\" mean the files in ontology/추출/창업중심대학/2_창업중심대학_본문_공통인용/작업_B.",
+    "뒤": "Output format: follow the section 출력 형식 of docs/5_룰/5-7b_추출_에이전트_지침.md exactly, and write the output as ontology/추출/창업중심대학/2_창업중심대학_본문_공통인용/작업_B/추출_B.md.\nKeep this session under 300k tokens of context."
+   },
+   "입력폴더": [
+    {
+     "이름": "입력_기존노드.json",
+     "sha256": "b6dc13c68083718a09bc7dcb1390f55644a86acabeef8f1762755b8bfb181463"
+    },
+    {
+     "이름": "입력_문서키.json",
+     "sha256": "8735931852f0837cf30fcb1b087acd489b1248e897d34a65e77b17c439cf35d4"
+    },
+    {
+     "이름": "입력_원문.md",
+     "sha256": "04249ffb0def0118fa0c30ef9fa99dac2aa09f1d10dc6657ea7f29a4461da664"
+    },
+    {
+     "이름": "추출_B.md",
+     "sha256": "9607dfb4ba6130eef17ce24788718de55ec441f7cb38977f05255cad91aa2705"
+    }
+   ],
+   "추가파일": [],
+   "문제": []
+  }
+ },
+ "통과": true,
+ "검증자": {
+  "이름": "창업중심대학_2_창업중심대학_본문_공통인용_V",
+  "세션": "a3e51e37b9c889dbb",
+  "모델": "claude-opus-5-5",
+  "effort": "high",
+  "effort_출처": "Agent 도구 인자 · transcript assistant 줄",
+  "경로": "구독",
+  "프롬프트": "ontology/추출/창업중심대학/2_창업중심대학_본문_공통인용/프롬프트_검증자.md",
+  "프롬프트해시": "5eebb5e5b986cfbc8d98e460b4e2f91b310fe545b3ea97f3aab64adde5c2a416",
+  "덧붙임": false,
+  "비용": null,
+  "시작": "2026-11-07T23:27:17.966Z",
+  "끝": "2026-11-07T23:47:38.588Z"
+ }
+}

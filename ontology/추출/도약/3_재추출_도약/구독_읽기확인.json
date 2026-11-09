@@ -1,0 +1,82 @@
+{
+ "묶음": "ontology/추출/도약/3_재추출_도약",
+ "검사": "scripts/extraction_run.py 로그_읽기(구독 transcript 를 init 줄 + assistant 줄로 바꿔 넣음)",
+ "추출자": {
+  "A": {
+   "에이전트ID": "a75f53c56f2d18e20",
+   "transcript": "C:\\Users\\dogun\\.claude\\projects\\C--Users-dogun-Downloads-Desktop-Desktop-Desktop-Desktop-----3-1------------github----\\01377b18-d61a-4565-af8b-80e9cf3c38dc\\subagents\\agent-a75f53c56f2d18e20.jsonl",
+   "모델": [
+    "claude-opus-5-5"
+   ],
+   "effort": [
+    "high"
+   ],
+   "effort_출처": "transcript assistant 줄",
+   "프롬프트_글자같음": true,
+   "프롬프트해시_LF": "0562c86bcb2f117cc162e168062c133a0662182b1c17c79b9ca1728841c71b1b",
+   "시작": "2026-11-07T22:00:38.728Z",
+   "끝": "2026-11-07T22:03:46.847Z",
+   "읽은파일": [
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\docs\\5_룰\\5-5_규범_구조.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\docs\\5_룰\\5-7_원문_추출_절차.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\docs\\5_룰\\5-8b_원천_JSON_형식.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\docs\\5_룰\\5-7b_추출_에이전트_지침.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\ontology\\추출\\도약\\3_재추출_도약\\작업_A\\입력_원문.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\ontology\\추출\\도약\\3_재추출_도약\\작업_A\\입력_문서키.json",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\ontology\\추출\\도약\\3_재추출_도약\\작업_A\\입력_기존노드.json"
+   ],
+   "명령": [
+    {
+     "도구": "Glob",
+     "pattern": "*",
+     "path": "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\ontology\\추출\\도약\\3_재추출_도약\\작업_A"
+    }
+   ],
+   "허용밖읽기": [],
+   "로그_읽기_원래": [
+    "Glob C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\ontology\\추출\\도약\\3_재추출_도약\\작업_A"
+   ],
+   "자기폴더_Glob_허용": [
+    "Glob C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\ontology\\추출\\도약\\3_재추출_도약\\작업_A *"
+   ],
+   "작업폴더_Read": 3,
+   "문제": []
+  },
+  "B": {
+   "에이전트ID": "a790fa265ea1fc844",
+   "transcript": "C:\\Users\\dogun\\.claude\\projects\\C--Users-dogun-Downloads-Desktop-Desktop-Desktop-Desktop-----3-1------------github----\\01377b18-d61a-4565-af8b-80e9cf3c38dc\\subagents\\agent-a790fa265ea1fc844.jsonl",
+   "모델": [
+    "claude-opus-5-5"
+   ],
+   "effort": [
+    "high"
+   ],
+   "effort_출처": "transcript assistant 줄",
+   "프롬프트_글자같음": true,
+   "프롬프트해시_LF": "9f74e8d447e52fd4c3259f54ef9e7eebcb922567497de1be382ad62d0ccb06e0",
+   "시작": "2026-11-07T22:00:46.304Z",
+   "끝": "2026-11-07T22:03:26.955Z",
+   "읽은파일": [
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\ontology\\추출\\도약\\3_재추출_도약\\작업_B\\입력_원문.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\ontology\\추출\\도약\\3_재추출_도약\\작업_B\\입력_문서키.json",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\docs\\5_룰\\5-5_규범_구조.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\docs\\5_룰\\5-7_원문_추출_절차.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\docs\\5_룰\\5-8b_원천_JSON_형식.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\docs\\5_룰\\5-7b_추출_에이전트_지침.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\ontology\\추출\\도약\\3_재추출_도약\\작업_B\\입력_기존노드.json"
+   ],
+   "명령": [
+    {
+     "도구": "Bash",
+     "명령": "cd \"C:/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본\" && ls -la \"ontology/추출/도약/3_재추출_도약/작업_B\" && wc -c ontology/추출/도약/3_재추출_도약/작업_B/* docs/5_룰/5-5_규범_구조.md docs/5_룰/5-7_원문_추출_절차.md docs/5_룰/5-8b_원천_JSON_형식.md docs/5_룰/5-7b_추출_에이전트_지침.md"
+    }
+   ],
+   "허용밖읽기": [],
+   "로그_읽기_원래": [],
+   "자기폴더_Glob_허용": [],
+   "작업폴더_Read": 3,
+   "문제": []
+  }
+ },
+ "통과": true
+}

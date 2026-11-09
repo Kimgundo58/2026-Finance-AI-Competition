@@ -183,6 +183,7 @@ def _환경_준비(l3_dir: str) -> None:
         "SUDDOE_WARMUP_ON_START": "0",
         "SUDDOE_L3_DIR": l3_dir,             # 업로드 원본을 레포 밖 임시 폴더에 둔다
         "SUDDOE_ALLOW_ORG_PARAM": "0",       # 운영과 같게: 토큰 없는 업로드는 거부
+        "SUDDOE_ONTOLOGY_PROGRAMS": "",      # 온톨로지 경로는 점검 31~36 에서만 켠다
     })
     os.environ.setdefault("SUDDOE_DEMO_SECRET", secrets.token_hex(32))
     os.environ.setdefault("SUDDOE_SLUG_SECRET", secrets.token_hex(32))
@@ -469,7 +470,7 @@ def _점검(결과: 점검결과) -> None:
         기록 = llm_validate._검증기록()
         인용들 = [인용(문장ID="S01", extraction=메타.get("S01", {}).get("extraction"))]
         등급 = llm_validate._신뢰등급(인용들, None, 기록)
-        하향, _ = llm_validate._판정_하향("가능", 등급, 인용들, ["L1", "L3"], None, None, 기록)
+        하향, _ = llm_validate._판정_하향("가능", 등급, 인용들, ["L1", "L3"], None, 기록)
         결과.기록("16 OCR 설정 시 스캔본 → OCR 로 '완료'(warn·ocr) · 판정이 읽음 · 인용한 '가능' 은 조건부",
                ocr_상태.get("상태") == "완료" and ocr_상태.get("조_건수") == 픽스처_조_건수
                and ocr_상태.get("파싱품질") == "warn" and ocr_상태.get("추출방식") == "ocr"
@@ -523,7 +524,7 @@ def _점검(결과: 점검결과) -> None:
                게스트_put.status_code == 401 and 거꾸로.status_code == 422
                and all(s == 200 and isinstance(j, dict) and j.get("저장") is True for s, j in 저장들)
                and 읽음 == {"협약시작일": "2026-05-03", "협약종료일": "2026-10-30",
-                           "정부지원_현금": 51234000.0, "자기부담_현금": 2345678.0}
+                           "정부지원_현금": 51234000.0, "자기부담_현금": 2345678.0, "자기부담_현물": None}
                and 행수 == 1 and all(all(x in b for x in 기대[i]) for i, b in enumerate(b5들)),
                f"게스트 {게스트_put.status_code} · 역순 {거꾸로.status_code} · 저장 {[s for s, _ in 저장들]} · "
                f"GET {읽음} · 행 {행수}개 · B5 {[b.replace(chr(10), ' / ') for b in b5들]}")
@@ -538,6 +539,7 @@ def _점검(결과: 점검결과) -> None:
         _첨부_점검(결과, client, 데모세션)
         _세부기준_점검(결과, client, 데모세션, 업로드, 판정, 현재문서, 원래_판정, 판정_dry, llm_금지)
         _팀_점검(결과, client, 데모세션, 원래_판정, 판정_dry, llm_금지)
+        _온톨로지_점검(결과, client, 데모세션, 원래_판정, 판정_dry, llm_금지)
     finally:
         l3_load.조문_조회, orchestrate.프롬프트_구성, orchestrate.판정 = (
             원래_조문조회, 원래_프롬프트, 원래_판정)
@@ -1560,7 +1562,8 @@ def _확인질문_점검(결과: 점검결과, client, 데모세션, 캡처, 원
                         "WHERE c.status = 'active' AND a.article_id <> %s ORDER BY c.chunk_id DESC LIMIT 1",
                         (조문행[0],)).fetchone()
     결과.기록("21 LLM 이 막히면 /api/questions 는 200 · 상태 '실패' · 질문세트 저장 없음",
-           r.status_code == 200 and r.json() == {"상태": "실패", "질문세트": None, "질문": []} and 저장행 == 0,
+           r.status_code == 200 and r.json() == {"상태": "실패", "질문세트": None, "질문": [], "추가입력": [], "용어풀이": []}
+           and 저장행 == 0,
            f"{r.status_code} {r.text[:200]} · 저장 행 {저장행}")
 
     공개 = [{"질문문": "시제품 재료를 직접 사용하나요?", "답": "예"}, {"질문문": "대표자의 배우자가 판매자인가요?", "답": "모름"}]
@@ -1651,6 +1654,127 @@ def _확인질문_점검(결과: 점검결과, client, 데모세션, 캡처, 원
         f"판정 {결과값.get('판정')} · 판정 행 {[(x[0], x[1], x[3]) for x in 판정행]} · 해야할일 {모름항목} · "
         f"plan_tasks {할일행} · 화면 {결과값.get('사용자답변')} · 재요청 {다시값.get('사용자답변')} · "
         f"계획 상세 {상세.get('사용자답변')} · 내부값 {내부값}")
+
+
+def _온톨로지_점검(결과: 점검결과, client, 데모세션, 원래_판정, 판정_dry, llm_금지) -> None:
+    """31~36: 온톨로지 경로. 분류 후보 → 추가 입력 칸 → 코드 판정(LLM 0회) → 저장 → 다시 열기 → 환경변수 전환.
+
+    판정 LLM 호출을 세어 코드 판정에 LLM 이 쓰이지 않았음을 본다. 규범이 적재되지 않은 DB 에서는 건너뛴다.
+    """
+    import re
+
+    import normalize_run
+    import orchestrate
+    import psycopg
+    import question_generate
+
+    사업 = "모두의 창업 프로젝트"
+    with psycopg.connect(OWNER_DSN, connect_timeout=5) as c:
+        규범수 = c.execute("SELECT count(*) FROM corpus.norms WHERE 적용사업 = %s AND verified", (사업,)).fetchone()[0]
+    if not 규범수:
+        결과.기록("31~36 온톨로지 경로: 규범 적재 전이라 건너뜀", True, "corpus.norms verified 0건")
+        return
+
+    내부값 = re.compile(r"규범:|세목:|품목:|비목:창업|조:모두의창업|조:지침|조:안내책자|\[S\d+\]")
+    품목, 용도 = "외부 전문가 멘토링", "시제품 설계 자문"
+    원래_환경 = os.environ.get("SUDDOE_ONTOLOGY_PROGRAMS")
+    원래_질의llm, 원래_질문llm, 원래_판정llm = normalize_run.llm_호출, question_generate.llm_호출, orchestrate.llm_호출
+    호출: dict[str, int] = {"판정": 0}
+    os.environ["SUDDOE_ONTOLOGY_PROGRAMS"] = 사업
+    헤더, _org = 데모세션()
+
+    def 질의변환_가짜(*_a, **_k):
+        return ({"품목": 품목, "질의문": "멘토링비 한도", "수치": {"시간": 2},
+                 "분류후보": [{"표시문": "없는 분류", "신뢰도": 0.9}, {"표시문": "지급수수료 > 멘토링비", "신뢰도": 0.8}],
+                 "거래처유형": None}, {"지연ms": 0, "모델": "가짜"})
+
+    def 판정llm_가능(프롬프트_글, *_a, **_k):
+        호출["판정"] += 1
+        첫문장 = re.search(r"\[(S\d+)\]", 프롬프트_글).group(1)
+        return ({"판정": "가능", "요약": "규정상 집행할 수 있습니다.", "해야할일": [], "인용": [첫문장], "전제": []},
+                {"지연ms": 0, "모델": "가짜"})
+
+    def 계획(금액: int) -> int | None:
+        r = client.post("/api/plans", headers=헤더, json={
+            "사업명": 사업, "품목": 품목, "금액": 금액, "용도": 용도, "확정비목": "지급수수료",
+            "정규화": {"품목": 품목, "금액": 금액, "용도": 용도, "질문원문": f"{품목} {금액}원"}})
+        return r.json().get("plan_id") if r.status_code == 201 else None
+
+    def 판정(plan_id, 금액, 추가입력값, **더) -> tuple[dict, str]:
+        본문 = client.post("/api/judge", headers=헤더, json={
+            "사업명": 사업, "확정비목": "지급수수료", "확정세목": "멘토링비", "plan_id": plan_id,
+            "추가입력값": 추가입력값, "부가세구분": "포함",
+            "정규화": {"품목": 품목, "금액": 금액, "용도": 용도, "질문원문": f"{품목} {금액}원"}, **더}).text
+        return _sse_이벤트(본문, "결과") or {}, 본문
+
+    def 판정행(plan_id) -> list:
+        with psycopg.connect(OWNER_DSN, connect_timeout=5) as c:
+            return c.execute('SELECT "판정", "검증코드", "경로", "온톨로지결과" FROM tenant.decisions '
+                             "WHERE plan_id = %s ORDER BY decision_id", (plan_id,)).fetchall()
+
+    normalize_run.llm_호출 = 질의변환_가짜
+    question_generate.llm_호출 = llm_금지
+    orchestrate.판정, orchestrate.llm_호출 = 원래_판정, 판정llm_가능
+    try:
+        본문 = client.post("/api/normalize", headers=헤더, json={
+            "사업명": 사업, "품목": 품목, "용도": 용도, "금액": 400000, "부가세구분": "포함"}).text
+        정규화 = _sse_이벤트(본문, "결과") or {}
+        후보 = [c.get("표시문") for c in 정규화.get("분류후보") or []]
+        결과.기록("31 /api/normalize 분류 후보는 온톨로지 레이블 안에서만 · 내부 ID 없음",
+               "지급수수료 > 멘토링비" in 후보 and "없는 분류" not in 후보 and not 내부값.search(본문),
+               f"후보 {후보} · 내부값 {내부값.findall(본문)[:3]}")
+
+        r = client.post("/api/questions", headers=헤더, json={
+            "사업명": 사업, "확정비목": "지급수수료", "확정세목": "멘토링비", "부가세구분": "포함",
+            "품목": 품목, "금액": 400000, "용도": 용도})
+        q = r.json() if r.status_code == 200 else {}
+        칸 = {x.get("키") for x in q.get("추가입력") or []}
+        결과.기록("32 /api/questions 세목 한도의 분모로 숫자 칸을 코드가 만든다(질문 LLM 실패해도 나옴) · 내부 ID 없음",
+               {"인원", "일수", "시간"} <= 칸 and not 내부값.search(r.text), f"{r.status_code} 칸 {sorted(칸)} · {r.text[:200]}")
+
+        p1 = 계획(400000)
+        값, 본문 = 판정(p1, 400000, {"인원": 1, "일수": 1})
+        상세 = client.get(f"/api/plans/{p1}", headers=헤더).json() if p1 else {}
+        행 = 판정행(p1)
+        결과.기록("33 멘토링비 1인 1일 40만원 → LLM 없이 불가 · 코드판정 · 저장 · 다시 열어도 같음 · 내부 ID 없음",
+               값.get("판정") == "불가" and (값.get("코드판정") or {}).get("종류") == "한도초과" and 호출["판정"] == 0
+               and bool(행) and 행[0][0] == "불가" and "LIMIT_EXCEEDED" in 행[0][1] and 행[0][2] == "온톨로지"
+               and (상세.get("판정상세") or {}).get("코드판정") == 값.get("코드판정")
+               and (상세.get("판정상세") or {}).get("근거경로") == 값.get("근거경로")
+               and not 내부값.search(본문) and not 내부값.search(json.dumps(상세, ensure_ascii=False)),
+               f"판정 {값.get('판정')} · 코드판정 {값.get('코드판정')} · LLM {호출['판정']}회 · 행 {[(x[0], x[1], x[2]) for x in 행]} · "
+               f"내부값 {내부값.findall(본문)[:3]}")
+
+        p2 = 계획(250000)
+        값, 본문 = 판정(p2, 250000, {"인원": 1, "일수": 1})
+        조건 = 값.get("조건") or []
+        상세2 = (client.get(f"/api/plans/{p2}", headers=헤더).json().get("판정상세") or {}) if p2 else {}
+        결과.기록("34 LLM 「가능」 + 시간 칸 비움 + 12만 5천원 초과 → 조건부 · 조건에 시간 안내와 공제 의무 · 금지 칸 · 다시 열어도 같음 · 근거 경로",
+               값.get("판정") == "조건부" and 호출["판정"] == 1 and any("시간" in x for x in 조건)
+               and any("기타소득세" in x for x in 조건) and bool(값.get("금지조건"))
+               and not set(조건) & set(값.get("금지조건") or [])
+               and all(상세2.get(k) == 값.get(k) for k in ("조건", "금지조건", "해당시조건"))
+               and bool(값.get("근거경로")) and not 내부값.search(본문),
+               f"판정 {값.get('판정')} · LLM {호출['판정']}회 · 조건 {조건} · 금지 {값.get('금지조건')} · 해당시 {값.get('해당시조건')} · 경로 {값.get('근거경로')}")
+
+        값, _ = 판정(None, 250001, {}, 확정세목="없는세목")
+        결과.기록("35 없는 세목 → 판단불가", 값.get("판정") == "판단불가", f"{값.get('판정')} · {값.get('요약')}")
+
+        os.environ["SUDDOE_ONTOLOGY_PROGRAMS"] = ""
+        p3 = 계획(250002)
+        값, _ = 판정(p3, 250002, {})
+        행 = 판정행(p3)
+        결과.기록("36 환경변수를 비우면 옛 경로로 돌아감(decisions.경로 = 옛, 코드판정 · 분류 없음)",
+               bool(행) and 행[0][2] == "옛" and 값.get("코드판정") is None and not 값.get("분류"),
+               f"행 {[(x[0], x[2]) for x in 행]} · 판정 {값.get('판정')} · 분류 {값.get('분류')}")
+    finally:
+        normalize_run.llm_호출, question_generate.llm_호출 = 원래_질의llm, 원래_질문llm
+        orchestrate.판정, orchestrate.llm_호출 = 판정_dry, llm_금지
+        del 원래_판정llm
+        if 원래_환경 is None:
+            os.environ.pop("SUDDOE_ONTOLOGY_PROGRAMS", None)
+        else:
+            os.environ["SUDDOE_ONTOLOGY_PROGRAMS"] = 원래_환경
 
 
 def 실행() -> tuple[int, str]:

@@ -1,0 +1,99 @@
+{
+ "묶음": "ontology/추출/초격차/2_초격차_본문_공통인용",
+ "마감": "2026-11-08T12:18:31+09:00",
+ "추출자": {
+  "A": {
+   "에이전트ID": "ae96e79decc20d23d",
+   "모델": "claude-opus-5-5",
+   "effort": "high",
+   "effort_출처": "인자",
+   "시작": "2026-11-08T03:07:48Z",
+   "끝": "2026-11-08T03:18:15Z",
+   "읽은파일": "미확인",
+   "명령": "미확인",
+   "허용밖읽기": "미확인",
+   "비용": null,
+   "경로": "구독",
+   "프롬프트해시_출처": "파일",
+   "프롬프트해시": "2ad3b1740c2b9ea7381da6fbacd22a6f79224be9d4707b596f23c8d26c3c9098",
+   "덧붙인문장": {
+    "앞": "Input folder: ontology/추출/초격차/2_초격차_본문_공통인용/작업_A\nYou are extractor A. Work independently: another extractor works on the same provisions; do not look for, open or ask about its folder, its output or any file outside the input folder except the documents the prompt below allows.\nIn the prompt below, 입력_원문.md, 입력_문서키.json, 입력_기존노드.json and \"the input folder\" mean the files in ontology/추출/초격차/2_초격차_본문_공통인용/작업_A.",
+    "뒤": "Output format: follow the section 출력 형식 of docs/5_룰/5-7b_추출_에이전트_지침.md exactly, and write the output as ontology/추출/초격차/2_초격차_본문_공통인용/작업_A/추출_A.md.\nKeep this session under 300k tokens of context."
+   },
+   "입력폴더": [
+    {
+     "이름": "입력_기존노드.json",
+     "sha256": "a9cfd2d8b0c05d918c1c621e7ea2b62ba797df087180da4967f67cdb3011b73e"
+    },
+    {
+     "이름": "입력_문서키.json",
+     "sha256": "8df5c49347348f65528f6235fccb937cbe97270fdc25d57c6783add86d63972a"
+    },
+    {
+     "이름": "입력_원문.md",
+     "sha256": "a837dc106d5a6e080299e3b1863fd31a1b4837784b1493feac0e277a6b173fcf"
+    },
+    {
+     "이름": "추출_A.md",
+     "sha256": "fdad82122cd03a1d42407a2fa42f0ff51d66076b0aabe2ff60b85cdb9e7fd51a"
+    }
+   ],
+   "추가파일": [],
+   "문제": []
+  },
+  "B": {
+   "에이전트ID": "a9c73d4d9a1a3033e",
+   "모델": "claude-opus-5-5",
+   "effort": "high",
+   "effort_출처": "인자",
+   "시작": "2026-11-08T03:07:57Z",
+   "끝": "2026-11-08T03:17:34Z",
+   "읽은파일": "미확인",
+   "명령": "미확인",
+   "허용밖읽기": "미확인",
+   "비용": null,
+   "경로": "구독",
+   "프롬프트해시_출처": "파일",
+   "프롬프트해시": "1d8e332b80846ae2427b18129ff91242bbee711c619bfa35909e804480c0a9cc",
+   "덧붙인문장": {
+    "앞": "Input folder: ontology/추출/초격차/2_초격차_본문_공통인용/작업_B\nYou are extractor B. Work independently: another extractor works on the same provisions; do not look for, open or ask about its folder, its output or any file outside the input folder except the documents the prompt below allows.\nIn the prompt below, 입력_원문.md, 입력_문서키.json, 입력_기존노드.json and \"the input folder\" mean the files in ontology/추출/초격차/2_초격차_본문_공통인용/작업_B.",
+    "뒤": "Output format: follow the section 출력 형식 of docs/5_룰/5-7b_추출_에이전트_지침.md exactly, and write the output as ontology/추출/초격차/2_초격차_본문_공통인용/작업_B/추출_B.md.\nKeep this session under 300k tokens of context."
+   },
+   "입력폴더": [
+    {
+     "이름": "입력_기존노드.json",
+     "sha256": "a9cfd2d8b0c05d918c1c621e7ea2b62ba797df087180da4967f67cdb3011b73e"
+    },
+    {
+     "이름": "입력_문서키.json",
+     "sha256": "8df5c49347348f65528f6235fccb937cbe97270fdc25d57c6783add86d63972a"
+    },
+    {
+     "이름": "입력_원문.md",
+     "sha256": "a837dc106d5a6e080299e3b1863fd31a1b4837784b1493feac0e277a6b173fcf"
+    },
+    {
+     "이름": "추출_B.md",
+     "sha256": "42cd156bed523c77cc69dc3e9906661e110516f2acab04a2c96159c2e0e69d7c"
+    }
+   ],
+   "추가파일": [],
+   "문제": []
+  }
+ },
+ "통과": true,
+ "검증자": {
+  "이름": "초격차_2_초격차_본문_공통인용_V",
+  "세션": "a912d43bb97e76d32",
+  "모델": "claude-opus-5-5",
+  "effort": "high",
+  "effort_출처": "Agent 도구 인자 · transcript assistant 줄",
+  "경로": "구독",
+  "프롬프트": "ontology/추출/초격차/2_초격차_본문_공통인용/프롬프트_검증자.md",
+  "프롬프트해시": "af709f2a199fbd1bf87e8945a6a34b6dc118c73be34d1e0418972caee4f1f5c6",
+  "덧붙임": false,
+  "비용": null,
+  "시작": "2026-11-08T03:18:56Z",
+  "끝": "2026-11-08T03:31:17Z"
+ }
+}

@@ -1,0 +1,99 @@
+{
+ "묶음": "ontology/추출/재도전/1_재도전_본문_공통인용",
+ "마감": "2026-11-08T10:54:12+09:00",
+ "추출자": {
+  "A": {
+   "에이전트ID": "a1df52606977452a2",
+   "모델": "claude-opus-5-5",
+   "effort": "high",
+   "effort_출처": "인자",
+   "시작": "2026-11-08T01:43:47Z",
+   "끝": "2026-11-08T01:53:55Z",
+   "읽은파일": "미확인",
+   "명령": "미확인",
+   "허용밖읽기": "미확인",
+   "비용": null,
+   "경로": "구독",
+   "프롬프트해시_출처": "파일",
+   "프롬프트해시": "83b25b69d1da3a882c194bf9e320aa3608daf57678afc1ce657bcc888ee14e0a",
+   "덧붙인문장": {
+    "앞": "Input folder: ontology/추출/재도전/1_재도전_본문_공통인용/작업_A\nYou are extractor A. Work independently: another extractor works on the same provisions; do not look for, open or ask about its folder, its output or any file outside the input folder except the documents the prompt below allows.\nIn the prompt below, 입력_원문.md, 입력_문서키.json, 입력_기존노드.json and \"the input folder\" mean the files in ontology/추출/재도전/1_재도전_본문_공통인용/작업_A.",
+    "뒤": "Output format: follow the section 출력 형식 of docs/5_룰/5-7b_추출_에이전트_지침.md exactly, and write the output as ontology/추출/재도전/1_재도전_본문_공통인용/작업_A/추출_A.md.\nKeep this session under 300k tokens of context."
+   },
+   "입력폴더": [
+    {
+     "이름": "입력_기존노드.json",
+     "sha256": "271167c79a8f26aa6bba1de1a0f8595f958f523cf49b4c7a20f9c8bc571b8beb"
+    },
+    {
+     "이름": "입력_문서키.json",
+     "sha256": "ecb78b416595eb5643daa2713a30b3e2a7a0a20a9599eeaa2c759dae1cc2137a"
+    },
+    {
+     "이름": "입력_원문.md",
+     "sha256": "7f8c03410b6e7eeee9d12fa5a928622a25bd4e732e900a69fbd2cbff36135a8a"
+    },
+    {
+     "이름": "추출_A.md",
+     "sha256": "ab3bca7fba6d54322adcbfd7518a9e8d010166e575573647c93626a41c608869"
+    }
+   ],
+   "추가파일": [],
+   "문제": []
+  },
+  "B": {
+   "에이전트ID": "a12b28fb8ea176a03",
+   "모델": "claude-opus-5-5",
+   "effort": "high",
+   "effort_출처": "인자",
+   "시작": "2026-11-08T01:43:55Z",
+   "끝": "2026-11-08T01:53:08Z",
+   "읽은파일": "미확인",
+   "명령": "미확인",
+   "허용밖읽기": "미확인",
+   "비용": null,
+   "경로": "구독",
+   "프롬프트해시_출처": "파일",
+   "프롬프트해시": "a7776a97c3408b20e851755c2cfc584d0ef5e0479e2364d5b04c0ce6a172c0ba",
+   "덧붙인문장": {
+    "앞": "Input folder: ontology/추출/재도전/1_재도전_본문_공통인용/작업_B\nYou are extractor B. Work independently: another extractor works on the same provisions; do not look for, open or ask about its folder, its output or any file outside the input folder except the documents the prompt below allows.\nIn the prompt below, 입력_원문.md, 입력_문서키.json, 입력_기존노드.json and \"the input folder\" mean the files in ontology/추출/재도전/1_재도전_본문_공통인용/작업_B.",
+    "뒤": "Output format: follow the section 출력 형식 of docs/5_룰/5-7b_추출_에이전트_지침.md exactly, and write the output as ontology/추출/재도전/1_재도전_본문_공통인용/작업_B/추출_B.md.\nKeep this session under 300k tokens of context."
+   },
+   "입력폴더": [
+    {
+     "이름": "입력_기존노드.json",
+     "sha256": "271167c79a8f26aa6bba1de1a0f8595f958f523cf49b4c7a20f9c8bc571b8beb"
+    },
+    {
+     "이름": "입력_문서키.json",
+     "sha256": "ecb78b416595eb5643daa2713a30b3e2a7a0a20a9599eeaa2c759dae1cc2137a"
+    },
+    {
+     "이름": "입력_원문.md",
+     "sha256": "7f8c03410b6e7eeee9d12fa5a928622a25bd4e732e900a69fbd2cbff36135a8a"
+    },
+    {
+     "이름": "추출_B.md",
+     "sha256": "54b929a594a08412ff0b0f7998281b8ad573a589cd267b28a3d9e406ced4babf"
+    }
+   ],
+   "추가파일": [],
+   "문제": []
+  }
+ },
+ "통과": true,
+ "검증자": {
+  "이름": "재도전_1_재도전_본문_공통인용_V",
+  "세션": "ae0caa85c5ca189e6",
+  "모델": "claude-opus-5-5",
+  "effort": "high",
+  "effort_출처": "Agent 도구 인자 · transcript assistant 줄",
+  "경로": "구독",
+  "프롬프트": "ontology/추출/재도전/1_재도전_본문_공통인용/프롬프트_검증자.md",
+  "프롬프트해시": "fdd43c48d7826877a2650a8bcfb29a56482b00399213273ad91ecbff74c2825a",
+  "덧붙임": false,
+  "비용": null,
+  "시작": "2026-11-08T01:54:42Z",
+  "끝": "2026-11-08T02:07:41Z"
+ }
+}

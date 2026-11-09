@@ -6,7 +6,8 @@ PR 검사와 이미지 빌드는 GitHub Actions, 이미지 보관은 네이버�
 ## 흐름
 
 ```
-PR          ─▶ ci.yml     문법 검사 · server.selftest(SUDDOE_MOCK=1) · rule_lookup self-test (DB·LLM·키 없음)
+PR          ─▶ ci.yml     checks: 문법 검사 · server.selftest(SUDDOE_MOCK=1) · rule_lookup · 온톨로지 self-test (DB·LLM·키 없음)
+                          ontology-db: Postgres 서비스에 온톨로지 적재 검사 · 능력 질문 · 개정 처리 (LLM·키 없음)
 main push   ─▶ ci.yml + image.yml ─▶ suddoe.kr.ncr.ntruss.com/suddoe-api:<커밋 SHA>, :main
 운영 서버   ─▶ cron 5분마다 deploy.sh --auto
                새 커밋 이미지 받기 → suddoe-api:prod 태그 → api 재생성 → healthy 확인(실패하면 되돌림)
@@ -66,7 +67,16 @@ health 200 은 판정이 정상이라는 뜻이 아니다. 배포 로그를 본 
 - Container Registry: 관리 비용은 없고 저장 용량·요청·전송량만 과금된다. 캐시 포함 약 13GB 로 예상한다.
   요금 안내의 Standard 예시 단가(GB-월 28원)를 쓰면 월 약 400원이다. 실제 단가는 콘솔 요금 안내에서 확인한다.
 
+## 잡 `ontology-db`
+
+레포만으로 DB 를 만든다: 서비스 컨테이너(`pgvector/pgvector:pg17`) → `db/init/*.sql` → `scripts/ontology_ci_seed.py`(schema.json 문서키 문서의
+documents · doc_articles, 원본 `ontology/테스트/CI_원문.json`, 청크는 조문마다 1행 · 임베딩 없음) → `ontology_load.py`(코드 검사 + HermiT + 발췌 ⊂ 본문, 롤 `suddoe_ingest`) →
+`ontology_lookup.py --cq-test` · `--self-test`(롤 `suddoe_app`) → `ontology_judge_check.py --self-test`(판정 LLM 고정, 검색 대체) → `ontology_revision_check.py`(새 판 활성화 전후 게이트). 임베딩 · 검색 · LLM 은 쓰지 않는다.
+
+문서키를 더하거나 판을 바꾸면 `적재 검사` 가 실패한다. 로컬 DB 에 그 판을 적재한 뒤 `python scripts/ontology_ci_seed.py --내보내기` 로 `CI_원문.json` 을 다시 만들어 함께 커밋한다.
+Java 는 HermiT 용이고 CI 잡에만 둔다(API 이미지에는 없다).
+
 ## 아직 CI 에 없는 검사
 
 `scripts/ux_flow_check.py` 와 `orchestrate.py --fault` 는 DB 가 필요해 CI 에서 돌지 않는다.
-레포만으로 DB 를 만들 수 있어야 한다. 지금은 사람이 검토한 룰이 운영·로컬 DB 에만 있다.
+레포만으로 코퍼스 전체(청크 · 임베딩)와 룰을 만들 수 있어야 한다. 지금은 사람이 검토한 룰이 운영·로컬 DB 에만 있다.

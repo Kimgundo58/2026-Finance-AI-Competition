@@ -1,0 +1,109 @@
+{
+ "묶음": "ontology/추출/초격차/2_초격차_본문_공통인용",
+ "검사": "scripts/extraction_run.py 로그_읽기(구독 transcript 를 init 줄 + assistant 줄로 바꿔 넣음)",
+ "추출자": {
+  "A": {
+   "에이전트ID": "ae96e79decc20d23d",
+   "transcript": "C:\\Users\\dogun\\.claude\\projects\\C--Users-dogun-Downloads-Desktop-Desktop-Desktop-Desktop-----3-1------------github----\\01377b18-d61a-4565-af8b-80e9cf3c38dc\\subagents\\agent-ae96e79decc20d23d.jsonl",
+   "모델": [
+    "claude-opus-5-5"
+   ],
+   "effort": [
+    "high"
+   ],
+   "effort_출처": "transcript assistant 줄",
+   "프롬프트_글자같음": true,
+   "프롬프트해시_LF": "2ad3b1740c2b9ea7381da6fbacd22a6f79224be9d4707b596f23c8d26c3c9098",
+   "시작": "2026-11-08T03:07:48.892Z",
+   "끝": "2026-11-08T03:18:15.163Z",
+   "읽은파일": [
+    "C:/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본/docs/5_룰/5-5_규범_구조.md",
+    "C:/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본/docs/5_룰/5-7_원문_추출_절차.md",
+    "C:/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본/docs/5_룰/5-8b_원천_JSON_형식.md",
+    "C:/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본/docs/5_룰/5-7b_추출_에이전트_지침.md",
+    "C:/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본/ontology/추출/초격차/2_초격차_본문_공통인용/작업_A/입력_원문.md",
+    "C:/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본/ontology/추출/초격차/2_초격차_본문_공통인용/작업_A/입력_문서키.json",
+    "C:/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본/ontology/추출/초격차/2_초격차_본문_공통인용/작업_A/입력_기존노드.json"
+   ],
+   "명령": [
+    {
+     "도구": "Bash",
+     "명령": "cd \"C:/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본/ontology/추출/초격차/2_초격차_본문_공통인용/작업_A\" && ls -la && wc -c *"
+    },
+    {
+     "도구": "Bash",
+     "명령": "cd \"C:/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본/ontology/추출/초격차/2_초격차_본문_공통인용/작업_A\" && grep -n '^### ' 입력_원문.md | wc -l"
+    },
+    {
+     "도구": "Bash",
+     "명령": "mkdir -p \"C:/Users/dogun/AppData/Local/Temp/claude/27e28e8e3953af44/01377b18-d61a-4565-af8b-80e9cf3c38dc/scratchpad/chogyeokcha_2A\" && cat > \"C:/Users/dogun/AppData/Local/Temp/claude/27e28e8e3953af44/01377b18-d61a-4565-af8b-80e9cf3c38dc/scratchpad/chogyeokcha_2A/fill_check.py\" <<'EOF'\nimport re, sys, unicodedata\ninp, out = sys.argv[1], sys.argv[2]\ndef norm(s):\n    s = unicodedata.normalize('NFC', s)\n    for q in '“”″': s = s.replace(q, '\"')\n    for q in '‘’': s = s.replace(q, \"'\")\n    s = re.sub(r'-\\s*\\d+\\s*-', ' ', s) if False else s\n    s = re.sub(r'\\s+', ' ', s).strip()\n    return s\ndef blocks(text):\n    d = {}; cur = None\n    for line in text.split('\\n'):\n        m = re.match(r'^### (조:\\S.*)$', line)\n        if m: cur = m.group(1).strip(); d[cur] = []; continue\n        if cur: d[cur].append(line)\n    return d\nsrc = blocks(open(inp, encoding='utf-8').read())\nsrcn = {k: norm('\\n'.join(l for l in v if not l.startswith('<!--'))) for k, v in src.items()}\ntxt = open(out, encoding='utf-8').read()\nob = blocks(txt)\nprint('input', len(src), 'output', len(ob), 'missing', set(src)-set(ob), 'extra', set(ob)-set(src))\n# fill\nlines = txt.split('\\n'); cur=None; res=[]\nfor line in lines:\n    m = re.match(r'^### (조:\\S.*)$', line)\n    if m: cur = m.group(1).strip()\n    if line.startswith('원문:') and '@@' in line:\n        line = line.replace('@@', srcn[cur])\n    res.append(line)\ntxt2 = '\\n'.join(res)\nif '--write' in sys.argv:\n    open(out, 'w', encoding='utf-8', newline='\\n').write(txt2)\n# check excerpts\nbad = 0; n = 0\nfor k, v in blocks(txt2).items():\n    for line in v:\n        if line.startswith('원문:'): continue\n        for ex in re.findall(r'\"([^\"]*)\"', line):\n            n += 1\n            if norm(ex) not in srcn[k]:\n                bad += 1; print('BAD', k, '|', ex)\n        if line.lstrip().startswith('규범:'):\n            m = re.search(r'문장 ([^|]*)', line)\n            if m and ('\"' in m.group(1)): print('QUOTE IN 문장', k)\nprint('excerpts', n, 'bad', bad)\nEOF\ncd \"C:/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본/ontology/추출/초격차/2_초격차_본문_공통인용/작업_A\" && PYTHONIOENCODING=utf-8 python -I \"C:/Users/dogun/AppData/Local/Temp/claude/27e28e8e3953af44/01377b18-d61a-4565-af8b-80e9cf3c38dc/scratchpad/chogyeokcha_2A/fill_check.py\" 입력_원문.md 추출_A.md"
+    },
+    {
+     "도구": "Bash",
+     "명령": "cd \"C:/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본/ontology/추출/초격차/2_초격차_본문_공통인용/작업_A\" && PYTHONIOENCODING=utf-8 python -I \"C:/Users/dogun/AppData/Local/Temp/claude/27e28e8e3953af44/01377b18-d61a-4565-af8b-80e9cf3c38dc/scratchpad/chogyeokcha_2A/fill_check.py\" 입력_원문.md 추출_A.md --write && PYTHONIOENCODING=utf-8 python -I \"C:/Users/dogun/AppData/Local/Temp/claude/27e28e8e3953af44/01377b18-d61a-4565-af8b-80e9cf3c38dc/scratchpad/chogyeokcha_2A/fill_check.py\" 입력_원문.md 추출_A.md && grep -c '@@' 추출_A.md; ls; grep -oE '^ *규범: 규범:[^ ]+|^      규범:[^ ]+' 추출_A.md | wc -l; grep -oE '\\((신규|기존)\\)' 추출_A.md | wc -l; grep -oE '[^ ]+ \\(신규\\)' 추출_A.md | sort -u | wc -l; grep -oE '[^ ]+ \\((신규|기존)\\)' 추출_A.md | sed 's/ (.*//' | sort -u | wc -l; grep -cE ' -[가-힣]+-> ' 추출_A.md"
+    },
+    {
+     "도구": "Bash",
+     "명령": "cd \"C:/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본/ontology/추출/초격차/2_초격차_본문_공통인용/작업_A\" && grep -oE '[^ ]+ \\(신규\\)' 추출_A.md | sort -u | tr '\\n' ' '; echo; grep -oE '규범:[^ ]+/(금지|의무|허용|한도|임계값|요건|우선순위)/[0-9]+ \\|' 추출_A.md | sed -E 's#.*/(금지|의무|허용|한도|임계값|요건|우선순위)/.*#\\1#' | sort | uniq -c; python -I -c \"\nimport json;e=set(json.load(open('입력_기존노드.json',encoding='utf-8')))\nimport re;t=open('추출_A.md',encoding='utf-8').read()\nfor m in sorted(set(re.findall(r'(\\S+) \\(기존\\)',t))):\n  print('NOT EXISTING',m) if m not in e else None\nfor m in sorted(set(re.findall(r'(\\S+) \\(신규\\)',t))):\n  print('ACTUALLY EXISTS',m) if m in e else None\n\""
+    },
+    {
+     "도구": "Bash",
+     "명령": "cd \"C:/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본/ontology/추출/초격차/2_초격차_본문_공통인용/작업_A\" && grep -oE '^(규범: |      )규범:[^ ]+' 추출_A.md | sed -E 's#.*/([^/]+)/[0-9]+$#\\1#' | sort | uniq -c"
+    }
+   ],
+   "허용밖읽기": [],
+   "로그_읽기_원래": [],
+   "자기폴더_Glob_허용": [],
+   "작업폴더_Read": 3,
+   "문제": []
+  },
+  "B": {
+   "에이전트ID": "a9c73d4d9a1a3033e",
+   "transcript": "C:\\Users\\dogun\\.claude\\projects\\C--Users-dogun-Downloads-Desktop-Desktop-Desktop-Desktop-----3-1------------github----\\01377b18-d61a-4565-af8b-80e9cf3c38dc\\subagents\\agent-a9c73d4d9a1a3033e.jsonl",
+   "모델": [
+    "claude-opus-5-5"
+   ],
+   "effort": [
+    "high"
+   ],
+   "effort_출처": "transcript assistant 줄",
+   "프롬프트_글자같음": true,
+   "프롬프트해시_LF": "1d8e332b80846ae2427b18129ff91242bbee711c619bfa35909e804480c0a9cc",
+   "시작": "2026-11-08T03:07:57.163Z",
+   "끝": "2026-11-08T03:17:34.732Z",
+   "읽은파일": [
+    "C:/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본/docs/5_룰/5-5_규범_구조.md",
+    "C:/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본/docs/5_룰/5-7_원문_추출_절차.md",
+    "C:/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본/docs/5_룰/5-8b_원천_JSON_형식.md",
+    "C:/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본/docs/5_룰/5-7b_추출_에이전트_지침.md",
+    "C:/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본/ontology/추출/초격차/2_초격차_본문_공통인용/작업_B/입력_원문.md",
+    "C:/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본/ontology/추출/초격차/2_초격차_본문_공통인용/작업_B/입력_문서키.json",
+    "C:/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본/ontology/추출/초격차/2_초격차_본문_공통인용/작업_B/입력_기존노드.json"
+   ],
+   "명령": [
+    {
+     "도구": "Bash",
+     "명령": "cd \"C:/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본\" && ls -la \"ontology/추출/초격차/2_초격차_본문_공통인용/작업_B\" && wc -c ontology/추출/초격차/2_초격차_본문_공통인용/작업_B/* docs/5_룰/5-5_규범_구조.md docs/5_룰/5-7_원문_추출_절차.md docs/5_룰/5-8b_원천_JSON_형식.md docs/5_룰/5-7b_추출_에이전트_지침.md"
+    },
+    {
+     "도구": "Bash",
+     "명령": "mkdir -p \"C:/Users/dogun/AppData/Local/Temp/claude/27e28e8e3953af44/01377b18-d61a-4565-af8b-80e9cf3c38dc/scratchpad/chogyeokcha_2B\""
+    },
+    {
+     "도구": "Bash",
+     "명령": "cat > \"C:/Users/dogun/AppData/Local/Temp/claude/27e28e8e3953af44/01377b18-d61a-4565-af8b-80e9cf3c38dc/scratchpad/chogyeokcha_2B/check.py\" <<'EOF'\nimport re, sys, unicodedata\nd = sys.argv[1]\ndef norm(s):\n    s = unicodedata.normalize('NFC', s)\n    for c in '\\u201c\\u201d\\u2033': s = s.replace(c, '\"')\n    for c in '\\u2018\\u2019': s = s.replace(c, \"'\")\n    s = re.sub(r'- \\d+ -', '', s)\n    s = re.sub(r'\\s+', ' ', s)\n    return s.strip()\nsrc = open(d + '/입력_원문.md', encoding='utf-8').read()\nblocks = {}\ncur = None\nfor line in src.splitlines():\n    m = re.match(r'### (조:\\S+(?: 제\\d+조)?)$', line)\n    if m: cur = m.group(1); blocks[cur] = []; continue\n    if cur and not line.startswith('<!--'): blocks[cur].append(line)\nblocks = {k: norm('\\n'.join(v)) for k, v in blocks.items()}\nout = open(d + '/추출_B.md', encoding='utf-8').read()\ncur = None; bad = 0; n = 0\nids_out = []\nfor line in out.splitlines():\n    m = re.match(r'### (조:.+)$', line)\n    if m: cur = m.group(1).strip(); ids_out.append(cur); continue\n    if not cur: continue\n    s = line.strip()\n    if '\"' in s and not (s.startswith('관계:') or s.startswith('규범:') or line.startswith('      ')):\n        print('QUOTE OUTSIDE', cur, s[:60]); bad += 1\n    if s.startswith('관계:') or s.startswith('규범:') or line.startswith('      '):\n        for q in re.findall(r'\"([^\"]*)\"', s):\n            n += 1\n            # relation may cite another provision explicitly\n            if norm(q) not in blocks.get(cur, ''):\n                print('MISS', cur, q); bad += 1\n        if ' | ' in s:\n            for f in s.split(' | '):\n                if f.startswith('문장 ') and ('\"' in f): print('QUOTE IN 문장', cur)\nprint('excerpts', n, 'bad', bad)\nprint('missing ids', set(blocks) - set(ids_out), 'extra', set(ids_out) - set(blocks))\nEOF\ncd \"C:/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본\" && PYTHONIOENCODING=utf-8 python -I \"C:/Users/dogun/AppData/Local/Temp/claude/27e28e8e3953af44/01377b18-d61a-4565-af8b-80e9cf3c38dc/scratchpad/chogyeokcha_2B/check.py\" \"ontology/추출/초격차/2_초격차_본문_공통인용/작업_B\""
+    },
+    {
+     "도구": "Bash",
+     "명령": "cat > \"C:/Users/dogun/AppData/Local/Temp/claude/27e28e8e3953af44/01377b18-d61a-4565-af8b-80e9cf3c38dc/scratchpad/chogyeokcha_2B/count.py\" <<'EOF'\nimport re, sys\nt = open(sys.argv[1], encoding='utf-8').read()\nprov = len(re.findall(r'^### 조:', t, re.M))\nconcepts = set(); new = set(); rel = 0; norms = 0; mode = None\nfor line in t.splitlines():\n    s = line.strip()\n    if s.startswith('개념:'):\n        mode = None\n        for m in re.finditer(r'(\\S+:\\S+) \\((신규|기존)', s):\n            concepts.add(m.group(1))\n            if m.group(2) == '신규': new.add(m.group(1))\n    elif s.startswith('관계:'): mode = 'r'\n    elif s.startswith('규범:') and not s.startswith('규범: 해당'): mode = 'n'\n    elif s.startswith('규범:'): mode = None\n    elif not line.startswith('      '): mode = None\n    if mode == 'r' and ' -' in s and '->' in s: rel += 1\n    if mode == 'n' and re.search(r'규범:\\S+/(금지|허용|한도|임계값|의무|요건|우선순위)/\\d+', s): norms += 1\nprint('provisions', prov, 'concepts', len(concepts), 'new', len(new), 'relations', rel, 'norms', norms)\nEOF\ncd \"C:/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본\" && D=\"ontology/추출/초격차/2_초격차_본문_공통인용/작업_B\" && PYTHONIOENCODING=utf-8 python -I \"C:/Users/dogun/AppData/Local/Temp/claude/27e28e8e3953af44/01377b18-d61a-4565-af8b-80e9cf3c38dc/scratchpad/chogyeokcha_2B/check.py\" \"$D\" && PYTHONIOENCODING=utf-8 python -I \"C:/Users/dogun/AppData/Local/Temp/claude/27e28e8e3953af44/01377b18-d61a-4565-af8b-80e9cf3c38dc/scratchpad/chogyeokcha_2B/count.py\" \"$D/추출_B.md\" && ls \"$D\""
+    }
+   ],
+   "허용밖읽기": [],
+   "로그_읽기_원래": [],
+   "자기폴더_Glob_허용": [],
+   "작업폴더_Read": 3,
+   "문제": []
+  }
+ },
+ "통과": true
+}

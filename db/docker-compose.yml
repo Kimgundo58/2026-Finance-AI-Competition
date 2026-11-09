@@ -12,7 +12,10 @@ name: suddoe
 services:
   # ── Postgres + pgvector : 실제 데이터가 저장되는 곳 ──────────────
   db:
-    image: pgvector/pgvector:pg17
+    image: suddoe-db-age:local
+    build:
+      context: .
+      dockerfile: Dockerfile.age
     container_name: suddoe-db
     restart: unless-stopped
     environment:

@@ -1,0 +1,138 @@
+{
+ "묶음": "ontology/추출/초기/1_초기_본문",
+ "마감": "2026-11-08T05:06:16+09:00",
+ "추출자": {
+  "A": {
+   "에이전트ID": "18dc35ca-1f64-4444-ac5b-088d8e6707a0",
+   "모델": "claude-opus-5-5",
+   "effort": "high",
+   "시작": "2026-11-07T19:50:30.704Z",
+   "끝": "2026-11-07T20:06:15.597Z",
+   "읽은파일": [
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\docs\\5_룰\\5-5_규범_구조.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\docs\\5_룰\\5-7_원문_추출_절차.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\docs\\5_룰\\5-8b_원천_JSON_형식.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\docs\\5_룰\\5-7b_추출_에이전트_지침.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\ontology\\추출\\초기\\1_초기_본문\\작업_A\\입력_원문.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\ontology\\추출\\초기\\1_초기_본문\\작업_A\\입력_문서키.json",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\ontology\\추출\\초기\\1_초기_본문\\작업_A\\입력_기존노드.json"
+   ],
+   "명령": [
+    {
+     "도구": "Bash",
+     "명령": "ls -la \"ontology/추출/초기/1_초기_본문/작업_A\""
+    },
+    {
+     "도구": "Bash",
+     "명령": "cd \"ontology/추출/초기/1_초기_본문/작업_A\" && PYTHONIOENCODING=utf-8 python -I - <<'EOF'\nimport re, unicodedata\ndef norm(s):\n    s=unicodedata.normalize('NFC',s)\n    s=re.sub('[“”″]','\"',s); s=re.sub(\"[‘’]\",\"'\",s)\n    s=re.sub(r'-\\s*\\d+\\s*-','',s)\n    return re.sub(r'\\s+',' ',s).strip()\ndef blocks(t):\n    out={};cur=None\n    for ln in t.splitlines():\n        if ln.startswith('### '): cur=ln[4:].strip(); out[cur]=[]; continue\n        if cur: out[cur].append(ln)\n    return out\ninp=blocks(open('입력_원문.md',encoding='utf-8').read())\noutp=blocks(open('추출_A.md',encoding='utf-8').read())\ninb={k:norm('\\n'.join(l for l in v if not l.startswith('<!--'))) for k,v in inp.items()}\nprint('input',len(inp),'output',len(outp))\nprint('missing',set(inp)-set(outp),'extra',set(outp)-set(inp))\nbad=0;rels=0;norms=0;concepts=set();kinds={}\nfor k,lines in outp.items():\n    sec=None\n    for ln in lines:\n        m=re.match(r'^(\\S+?):',ln)\n        if m and m.group(1) in('원문','개념','관계','규범','모르는 것','용어 후보'): sec=m.group(1)\n        if sec=='개념' and ln.startswith('개념:'):\n            for c in re.findall(r'(\\S+:\\S+) \\((?:기존|신규)\\)',ln): concepts.add(c)\n        if sec=='관계' and '-' in ln and '->' in ln: rels+=1\n        if sec=='규범' and '규범:초기/' in ln:\n            norms+=1\n            nid=re.search(r'규범:초기/\\S+',ln).group(0); kd=nid.split('/')[-2]; kinds[kd]=kinds.get(kd,0)+1\n            cells=ln.split(' | ')\n            for c in cells:\n                if c.startswith('문장 ') and ('\"' in c): print('QUOTE IN 문장',k)\n            if kd in('금지','의무') and not any(c.startswith('문장 ') for c in cells): print('NO 문장',nid)\n        if sec in('관계','규범'):\n            for q in re.findall(r'\"([^\"]*)\"',ln):\n                if norm(q) not in inb[k]: bad+=1; print('BAD',k,'|',q)\nprint('bad',bad,'rels',rels,'norms',norms,'concepts',len(concepts),kinds)\nEOF"
+    }
+   ],
+   "허용밖읽기": [],
+   "작업폴더_Read": 3,
+   "비용": 3.686283199999999,
+   "인증": "ANTHROPIC_API_KEY",
+   "로그": ".claude/작업/api_agents/runs/초기_1_초기_본문_A.jsonl",
+   "경로": "API",
+   "effort_출처": "인자",
+   "프롬프트해시_출처": "파일",
+   "프롬프트해시": "b3607ab16031337444f9042642371d1c6cf4244cddef1d02960a3828de2b2fd9",
+   "덧붙인문장": {
+    "앞": "Input folder: ontology/추출/초기/1_초기_본문/작업_A\nYou are extractor A. Work independently: another extractor works on the same provisions; do not look for, open or ask about its folder, its output or any file outside the input folder except the documents the prompt below allows.\nIn the prompt below, 입력_원문.md, 입력_문서키.json, 입력_기존노드.json and \"the input folder\" mean the files in ontology/추출/초기/1_초기_본문/작업_A.",
+    "뒤": "Output format: follow the section 출력 형식 of docs/5_룰/5-7b_추출_에이전트_지침.md exactly, and write the output as ontology/추출/초기/1_초기_본문/작업_A/추출_A.md.\nKeep this session under 300k tokens of context."
+   },
+   "입력폴더": [
+    {
+     "이름": "입력_기존노드.json",
+     "sha256": "70c53101f7145e35f536b9676c62f9d3a6a53ba1606db131ab65a7932ab9ce32"
+    },
+    {
+     "이름": "입력_문서키.json",
+     "sha256": "f00556fe2b3664674864dd12a6552b9d14b07278f536f0bc8c3d78488c091169"
+    },
+    {
+     "이름": "입력_원문.md",
+     "sha256": "0876986be5df4f463278fb4e8c37d8aca2dd18cd64800157e97d1e3f7743104c"
+    },
+    {
+     "이름": "추출_A.md",
+     "sha256": "8b2c0605f4246ea1f5651846d04e5a2093c97fc44054d3a2c14883b23eab1175"
+    }
+   ],
+   "추가파일": [],
+   "문제": []
+  },
+  "B": {
+   "에이전트ID": "abfb9571-71e5-45e6-8618-56ad318cc818",
+   "모델": "claude-opus-5-5",
+   "effort": "high",
+   "시작": "2026-11-07T19:50:31.217Z",
+   "끝": "2026-11-07T20:03:24.499Z",
+   "읽은파일": [
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\docs\\5_룰\\5-5_규범_구조.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\docs\\5_룰\\5-7_원문_추출_절차.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\docs\\5_룰\\5-8b_원천_JSON_형식.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\docs\\5_룰\\5-7b_추출_에이전트_지침.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\ontology\\추출\\초기\\1_초기_본문\\작업_B\\입력_원문.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\ontology\\추출\\초기\\1_초기_본문\\작업_B\\입력_문서키.json",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\ontology\\추출\\초기\\1_초기_본문\\작업_B\\입력_기존노드.json"
+   ],
+   "명령": [
+    {
+     "도구": "Bash",
+     "명령": "ls -la \"ontology/추출/초기/1_초기_본문/작업_B\""
+    },
+    {
+     "도구": "Bash",
+     "명령": "cd \"ontology/추출/초기/1_초기_본문/작업_B\" && PYTHONIOENCODING=utf-8 python -I - <<'EOF'\nimport re, unicodedata\ndef norm(s):\n    s=unicodedata.normalize('NFC',s)\n    for a in '“”″': s=s.replace(a,'\"')\n    for a in '‘’': s=s.replace(a,\"'\")\n    s=re.sub(r'- \\d+ -','',s)\n    return re.sub(r'\\s+',' ',s).strip()\ndef blocks(path):\n    d={};cur=None\n    for line in open(path,encoding='utf-8'):\n        if line.startswith('### '):\n            cur=line[4:].strip(); d[cur]=[]\n        elif cur: d[cur].append(line)\n    return d\ninp={k:norm(''.join(v)) for k,v in blocks('입력_원문.md').items()}\nout=blocks('추출_B.md')\nprint('input ids',len(inp),'output ids',len(out),'missing',set(inp)-set(out),'extra',set(out)-set(inp))\nbad=0;rels=0;norms=0;concepts=set();kinds={}\nfor k,lines in out.items():\n    sec=None\n    for ln in lines:\n        m=re.match(r'^(원문|개념|관계|규범|모르는 것|용어 후보):',ln)\n        if m: sec=m.group(1)\n        if sec in('관계','규범'):\n            body=ln.split(':',1)[1] if m else ln\n            if sec=='규범':\n                for seg in body.split(' | '):\n                    if seg.strip().startswith('문장') and ('\"' in seg or re.search(r'[가-힣A-Za-z]+:[가-힣A-Za-z]',seg)):\n                        print('BAD 문장',k,seg)\n            for q in re.findall(r'\"([^\"]*)\"',body):\n                if norm(q) not in inp.get(k,''):\n                    bad+=1; print('EXCERPT FAIL',k,'|',q)\n            if '해당 없음' not in body:\n                if sec=='관계' and '->' in body: rels+=1\n                if sec=='규범' and body.strip().startswith('규범:'):\n                    norms+=1; t=body.split(' | ')[0].strip().split('/')[-2]; kinds[t]=kinds.get(t,0)+1\n        if sec=='개념' and m:\n            for c in re.findall(r'(\\S+:\\S+) \\((기존|신규)',ln): concepts.add((c[0],c[1]))\nprint('excerpt failures',bad)\nprint('relations',rels,'norms',norms,kinds)\nprint('unique concepts',len({c for c,_ in concepts}),'new',sorted({c for c,s in concepts if s=='신규'}))\nEOF"
+    }
+   ],
+   "허용밖읽기": [],
+   "작업폴더_Read": 3,
+   "비용": 3.1464324,
+   "인증": "ANTHROPIC_API_KEY",
+   "로그": ".claude/작업/api_agents/runs/초기_1_초기_본문_B.jsonl",
+   "경로": "API",
+   "effort_출처": "인자",
+   "프롬프트해시_출처": "파일",
+   "프롬프트해시": "ebc8b6d7cad9c8c225f234a1dad2a1be44ea4893ad0682654f4cc103c3b5538d",
+   "덧붙인문장": {
+    "앞": "Input folder: ontology/추출/초기/1_초기_본문/작업_B\nYou are extractor B. Work independently: another extractor works on the same provisions; do not look for, open or ask about its folder, its output or any file outside the input folder except the documents the prompt below allows.\nIn the prompt below, 입력_원문.md, 입력_문서키.json, 입력_기존노드.json and \"the input folder\" mean the files in ontology/추출/초기/1_초기_본문/작업_B.",
+    "뒤": "Output format: follow the section 출력 형식 of docs/5_룰/5-7b_추출_에이전트_지침.md exactly, and write the output as ontology/추출/초기/1_초기_본문/작업_B/추출_B.md.\nKeep this session under 300k tokens of context."
+   },
+   "입력폴더": [
+    {
+     "이름": "입력_기존노드.json",
+     "sha256": "70c53101f7145e35f536b9676c62f9d3a6a53ba1606db131ab65a7932ab9ce32"
+    },
+    {
+     "이름": "입력_문서키.json",
+     "sha256": "f00556fe2b3664674864dd12a6552b9d14b07278f536f0bc8c3d78488c091169"
+    },
+    {
+     "이름": "입력_원문.md",
+     "sha256": "0876986be5df4f463278fb4e8c37d8aca2dd18cd64800157e97d1e3f7743104c"
+    },
+    {
+     "이름": "추출_B.md",
+     "sha256": "3ed973b38bc7df2e06d758fdfe1dd809d4447ec6167339dc23e81e44aeec290f"
+    }
+   ],
+   "추가파일": [],
+   "문제": []
+  }
+ },
+ "통과": true,
+ "검증자": {
+  "이름": "초기_1_초기_본문_V",
+  "세션": "1d662dbe-bb59-4593-b6ad-438d6f7e17dc",
+  "모델": "claude-opus-5-5",
+  "effort": "high",
+  "effort_출처": "run.py 인자",
+  "프롬프트": "ontology/추출/초기/1_초기_본문/프롬프트_검증자.md",
+  "프롬프트해시": "db066d082fa8b9303af65531c696c19cfdb08062cc8c881ffc1cde7074c3a200",
+  "덧붙임": false,
+  "비용": 5.2997824,
+  "시작": "2026-11-08T05:06:16",
+  "프롬프트해시_정정": "처음 값 39f460483e1170265f172dc3152b76d1a580484fd554b7929350f498bebfb8e8 은 작업 트리 CRLF 바이트의 해시였다. 저장소는 LF 로 저장하므로 LF 바이트로 다시 셌다(검토 4차 지적 4c, 2026-11-08). 글자는 같다"
+ }
+}

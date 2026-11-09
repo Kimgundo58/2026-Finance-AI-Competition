@@ -76,8 +76,10 @@ curl -s -X POST "$API/admin/documents/<doc_id>/activate" -H "$H" -H "Content-Typ
 - 이전 판은 `superseded`·`index_target=false` 가 되고 청크를 지운다(조문 doc_articles 는 남긴다). 새 판은
   이전 판의 retrieval_scope 를 이어받는다. 새 판 청크를 BM25 색인(chunk_len·chunk_terms)에 넣고, `tenant.judge_cache` 를
   비우고, `corpus.term_df` 를 `REFRESH ... CONCURRENTLY` 한다. staged 동안에는 BM25 점수에 영향을 주지 않는다.
-- 응답 `경고`: 이전 판을 근거로 가진 corpus.rules 수, 이전 판을 가리키는 다른 문서 참조 수, 신규문서일 때 함께
-  검색될 비슷한 active 문서. 룰 근거와 들어오는 참조는 자동으로 고치지 않는다(재검수 대상).
+- 들어오는 참조: active 문서에서 이전 판으로 가는 `corpus.refs` 는 활성화 트랜잭션에서 새 판으로 옮긴다. 판이 바뀌는 순간 참조 확장이 끊기지 않게 하기 위해서다.
+- 온톨로지: 이전 판을 근거(`corpus.provenance`)로 가진 규범 · 노드의 검수단계를 활성화 트랜잭션에서 `재검토` 로 내린다. 그 규범은 코드 불가를 내지 못하고 '가능' 은 조건부가 된다. 절차는 `docs/5_룰/5-8_저장과_조회.md` 개정판.
+- 응답 `경고`: 이전 판을 근거로 가진 corpus.rules 수, 재검토로 내린 규범 · 노드 수, 새 판에 없는 조로 옮긴 참조, 신규문서일 때 함께
+  검색될 비슷한 active 문서. 룰 근거는 자동으로 고치지 않는다(재검수 대상).
 - superseded 를 다시 active 로 돌리는 API 는 없다(청크를 지웠다). 필요하면 그 판을 다시 올려 활성화한다.
 
 ## 판정 캐시 반영
@@ -91,9 +93,8 @@ curl -s -X POST "$API/admin/documents/<doc_id>/activate" -H "$H" -H "Content-Typ
 
 - 텍스트가 200자 미만인 파일(스캔본)과 배포용·암호화 HWP 는 failed 다. L3 업로드와 달리 OCR 을 하지 않는다.
 - 품질 low(조 5개 미만, 단락·장 단위 분할, 조번호 역전, 빈 조 과다)는 활성화할 수 없다. 원본을 고쳐 다시 올린다.
-- 적재는 한 번에 하나씩 실행된다. 임베딩이 CPU 를 쓰므로 그동안 판정 응답이 느려질 수 있다.
-  실측(개발 PC): PDF 480KB·48조·54청크 약 75초.
+- 적재는 한 번에 하나씩 실행된다. 임베딩이 CPU 를 쓰므로 그동안 판정 응답이 느려질 수 있다. 실측(개발 PC): PDF 480KB·48조·54청크 약 75초.
+- API 밖 경로: 복원본 · 법령 HTML 문서는 `scripts/corpus_restored_load.py` + `ontology/수집/적재목록.json` 으로 넣는다. 품질 게이트를 거치지 않으므로 절차는 `ontology/수집/P0-6_P0-7_기록.md` 를 따른다.
 - 서버가 재시작되면 parsing 중이던 업로드는 parsing 으로 남는다. DELETE 후 다시 올린다.
-- 참조: 새 문서에서 나가는 참조는 active 문서만 대상으로 만든다. `지침 제N조` 는 build_refs 에 고정된
-  통합관리지침 제14차 doc_id 로 해결되므로, 새 통합관리지침을 올리면 해결 대상을 따로 확인한다.
+- 참조: 새 문서에서 나가는 참조는 active 문서만 대상으로 만든다. `지침 제N조` 는 build_refs 에 고정된 통합관리지침 제14차 doc_id 로 해결되므로, 새 통합관리지침을 올리면 해결 대상을 따로 확인한다.
 - 로컬 DB 는 `eval.golden_chunks` 가 이전 판 청크를 참조하면 활성화가 409 다(골든셋 재매칭 필요). 운영 DB 에는 eval 이 없다.

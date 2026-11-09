@@ -1,0 +1,27 @@
+07:58:10 추출자 4개 시작(구독 경로, opus · high, 프롬프트_X.md 글자 그대로) 1 A a7976decbf34d4c37 · B a4114f7d257881920 / 2 A a65d7c170e3876f0b · B a347cedc5f7f4b64f
+08:25 2 A 가 알림: 세션 scratchpad 의 초안 파일 이름(p1.md · p2.md)이 1 B 와 겹쳐 덮였다. transcript 대조: 1 B 가 23:17:41Z p1 · 23:19:51Z p2 · 23:23:46Z p3 를 썼고, 2 A 는 23:22:03Z 에 자기 p3 · p4 · p5 를 개인 폴더로 복사하고 p1 · p2 를 다시 써서 추출_A.md 를 만들었다. 두 추출자 모두 남의 초안을 Read 하지 않았다(2 A 의 검사 스크립트 출력에 1 B 초안 몇 줄이 한 번 보임, 다른 묶음). 블록 ID 대조: 2 A · 2 B · 1 A 모두 입력과 같은 74 · 74 · 44 블록, 순서 같음.
+08:26 1 B 에 메시지: p4 · p5 는 다른 묶음 에이전트 것이니 쓰지 말고 개인 폴더에 초안을 두며, 끝내기 전 추출_B.md 블록이 입력 44 블록과 같은지 볼 것(같은 묶음 A 내용은 담지 않음)
+08:26 2_창업중심대학_본문_공통인용 마감(구독 경로, 읽기 확인 구독_읽기확인.json 통과) A a65d7c170e3876f0b · B a347cedc5f7f4b64f. 비교: 발췌오류 0 · 블록누락 0 · 규범 일치 112 · A만 33 · B만 52
+08:27 2_창업중심대학_본문_공통인용 검증자(구독) a3e51e37b9c889dbb 시작(프롬프트_검증자.md 해시 5eebb5e5b986)
+08:31 1 B 끝. transcript 대조: 1 B 는 p1~p4 를 자기가 쓴 직후(23:17~23:26Z) 개인 폴더 extB_bundle1 로 복사해 썼고, 그 사이 다른 에이전트의 p1~p4 쓰기 없음. 블록 44 · 순서 같음 · 중복 없음
+08:31 1_창업중심대학_사업비 마감(구독 경로, 읽기 확인 구독_읽기확인.json 통과) A a7976decbf34d4c37 · B a4114f7d257881920. 비교: 발췌오류 0 · 블록누락 0 · 규범 일치 178 · A만 58 · B만 52 · 값다름 11
+08:32 1_창업중심대학_사업비 검증자(구독) a221bb843b61596cf 시작(프롬프트_검증자.md 해시 c64e815d375a, 묶음 2 와 경로만 다른 같은 틀)
+08:47 두 검증자 끝(--기록 남김). 1: 규범 240(AI검증 238 · AI대조 2) · 재추출 1. 2: 규범 119(AI검증 117 · 해석미결 2) · 재추출 0. 두 확정표 블록 = 입력 블록(44 · 74). 검증자 초안 파일 이름은 겹치지 않음(part2 · part3 / 확정_1 · 확정_2)
+08:50 사업변환(임시 원천): 검사 오류 3(고아 품목 선급금보증보험료 · 체제비 · 해외거래수수료) → 조율 세션 수정(블록 비목 · 세목에 상위, 연결종류 해석)
+08:55 `판정 수정` 인데 AI검증 인 17행(1: 3 · 2: 14, 관계 1 포함) → AI대조 + 재추출 대상(5-7b:80, 앞 사업은 모두 AI대조). 변환기에 같은 검사를 넣음(self-test 55/55, 5-7d 판정 칸)
+08:58 사업변환(임시 원천) 1 · 2 다시: 검사 통과, 이 사업 경고 39(조건없는_금지 15 · 전제표현_조건없음 24)
+09:00 3_재추출_창업중심대학 준비(14블록, 블록 본문 합 4,469자(검토 세션 지적으로 다시 셈), 1차 입력과 글 같음, 인용대응에 제14조5호 → 조:창업지원법#제2조). scratchpad 의 1차 초안 파일을 _보관_창업중심대학_1차/ 로 옮김(지우지 않음)
+09:00 재추출 추출자 시작 A a1f0110d4b94706e1 · B ad2304cd0e87fba88(프롬프트_X.md 글자 그대로). 바로 뒤 각자에 scratch 개인 폴더(reext_A · reext_B) 안내 메시지(지시 내용 바꾸지 않음)
+09:10 3_재추출_창업중심대학 마감(구독 경로, 읽기 확인 구독_읽기확인.json 통과, 두 추출자 scratch 는 각자 폴더만 씀) A a1f0110d4b94706e1 · B ad2304cd0e87fba88. 비교: 발췌오류 0 · 블록누락 0 · 규범 일치 65 · A만 16 · B만 15
+09:11 3_재추출_창업중심대학 검증자(구독) a1a6fd8eb87365a91 시작(프롬프트_검증자.md 해시 d89a9495b256, 덧붙임 포함)
+09:22 재추출 검증자 끝(--기록): 규범 73(AI검증 71 · AI대조 2) · 재추출 대상 18행 중 AI검증 16 · 잔여 2(제28조①/의무/1 · 제28조②#2/의무/2) · 변환 실패 0
+09:24 사업변환 1 · 2 · 3 --목록(임시 원천): 교체 73 · 검사 통과 · 경고 39 · 전수 대조 목록 74행 · 잔여 규범 5(해석미결 3 포함)
+09:25 전수 대조(API, --상한 5) 시작
+09:25 이후(시각 미기록) 전수 대조 끝: 74행 중 틀림 3(기계장치/금지/1 · 제31조①/금지/1 · 붙임4/금지/1, 대상이 넓은 금지) → 확정.md 에 조건을 넣고 AI대조, API $1.70. 사업변환 --목록 --실제: 원천 반영, 전수대조_목록.md 71행(내려간 3행이 빠짐) · 잔여 규범 8
+09:53 커밋 d50ce6c(로컬)
+이후 독립 확인(구독 에이전트 2개, 결론 없이 질문만): scratch 충돌 · 판정 수정 17행 · 수치 · 잔여 · 변환기 검사 · dry 가 조율 세션 점검과 맞음. 묶음 2 · 3 확정.md 집계 줄이 전수 대조 전 값이라 고쳤고, 잔여 목록에 사유 줄을 더했다
+
+추출자에 보낸 프롬프트 밖 메시지 원문(SendMessage, 지시 내용은 바꾸지 않음):
+08:26 → 1 B(a4114f7d257881920): "Warning: scratchpad files p4.md and p5.md were written by another agent working on a different bundle, so don't use them. That agent also wrote p1.md and p2.md before you replaced them. Keep your remaining drafts in a private subfolder, for example scratchpad/extB_bundle1/, and don't read or merge any p*.md file you didn't write yourself. Before you finish, confirm that every `### 조:` block in 추출_B.md is a block of 1_창업중심대학_사업비/작업_B/입력_원문.md (44 blocks) and that no block appears twice. This message contains no content from the other extractor of your bundle."
+09:00 → 재추출 A(a1f0110d4b94706e1): "Note on scratch files: you share the session scratchpad with another agent. If you need draft or helper files outside your input folder, put them only in scratchpad/reext_A/ and don't read anything elsewhere in the scratchpad. Your input folder must still hold only the three inputs plus 추출_A.md. This message changes none of your instructions."
+09:00 → 재추출 B(ad2304cd0e87fba88): 위와 같고 reext_A → reext_B, 추출_A.md → 추출_B.md.

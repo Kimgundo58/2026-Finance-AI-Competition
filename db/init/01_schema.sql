@@ -334,7 +334,8 @@ CREATE TABLE tenant.profile_agreements (
     사업명          TEXT NOT NULL,
     협약시작일      DATE,
     협약종료일      DATE,
-    -- 재원(정부지원·자기부담) x 형태(현금·현물). 현물 두 컬럼은 04_validation_eval.sql 이 지운다
+    -- 재원(정부지원·자기부담) x 형태(현금·현물). 정부지원_현물은 04_validation_eval.sql 이 지운다.
+    -- 자기부담_현물 = 현물 총액(NULL = 미입력). 총사업비 = 정부지원_현금 + 자기부담_현금 + 자기부담_현물
     정부지원_현금   NUMERIC, 정부지원_현물 NUMERIC,
     자기부담_현금   NUMERIC, 자기부담_현물 NUMERIC,
     과업범위요약    TEXT,          -- 사업계획서의 과업범위 요약. 원문은 저장하지 않는다

@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """평가 결과를 `eval.runs` / `eval.run_items` 에 저장한다.
 
-`eval_retrieval.py`, 판정 파이프라인 골든셋 실행(`orchestrate.py --eval-log`)이 호출한다.
-공개 함수: `기록(run, items, *, conn)`, `코퍼스버전(cur)`, `평가용_사업명(사업명, 적용범위)`.
+`eval_retrieval.py`, 판정 파이프라인 골든셋 실행(`orchestrate.py --eval-log`), 화면 경로 비교(`eval_screen_path.py`)가 호출한다.
+공개 함수: `기록(run, items, *, conn)`, `코퍼스버전(cur)`, `평가용_사업명(사업명, 적용범위)`, `고르게_뽑기(문항들, n, L3인가)`.
 `지표`·`원출력` 은 jsonb 로 그대로 저장하고, `코퍼스버전`·`git커밋` 을 주지 않으면 여기서 계산해 채운다.
 채점은 전부 결정론적이며 LLM-as-judge 는 쓰지 않는다.
 """
@@ -18,6 +18,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _lib import db                                                   # noqa: E402
 
 _종류 = ("e2e", "retrieval", "judge")
+
+# 정답셋 v2(세트 v2_dev · v2_test, golden_v2_load.py)는 기존 문항과 섞지 않는다. 세트를 고르지 않은 평가는 이 조건으로 읽는다.
+기존세트_SQL = "left(세트, 3) <> 'v2_'"
 
 
 def 코퍼스버전(cur) -> str:
@@ -35,10 +38,11 @@ def 코퍼스버전(cur) -> str:
 
 def _git커밋() -> str | None:
     try:
+        # 인코딩을 지정한다. 기본(cp949)으로 읽으면 한글 파일명에서 stdout 이 None 이 되어 커밋이 비게 된다.
         out = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
-                             capture_output=True, text=True, timeout=10)
+                             capture_output=True, encoding="utf-8", errors="replace", timeout=10)
         변경있음 = subprocess.run(["git", "status", "--porcelain"],
-                                capture_output=True, text=True, timeout=10)
+                                capture_output=True, encoding="utf-8", errors="replace", timeout=10)
         if out.returncode:
             return None
         # 커밋 안 된 변경이 있으면 커밋 해시만으로는 재현이 안 되므로 +dirty 를 붙인다.
@@ -89,6 +93,22 @@ def 기록(run: dict, items: list[dict] | None = None, *, conn=None) -> int:
             )
         conn.commit()
         return run_id
+
+
+def 고르게_뽑기(문항들: list, n: int | None, L3인가) -> list:
+    """소량 실행용 표본: L3 문항과 나머지를 비율대로 고르게 n 개 뽑는다(L3 가 있으면 최소 1개). 문항 내용을 보지 않는다.
+
+    n 이 없거나 전체보다 크면 그대로 돌려준다. 결정론이다(gold_id 순서의 등간격).
+    """
+    if not n or n >= len(문항들):
+        return list(문항들)
+    L3들 = [m for m in 문항들 if L3인가(m)]
+    나머지 = [m for m in 문항들 if not L3인가(m)]
+    k = min(len(L3들), max(1, round(n * len(L3들) / len(문항들)))) if L3들 else 0
+
+    def 등간격(묶음: list, c: int) -> list:
+        return [묶음[i * len(묶음) // c] for i in range(c)] if c else []
+    return 등간격(나머지, min(n - k, len(나머지))) + 등간격(L3들, k)
 
 
 def 평가용_사업명(사업명: str | None, 적용범위: str | None = None) -> str | None:

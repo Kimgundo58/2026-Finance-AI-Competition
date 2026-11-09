@@ -17,12 +17,12 @@ import json
 import logging
 import uuid
 
-from fastapi import (APIRouter, BackgroundTasks, File, Form, HTTPException,
+from fastapi import (APIRouter, BackgroundTasks, Body, File, Form, HTTPException,
                      Request, UploadFile)
 
 from ._common import DSN, MOCK, 트랜잭션, _org조건, _질의, _실행
 from .file_format import 실제형식
-from .models import L3업로드응답, L3현재문서, L3현재문서목록응답
+from .models import L3업로드응답, L3연결선택지항목, L3연결조문항목, L3현재문서, L3현재문서목록응답
 from . import auth, mock_data
 
 _log = logging.getLogger("suddoe.l3")
@@ -154,13 +154,120 @@ def 현재문서(org_id: str | None = None) -> L3현재문서목록응답:
         f' ORDER BY (d."파싱품질" IN (\'pass\', \'warn\')) DESC, d.created_at DESC',
         org인자,
     )
-    return L3현재문서목록응답(문서=[
+    문서들 = [
         L3현재문서(doc_id=str(doc_id), 원본파일명=이름, version=버전,
                 시행일=시행일.isoformat() if 시행일 else None,
                 등록일=등록.date().isoformat() if 등록 else None,
                 파싱품질=파싱품질, 조_건수=건수, 추출방식=추출방식,
                 검토이유=이유 if 파싱품질 == "review" else None)
-        for doc_id, 이름, 버전, 시행일, 등록, 파싱품질, 건수, 추출방식, 이유 in 행])
+        for doc_id, 이름, 버전, 시행일, 등록, 파싱품질, 건수, 추출방식, 이유 in 행]
+    적용 = [d for d in 문서들 if d.파싱품질 in ("pass", "warn")]
+    if 적용 and org_id:
+        try:
+            with 트랜잭션(org_id) as cur:
+                for d in 적용:
+                    for k, v in _연결_정보(cur, d.doc_id).items():
+                        setattr(d, k, v)
+        except Exception:                               # noqa: BLE001 — 연결 화면이 없어도 문서 목록은 보인다
+            _log.exception("L3 연결 정보 조회 실패 org=%s", org_id)
+    return L3현재문서목록응답(문서=문서들)
+
+
+# 조문 연결(P4-5). 추천 상태 → 화면 상태. 작성중이 이만큼 넘게 남으면(서버 재시작 등) 실패로 보인다
+_연결상태_표시 = {"작성중": "추천작성중", "완료": "추천완료", "일부실패": "추천일부실패", "실패": "추천실패", None: "추천없음"}
+_초안_중단_분 = 30
+
+
+def _미리보기(본문: str | None) -> str:
+    from l3_link import _머리_떼기
+    글 = _머리_떼기(" ".join((본문 or "").split()))
+    return 글[:100] + ("…" if len(글) > 100 else "")
+
+
+def _연결_정보(cur, doc_id: str) -> dict:
+    """GET /current 와 PATCH 응답의 연결 칸. 고를 분류가 없으면(새 경로 사업 없음) 빈 dict 라 화면에 연결이 보이지 않는다."""
+    import l3_link
+    고를것 = l3_link.선택지(cur)
+    if not 고를것:
+        return {}
+    표 = {x["concept_id"]: x["표시문"] for x in 고를것}
+    상태, 오래됨 = cur.execute(
+        f'SELECT "연결초안상태", "연결초안시각" < now() - interval \'{_초안_중단_분} minutes\' '
+        'FROM tenant.l3_documents WHERE doc_id = %s', (doc_id,)).fetchone()
+    if 상태 == "작성중" and 오래됨:
+        상태 = "실패"
+    조문들 = l3_link.연결대상_조문(cur, doc_id)
+    모르는 = sorted({x for a in 조문들 for x in a["concept_ids"] or () if x not in 표})
+    if 모르는:                                         # 확인값이 지금 고를 분류 밖이면(사업 설정이 바뀜) 개념 이름으로 보인다
+        표.update(dict(cur.execute("SELECT concept_id, pref_label FROM corpus.age_concepts WHERE concept_id = ANY(%s)",
+                                  (모르는,)).fetchall()))
+    연결 = []
+    for a in 조문들:
+        if a["concept_ids"] is not None:
+            # 확인값은 그대로 돌려준다. 없는 개념 ID 를 빼면 [](모든 지출에 공통)로 보이는데 판정은 그 조를 뺀다
+            값, 조상태 = list(a["concept_ids"]), "확인"
+        elif a["연결초안"] is not None and (not a["연결초안"] or any(x in 표 for x in a["연결초안"])):
+            값, 조상태 = [x for x in a["연결초안"] if x in 표], "추천"
+        else:
+            값, 조상태 = None, "추천없음"
+        연결.append(L3연결조문항목(article_id=a["article_id"], 조번호=a["조번호"], 조제목=a["조제목"], 미리보기=_미리보기(a["본문"]),
+                          상태=조상태, concept_ids=값, 표시문=[표[x] for x in 값 or () if x in 표],
+                          옛판문구=[{"문장": x["문장"], "문서": x["문서"]} for x in a["옛판문구"] or ()]))
+    return {"연결상태": _연결상태_표시.get(상태, "추천없음"), "연결": 연결,
+            "연결선택지": [L3연결선택지항목(**x) for x in 고를것]}
+
+
+@router.patch("/{doc_id}/links", response_model=L3현재문서)
+def 연결_저장(doc_id: str, 본문: dict[str, list[str] | None] = Body(...), org_id: str | None = None) -> L3현재문서:
+    """조문 연결을 저장한다. 본문 `{article_id: [concept_id]}` — [] = 모든 지출에 공통, null = 확인 안 함(미확인으로 되돌림).
+
+    같은 기관의 판정에 쓰는 문서만 고친다(코드 조건 + RLS org_isolation). 고를 분류 밖의 concept_id 나 이 문서에 없는 조가
+    있으면 하나도 저장하지 않고 400(그 조에 이미 저장된 확인값은 분류 밖이어도 그대로 다시 보낼 수 있다). 저장하면 판정이 연결을 읽으므로 기관의 판정 캐시를 지운다(캐시키 l3_해시도 바뀐다).
+    """
+    if MOCK:
+        return L3현재문서(doc_id=doc_id, 원본파일명=mock_data.mock_L3["파일명"], 파싱품질="pass", 조_건수=len(본문))
+    if not org_id:
+        raise HTTPException(401, "기관을 확인할 수 없습니다. 로그인해 주세요.")
+    try:
+        uuid.UUID(doc_id)
+        고칠것 = {int(k): (None if v is None else list(dict.fromkeys(str(x) for x in v))) for k, v in 본문.items()}
+    except (ValueError, TypeError):
+        raise HTTPException(400, "조문을 찾을 수 없습니다. 화면을 새로고침해 주세요.") from None
+    if not 고칠것:
+        raise HTTPException(400, "저장할 조문이 없습니다.")
+    import l3_link
+    from l3_parse import _기관_정리_잠금      # scripts/ — 교체 · 적용 확인과 같은 기관 잠금
+    with 트랜잭션(org_id) as cur:
+        행 = cur.execute('SELECT org_id, status, "파싱품질" FROM tenant.l3_documents WHERE doc_id = %s AND org_id = %s',
+                       (doc_id, org_id)).fetchone()
+        if not 행:
+            raise HTTPException(404, f"L3 문서 {doc_id} 을(를) 찾을 수 없습니다")
+        _기관_정리_잠금(cur, 행[0])
+        행 = cur.execute('SELECT status, "파싱품질" FROM tenant.l3_documents WHERE doc_id = %s', (doc_id,)).fetchone()
+        if 행[0] != "active" or 행[1] not in ("pass", "warn"):
+            raise HTTPException(409, "이 문서는 지금 판정에 쓰지 않아 연결을 저장할 수 없습니다. 화면을 새로고침해 주세요.")
+        고를것 = {x["concept_id"] for x in l3_link.선택지(cur)}
+        if not 고를것:
+            raise HTTPException(409, "지금은 조문 연결을 쓰지 않습니다.")
+        저장값 = dict(cur.execute("SELECT article_id, concept_ids FROM tenant.l3_articles WHERE doc_id = %s AND article_id = ANY(%s)",
+                                  (doc_id, list(고칠것))).fetchall())
+        if set(저장값) != set(고칠것):
+            raise HTTPException(400, "이 문서에 없는 조문이 있습니다. 화면을 새로고침해 주세요.")
+        # 그 조에 이미 저장된 확인값은 지금 고를 분류 밖이어도(사업 설정이 바뀜) 그대로 다시 보낼 수 있다. 새로 고르는 값만 분류 안이어야 한다
+        if any(x not in 고를것 and x not in (저장값[aid] or ()) for aid, v in 고칠것.items() for x in v or ()):
+            raise HTTPException(400, "고를 수 없는 분류가 있습니다. 화면을 새로고침해 주세요.")
+        for aid, ids in 고칠것.items():
+            cur.execute("UPDATE tenant.l3_articles SET concept_ids = %s WHERE article_id = %s AND doc_id = %s AND org_id = %s",
+                        (ids, aid, doc_id, org_id))
+        cur.execute("DELETE FROM tenant.judge_cache WHERE org_id = %s", (org_id,))
+    with 트랜잭션(org_id) as cur:
+        # GET /current 의 문서 칸과 같게 채운다(저장 문서는 pass/warn 이라 검토이유는 없다)
+        d = cur.execute('SELECT "원본파일명", "파싱품질", extraction, created_at, version, "시행일" '
+                        '  FROM tenant.l3_documents WHERE doc_id = %s', (doc_id,)).fetchone()
+        건수 = cur.execute("SELECT count(*) FROM tenant.l3_articles WHERE doc_id = %s", (doc_id,)).fetchone()[0]
+        return L3현재문서(doc_id=doc_id, 원본파일명=d[0], 파싱품질=d[1], 추출방식=d[2], 조_건수=건수,
+                       등록일=d[3].date().isoformat() if d[3] else None, version=d[4],
+                       시행일=d[5].isoformat() if d[5] else None, **_연결_정보(cur, doc_id))
 
 
 @router.get("/{doc_id}", response_model=L3업로드응답)
@@ -176,11 +283,15 @@ def 상태(doc_id: str, org_id: str | None = None) -> L3업로드응답:
 
 
 @router.post("/{doc_id}/confirm", response_model=L3업로드응답)
-def 적용_확인(doc_id: str, org_id: str | None = None) -> L3업로드응답:
-    """확인을 기다리는 문서를 사용자가 세부기준으로 쓰기로 했다. 이 문서가 판정 기준이 되고 이전 문서는 내려간다."""
+def 적용_확인(doc_id: str, 백그라운드: BackgroundTasks, org_id: str | None = None) -> L3업로드응답:
+    """확인을 기다리는 문서를 사용자가 세부기준으로 쓰기로 했다. 이 문서가 판정 기준이 되고 이전 문서는 내려간다.
+    판정 기준이 된 뒤 조문 연결 추천을 백그라운드로 만든다(확인 전에는 쓰지 않을 문서라 만들지 않는다)."""
     if MOCK:
         return _mock_확인처리(doc_id, 적용=True)
-    return _live_확인처리(doc_id, org_id, 적용=True)
+    응답 = _live_확인처리(doc_id, org_id, 적용=True)
+    if 응답.파싱품질 in ("pass", "warn") and org_id:
+        백그라운드.add_task(연결_초안, doc_id, org_id)
+    return 응답
 
 
 @router.post("/{doc_id}/reject", response_model=L3업로드응답)
@@ -242,6 +353,7 @@ def _live_확인처리(doc_id: str, org_id: str | None, 적용: bool) -> L3업�
             cur.execute('UPDATE tenant.l3_documents SET "파싱품질"=%s, "검토결과"=%s WHERE doc_id=%s',
                         (검토.get("원래품질", "warn"), json.dumps(검토, ensure_ascii=False), doc_id))
             적용문서_정리(cur, doc_id, 문서_org[0][0], 성공=True)
+            _초안_시작표시(cur, doc_id)          # 추천은 적용_확인 이 백그라운드로 만든다
             # 계정별 캐시 행은 RLS 로 남을 수 있지만 캐시키의 l3_해시가 바뀌어 이전 근거로 답하지 않는다
             cur.execute("DELETE FROM tenant.judge_cache WHERE org_id = %s", (문서_org[0][0],))
         else:
@@ -306,6 +418,7 @@ def 백그라운드_파싱(doc_id: str, org_id: str) -> None:
             conn.execute("SELECT set_config('app.org_id', %s, true)", (str(org_id),))
             with conn.cursor() as cur:
                 결과 = 파싱(cur, doc_id)
+                초안 = 결과.get("파싱품질") in ("pass", "warn") and _초안_시작표시(cur, doc_id)
                 if 결과.get("ok", True):
                     # 이 연결은 app.org_id 만 설정하므로 RLS 때문에 계정 없는 행(데모 세션)만 지워진다.
                     # 계정별 행은 남지만 캐시키의 l3_해시가 바뀌어 이전 근거로 답하지 않는다.
@@ -316,6 +429,35 @@ def 백그라운드_파싱(doc_id: str, org_id: str) -> None:
     except Exception:                                   # noqa: BLE001
         _log.exception("L3 파싱 백그라운드 작업 실패 doc_id=%s", doc_id)
         _실패_직접기록(doc_id, org_id, "서버오류")
+        return
+    if 초안:
+        연결_초안(doc_id, org_id)
+
+
+def _초안_시작표시(cur, doc_id: str) -> bool:
+    """파싱 결과와 같은 트랜잭션에서 추천 상태를 '작성중' 으로 둔다. 화면이 완료를 본 순간 '추천 없음' 으로 보이지 않게.
+    고를 분류가 없으면(새 경로 사업 없음) 표시하지 않고 False. 실패해도 파싱 결과는 남긴다(세이브포인트)."""
+    try:
+        import l3_link
+        with cur.connection.transaction():
+            if not l3_link.선택지(cur):
+                return False
+            cur.execute('UPDATE tenant.l3_documents SET "연결초안상태" = \'작성중\', "연결초안시각" = now() '
+                        'WHERE doc_id = %s', (doc_id,))
+        return True
+    except Exception:                                   # noqa: BLE001
+        _log.exception("L3 연결 추천 시작 표시 실패 doc_id=%s", doc_id)
+        return False
+
+
+def 연결_초안(doc_id: str, org_id: str) -> None:
+    """옛 판 문구 + 조문 연결 추천(LLM, 50조씩). 판정과 별개이고 예외를 던지지 않는다(scripts/l3_link.초안_만들기)."""
+    try:
+        import l3_link
+        r = l3_link.초안_만들기(doc_id, str(org_id), dsn=DSN)
+        _log.info("L3 연결 추천 doc_id=%s %s", doc_id, r)
+    except Exception:                                   # noqa: BLE001
+        _log.exception("L3 연결 추천 실패 doc_id=%s", doc_id)
 
 
 def _실패_직접기록(doc_id: str, org_id: str, 실패사유: str) -> None:

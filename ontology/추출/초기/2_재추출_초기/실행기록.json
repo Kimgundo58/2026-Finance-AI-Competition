@@ -1,0 +1,143 @@
+{
+ "묶음": "ontology/추출/초기/2_재추출_초기",
+ "마감": "2026-11-08T05:25:01+09:00",
+ "추출자": {
+  "A": {
+   "에이전트ID": "525ca9fd-1374-4f07-b53a-3af9943f39af",
+   "모델": "claude-opus-5-5",
+   "effort": "high",
+   "시작": "2026-11-07T20:23:09.827Z",
+   "끝": "2026-11-07T20:24:48.105Z",
+   "읽은파일": [
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\docs\\5_룰\\5-5_규범_구조.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\docs\\5_룰\\5-7_원문_추출_절차.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\docs\\5_룰\\5-8b_원천_JSON_형식.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\docs\\5_룰\\5-7b_추출_에이전트_지침.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\ontology\\추출\\초기\\2_재추출_초기\\작업_A\\입력_원문.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\ontology\\추출\\초기\\2_재추출_초기\\작업_A\\입력_문서키.json",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\ontology\\추출\\초기\\2_재추출_초기\\작업_A\\입력_기존노드.json"
+   ],
+   "명령": [
+    {
+     "도구": "Bash",
+     "명령": "cd \"C:/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본\" && ls -la \"ontology/추출/초기/2_재추출_초기/작업_A\" && wc -c \"ontology/추출/초기/2_재추출_초기/작업_A\"/* docs/5_룰/5-5_규범_구조.md docs/5_룰/5-7_원문_추출_절차.md docs/5_룰/5-8b_원천_JSON_형식.md docs/5_룰/5-7b_추출_에이전트_지침.md"
+    },
+    {
+     "도구": "Bash",
+     "명령": "cd \"C:/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본/ontology/추출/초기/2_재추출_초기/작업_A\" && PYTHONIOENCODING=utf-8 python -I -c \"\nimport re,unicodedata\ndef n(s):\n    s=unicodedata.normalize('NFC',s)\n    for a in '\\u201c\\u201d\\u2033': s=s.replace(a,'\\\"')\n    for a in '\\u2018\\u2019': s=s.replace(a,\\\"'\\\")\n    return re.sub(r'\\s+',' ',s).strip()\nsrc=n(open('입력_원문.md',encoding='utf-8').read())\nout=open('추출_A.md',encoding='utf-8').read()\nbody=out.split('관계:')[1].split('모르는 것:')[0]\nbad=[e for e in re.findall(r'\\\"([^\\\"]+)\\\"',body) if n(e) not in src]\nprint(len(re.findall(r'\\\"([^\\\"]+)\\\"',body)),'excerpts; bad:',bad)\n\""
+    }
+   ],
+   "허용밖읽기": [],
+   "작업폴더_Read": 3,
+   "비용": 0.5295794,
+   "인증": "ANTHROPIC_API_KEY",
+   "로그": ".claude/작업/api_agents/runs/초기_2_재추출_초기_A.jsonl",
+   "경로": "API",
+   "effort_출처": "인자",
+   "프롬프트해시_출처": "파일",
+   "프롬프트해시": "74d01730f433c67f7cd00c28a7687737f432dd0912a72856cc3ed892687c196d",
+   "덧붙인문장": {
+    "앞": "Input folder: ontology/추출/초기/2_재추출_초기/작업_A\nYou are extractor A. Work independently: another extractor works on the same provisions; do not look for, open or ask about its folder, its output or any file outside the input folder except the documents the prompt below allows.\nIn the prompt below, 입력_원문.md, 입력_문서키.json, 입력_기존노드.json and \"the input folder\" mean the files in ontology/추출/초기/2_재추출_초기/작업_A.",
+    "뒤": "Output format: follow the section 출력 형식 of docs/5_룰/5-7b_추출_에이전트_지침.md exactly, and write the output as ontology/추출/초기/2_재추출_초기/작업_A/추출_A.md.\nKeep this session under 300k tokens of context."
+   },
+   "입력폴더": [
+    {
+     "이름": "입력_기존노드.json",
+     "sha256": "70c53101f7145e35f536b9676c62f9d3a6a53ba1606db131ab65a7932ab9ce32"
+    },
+    {
+     "이름": "입력_문서키.json",
+     "sha256": "f00556fe2b3664674864dd12a6552b9d14b07278f536f0bc8c3d78488c091169"
+    },
+    {
+     "이름": "입력_원문.md",
+     "sha256": "40cbeb9b4a10d132f36a04b3af6af266de7de163858b044eaf4aa7058d250a37"
+    },
+    {
+     "이름": "추출_A.md",
+     "sha256": "fb998483cefe500777d8c9ff0956d45025dcb5f11f6c5117d2a4d10f8f5b9dd1"
+    }
+   ],
+   "추가파일": [],
+   "문제": []
+  },
+  "B": {
+   "에이전트ID": "4e085143-3077-4b4d-97a9-a59d10153fa1",
+   "모델": "claude-opus-5-5",
+   "effort": "high",
+   "시작": "2026-11-07T20:23:09.772Z",
+   "끝": "2026-11-07T20:25:00.472Z",
+   "읽은파일": [
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\ontology\\추출\\초기\\2_재추출_초기\\작업_B\\입력_원문.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\ontology\\추출\\초기\\2_재추출_초기\\작업_B\\입력_문서키.json",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\docs\\5_룰\\5-5_규범_구조.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\docs\\5_룰\\5-7_원문_추출_절차.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\docs\\5_룰\\5-8b_원천_JSON_형식.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\docs\\5_룰\\5-7b_추출_에이전트_지침.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\ontology\\추출\\초기\\2_재추출_초기\\작업_B\\입력_기존노드.json"
+   ],
+   "명령": [
+    {
+     "도구": "Bash",
+     "명령": "cd \"C:/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본/ontology/추출/초기/2_재추출_초기/작업_B\" && ls -la && wc -c *"
+    },
+    {
+     "도구": "Grep",
+     "pattern": "^#+ ",
+     "path": "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\docs\\5_룰\\5-7b_추출_에이전트_지침.md"
+    },
+    {
+     "도구": "Bash",
+     "명령": "cd \"C:/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본/ontology/추출/초기/2_재추출_초기/작업_B\" && PYTHONIOENCODING=utf-8 python -I -c \"\nimport re,unicodedata\ndef n(s):\n    s=unicodedata.normalize('NFC',s)\n    for a in '“”″': s=s.replace(a,'\\\"')\n    for a in '‘’': s=s.replace(a,\\\"'\\\")\n    return re.sub(r'\\s+',' ',s).strip()\nsrc=n(open('입력_원문.md',encoding='utf-8').read())\nout=open('추출_B.md',encoding='utf-8').read()\nbad=[q for q in re.findall(r'\\\"([^\\\"]+)\\\"',out) if n(q) not in src]\nprint('bad',bad)\n\""
+    }
+   ],
+   "허용밖읽기": [],
+   "작업폴더_Read": 3,
+   "비용": 0.5372628,
+   "인증": "ANTHROPIC_API_KEY",
+   "로그": ".claude/작업/api_agents/runs/초기_2_재추출_초기_B.jsonl",
+   "경로": "API",
+   "effort_출처": "인자",
+   "프롬프트해시_출처": "파일",
+   "프롬프트해시": "bd4f6d6dd160b292985199dbbf38b536c5080a321f9489c8235516e13efc07a1",
+   "덧붙인문장": {
+    "앞": "Input folder: ontology/추출/초기/2_재추출_초기/작업_B\nYou are extractor B. Work independently: another extractor works on the same provisions; do not look for, open or ask about its folder, its output or any file outside the input folder except the documents the prompt below allows.\nIn the prompt below, 입력_원문.md, 입력_문서키.json, 입력_기존노드.json and \"the input folder\" mean the files in ontology/추출/초기/2_재추출_초기/작업_B.",
+    "뒤": "Output format: follow the section 출력 형식 of docs/5_룰/5-7b_추출_에이전트_지침.md exactly, and write the output as ontology/추출/초기/2_재추출_초기/작업_B/추출_B.md.\nKeep this session under 300k tokens of context."
+   },
+   "입력폴더": [
+    {
+     "이름": "입력_기존노드.json",
+     "sha256": "70c53101f7145e35f536b9676c62f9d3a6a53ba1606db131ab65a7932ab9ce32"
+    },
+    {
+     "이름": "입력_문서키.json",
+     "sha256": "f00556fe2b3664674864dd12a6552b9d14b07278f536f0bc8c3d78488c091169"
+    },
+    {
+     "이름": "입력_원문.md",
+     "sha256": "40cbeb9b4a10d132f36a04b3af6af266de7de163858b044eaf4aa7058d250a37"
+    },
+    {
+     "이름": "추출_B.md",
+     "sha256": "512ecbd7991f3aee522115ea05d49320479c4e81fd561fedae6ea680ca6e7261"
+    }
+   ],
+   "추가파일": [],
+   "문제": []
+  }
+ },
+ "통과": true,
+ "검증자": {
+  "이름": "초기_2_재추출_초기_V",
+  "세션": "e4f52358-fd04-4bf2-9e3f-d821f8dcb58e",
+  "모델": "claude-opus-5-5",
+  "effort": "high",
+  "effort_출처": "run.py 인자",
+  "프롬프트": "ontology/추출/초기/2_재추출_초기/프롬프트_검증자.md",
+  "프롬프트해시": "77ec59d5a336c3a85188e343ee0e227a689aa39a5b37ee97440cf9c59edcb661",
+  "덧붙임": true,
+  "비용": 0.6134577999999999,
+  "시작": "2026-11-08T05:25:01",
+  "프롬프트해시_정정": "처음 값 4b2ccb2f2ac09544152bbdd80d97467c9d5666931700138e02ef4d37598a927e 은 작업 트리 CRLF 바이트의 해시였다. 저장소는 LF 로 저장하므로 LF 바이트로 다시 셌다(검토 4차 지적 4c, 2026-11-08). 글자는 같다"
+ }
+}

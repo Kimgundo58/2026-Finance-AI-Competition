@@ -4,7 +4,8 @@
 /api/normalize·/api/judge·/api/questions 가 캐시키() 로 키를 만들고 조회(k, org, account)·저장(k, 값, 종류=, org=, account=) 를
 부른다. 게스트(org 없음)는 프로세스 메모리(FIFO, 재시작하면 사라진다), 인증된 org 는 tenant.judge_cache 를 쓴다.
 DB 캐시 행은 계정 단위다(account_id, RLS account_isolation). 데모 세션은 계정이 없어 account_id 가 NULL 이다.
-두 캐시 모두 _데이터버전_해시()(코퍼스·룰·우선순위 규칙·체크항목·별칭 버전)가 저장 때와 같을 때만 적중한다.
+두 캐시 모두 _데이터버전_해시()(코퍼스·룰·우선순위 규칙·체크항목·별칭·온톨로지 버전과 SUDDOE_ONTOLOGY_PROGRAMS)가
+저장 때와 같을 때만 적중한다.
 확인 질문은 키가 곧 질문세트이고 저장(ttl초=) 로 항목별 만료 시각을 준다. 질문세트_조회() 는 조회() 와 달리 일일
 카운트를 되돌리지 않는다. /api/questions 의 캐시 확인(카운트를 올리기 전)과 판정 요청 안의 조회가 쓴다.
 환경변수: SUDDOE_RESPONSE_CACHE_TTL(기본 900초), SUDDOE_RESPONSE_CACHE_MAX(메모리 항목 수, 기본 512),
@@ -14,11 +15,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import threading
 import time
 from typing import Any
 
-from server._common import MOCK, _jsonb, _계정조건, _실행, _정수_환경변수, _질의, ttl_캐시
+from server._common import MOCK, _jsonb, _계정조건, _실행, _정수_환경변수, _질의, ttl_캐시, 트랜잭션
 from server.rate_limit import 제한
 
 _TTL초 = _정수_환경변수("SUDDOE_RESPONSE_CACHE_TTL", 900, 구이름="SUDDOE_CACHE_TTL")  # 구 이름 호환(제거 예정: 다음 릴리스)
@@ -49,9 +51,13 @@ def l3_해시(org: str | None) -> str:
     """
     if org is None or MOCK:
         return ""
+    # 사용자가 확인한 조문 연결(concept_ids)은 새 경로 판정 문맥을 바꾼다(P4-5). 연결이 없으면 예전 값과 같다
     행 = _질의('SELECT md5(coalesce(string_agg(doc_id::text || \':\' || coalesce("파싱품질", \'\') '
-              '|| \':\' || coalesce(status, \'\'), \'#\' ORDER BY doc_id), \'\')) '
-              'FROM tenant.l3_documents WHERE org_id = %s', (org,))
+              '|| \':\' || coalesce(status, \'\'), \'#\' ORDER BY doc_id), \'\') '
+              '|| coalesce(\'|\' || (SELECT string_agg(a.article_id::text || \':\' || array_to_string(a.concept_ids, \',\'), '
+              '\'#\' ORDER BY a.article_id) FROM tenant.l3_articles a JOIN tenant.l3_documents d ON d.doc_id = a.doc_id '
+              ' WHERE d.org_id = %s AND d.status = \'active\' AND a.concept_ids IS NOT NULL), \'\')) '
+              'FROM tenant.l3_documents WHERE org_id = %s', (org, org))
     return 행[0][0] if 행 else ""
 
 
@@ -65,7 +71,7 @@ def 프로필_해시(org: str | None, account: str | None = None) -> str:
         return ""
     조건, 인자 = _계정조건(org, "p", account)
     행 = _질의('SELECT md5(coalesce(string_agg(concat_ws(\'|\', profile_id, "사업명", "협약시작일", '
-              '"협약종료일", "정부지원_현금", "자기부담_현금", "과업범위요약"), \'#\' ORDER BY profile_id), \'\')) '
+              '"협약종료일", "정부지원_현금", "자기부담_현금", "과업범위요약", "자기부담_현물"), \'#\' ORDER BY profile_id), \'\')) '
               f'FROM tenant.profile_agreements p WHERE {조건}', 인자)
     return 행[0][0] if 행 else ""
 
@@ -103,6 +109,8 @@ def 저장(k: str, 값: Any, *, 종류: str, org: str | None, account: str | Non
     ttl초 = _TTL초 if ttl초 is None else ttl초
     if 데이터버전_해시 is None:
         데이터버전_해시 = _게스트_해시() if org is None else _데이터버전_해시()
+    if 데이터버전_해시 == "unknown":
+        return False
     if org is None:
         해시 = 데이터버전_해시
         with _락:
@@ -145,6 +153,8 @@ def _게스트_해시() -> str:
 def _메모리_조회(k: str) -> Any | None:
     # 규정 활성화·룰 수정으로 데이터 버전 해시가 바뀌면 TTL 이 남았어도 버린다(DB 캐시와 같은 기준).
     해시 = _게스트_해시()
+    if 해시 == "unknown":
+        return None
     with _락:
         v = _메모리.get(k)
         if not v:
@@ -158,11 +168,14 @@ def _메모리_조회(k: str) -> Any | None:
 
 def _db_조회(k: str, org: str, account: str | None) -> Any | None:
     # 게스트는 여기 오지 않는다. RLS 정책은 org_id = current_org() 라 org 가 NULL 이면 통과하지 못한다.
+    해시 = _데이터버전_해시()
+    if 해시 == "unknown":
+        return None
     조건, 인자 = _계정조건(org, "c", account)
     행 = _질의(
         'SELECT value FROM tenant.judge_cache c '
         f'WHERE c.key=%s AND {조건} AND c.expires_at > now() AND c.데이터버전_해시=%s',
-        (k, *인자, _데이터버전_해시()))
+        (k, *인자, 해시))
     return 행[0][0] if 행 else None
 
 
@@ -201,7 +214,30 @@ _데이터버전_해시_SQL = """SELECT (SELECT count(*) FROM corpus.chunks),
                                 || coalesce(max(created_at)::text, '')
                            FROM corpus.item_alias),
                         -- staged 문서를 활성화하면 청크 수는 그대로이고 상태만 바뀐다
-                        (SELECT count(*) FROM corpus.chunks WHERE status = 'active')"""
+                        (SELECT count(*) FROM corpus.chunks WHERE status = 'active'),
+                        -- 온톨로지(docs/5_룰/5-8_저장과_조회.md)는 행이 적어 행 전체를 해시한다.
+                        (SELECT md5(coalesce(string_agg(t::text, '#' ORDER BY concept_id), ''))
+                           FROM corpus.concepts t),
+                        (SELECT md5(coalesce(string_agg(t::text, '#' ORDER BY 정규화, 적용사업, concept_id), ''))
+                           FROM corpus.concept_labels t),
+                        (SELECT md5(coalesce(string_agg(t::text, '#' ORDER BY src_id, 관계, dst_id, 적용사업), ''))
+                           FROM corpus.concept_relations t),
+                        (SELECT md5(coalesce(string_agg(t::text, '#' ORDER BY norm_id), ''))
+                           FROM corpus.norms t),
+                        -- 용어 풀이(6-5): 질문 프롬프트와 질문 · 판정 응답 `용어풀이` 가 읽는다. 검수단계를 낮추면 캐시가 무효다
+                        (SELECT md5(coalesce(string_agg(t::text, '#' ORDER BY term_id), ''))
+                           FROM corpus.terminology t)"""
+
+
+def 데이터버전_문자열(n: tuple) -> str:
+    """_데이터버전_해시_SQL 한 행 + 환경변수 SUDDOE_ONTOLOGY_PROGRAMS → 해시 문자열.
+
+    경로를 고르는 환경변수가 바뀌면 같은 데이터로도 판정이 달라지므로 조각으로 더한다.
+    scripts/ontology_load.py 가 적재 전후 값을 비교하려고 같은 함수를 쓴다.
+    """
+    조각 = [*n, os.environ.get("SUDDOE_ONTOLOGY_PROGRAMS", "")]
+    h = hashlib.sha1("|".join(map(str, 조각)).encode()).hexdigest()[:10]
+    return f"c{n[0]}-e{n[1]}-r{n[2]}-d{n[3]}-rule{n[5]}v{n[6]}-rc{str(n[7])[:8]}-{h}"
 
 
 @ttl_캐시("SUDDOE_DATA_VERSION_TTL", 300, 구이름="SUDDOE_CONFIG_HASH_TTL")  # 구 이름 호환(제거 예정: 다음 릴리스)
@@ -210,10 +246,21 @@ def _데이터버전_해시_조회() -> str:
     행 = _질의(_데이터버전_해시_SQL)
     if not 행:
         return ""
-    n = 행[0]
-    h = hashlib.sha1("|".join(map(str, n)).encode()).hexdigest()[:10]
-    return f"c{n[0]}-e{n[1]}-r{n[2]}-d{n[3]}-rule{n[5]}v{n[6]}-rc{str(n[7])[:8]}-{h}"
+    return 데이터버전_문자열(행[0])
 
 
 def _데이터버전_해시() -> str:
-    return _데이터버전_해시_조회() or "unknown"
+    기본 = _데이터버전_해시_조회()
+    if not 기본:
+        return "unknown"
+    if MOCK or not os.environ.get("SUDDOE_ONTOLOGY_PROGRAMS", "").strip():
+        return 기본
+    # 그래프 재적재·미동기화·누락은 300초짜리 원천 해시 캐시와 무관하게 확인한다.
+    # 장애 중 저장된 응답이 AGE 조회를 우회하지 않도록 캐시 적중도 금지한다.
+    try:
+        from scripts.ontology_age import 준비_버전
+        with 트랜잭션() as cur:
+            버전 = 준비_버전(cur)
+        return f"{기본}-age{버전}"
+    except Exception:
+        return "unknown"

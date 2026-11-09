@@ -1,0 +1,102 @@
+{
+ "묶음": "ontology/추출/재도전/1_재도전_본문_공통인용",
+ "검사": "scripts/extraction_run.py 로그_읽기(구독 transcript 를 init 줄 + assistant 줄로 바꿔 넣음)",
+ "추출자": {
+  "A": {
+   "에이전트ID": "a1df52606977452a2",
+   "transcript": "C:\\Users\\dogun\\.claude\\projects\\C--Users-dogun-Downloads-Desktop-Desktop-Desktop-Desktop-----3-1------------github----\\01377b18-d61a-4565-af8b-80e9cf3c38dc\\subagents\\agent-a1df52606977452a2.jsonl",
+   "모델": [
+    "claude-opus-5-5"
+   ],
+   "effort": [
+    "high"
+   ],
+   "effort_출처": "transcript assistant 줄",
+   "프롬프트_글자같음": true,
+   "프롬프트해시_LF": "83b25b69d1da3a882c194bf9e320aa3608daf57678afc1ce657bcc888ee14e0a",
+   "시작": "2026-11-08T01:43:47.150Z",
+   "끝": "2026-11-08T01:53:55.546Z",
+   "읽은파일": [
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\docs\\5_룰\\5-5_규범_구조.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\docs\\5_룰\\5-7_원문_추출_절차.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\docs\\5_룰\\5-8b_원천_JSON_형식.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\docs\\5_룰\\5-7b_추출_에이전트_지침.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\ontology\\추출\\재도전\\1_재도전_본문_공통인용\\작업_A\\입력_원문.md",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\ontology\\추출\\재도전\\1_재도전_본문_공통인용\\작업_A\\입력_문서키.json",
+    "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\ontology\\추출\\재도전\\1_재도전_본문_공통인용\\작업_A\\입력_기존노드.json"
+   ],
+   "명령": [
+    {
+     "도구": "Glob",
+     "pattern": "ontology/추출/재도전/1_재도전_본문_공통인용/작업_A/**"
+    },
+    {
+     "도구": "Bash",
+     "명령": "mkdir -p \"C:/Users/dogun/AppData/Local/Temp/claude/27e28e8e3953af44/01377b18-d61a-4565-af8b-80e9cf3c38dc/scratchpad/jaedojeon_A\" && cat > \"C:/Users/dogun/AppData/Local/Temp/claude/27e28e8e3953af44/01377b18-d61a-4565-af8b-80e9cf3c38dc/scratchpad/jaedojeon_A/check.py\" <<'EOF'\nimport re, sys, unicodedata\nsrc, out = sys.argv[1], sys.argv[2]\ndef norm(s):\n    s = unicodedata.normalize('NFC', s)\n    for a in '“”″': s = s.replace(a, '\"')\n    for a in '‘’': s = s.replace(a, \"'\")\n    s = re.sub(r'- \\d+ -', '', s)\n    return re.sub(r'\\s+', ' ', s).strip()\nblocks = {}\ncur = None\nfor line in open(src, encoding='utf-8'):\n    m = re.match(r'### (조:\\S.*)$', line.rstrip())\n    if m: cur = m.group(1).strip(); blocks[cur] = ''; continue\n    if cur: blocks[cur] += line\nnb = {k: norm(v) for k, v in blocks.items()}\ntxt = open(out, encoding='utf-8').read()\nprovs = re.findall(r'^### (조:.*)$', txt, re.M)\nprint('provisions', len(provs), 'input', len(blocks), 'missing', set(blocks) - set(provs))\nconcepts, rels, norms_ = set(), 0, 0\nnewc = set()\nbad = 0\nfor blk in re.split(r'^### ', txt, flags=re.M)[1:]:\n    pid = blk.split('\\n', 1)[0].strip()\n    body = blk.split('\\n', 1)[1]\n    in_rel = in_norm = False\n    for line in body.split('\\n'):\n        if line.startswith('개념:'):\n            for m in re.finditer(r'(\\S+:\\S+) \\((기존|신규)\\)', line):\n                concepts.add(m.group(1))\n                if m.group(2) == '신규': newc.add(m.group(1))\n        if line.startswith('관계:'): in_rel, in_norm = True, False\n        elif line.startswith('규범:'): in_rel, in_norm = False, True\n        elif not line.startswith('      '): in_rel = in_norm = False\n        if in_rel and ' -' in line and '-> ' in line: rels += 1\n        if in_norm and re.search(r'규범:재도전/|규범:공통/', line): norms_ += 1\n        if in_rel or in_norm:\n            if ' | ' in line and in_norm:\n                for cell in line.split(' | '):\n                    if cell.strip().startswith('문장') and '\"' in cell: print('QUOTE IN 문장', pid)\n            for q in re.findall(r'\"([^\"]*)\"', line):\n                tgt = nb.get(pid, '')\n                m2 = re.search(r'근거 (조:\\S+) \"', line)\n                if m2: tgt = nb.get(m2.group(1), '')\n                if norm(q) not in tgt:\n                    bad += 1; print('BAD', pid, '|', q)\nprint('concepts', len(concepts), 'new', len(newc), sorted(newc))\nprint('relations', rels, 'norms', norms_, 'bad excerpts', bad)\nEOF\ncd \"C:/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본/ontology/추출/재도전/1_재도전_본문_공통인용/작업_A\" && PYTHONIOENCODING=utf-8 python -I \"C:/Users/dogun/AppData/Local/Temp/claude/27e28e8e3953af44/01377b18-d61a-4565-af8b-80e9cf3c38dc/scratchpad/jaedojeon_A/check.py\" 입력_원문.md 추출_A.md; ls"
+    }
+   ],
+   "허용밖읽기": [],
+   "로그_읽기_원래": [
+    "Glob C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본"
+   ],
+   "자기폴더_Glob_허용": [
+    "Glob C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본 ontology/추출/재도전/1_재도전_본문_공통인용/작업_A/**"
+   ],
+   "작업폴더_Read": 3,
+   "문제": []
+  },
+  "B": {
+   "에이전트ID": "a12b28fb8ea176a03",
+   "transcript": "C:\\Users\\dogun\\.claude\\projects\\C--Users-dogun-Downloads-Desktop-Desktop-Desktop-Desktop-----3-1------------github----\\01377b18-d61a-4565-af8b-80e9cf3c38dc\\subagents\\agent-a12b28fb8ea176a03.jsonl",
+   "모델": [
+    "claude-opus-5-5"
+   ],
+   "effort": [
+    "high"
+   ],
+   "effort_출처": "transcript assistant 줄",
+   "프롬프트_글자같음": true,
+   "프롬프트해시_LF": "a7776a97c3408b20e851755c2cfc584d0ef5e0479e2364d5b04c0ce6a172c0ba",
+   "시작": "2026-11-08T01:43:55.478Z",
+   "끝": "2026-11-08T01:53:08.605Z",
+   "읽은파일": [
+    "C:/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본/docs/5_룰/5-5_규범_구조.md",
+    "C:/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본/docs/5_룰/5-7_원문_추출_절차.md",
+    "C:/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본/docs/5_룰/5-8b_원천_JSON_형식.md",
+    "C:/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본/docs/5_룰/5-7b_추출_에이전트_지침.md",
+    "C:/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본/ontology/추출/재도전/1_재도전_본문_공통인용/작업_B/입력_원문.md",
+    "C:/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본/ontology/추출/재도전/1_재도전_본문_공통인용/작업_B/입력_문서키.json",
+    "C:/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본/ontology/추출/재도전/1_재도전_본문_공통인용/작업_B/입력_기존노드.json"
+   ],
+   "명령": [
+    {
+     "도구": "Bash",
+     "명령": "ls -la \"C:/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본/ontology/추출/재도전/1_재도전_본문_공통인용/작업_B\"; wc -c \"C:/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본/ontology/추출/재도전/1_재도전_본문_공통인용/작업_B\"/*"
+    },
+    {
+     "도구": "Grep",
+     "pattern": "^#",
+     "path": "C:/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본/docs/5_룰/5-7b_추출_에이전트_지침.md"
+    },
+    {
+     "도구": "Bash",
+     "명령": "mkdir -p \"C:/Users/dogun/AppData/Local/Temp/claude/27e28e8e3953af44/01377b18-d61a-4565-af8b-80e9cf3c38dc/scratchpad/jaedojeon_B\" && echo ok"
+    },
+    {
+     "도구": "Bash",
+     "명령": "cd \"C:/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본/ontology/추출/재도전/1_재도전_본문_공통인용/작업_B\" && PYTHONIOENCODING=utf-8 python -I \"C:/Users/dogun/AppData/Local/Temp/claude/27e28e8e3953af44/01377b18-d61a-4565-af8b-80e9cf3c38dc/scratchpad/jaedojeon_B/check.py\" 입력_원문.md 추출_B.md"
+    },
+    {
+     "도구": "Bash",
+     "명령": "ls \"C:/Users/dogun/Downloads/Desktop/Desktop/Desktop/Desktop/김건도/3-1 여름방학/금용공모전_github_최종본/ontology/추출/재도전/1_재도전_본문_공통인용/작업_B\""
+    }
+   ],
+   "허용밖읽기": [],
+   "로그_읽기_원래": [],
+   "자기폴더_Glob_허용": [],
+   "작업폴더_Read": 3,
+   "문제": []
+  }
+ },
+ "통과": true
+}

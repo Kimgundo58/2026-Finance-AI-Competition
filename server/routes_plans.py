@@ -161,6 +161,8 @@ def _계획_org(요청: Request, 요청_org_id: str | None) -> str | None:
 
 @router.post("", response_model=계획상세, status_code=201)
 def 생성(요청: Request, body: 계획생성) -> 계획상세:
+    # 조사ID는 현재 조사 세션의 자격증명이라 계획 데이터에 보관하지 않는다.
+    body.정규화 = {k: v for k, v in body.정규화.items() if k != '조사ID'}
     if MOCK:
         새 = max((p["plan_id"] for p in mock_data.mock_계획), default=0) + 1
         행 = {
@@ -214,7 +216,7 @@ def 상세(plan_id: int, org_id: str | None = None) -> 계획상세:
 
 @router.patch("/{plan_id}", response_model=계획상세)
 def 수정(plan_id: int, body: 계획수정, org_id: str | None = None) -> 계획상세:
-    """예상 지출일을 바꾼다. 판정 경로는 집행예정일을 읽지 않아 판정은 그대로다."""
+    """예상 지출일을 바꾼다. 판정을 다시 돌리지 않아 판정은 그대로다. 새 경로는 다음 재점검 때 이 값으로 지난 기한 문장을 뺀다."""
     if MOCK:
         행 = next((p for p in mock_data.mock_계획 if p["plan_id"] == plan_id), None)
         if not 행:
@@ -307,20 +309,17 @@ def 삭제(plan_id: int, org_id: str | None = None) -> dict:
         return {"삭제": True, "plan_id": plan_id, "할일삭제": len(할일)}
 
     조건, org인자 = _계정조건(org_id, "p")
-    # CASCADE 뒤에는 셀 수 없으므로 지우기 전에 센다
-    행 = _질의(
-        f"SELECT p.제목, (SELECT count(*) FROM tenant.plan_tasks t WHERE t.plan_id = p.plan_id) "
-        f"  FROM tenant.expense_plans p WHERE p.plan_id = %s AND {조건}",
-        (plan_id, *org인자))
-    if not 행:
-        # 다른 org 의 계획이어도 404 다. 403 을 주면 id 존재 여부가 드러난다
-        raise HTTPException(404, f"지출계획 {plan_id} 을(를) 찾을 수 없습니다")
-    제목, 할일수 = 행[0]
-    첨부파일 = routes_attachments.계획_첨부id(plan_id)
-    n = _실행(f"DELETE FROM tenant.expense_plans p WHERE p.plan_id = %s AND {조건}",
-             (plan_id, *org인자))
-    if n != 1:
-        raise HTTPException(404, f"지출계획 {plan_id} 을(를) 찾을 수 없습니다")
+    with 트랜잭션() as cur:
+        cur.execute(f"SELECT p.제목, (SELECT count(*) FROM tenant.plan_tasks t WHERE t.plan_id = p.plan_id) "
+                    f"FROM tenant.expense_plans p WHERE p.plan_id = %s AND {조건} FOR UPDATE",
+                    (plan_id, *org인자))
+        행 = cur.fetchone()
+        if not 행:
+            raise HTTPException(404, f"지출계획 {plan_id} 을(를) 찾을 수 없습니다")
+        제목, 할일수 = 행
+        cur.execute("SELECT attachment_id::text FROM tenant.plan_attachments WHERE plan_id = %s", (plan_id,))
+        첨부파일 = [r[0] for r in cur.fetchall()]
+        cur.execute(f"DELETE FROM tenant.expense_plans p WHERE p.plan_id = %s AND {조건}", (plan_id, *org인자))
     routes_attachments.파일들_지우기(첨부파일)     # 행은 CASCADE 로 지워졌다
     _log.info("지출계획 삭제 plan_id=%s 제목=%r 할일 %d건 동반삭제", plan_id, 제목, 할일수)
     return {"삭제": True, "plan_id": plan_id, "제목": 제목, "할일삭제": 할일수}
@@ -455,7 +454,7 @@ _상세_컬럼 = ("plan_id", "제목", "확정비목", "금액", "판정", "집�
              "updated_at", "created_at", "사업명", "상태", "질문원문",
              "거래처", "추가설명", "정규화", "latest_decision_id",
              "요약", "해야할일", "인용", "전제", "신뢰등급", "규정버전",
-             "참조관계", "검증사유", "사용자답변", "실제지출일", "실제지출액", "기준문서")
+             "참조관계", "검증사유", "사용자답변", "온톨로지결과", "실제지출일", "실제지출액", "기준문서")
 
 # 응답 키 순서. DB 컬럼 plan_tasks.코드 는 응답 키 code 로 내보낸다.
 _계획할일_컬럼 = ("task_id", "plan_id", "출처", "code", "구분", "항목", "설명", "due_date",
@@ -470,7 +469,7 @@ def _live_상세(plan_id: int, org_id: str | None) -> 계획상세:
                p.updated_at, p.created_at, p.사업명, p.상태, p.질문원문,
                p.거래처, p.추가설명, p.정규화, p.latest_decision_id,
                d.요약, d.해야할일, d.인용, d.전제, d.신뢰등급, d.규정버전,
-               d.참조관계, d.검증사유, d."사용자답변", p."실제지출일", p."실제지출액", d."기준문서"
+               d.참조관계, d.검증사유, d."사용자답변", d."온톨로지결과", p."실제지출일", p."실제지출액", d."기준문서"
         FROM tenant.expense_plans p
         LEFT JOIN tenant.decisions d ON d.decision_id = p.latest_decision_id
         WHERE p.plan_id = %s AND {조건}
@@ -487,6 +486,9 @@ def _live_상세(plan_id: int, org_id: str | None) -> 계획상세:
             "인용": r["인용"] or [], "전제": r["전제"] or [], "신뢰등급": r["신뢰등급"],
             "규정버전": r["규정버전"], "참조관계": r["참조관계"] or [],
             "검증사유": r["검증사유"] or [], "기준문서": r["기준문서"],
+            # 온톨로지 경로의 결과 화면 값. 옛 경로 판정은 빈 값이라 화면이 그리지 않는다
+            "분류": None, "근거경로": [], "코드판정": None, "조건": [], "기한조건": [], "금지조건": [], "해당시조건": [], "공통사항": [], "확인한조건": [], "용어풀이": [], "문의처": None,
+            **(r["온톨로지결과"] or {}),
         }
         판정상세 = 구_판정키_포함(판정상세)  # 구 이름 호환(제거 예정: 다음 릴리스)
         # 문의초안은 저장하지 않고 조회 때마다 만든다. 저장된 인용·전제·정규화에서 파생되는

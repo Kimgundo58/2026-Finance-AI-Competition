@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import os
 import re
 import traceback
@@ -118,6 +119,10 @@ def _조문_저장(cur, doc_id: str, org_id, arts: list[dict]) -> None:
     """
     # UNIQUE(doc_id, 조번호) 가 있고 chapter·paragraph 전략은 중복 조번호를 낼 수 있어 ON CONFLICT 로 거른다
     with cur.connection.transaction():
+        # 같은 문서를 다시 파싱하면 조번호 · 본문이 그대로인 조의 연결 확인값 · 추천 · 옛 판 문구를 이어 쓴다.
+        # 본문이 달라진 조는 미확인(NULL)으로 돌아가 판정이 그 조를 늘 넣는다. 새 문서(교체)는 l3_link 가 이전 문서에서 재사용한다
+        이전 = cur.execute('SELECT "조번호", "본문", concept_ids, "연결초안", "옛판문구" FROM tenant.l3_articles '
+                         "WHERE doc_id=%s", (doc_id,)).fetchall()
         cur.execute("DELETE FROM tenant.l3_articles WHERE doc_id=%s", (doc_id,))
         for a in arts:
             cur.execute(
@@ -127,6 +132,12 @@ def _조문_저장(cur, doc_id: str, org_id, arts: list[dict]) -> None:
                 "ON CONFLICT (doc_id, \"조번호\") DO NOTHING",
                 (doc_id, org_id, a["조번호"], a.get("조제목"), a.get("조순번"),
                  a.get("장"), a["본문"], a.get("페이지")))
+        for 조번호, 본문, 확인, 초안, 옛판 in 이전:
+            if 확인 is not None or 초안 is not None or 옛판 is not None:
+                cur.execute('UPDATE tenant.l3_articles SET concept_ids=%s, "연결초안"=%s, "옛판문구"=%s '
+                            'WHERE doc_id=%s AND "조번호"=%s AND "본문"=%s',
+                            (확인, 초안, json.dumps(옛판, ensure_ascii=False) if 옛판 is not None else None,
+                             doc_id, 조번호, 본문))
 
 
 def _미해결참조_수(cur, arts: list[dict]) -> int:

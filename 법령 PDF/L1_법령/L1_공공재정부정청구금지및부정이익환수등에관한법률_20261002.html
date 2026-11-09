@@ -1,0 +1,725 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="ko" xml:lang="ko">
+ <head></head>
+ <body>
+  <input type="hidden" id="lsNm" name="lsNm" value="공공재정 부정청구 금지 및 부정이익 환수 등에 관한 법률" /> 
+  <input type="hidden" id="lsId" name="lsId" value="013463" /> 
+  <input type="hidden" id="lsiSeq" name="lsiSeq" value="290651" /> 
+  <input type="hidden" id="ancYd" name="ancYd" value="20260324" /> 
+  <input type="hidden" id="efYd" name="efYd" value="20261002" /> 
+  <input type="hidden" id="ancNo" name="ancNo" value="21490" /> 
+  <input type="hidden" id="lsBdyChrCls" name="lsBdyChrCls" value="010202" /> 
+  <input type="hidden" id="lumIsConOrdin" value="" /> 
+  <input type="hidden" id="nwYnValue" value="Y" /> 
+  <input type="hidden" id="hstLnkDpYn" value="0" /> 
+  <style>
+.byl_pop ul li {
+	padding: 7px;
+	margin-left: 10px;
+}
+</style> 
+  <script type="text/javascript">
+$(document).ready(function(){
+	customResizePop(); // 본문 리사이즈
+	initEDotXPress('\uACF5\uACF5\uC7AC\uC815 \uBD80\uC815\uCCAD\uAD6C \uAE08\uC9C0 \uBC0F \uBD80\uC815\uC774\uC775 \uD658\uC218 \uB4F1\uC5D0 \uAD00\uD55C \uBC95\uB960');
+});
+
+function customResizePop() {
+		// 본문 버튼 높이 만큼 제공한다. 13은 패딩값
+		var $contentHeight = $("#center").height() - ($('.body_top_area').height() + 13);
+		var $conTopHeight = $('#conTop').height() + 35;
+
+		var bdyValue = lsVO.bdyUpdValue.updateContentNm || 'lsBdy';
+		
+        //lsInfoP 가 열릴 때 본문은 무조건 조회 하기 때문에 조건문 밖에 위치 하도록 변경.
+		$('#viewwrapCenter').css('overflow-y', 'hidden');
+        $('#bodyContentTOP > #viewwrapCenter').height($contentHeight);
+        $('#conScroll').height($('#viewwrapCenter').height() - $conTopHeight);
+        
+        if (bdyValue == 'lsBdy') {
+			/* 본문에서는 법령명 고정 때문에 hidden 처리*/
+			$('#viewwrapCenter').css('overflow-y', 'hidden');
+			$('#bodyContentTOP > #viewwrapCenter').height($contentHeight);
+			if($('#viewwrapCenter2').height() != null || $('#viewwrapCenter2').height() == 0){
+				$('#bodyContentTOP > #viewwrapCenter2').height($contentHeight);
+				$('#conScroll').height($('#viewwrapCenter2').height() - $conTopHeight);
+				$('#viewwrapCenter2').css('overflow', 'hidden');
+			}
+			$('#bodyContent').css('width', 'inherit');
+		} else if (bdyValue == 'lsPtnThdCmp') {
+			lspttnThdCmpResize();
+		} else if (bdyValue == 'lumThdCmp') {
+			thdCmpNewScPResize();
+		} else if (bdyValue == 'lumThdCmpSc') {
+
+		} else if (bdyValue == 'thdCmpNew') {
+
+		} else if (bdyValue == 'lsOldAndNew') {				
+			// 신구법은 이전 이후 버튼 높이까지 마이너스 한다. 
+			$('#bodySideContent > #oldAndNewDiv').height(($contentHeight + $('#tmpWidth').height()-114));
+		} else if (bdyValue == 'lsRvsDocInfoR') {
+
+			$('#bodySideContent > #viewwrapCenter').height($contentHeight);
+			$('#conScroll').height($('#viewwrapCenter').height() - $conTopHeight);
+			$('#conTop').height($('.cont_top').height());
+			$('#rvsConScroll').height($('#viewwrapCenter').height() - $('#rvsConTop').height());
+			
+		} else {
+			$('#bodySideContent > #viewwrapCenter').height($contentHeight);
+		}
+}
+
+function fileLayer(temp){
+	var tempStr = $("#hwptext"+temp).attr("value");
+	if(tempStr.length > 32){
+ 		$("#hwptext"+temp).css("width", "80%").css("text-overflow", "ellipsis").css("overflow","hidden").css("white-space","nowrap");
+ 		$("#hwpxtext"+temp).css("width", "80%").css("text-overflow", "ellipsis").css("overflow","hidden").css("white-space","nowrap");
+ 		$("#pdftext"+temp).css("width", "80%").css("text-overflow", "ellipsis").css("overflow","hidden").css("white-space","nowrap");
+ 	}
+
+ 	$(".byl_pop").css("display","none");
+
+ 	//레이어높이값
+ 	var height = $("#fileSaveLayer"+temp).height();
+ 	//본문 제일 하단 위치값 
+	var pagePos = document.querySelector('#center');
+	pagePos = pagePos.getBoundingClientRect().bottom;
+	//레이어버튼위치값
+	var layPos =document.querySelector('#imgPos'+temp);
+	layPos = layPos.getBoundingClientRect().bottom;
+	var lay_pop = $('#fileSaveLayer'+temp);
+	var pos = $('#imgPos'+temp).position();
+	
+	if(pagePos > height+layPos){ //레이어가 잘리지 않을 때 
+		lay_pop.css('top', (pos.top)+25 + 'px');
+		lay_pop.css('left', '250px')
+	}else{ //레이어가 잘릴 때
+		lay_pop.css('top', ((pos.top)-height)+ 'px');
+		lay_pop.css('left', (pos.left)+25+'px');
+	}
+	document.getElementById("fileSaveLayer"+temp).style.display="block";
+}
+
+function copyToClipBoard(temp2){
+	var content = document.getElementById('textarea'+temp2);
+	content.select();
+	document.execCommand('copy');
+	alert("주소가 클립보드에 저장되었습니다.");
+	content.setSelectionRange(0,0);
+}
+
+function delLayer(temp){
+	document.getElementById("fileSaveLayer"+temp).style.display="none";
+}
+
+</script> 
+  <div id="contentBody" class="scr_ctrl"> 
+   <div id="sideCenter" class="cont_area"> 
+    <ul class="cont_icon"> 
+     <li><a><img alt="판" src="/LSW/images/button/btn_jostmdico.gif" />판례</a></li> 
+     <li><a><img alt="연" src="/LSW/images/button/btn_year3.gif" />연혁</a></li> 
+     <li><a><img alt="행" src="/LSW/images/button/btn_entrust3_2.gif" />위임행정규칙</a></li> 
+     <li><a><img alt="규" src="/LSW/images/button/btn_entrust4_2.gif" />규제</a></li> 
+     <li><a><img alt="한" src="/LSW/images/button/btn_oneviewIcon.gif" />한눈보기</a></li> 
+    </ul> 
+    <!-- 연혁법령 안내문구 --> 
+    <!-- 법령명 --> 
+    <div id="conTop" class="cont_top"> 
+     <a id="top"></a> 
+     <!-- 국민신문고 연결배너 출력 --> 
+     <h2> 공공재정 부정청구 금지 및 부정이익 환수 등에 관한 법률 <span>( 약칭: 공공재정환수법 )</span> </h2> 
+     <div class="ct_sub"> 
+      <span>[시행 2026. 10. 2.] [법률 제21490호, 2026. 3. 24., 타법개정]</span> 
+     </div> 
+    </div> 
+    <!-- 소관부처 --> 
+    <div id="conScroll" class="scr_area" style="overflow-y: auto;"> 
+     <div class="cont_subtit"> 
+      <p> <a title="팝업으로 이동" onclick="javascript:cptOfiPop('http://www.acrc.go.kr/acrc/index.do'); return false;" href="#AJAX" target="_blank"> <span title="http://www.acrc.go.kr/acrc/index.do" style="cursor: pointer;">국민권익위원회</span> (<span title="" style="cursor: pointer;">공공재정환수관리과</span>), 044-200-7644 </a> </p> 
+     </div> 
+     <!-- 조문정보 --> 
+     <a name="pjuk:99504665" id="pjuk:99504665"></a> 
+     <div class="pgroup" style="padding-bottom: 0px; margin-bottom: 5px;"> 
+      <p class="gtit" style="padding-top: 5px; margin-bottom: 0px;" data-joidfull="000100" data-joseq="99504665">         제1장 총칙 </p> 
+     </div> 
+     <a name="J1:0" id="J1:0"></a> 
+     <div class="pgroup"> 
+      <ul class="lawico01"> 
+       <li><a title="조문체계도 팝업으로 이동" style="text-decoration: none;" onclick="javascript:joStmdPop('290651', '0001', '00' );return false; " href="#AJAX"> <img alt="조문체계도버튼" src="/LSW/images/button/btn_jostmdico.gif" /> </a></li> 
+      </ul> 
+      <div class="lawcon"> 
+       <p class="pty1_p4"> <input name="joNoList" id="Y000100" style="vertical-align: middle;" onclick="javascript:getJoSelectLayer(this,'');" type="checkbox" value="1:0:000100:99504667" /> <span class="bl"><label for="Y000100"> 제1조(목적) </label> </span> 이 법은 공공재정에 대한 부정청구 등을 금지하고 부정청구 등으로 얻은 이익의 환수ㆍ관리 체계를 확립함으로써 공공재정 운용의 건전성과 투명성을 제고함을 목적으로 한다. </p> 
+      </div> 
+     </div> 
+     <a name="J2:0" id="J2:0"></a> 
+     <div class="pgroup"> 
+      <ul class="lawico01"> 
+       <li><a title="조문체계도 팝업으로 이동" style="text-decoration: none;" onclick="javascript:joStmdPop('290651', '0002', '00' );return false; " href="#AJAX"> <img alt="조문체계도버튼" src="/LSW/images/button/btn_jostmdico.gif" /> </a></li> 
+       <li><a title="연혁 팝업으로 이동" style="text-decoration: none;" onclick="javascript:fJoHstShow(this, '013463', '290651', '99504669', '010202');return false;" href="#AJAX"> <img alt="연혁" src="/LSW/images/button/btn_year3.gif" /> </a></li> 
+      </ul> 
+      <div class="lawcon"> 
+       <p class="pty1_p4"> <input name="joNoList" id="Y000200" style="vertical-align: middle;" onclick="javascript:getJoSelectLayer(this,'');" type="checkbox" value="2:0:000200:99504669" /> <span class="bl"><label for="Y000200"> 제2조(정의) </label> </span> 이 법에서 사용하는 용어의 뜻은 다음과 같다. <span class="sfon">&lt;개정 2021. 1. 5., 2024. 3. 26.&gt;</span> </p>
+       <p class="pty1_de2_1"> </p> 
+       <p class="pty1_de2h">1. “공공기관”이란 다음 각 목의 어느 하나에 해당하는 기관ㆍ법인ㆍ단체를 말한다. </p> 
+       <p class="pty1_de3">가. 국회, 법원, 헌법재판소, 선거관리위원회, 감사원, 국가인권위원회, 고위공직자범죄수사처, 중앙행정기관(대통령 소속 기관과 국무총리 소속 기관을 포함한다)과 그 소속 기관 및 지방자치단체 <span class="sfon"></span></p> 
+       <p class="pty1_de3">나. <a title="팝업으로 이동" class="link sfon1" onclick="javascript:fncLsLawPop('1035102167','ALLJO','');" href="javascript:;">「공직자윤리법」</a> <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102169','JO','');" href="javascript:;">제3조의2</a>에 따른 공직유관단체 <span class="sfon"></span></p> 
+       <p class="pty1_de3">다. <a title="팝업으로 이동" class="link sfon1" onclick="javascript:fncLsLawPop('1035102171','ALLJO','');" href="javascript:;">「공공기관의 운영에 관한 법률」</a> <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102173','JO','');" href="javascript:;">제4조</a>에 따른 기관 <span class="sfon"></span></p> 
+       <p class="pty1_de3">라. <a title="팝업으로 이동" class="link sfon1" onclick="javascript:fncLsLawPop('1035102175','ALLJO','');" href="javascript:;">「초ㆍ중등교육법」</a>, <a title="팝업으로 이동" class="link sfon1" onclick="javascript:fncLsLawPop('1035102163','ALLJO','');" href="javascript:;">「고등교육법」</a>, <a title="팝업으로 이동" class="link sfon1" onclick="javascript:fncLsLawPop('1035102165','ALLJO','');" href="javascript:;">「유아교육법」</a> 및 그 밖의 다른 법률에 따라 설치된 각급 국립ㆍ공립 학교 <span class="sfon"></span></p> 
+       <p class="pty1_de2h">2. “행정청”이란 다음 각 목의 자를 말한다. </p> 
+       <p class="pty1_de3">가. 행정에 관한 의사를 결정하여 표시하는 국가 또는 지방자치단체의 기관 <span class="sfon"></span></p> 
+       <p class="pty1_de3">나. 그 밖에 법령 또는 자치법규에 따라 행정권한을 가지고 있거나 위탁받은 공공단체 또는 그 기관이나 사인(私人) <span class="sfon"></span></p> 
+       <p class="pty1_de2h">3. “금품등”이란 다음 각 목의 어느 하나에 해당하는 것을 말한다. </p> 
+       <p class="pty1_de3">가. 금전 <span class="sfon"></span></p> 
+       <p class="pty1_de3">나. 채권(債券) <span class="sfon"></span></p> 
+       <p class="pty1_de3">다. 물품 <span class="sfon"></span></p> 
+       <p class="pty1_de3">라. 상품권, 이용권(利用券), 그 밖에 이에 준하는 증표 <span class="sfon"></span></p> 
+       <p class="pty1_de2h">4. “공공재정”이란 공공기관이 조성ㆍ취득하거나 관리ㆍ처분ㆍ사용하는 금품등을 말한다. </p> 
+       <p class="pty1_de2h">5. “공공재정지급금”이란 법령 또는 자치법규에 따라 공공재정에서 제공되는 보조금ㆍ보상금ㆍ출연금이나 그 밖에 상당한 반대급부를 받지 아니하고 제공되는 금품등으로서 <a title="팝업으로 이동" class="link" onclick="javascript:fncLsPttnLinkPop('152961');" href="javascript:;">대통령령</a>으로 정하는 것을 말한다. </p> 
+       <p class="pty1_de2h">6. “부정청구등”이란 다음 각 목의 어느 하나에 해당하는 행위로 공공재정에 손해를 입히거나 이익을 얻는 일체의 행위를 말한다. </p> 
+       <p class="pty1_de3">가. 거짓이나 그 밖의 부정한 방법으로 공공재정지급금을 청구할 자격이 없는데도 공공재정지급금을 청구하는 행위 <span class="sfon"></span></p> 
+       <p class="pty1_de3">나. 거짓이나 그 밖의 부정한 방법으로 받아야 할 공공재정지급금보다 과다하게 공공재정지급금을 청구하는 행위 <span class="sfon"></span></p> 
+       <p class="pty1_de3">다. 법령ㆍ자치법규나 기준(제1호나목부터 라목까지의 기관ㆍ법인ㆍ단체의 기준ㆍ규정ㆍ사규를 포함한다)에서 정한 절차에 따르지 아니하고 정해진 목적이나 용도와 달리 공공재정지급금을 사용하는 행위 <span class="sfon"></span></p> 
+       <p class="pty1_de3">라. 그 밖에 공공재정지급금이 잘못 지급된 경우 <span class="sfon"></span></p> 
+       <p class="pty1_de2h">7. “부정이익”이란 부정청구등으로 공공재정에서 얻거나 사용한 금품등(정당한 권리나 자격이 인정되는 금품등에 해당하는 부분은 제외한다)을 말한다. </p> 
+       <p class="pty1_de2h">8. “부정수익자”란 부정이익을 얻은 자(제1호가목의 기관ㆍ법인 및 같은 호 라목의 각급 국립ㆍ공립 학교는 제외한다)를 말한다. </p> 
+       <p></p> 
+      </div> 
+     </div> 
+     <a name="J3:0" id="J3:0"></a> 
+     <div class="pgroup"> 
+      <ul class="lawico01"> 
+       <li><a title="조문체계도 팝업으로 이동" style="text-decoration: none;" onclick="javascript:joStmdPop('290651', '0003', '00' );return false; " href="#AJAX"> <img alt="조문체계도버튼" src="/LSW/images/button/btn_jostmdico.gif" /> </a></li> 
+      </ul> 
+      <div class="lawcon"> 
+       <p class="pty1_p4"> <input name="joNoList" id="Y000300" style="vertical-align: middle;" onclick="javascript:getJoSelectLayer(this,'');" type="checkbox" value="3:0:000300:99504671" /> <span class="bl"><label for="Y000300"> 제3조(공공기관의 책무) </label> </span> 공공기관은 부정청구등의 예방과 확산 방지를 위하여 노력하여야 한다. </p> 
+      </div> 
+     </div> 
+     <a name="J4:0" id="J4:0"></a> 
+     <div class="pgroup"> 
+      <ul class="lawico01"> 
+       <li><a title="조문체계도 팝업으로 이동" style="text-decoration: none;" onclick="javascript:joStmdPop('290651', '0004', '00' );return false; " href="#AJAX"> <img alt="조문체계도버튼" src="/LSW/images/button/btn_jostmdico.gif" /> </a></li> 
+      </ul> 
+      <div class="lawcon"> 
+       <p class="pty1_p4"> <input name="joNoList" id="Y000400" style="vertical-align: middle;" onclick="javascript:getJoSelectLayer(this,'');" type="checkbox" value="4:0:000400:99504673" /> <span class="bl"><label for="Y000400"> 제4조(적용 범위) </label> </span> 이 법은 다음 각 호의 어느 하나에 해당하는 경우에는 적용하지 아니한다. </p>
+       <p class="pty1_de2_1"> </p> 
+       <p class="pty1_de2h">1. <a title="팝업으로 이동" class="link sfon1" onclick="javascript:fncLsLawPop('1035101985','ALLJO','');" href="javascript:;">「국세기본법」</a>, <a title="팝업으로 이동" class="link sfon1" onclick="javascript:fncLsLawPop('1035101987','ALLJO','');" href="javascript:;">「지방세기본법」</a> 및 <a title="팝업으로 이동" class="link sfon1" onclick="javascript:fncLsLawPop('1035101993','ALLJO','');" href="javascript:;">「관세법」</a> 등에 따른 조세(租稅)를 부과ㆍ징수하는 경우 </p> 
+       <p class="pty1_de2h">2. <a title="팝업으로 이동" class="link sfon1" onclick="javascript:fncLsLawPop('1035101991','ALLJO','');" href="javascript:;">「부담금관리 기본법」</a>에 따른 부담금을 부과ㆍ징수하는 경우 </p> 
+       <p class="pty1_de2h">3. 벌금ㆍ과료, 몰수ㆍ추징 및 과태료를 부과ㆍ징수하는 경우 </p> 
+       <p class="pty1_de2h">4. <a title="팝업으로 이동" class="link sfon1" onclick="javascript:fncLsLawPop('1035101995','ALLJO','');" href="javascript:;">「국가를 당사자로 하는 계약에 관한 법률」</a> 및 <a title="팝업으로 이동" class="link sfon1" onclick="javascript:fncLsLawPop('1035101989','ALLJO','');" href="javascript:;">「지방자치단체를 당사자로 하는 계약에 관한 법률」</a>의 적용을 받는 사항과 그에 준하는 계약관계에 해당하는 사항 </p> 
+       <p></p> 
+      </div> 
+     </div> 
+     <a name="J5:0" id="J5:0"></a> 
+     <div class="pgroup"> 
+      <ul class="lawico01"> 
+       <li><a title="조문체계도 팝업으로 이동" style="text-decoration: none;" onclick="javascript:joStmdPop('290651', '0005', '00' );return false; " href="#AJAX"> <img alt="조문체계도버튼" src="/LSW/images/button/btn_jostmdico.gif" /> </a></li> 
+       <li><a title="연혁 팝업으로 이동" style="text-decoration: none;" onclick="javascript:fJoHstShow(this, '013463', '290651', '99504675', '010202');return false;" href="#AJAX"> <img alt="연혁" src="/LSW/images/button/btn_year3.gif" /> </a></li> 
+       <li><a href="javascript:;" onclick="javascript:openCtlInfoList('290651', '013463', '0005', '00');return false;" style="text-decoration: none;" title="관련규정 팝업으로 이동"> <img src="images/button/btn_entrust4_2.gif" alt="관련규제버튼" /> </a></li> 
+      </ul> 
+      <div class="lawcon"> 
+       <p class="pty1_p4"> <input name="joNoList" id="Y000500" style="vertical-align: middle;" onclick="javascript:getJoSelectLayer(this,'');" type="checkbox" value="5:0:000500:99504675" /> <span class="bl"><label for="Y000500"> 제5조(다른 법률과의 관계) </label> </span> ① <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102197','JO','');" href="javascript:;">제7조</a>의 공공재정지급금의 지급 중단에 관하여 다른 법률에 중단, 정지 또는 중지 규정이 있는 경우에는 그 법률에서 정하는 바에 따른다. </p>
+       <p class="pty1_de2_1">② <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102189','JO','');" href="javascript:;">제8조</a>의 환수에 관하여 다른 법률에 환수, 징수, 회수, 반납명령, 반환명령, 반환요구 등 그 명칭에도 불구하고 그 성질상 <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102189','JO','');" href="javascript:;">제8조</a>의 환수로 볼 수 있는 규정이 있는 경우에는 그 법률에서 정하는 바에 따른다. 이 경우 다른 법률에 따라 환수, 징수, 회수, 반납명령, 반환명령, 반환요구 등을 한 경우에는 <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102189','JO','');" href="javascript:;">제8조</a>에 따라 환수한 것으로 본다. </p> 
+       <p class="pty1_de2_1">③ <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102177','JO','');" href="javascript:;">제9조</a>의 제재부가금에 관하여 다른 법률에 제2항에 해당하는 환수에 추가하여 환수의 원인이 되는 행위를 제재하기 위하여 금전을 부과하도록 하는 규정이 있는 경우에는 그 법률에서 정하는 바에 따른다. 이 경우 다른 법률에 따라 제2항에 해당하는 환수에 추가하여 환수의 원인이 되는 행위를 제재하기 위하여 금전을 부과한 경우에는 <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102177','JO','');" href="javascript:;">제9조</a>에 따라 제재부가금을 부과한 것으로 본다. </p> 
+       <p class="pty1_de2_1">④ <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102195','JO','');" href="javascript:;">제12조</a>의 가산금 및 체납처분에 관하여 다른 법률에 규정이 있는 경우에는 그 법률에서 정하는 바에 따른다. </p> 
+       <p class="pty1_de2_1">⑤ <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102199','JO','');" href="javascript:;">제13조</a>의 조사의 실시에 관하여 다른 법률에서 부정청구등에 대한 조사를 할 수 있도록 하는 규정이 있는 경우에는 그 법률에서 정하는 바에 따른다. </p> 
+       <p class="pty1_de2_1">⑥ <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102183','JO','');" href="javascript:;">제15조</a>의 이의신청에 관하여 다른 법률에 제1항에 해당하는 공공재정지급금의 지급 중단, 제2항에 해당하는 환수, 제3항에 해당하는 제재부가금 및 제4항에 해당하는 가산금ㆍ체납처분에 관하여 이의신청이나 그 밖의 불복절차(<a title="팝업으로 이동" class="link sfon1" onclick="javascript:fncLsLawPop('1035102185','ALLJO','');" href="javascript:;">「행정심판법」</a>에 따른 행정심판 및 <a title="팝업으로 이동" class="link sfon1" onclick="javascript:fncLsLawPop('1035102191','ALLJO','');" href="javascript:;">같은 법</a> <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102193','JO','');" href="javascript:;">제4조</a>에 따른 특별행정심판은 제외한다)에 관한 규정이 있는 경우에는 그 법률에서 정하는 바에 따른다. </p> 
+       <p class="pty1_de2_1">⑦ <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102187','JO','');" href="javascript:;">제16조</a>의 명단 공표에 관하여 다른 법률에 규정이 있는 경우에는 그 법률에서 정하는 바에 따른다. </p> 
+       <p class="pty1_de2_1">⑧ <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102179','JO','');" href="javascript:;">제23조</a><a title="팝업으로 이동" class="link sfon3" onclick="javascript:fncLsLawPop('1035102181','JO','');" href="javascript:;">제1항</a>의 포상금에 관하여 다른 법률에 규정이 있는 경우에는 그 법률에서 정하는 바에 따른다. </p> 
+       <p class="pty1_de2_1">⑨ <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102281','JO','');" href="javascript:;">제28조의2</a>의 벌칙에 관하여 다른 법률에 규정이 있는 경우에는 그 법률에서 정하는 바에 따른다. <span class="sfon">&lt;신설 2024. 3. 26.&gt;</span> </p> 
+       <p></p> 
+      </div> 
+     </div> 
+     <a name="pjuk:99504677" id="pjuk:99504677"></a> 
+     <div class="pgroup" style="padding-bottom: 0px; margin-bottom: 5px;"> 
+      <p class="gtit" style="padding-top: 5px; margin-bottom: 0px;" data-joidfull="000600" data-joseq="99504677">         제2장 부정이익 등의 환수 및 제재부가금의 부과ㆍ징수 등 </p> 
+     </div> 
+     <a name="J6:0" id="J6:0"></a> 
+     <div class="pgroup"> 
+      <ul class="lawico01"> 
+       <li><a title="조문체계도 팝업으로 이동" style="text-decoration: none;" onclick="javascript:joStmdPop('290651', '0006', '00' );return false; " href="#AJAX"> <img alt="조문체계도버튼" src="/LSW/images/button/btn_jostmdico.gif" /> </a></li> 
+      </ul> 
+      <div class="lawcon"> 
+       <p class="pty1_p4"> <input name="joNoList" id="Y000600" style="vertical-align: middle;" onclick="javascript:getJoSelectLayer(this,'');" type="checkbox" value="6:0:000600:99504679" /> <span class="bl"><label for="Y000600"> 제6조(부정청구등 금지) </label> </span> 누구든지 부정청구등을 하여서는 아니 된다. </p> 
+      </div> 
+     </div> 
+     <a name="J7:0" id="J7:0"></a> 
+     <div class="pgroup"> 
+      <ul class="lawico01"> 
+       <li><a title="조문체계도 팝업으로 이동" style="text-decoration: none;" onclick="javascript:joStmdPop('290651', '0007', '00' );return false; " href="#AJAX"> <img alt="조문체계도버튼" src="/LSW/images/button/btn_jostmdico.gif" /> </a></li> 
+      </ul> 
+      <div class="lawcon"> 
+       <p class="pty1_p4"> <input name="joNoList" id="Y000700" style="vertical-align: middle;" onclick="javascript:getJoSelectLayer(this,'');" type="checkbox" value="7:0:000700:99504681" /> <span class="bl"><label for="Y000700"> 제7조(공공재정지급금의 지급 중단) </label> </span> 행정청은 부정청구등이 발생하였다고 인정될 만한 상당한 근거가 있는 경우에는 공공재정지급금의 전부 또는 일부의 지급을 중단할 수 있다. </p> 
+      </div> 
+     </div> 
+     <a name="J8:0" id="J8:0"></a> 
+     <div class="pgroup"> 
+      <ul class="lawico01"> 
+       <li><a title="조문체계도 팝업으로 이동" style="text-decoration: none;" onclick="javascript:joStmdPop('290651', '0008', '00' );return false; " href="#AJAX"> <img alt="조문체계도버튼" src="/LSW/images/button/btn_jostmdico.gif" /> </a></li> 
+       <li><a title="연혁 팝업으로 이동" style="text-decoration: none;" onclick="javascript:fJoHstShow(this, '013463', '290651', '99504683', '010202');return false;" href="#AJAX"> <img alt="연혁" src="/LSW/images/button/btn_year3.gif" /> </a></li> 
+      </ul> 
+      <div class="lawcon"> 
+       <p class="pty1_p4"> <input name="joNoList" id="Y000800" style="vertical-align: middle;" onclick="javascript:getJoSelectLayer(this,'');" type="checkbox" value="8:0:000800:99504683" /> <span class="bl"><label for="Y000800"> 제8조(부정이익등의 환수) </label> </span> ① 행정청은 부정청구등이 있는 경우에는 부정이익과 <a title="팝업으로 이동" class="link" onclick="javascript:fncLsPttnLinkPop('152963');" href="javascript:;">대통령령</a>으로 정하는 이자(이하 “부정이익등”이라 한다)를 환수하여야 한다. 다만, <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102283','JO','');" href="javascript:;">제2조</a><a title="팝업으로 이동" class="link sfon4" onclick="javascript:fncLsLawPop('1035102285','JO','');" href="javascript:;">제6호</a><a title="팝업으로 이동" class="link sfon5" onclick="javascript:fncLsLawPop('1035102287','JO','');" href="javascript:;">라목</a>의 경우에는 공공재정지급금을 지급받은 자의 귀책사유가 있는 경우에만 이자까지 환수한다. <span class="sfon">&lt;개정 2024. 3. 26.&gt;</span> </p>
+       <p class="pty1_de2_1">② 행정청은 부정청구등이 있는 경우 이자의 환수에 관하여 다른 법률에 특별한 규정이 없으면 제1항에 따라 이자를 환수하여야 한다. <span class="sfon">&lt;신설 2024. 3. 26.&gt;</span> </p> 
+       <p class="pty1_de2_1">③ 행정청은 부정이익등을 환수하는 경우에는 공공재정지급금 지급 결정의 전부 또는 일부를 취소하여야 한다. <span class="sfon">&lt;개정 2024. 3. 26.&gt;</span> </p> 
+       <p class="pty1_de2_1">④ 행정청은 부정수익자에게 부정청구등에 따른 범죄혐의가 있다고 인정될 만한 상당한 이유가 있을 때에는 수사기관에 그 내용을 통보하여야 한다. <span class="sfon">&lt;개정 2024. 3. 26.&gt;</span> </p> 
+       <p class="pty1_de2_1">⑤ 제1항부터 제4항까지에서 규정한 사항 외에 부정이익등의 환수를 위한 가액 산정 기준, 환수 절차에 관한 사항은 <a title="팝업으로 이동" class="link" onclick="javascript:fncLsPttnLinkPop('152965');" href="javascript:;">대통령령</a>으로 정한다. <span class="sfon">&lt;개정 2024. 3. 26.&gt;</span> </p> 
+       <p></p> 
+      </div> 
+     </div> 
+     <a name="J9:0" id="J9:0"></a> 
+     <div class="pgroup"> 
+      <ul class="lawico01"> 
+       <li><a title="조문체계도 팝업으로 이동" style="text-decoration: none;" onclick="javascript:joStmdPop('290651', '0009', '00' );return false; " href="#AJAX"> <img alt="조문체계도버튼" src="/LSW/images/button/btn_jostmdico.gif" /> </a></li> 
+       <li><a href="javascript:;" onclick="javascript:openCtlInfoList('290651', '013463', '0009', '00');return false;" style="text-decoration: none;" title="관련규정 팝업으로 이동"> <img src="images/button/btn_entrust4_2.gif" alt="관련규제버튼" /> </a></li> 
+      </ul> 
+      <div class="lawcon"> 
+       <p class="pty1_p4"> <input name="joNoList" id="Y000900" style="vertical-align: middle;" onclick="javascript:getJoSelectLayer(this,'');" type="checkbox" value="9:0:000900:99504685" /> <span class="bl"><label for="Y000900"> 제9조(제재부가금의 부과ㆍ징수) </label> </span> ① 행정청은 <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035101997','JO','');" href="javascript:;">제2조</a><a title="팝업으로 이동" class="link sfon4" onclick="javascript:fncLsLawPop('1035102003','JO','');" href="javascript:;">제6호</a><a title="팝업으로 이동" class="link sfon5" onclick="javascript:fncLsLawPop('1035102001','JO','');" href="javascript:;">가목부터 다목</a>까지의 어느 하나에 해당하는 부정청구등이 있는 경우에는 <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035101999','JO','');" href="javascript:;">제8조</a>에 따른 환수에 추가하여 부정이익 가액의 5배 이내에서 <a title="팝업으로 이동" class="link" onclick="javascript:fncLsPttnLinkPop('152967');" href="javascript:;">대통령령</a>으로 정하는 바에 따라 제재부가금을 부과ㆍ징수하여야 한다. 다만, 행정청은 부정청구등이 사소한 부주의나 오류 등 과실로 인한 것으로 인정되는 경우 등 <a title="팝업으로 이동" class="link" onclick="javascript:fncLsPttnLinkPop('152969');" href="javascript:;">대통령령</a>으로 정하는 사유가 있는 경우에는 산정된 제재부가금을 줄이거나 부과하지 아니할 수 있다. </p>
+       <p class="pty1_de2_1">② 제재부가금 부과를 위한 가액 산정 기준, 제재부가금의 부과ㆍ납부ㆍ징수 절차에 관한 사항은 <a title="팝업으로 이동" class="link" onclick="javascript:fncLsPttnLinkPop('152971');" href="javascript:;">대통령령</a>으로 정한다. </p> 
+       <p></p> 
+      </div> 
+     </div> 
+     <a name="J10:0" id="J10:0"></a> 
+     <div class="pgroup"> 
+      <ul class="lawico01"> 
+       <li><a title="조문체계도 팝업으로 이동" style="text-decoration: none;" onclick="javascript:joStmdPop('290651', '0010', '00' );return false; " href="#AJAX"> <img alt="조문체계도버튼" src="/LSW/images/button/btn_jostmdico.gif" /> </a></li> 
+       <li><a title="연혁 팝업으로 이동" style="text-decoration: none;" onclick="javascript:fJoHstShow(this, '013463', '290651', '99504687', '010202');return false;" href="#AJAX"> <img alt="연혁" src="/LSW/images/button/btn_year3.gif" /> </a></li> 
+       <li><a href="javascript:;" onclick="javascript:openCtlInfoList('290651', '013463', '0010', '00');return false;" style="text-decoration: none;" title="관련규정 팝업으로 이동"> <img src="images/button/btn_entrust4_2.gif" alt="관련규제버튼" /> </a></li> 
+      </ul> 
+      <div class="lawcon"> 
+       <p class="pty1_p4"> <input name="joNoList" id="Y001000" style="vertical-align: middle;" onclick="javascript:getJoSelectLayer(this,'');" type="checkbox" value="10:0:001000:99504687" /> <span class="bl"><label for="Y001000"> 제10조(제재부가금의 감면 등) </label> </span> ① 행정청은 <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102219','JO','');" href="javascript:;">제8조</a>에 따른 환수를 하기 위하여 <a title="팝업으로 이동" class="link sfon1" onclick="javascript:fncLsLawPop('1035102211','ALLJO','');" href="javascript:;">「행정절차법」</a> <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102213','JO','');" href="javascript:;">제21조</a><a title="팝업으로 이동" class="link sfon3" onclick="javascript:fncLsLawPop('1035102215','JO','');" href="javascript:;">제1항</a>에 따라 사전 통지를 하기 전(<a title="팝업으로 이동" class="link sfon1" onclick="javascript:fncLsLawPop('1035102203','ALLJO','');" href="javascript:;">같은 법</a> <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102205','JO','');" href="javascript:;">제21조</a><a title="팝업으로 이동" class="link sfon3" onclick="javascript:fncLsLawPop('1035102207','JO','');" href="javascript:;">제4항</a>에 따라 사전 통지를 하지 아니하는 경우에는 <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102219','JO','');" href="javascript:;">제8조</a>에 따라 환수처분을 하기 전을 말한다)에 부정수익자가 자진하여 신고하고, 부정청구등으로 인한 부정이익등을 모두 반환한 경우에는 <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102217','JO','');" href="javascript:;">제9조</a>에 따른 제재부가금을 줄이거나 부과하지 아니한다. <span class="sfon">&lt;개정 2024. 3. 26.&gt;</span> </p>
+       <p class="pty1_de2_1">② 행정청은 <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102209','JO','');" href="javascript:;">제9조</a>에 따른 제재부가금을 부과하기 전에 부정수익자가 해당 부정청구등과 관련하여 이 법 또는 다른 법률에 따라 벌금ㆍ과료, 몰수ㆍ추징, 과징금 또는 과태료를 부과받은 경우에는 제재부가금을 줄이거나 부과하지 아니한다. <span class="sfon">&lt;개정 2024. 3. 26.&gt;</span> </p> 
+       <p class="pty1_de2_1">③ 행정청은 <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102201','JO','');" href="javascript:;">제9조</a>에 따른 제재부가금을 부과한 후에 부정수익자가 해당 부정청구등과 관련하여 이 법 또는 다른 법률에 따라 벌금ㆍ과료, 몰수ㆍ추징, 과징금 또는 과태료를 부과받은 경우에는 제재부가금을 감면하여야 한다. <span class="sfon">&lt;개정 2024. 3. 26.&gt;</span> </p> 
+       <p class="pty1_de2_1">④ 제재부가금 부과 및 감면의 기준, 절차 등에 관한 사항은 <a title="팝업으로 이동" class="link" onclick="javascript:fncLsPttnLinkPop('152973');" href="javascript:;">대통령령</a>으로 정한다. </p> 
+       <p></p> 
+      </div> 
+     </div> 
+     <a name="J11:0" id="J11:0"></a> 
+     <div class="pgroup"> 
+      <ul class="lawico01"> 
+       <li><a title="조문체계도 팝업으로 이동" style="text-decoration: none;" onclick="javascript:joStmdPop('290651', '0011', '00' );return false; " href="#AJAX"> <img alt="조문체계도버튼" src="/LSW/images/button/btn_jostmdico.gif" /> </a></li> 
+      </ul> 
+      <div class="lawcon"> 
+       <p class="pty1_p4"> <input name="joNoList" id="Y001100" style="vertical-align: middle;" onclick="javascript:getJoSelectLayer(this,'');" type="checkbox" value="11:0:001100:99504689" /> <span class="bl"><label for="Y001100"> 제11조(제재부가금의 적용 배제) </label> </span> ① 다음 각 호의 어느 하나에 해당하는 경우에는 이 법에 따른 제재부가금을 부과하지 아니할 수 있다. </p>
+       <p class="pty1_de2h">1. <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102007','JO','');" href="javascript:;">제8조</a>에 따른 환수 금액에서 이자를 제외한 금액(수회에 걸쳐 부정이익을 얻은 경우에는 그 누적된 금액을 말한다)이 100만원을 초과하지 아니하는 경우 </p> 
+       <p class="pty1_de2h">2. <a title="팝업으로 이동" class="link sfon1" onclick="javascript:fncLsLawPop('1035102015','ALLJO','');" href="javascript:;">「국민기초생활 보장법」</a>에 따른 급여, <a title="팝업으로 이동" class="link sfon1" onclick="javascript:fncLsLawPop('1035102021','ALLJO','');" href="javascript:;">「장애인복지법」</a>에 따른 장애수당, <a title="팝업으로 이동" class="link sfon1" onclick="javascript:fncLsLawPop('1035102011','ALLJO','');" href="javascript:;">「장애인연금법」</a>에 따른 장애인연금, <a title="팝업으로 이동" class="link sfon1" onclick="javascript:fncLsLawPop('1035102019','ALLJO','');" href="javascript:;">「기초연금법」</a>에 따른 기초연금, <a title="팝업으로 이동" class="link sfon1" onclick="javascript:fncLsLawPop('1035102005','ALLJO','');" href="javascript:;">「한부모가족지원법」</a>에 따른 복지 급여, <a title="팝업으로 이동" class="link sfon1" onclick="javascript:fncLsLawPop('1035102017','ALLJO','');" href="javascript:;">「독립유공자예우에 관한 법률」</a>ㆍ<a title="팝업으로 이동" class="link sfon1" onclick="javascript:fncLsLawPop('1035102013','ALLJO','');" href="javascript:;">「국가유공자 등 예우 및 지원에 관한 법률」</a>ㆍ<a title="팝업으로 이동" class="link sfon1" onclick="javascript:fncLsLawPop('1035102023','ALLJO','');" href="javascript:;">「보훈보상대상자 지원에 관한 법률」</a>ㆍ<a title="팝업으로 이동" class="link sfon1" onclick="javascript:fncLsLawPop('1035102009','ALLJO','');" href="javascript:;">「참전유공자 예우 및 단체설립에 관한 법률」</a>ㆍ<a title="팝업으로 이동" class="link sfon1" onclick="javascript:fncLsLawPop('1035102025','ALLJO','');" href="javascript:;">「고엽제후유의증 등 환자지원 및 단체설립에 관한 법률」</a>에 따른 보훈급여금 또는 그에 준하는 경우 </p> 
+       <p class="pty1_de2h">3. 제재부가금 부과ㆍ징수에 드는 비용이 부과ㆍ징수하려는 제재부가금보다 큰 경우 등 제재부가금을 부과할 실익이 크지 아니하다고 인정되는 경우 </p> 
+       <p class="pty1_de2_1">② 제재부가금의 적용 배제의 기준은 부정이익등의 금액, 부정이익등을 얻은 횟수 및 기간 등을 고려하여 <a title="팝업으로 이동" class="link" onclick="javascript:fncLsPttnLinkPop('152975');" href="javascript:;">대통령령</a>으로 정한다. </p> 
+       <p></p> 
+      </div> 
+     </div> 
+     <a name="J12:0" id="J12:0"></a> 
+     <div class="pgroup"> 
+      <ul class="lawico01"> 
+       <li><a title="조문체계도 팝업으로 이동" style="text-decoration: none;" onclick="javascript:joStmdPop('290651', '0012', '00' );return false; " href="#AJAX"> <img alt="조문체계도버튼" src="/LSW/images/button/btn_jostmdico.gif" /> </a></li> 
+       <li><a title="연혁 팝업으로 이동" style="text-decoration: none;" onclick="javascript:fJoHstShow(this, '013463', '290651', '99504691', '010202');return false;" href="#AJAX"> <img alt="연혁" src="/LSW/images/button/btn_year3.gif" /> </a></li> 
+      </ul> 
+      <div class="lawcon"> 
+       <p class="pty1_p4"> <input name="joNoList" id="Y001200" style="vertical-align: middle;" onclick="javascript:getJoSelectLayer(this,'');" type="checkbox" value="12:0:001200:99504691" /> <span class="bl"><label for="Y001200"> 제12조(가산금 및 체납처분) </label> </span> ① 행정청은 <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102033','JO','');" href="javascript:;">제8조</a>에 따른 환수처분을 받거나 <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102031','JO','');" href="javascript:;">제9조</a>에 따른 제재부가금을 부과받은 자가 정해진 기한까지 부정이익등을 모두 반환하거나 제재부가금을 완납하지 아니하면 그 기한 다음 날부터 부정이익등을 모두 반환하거나 제재부가금을 완납한 날의 전날까지의 기간에 대하여 체납된 금액에 <a title="팝업으로 이동" class="link" onclick="javascript:fncLsPttnLinkPop('152977');" href="javascript:;">대통령령</a>으로 정하는 이자율에 따라 계산한 금액을 가산금으로 징수한다. 이 경우 가산금을 징수하는 기간은 60개월을 초과하지 못한다. </p>
+       <p class="pty1_de2_1">② 행정청은 <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102029','JO','');" href="javascript:;">제8조</a>에 따른 환수처분 또는 <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102027','JO','');" href="javascript:;">제9조</a>에 따른 제재부가금 부과처분을 받은 자가 정해진 기한까지 부정이익등을 반환하거나 제재부가금을 납부하지 아니하면 기한을 정하여 독촉을 하고, 그 기한까지 부정이익등을 반환하거나 제재부가금 또는 가산금을 납부하지 아니하면 국세체납 처분의 예에 따라 징수하거나 <a title="팝업으로 이동" class="link sfon1" onclick="javascript:fncLsLawPop('1035102121','ALLJO','');" href="javascript:;">「지방행정제재ㆍ부과금의 징수 등에 관한 법률」</a>에 따라 징수할 수 있다. <span class="sfon">&lt;개정 2020. 3. 24.&gt;</span> </p> 
+       <p></p> 
+      </div> 
+     </div> 
+     <a name="J13:0" id="J13:0"></a> 
+     <div class="pgroup"> 
+      <ul class="lawico01"> 
+       <li><a title="조문체계도 팝업으로 이동" style="text-decoration: none;" onclick="javascript:joStmdPop('290651', '0013', '00' );return false; " href="#AJAX"> <img alt="조문체계도버튼" src="/LSW/images/button/btn_jostmdico.gif" /> </a></li> 
+       <li><a href="javascript:;" onclick="javascript:openCtlInfoList('290651', '013463', '0013', '00');return false;" style="text-decoration: none;" title="관련규정 팝업으로 이동"> <img src="images/button/btn_entrust4_2.gif" alt="관련규제버튼" /> </a></li> 
+      </ul> 
+      <div class="lawcon"> 
+       <p class="pty1_p4"> <input name="joNoList" id="Y001300" style="vertical-align: middle;" onclick="javascript:getJoSelectLayer(this,'');" type="checkbox" value="13:0:001300:99504693" /> <span class="bl"><label for="Y001300"> 제13조(조사의 실시 등) </label> </span> ① 행정청은 <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102039','JO','');" href="javascript:;">제8조</a>에 따라 부정이익등을 환수하거나 <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102037','JO','');" href="javascript:;">제9조</a>에 따라 제재부가금을 부과ㆍ징수하기 위하여 필요하다고 인정되는 경우에는 부정수익자 또는 부정청구등과 관련된 자(부정수익자에 해당하는 기관이나 법인 또는 단체의 실질적인 운영자나 대표자로 볼 수 있는 자 등 <a title="팝업으로 이동" class="link" onclick="javascript:fncLsPttnLinkPop('152979');" href="javascript:;">대통령령</a>으로 정하는 자를 말한다. 이하 같다)에게 출석, 진술 및 자료의 제출을 요구할 수 있다. 이 경우 출석 등의 요구를 받은 자는 정당한 사유가 없으면 그 요구에 따라야 한다. </p>
+       <p class="pty1_de2_1">② 행정청은 제1항에 따른 출석, 진술 및 자료의 제출을 하지 아니하거나 부정청구등이 발생하였다고 인정될 만한 상당한 근거가 있는 경우에는 소속 공무원으로 하여금 부정수익자 또는 부정청구등과 관련된 자의 사무소ㆍ사업장에 출입하여 장부 또는 서류ㆍ시설ㆍ장비 등을 조사하게 할 수 있다. </p> 
+       <p class="pty1_de2_1">③ 제1항에 따른 출석, 진술, 자료제출의 요구 및 제2항에 따른 출입 등의 방법ㆍ절차에 관하여는 <a title="팝업으로 이동" class="link sfon1" onclick="javascript:fncLsLawPop('1035102041','ALLJO','');" href="javascript:;">「행정조사기본법」</a>에서 정하는 바에 따른다. </p> 
+       <p></p> 
+      </div> 
+     </div> 
+     <a name="J14:0" id="J14:0"></a> 
+     <div class="pgroup"> 
+      <ul class="lawico01"> 
+       <li><a title="조문체계도 팝업으로 이동" style="text-decoration: none;" onclick="javascript:joStmdPop('290651', '0014', '00' );return false; " href="#AJAX"> <img alt="조문체계도버튼" src="/LSW/images/button/btn_jostmdico.gif" /> </a></li> 
+      </ul> 
+      <div class="lawcon"> 
+       <p class="pty1_p4"> <input name="joNoList" id="Y001400" style="vertical-align: middle;" onclick="javascript:getJoSelectLayer(this,'');" type="checkbox" value="14:0:001400:99504695" /> <span class="bl"><label for="Y001400"> 제14조(재산 관계 공부의 열람 등) </label> </span> 행정청은 <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102043','JO','');" href="javascript:;">제8조</a>에 따라 부정이익등을 환수하거나 <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102045','JO','');" href="javascript:;">제9조</a>에 따라 제재부가금을 부과ㆍ징수하기 위하여 필요한 경우에는 등기소나 그 밖의 관계 행정기관의 장에게 무료로 재산 관계 공부(公簿) 등의 열람ㆍ복사나 그 등본 또는 초본의 발급을 청구할 수 있다. </p> 
+      </div> 
+     </div> 
+     <a name="J15:0" id="J15:0"></a> 
+     <div class="pgroup"> 
+      <ul class="lawico01"> 
+       <li><a title="조문체계도 팝업으로 이동" style="text-decoration: none;" onclick="javascript:joStmdPop('290651', '0015', '00' );return false; " href="#AJAX"> <img alt="조문체계도버튼" src="/LSW/images/button/btn_jostmdico.gif" /> </a></li> 
+       <li><a title="연혁 팝업으로 이동" style="text-decoration: none;" onclick="javascript:fJoHstShow(this, '013463', '290651', '99504697', '010202');return false;" href="#AJAX"> <img alt="연혁" src="/LSW/images/button/btn_year3.gif" /> </a></li> 
+      </ul> 
+      <div class="lawcon"> 
+       <p class="pty1_p4"> <input name="joNoList" id="Y001500" style="vertical-align: middle;" onclick="javascript:getJoSelectLayer(this,'');" type="checkbox" value="15:0:001500:99504697" /> <span class="bl"><label for="Y001500"> 제15조(이의신청의 특례) </label> </span> ① 다음 각 호의 처분에 불복하는 자는 그 처분을 고지받은 날부터 30일 이내에 그 사유를 밝혀 문서로 행정청에 이의를 신청할 수 있다. </p>
+       <p class="pty1_de2h">1. <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102231','JO','');" href="javascript:;">제7조</a>에 따른 공공재정지급금의 지급 중단 </p> 
+       <p class="pty1_de2h">2. <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102229','JO','');" href="javascript:;">제8조</a>에 따른 부정이익등 환수처분 </p> 
+       <p class="pty1_de2h">3. <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102223','JO','');" href="javascript:;">제9조</a>에 따른 제재부가금 부과처분 </p> 
+       <p class="pty1_de2h">4. <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102221','JO','');" href="javascript:;">제12조</a>에 따른 가산금ㆍ체납처분 </p> 
+       <p class="pty1_de2_1">② 행정청은 제1항에 따른 이의신청을 받으면 그 신청을 받은 날부터 30일 이내에 그 이의신청에 대한 결과를 신청인에게 통지하여야 한다. 다만, 부득이한 사유로 30일 이내에 통지할 수 없는 경우에는 그 기간을 만료일 다음 날부터 기산하여 10일의 범위에서 한 차례 연장할 수 있으며, 연장 사유를 신청인에게 통지하여야 한다. </p> 
+       <p class="pty1_de2_1">③ 제1항 및 제2항에서 규정한 사항 외에 이의신청의 방법 및 절차 등에 관한 사항은 <a title="팝업으로 이동" class="link sfon1" onclick="javascript:fncLsLawPop('1035102225','ALLJO','');" href="javascript:;">「행정기본법」</a> <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102227','JO','');" href="javascript:;">제36조</a>에 따른다. </p> 
+       <p class="pty1_de2"> <span class="sfon">[전문개정 2024. 3. 26.]</span> </p> 
+       <p></p> 
+      </div> 
+     </div> 
+     <a name="J16:0" id="J16:0"></a> 
+     <div class="pgroup"> 
+      <ul class="lawico01"> 
+       <li><a title="조문체계도 팝업으로 이동" style="text-decoration: none;" onclick="javascript:joStmdPop('290651', '0016', '00' );return false; " href="#AJAX"> <img alt="조문체계도버튼" src="/LSW/images/button/btn_jostmdico.gif" /> </a></li> 
+       <li><a href="javascript:;" onclick="javascript:openCtlInfoList('290651', '013463', '0016', '00');return false;" style="text-decoration: none;" title="관련규정 팝업으로 이동"> <img src="images/button/btn_entrust4_2.gif" alt="관련규제버튼" /> </a></li> 
+      </ul> 
+      <div class="lawcon"> 
+       <p class="pty1_p4"> <input name="joNoList" id="Y001600" style="vertical-align: middle;" onclick="javascript:getJoSelectLayer(this,'');" type="checkbox" value="16:0:001600:99504699" /> <span class="bl"><label for="Y001600"> 제16조(명단 공표) </label> </span> ① 행정청은 직전 연도부터 과거 3년간 다음 각 호의 요건에 모두 해당하는 부정수익자(이하 “고액부정청구등행위자”라 한다)의 명단을 공표하여야 한다. 다만, 고액부정청구등행위자의 사망으로 명단 공표의 실효성이 없는 경우 등 <a title="팝업으로 이동" class="link" onclick="javascript:fncLsPttnLinkPop('152981');" href="javascript:;">대통령령</a>으로 정하는 사유가 있는 경우에는 그러하지 아니하다. </p>
+       <p class="pty1_de2h">1. 해당 행정청으로부터 제재부가금 부과처분(이의신청이나 그 밖의 불복절차가 진행 중인 처분은 제외한다)을 받은 횟수가 2회 이상 </p> 
+       <p class="pty1_de2h">2. 제1호에 따른 제재부가금 부과처분의 대상이 되는 부정이익 가액이 합계 3천만원 이상 </p> 
+       <p class="pty1_de2_1">② 행정청은 <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102047','JO','');" href="javascript:;">제15조</a>에 따른 이의신청이나 그 밖의 불복절차가 진행 중인 제재부가금 부과처분에 대해서는 불복절차가 끝난 후 고액부정청구등행위자에 해당하는 자의 명단을 추가로 공표하여야 한다. </p> 
+       <p class="pty1_de2_1">③ 제1항 및 제2항에 따른 고액부정청구등행위자 명단의 공표 여부를 심의하기 위하여 각 행정청에 고액부정청구등행위자명단공표심의위원회(이하 이 조에서 “심의위원회”라 한다)를 둔다. </p> 
+       <p class="pty1_de2_1">④ 행정청은 명단 공표를 하기 전에 심의위원회의 심의를 거친 공표 대상자에게 명단 공표 대상자임을 통지하고 소명 기회를 주어야 한다. </p> 
+       <p class="pty1_de2_1">⑤ 제1항부터 제4항까지에서 규정한 사항 외에 고액부정청구등행위자의 명단 공표의 시기ㆍ방법ㆍ절차, 소명의 기간ㆍ방법ㆍ절차와 심의위원회의 구성 및 운영에 필요한 사항은 <a title="팝업으로 이동" class="link" onclick="javascript:fncLsPttnLinkPop('152983');" href="javascript:;">대통령령</a>으로 정한다. </p> 
+       <p></p> 
+      </div> 
+     </div> 
+     <a name="pjuk:99504701" id="pjuk:99504701"></a> 
+     <div class="pgroup" style="padding-bottom: 0px; margin-bottom: 5px;"> 
+      <p class="gtit" style="padding-top: 5px; margin-bottom: 0px;" data-joidfull="001700" data-joseq="99504701">         제3장 부정청구등 신고 및 신고자 보호ㆍ보상 등 </p> 
+     </div> 
+     <a name="J17:0" id="J17:0"></a> 
+     <div class="pgroup"> 
+      <ul class="lawico01"> 
+       <li><a title="조문체계도 팝업으로 이동" style="text-decoration: none;" onclick="javascript:joStmdPop('290651', '0017', '00' );return false; " href="#AJAX"> <img alt="조문체계도버튼" src="/LSW/images/button/btn_jostmdico.gif" /> </a></li> 
+      </ul> 
+      <div class="lawcon"> 
+       <p class="pty1_p4"> <input name="joNoList" id="Y001700" style="vertical-align: middle;" onclick="javascript:getJoSelectLayer(this,'');" type="checkbox" value="17:0:001700:99504703" /> <span class="bl"><label for="Y001700"> 제17조(부정청구등의 신고) </label> </span> 누구든지 부정청구등이 발생하였거나 발생할 우려가 있다고 판단하는 경우에는 다음 각 호의 어느 하나에 해당하는 기관에 신고할 수 있다. </p>
+       <p class="pty1_de2_1"> </p> 
+       <p class="pty1_de2h">1. 신고 내용의 소관 공공기관 또는 그 감독기관 </p> 
+       <p class="pty1_de2h">2. 감사원 또는 수사기관 </p> 
+       <p class="pty1_de2h">3. 국민권익위원회(이하 “위원회”라 한다) </p> 
+       <p></p> 
+      </div> 
+     </div> 
+     <a name="J18:0" id="J18:0"></a> 
+     <div class="pgroup"> 
+      <ul class="lawico01"> 
+       <li><a title="조문체계도 팝업으로 이동" style="text-decoration: none;" onclick="javascript:joStmdPop('290651', '0018', '00' );return false; " href="#AJAX"> <img alt="조문체계도버튼" src="/LSW/images/button/btn_jostmdico.gif" /> </a></li> 
+      </ul> 
+      <div class="lawcon"> 
+       <p class="pty1_p4"> <input name="joNoList" id="Y001800" style="vertical-align: middle;" onclick="javascript:getJoSelectLayer(this,'');" type="checkbox" value="18:0:001800:99504705" /> <span class="bl"><label for="Y001800"> 제18조(신고자 등의 보호) </label> </span> 누구든지 다음 각 호의 어느 하나에 해당하는 신고 등(이하 “신고등”이라 한다)을 하지 못하도록 방해하거나 신고등을 한 사람(이하 “신고자등”이라 한다)에게 그 행위를 취소하도록 강요해서는 아니 된다. </p>
+       <p class="pty1_de2_1"> </p> 
+       <p class="pty1_de2h">1. <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102049','JO','');" href="javascript:;">제10조</a><a title="팝업으로 이동" class="link sfon3" onclick="javascript:fncLsLawPop('1035102057','JO','');" href="javascript:;">제1항</a>에 따른 신고 </p> 
+       <p class="pty1_de2h">2. <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102059','JO','');" href="javascript:;">제17조</a>에 따른 신고 </p> 
+       <p class="pty1_de2h">3. 신고 사항에 관한 조사ㆍ감사ㆍ수사 또는 소송에서 진술ㆍ증언 및 자료제공 등의 방법으로 돕는 행위 </p> 
+       <p class="pty1_de2h">4. 신고한 사람에 대한 <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102051','JO','');" href="javascript:;">제19조</a><a title="팝업으로 이동" class="link sfon3" onclick="javascript:fncLsLawPop('1035102053','JO','');" href="javascript:;">제2항</a> 및 <a title="팝업으로 이동" class="link sfon3" onclick="javascript:fncLsLawPop('1035102055','JO','');" href="javascript:;">제3항</a>에 따른 조치에 관한 조사ㆍ소송 등에서 진술ㆍ증언 및 자료제공 등의 방법으로 돕는 행위 </p> 
+       <p></p> 
+      </div> 
+     </div> 
+     <a name="J19:0" id="J19:0"></a> 
+     <div class="pgroup"> 
+      <ul class="lawico01"> 
+       <li><a title="조문체계도 팝업으로 이동" style="text-decoration: none;" onclick="javascript:joStmdPop('290651', '0019', '00' );return false; " href="#AJAX"> <img alt="조문체계도버튼" src="/LSW/images/button/btn_jostmdico.gif" /> </a></li> 
+      </ul> 
+      <div class="lawcon"> 
+       <p class="pty1_p4"> <input name="joNoList" id="Y001900" style="vertical-align: middle;" onclick="javascript:getJoSelectLayer(this,'');" type="checkbox" value="19:0:001900:99504707" /> <span class="bl"><label for="Y001900"> 제19조(신분보장 등) </label> </span> ① 누구든지 신고등을 이유로 소속 기관ㆍ단체ㆍ법인 등으로부터 징계조치 등 어떠한 신분상 불이익이나 근무조건상의 차별을 받지 아니한다. </p>
+       <p class="pty1_de2_1">② 누구든지 신고등을 한 이유로 신분상 불이익이나 근무조건상의 차별을 당하였거나 당할 것으로 예상되는 때에는 위원회에 해당 불이익처분의 원상회복, 전직(轉職), 징계의 보류 등 신분보장 조치와 그 밖에 필요한 조치를 요구할 수 있다. </p> 
+       <p class="pty1_de2_1">③ 누구든지 신고등으로 인하여 인가ㆍ허가 등의 취소, 계약의 해지 등 경제적ㆍ행정적 불이익을 당하였을 때에는 위원회에 원상회복 또는 시정을 위하여 인가ㆍ허가, 계약 등의 잠정적인 효력유지 등 필요한 조치를 요구할 수 있다. </p> 
+       <p class="pty1_de2_1">④ 위원회는 제2항 또는 제3항에 따른 요구가 있는 경우에는 조사에 착수하여야 한다. </p> 
+       <p class="pty1_de2_1">⑤ 위원회는 제2항 또는 제3항에 따라 요구를 한 자나 참고인 또는 관계 기관 등에 대하여 다음 각 호의 방법으로 제4항에 따른 조사를 할 수 있다. </p> 
+       <p class="pty1_de2h">1. 출석 요구 및 진술 또는 진술서 제출 요구 </p> 
+       <p class="pty1_de2h">2. 조사사항과 관련이 있다고 인정되는 자료 등의 제출 요구 </p> 
+       <p class="pty1_de2h">3. 조사사항과 관련이 있다고 인정되는 사실 또는 정보에 대한 조회 </p> 
+       <p class="pty1_de2_1">⑥ 제5항 각 호의 요구를 받거나 조회를 요청받은 자는 그 요구 또는 요청에 성실히 따라야 한다. </p> 
+       <p class="pty1_de2_1">⑦ 위원회는 조사 결과 제2항 또는 제3항에 따른 요구의 내용이 타당하다고 인정할 때에는 그 요구를 한 자의 소속 기관의 장, 관계 기관의 장 또는 소속 단체ㆍ법인 등의 장에게 적절한 조치를 요구할 수 있다. 이 경우 위원회로부터 조치의 요구를 받은 소속 기관의 장, 관계 기관의 장 또는 소속 단체ㆍ법인 등의 장은 정당한 사유가 없으면 그 요구에 따라야 한다. </p> 
+       <p class="pty1_de2_1">⑧ 공직자(<a title="팝업으로 이동" class="link sfon1" onclick="javascript:fncLsLawPop('1035102123','ALLJO','');" href="javascript:;">「부패방지 및 국민권익위원회의 설치와 운영에 관한 법률」</a> <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102125','JO','');" href="javascript:;">제2조</a><a title="팝업으로 이동" class="link sfon4" onclick="javascript:fncLsLawPop('1035102127','JO','');" href="javascript:;">제3호</a>의 공직자를 말한다. 이하 같다)인 신고자등이 위원회에 전직, 전출ㆍ전입, 파견근무 등 인사에 관한 조치를 요구한 경우 위원회는 요구 내용이 타당하다고 인정할 때에는 인사혁신처장 또는 관계 기관의 장에게 필요한 조치를 요구할 수 있다. 이 경우 위원회로부터 요구를 받은 인사혁신처장 또는 관계 기관의 장은 해당 사항을 우선적으로 고려하여야 하며, 그 결과를 위원회에 통보하여야 한다. </p> 
+       <p class="pty1_de2_1">⑨ 위원회는 신고등을 한 이유로 신고자등에게 신분상 불이익을 주거나 근무조건상 차별을 한 자에 대하여 징계권자에게 징계를 요구할 수 있다. </p> 
+       <p></p> 
+      </div> 
+     </div> 
+     <a name="J20:0" id="J20:0"></a> 
+     <div class="pgroup"> 
+      <ul class="lawico01"> 
+       <li><a title="조문체계도 팝업으로 이동" style="text-decoration: none;" onclick="javascript:joStmdPop('290651', '0020', '00' );return false; " href="#AJAX"> <img alt="조문체계도버튼" src="/LSW/images/button/btn_jostmdico.gif" /> </a></li> 
+      </ul> 
+      <div class="lawcon"> 
+       <p class="pty1_p4"> <input name="joNoList" id="Y002000" style="vertical-align: middle;" onclick="javascript:getJoSelectLayer(this,'');" type="checkbox" value="20:0:002000:99504709" /> <span class="bl"><label for="Y002000"> 제20조(신고자등의 비밀보장) </label> </span> ① 누구든지 신고자등이라는 사정을 알면서 그의 인적사항이나 그가 신고자등임을 미루어 알 수 있는 사실을 다른 사람에게 알려주거나 공개 또는 보도해서는 아니 된다. 다만, 신고자등이 동의한 때에는 그러하지 아니하다. </p>
+       <p class="pty1_de2_1">② 위원회는 제1항을 위반하여 신고자등의 인적사항이나 신고자등임을 미루어 알 수 있는 사실이 공개 또는 보도되었을 때에는 그 경위를 확인할 수 있다. </p> 
+       <p class="pty1_de2_1">③ 위원회는 제2항에 따른 경위를 확인하는 데 필요하다고 인정하면 관계 기관에 관련 자료의 제출이나 의견의 진술 등을 요청할 수 있다. 이 경우 자료의 제출이나 의견의 진술을 요청받은 해당 기관은 특별한 사유가 없으면 그 요청에 따라야 한다. </p> 
+       <p class="pty1_de2_1">④ 위원회는 제1항을 위반하여 신고자등의 인적사항이나 신고자등임을 미루어 알 수 있는 사실을 다른 사람에게 알려주거나 공개 또는 보도한 사람의 징계권자에게 그 사람에 대한 징계 등 필요한 조치를 요구할 수 있다. </p> 
+       <p></p> 
+      </div> 
+     </div> 
+     <a name="J21:0" id="J21:0"></a> 
+     <div class="pgroup"> 
+      <ul class="lawico01"> 
+       <li><a title="조문체계도 팝업으로 이동" style="text-decoration: none;" onclick="javascript:joStmdPop('290651', '0021', '00' );return false; " href="#AJAX"> <img alt="조문체계도버튼" src="/LSW/images/button/btn_jostmdico.gif" /> </a></li> 
+       <li><a title="연혁 팝업으로 이동" style="text-decoration: none;" onclick="javascript:fJoHstShow(this, '013463', '290651', '99504711', '010202');return false;" href="#AJAX"> <img alt="연혁" src="/LSW/images/button/btn_year3.gif" /> </a></li> 
+      </ul> 
+      <div class="lawcon"> 
+       <p class="pty1_p4"> <input name="joNoList" id="Y002100" style="vertical-align: middle;" onclick="javascript:getJoSelectLayer(this,'');" type="checkbox" value="21:0:002100:99504711" /> <span class="bl"><label for="Y002100"> 제21조(신변보호조치) </label> </span> ① 신고자등은 신고등을 한 이유로 자신과 친족 또는 동거인의 신변에 불안이 있는 경우에는 위원회에 신변보호조치를 요구할 수 있다. 이 경우 위원회는 필요하다고 인정할 때에는 경찰청장, 관할 시ㆍ도경찰청장, 관할 경찰서장에게 신변보호조치를 요구할 수 있다. <span class="sfon">&lt;개정 2020. 12. 22.&gt;</span> </p>
+       <p class="pty1_de2_1">② 위원회는 제1항에 따른 신변보호조치를 요구하기 위하여 필요한 경우(<a title="팝업으로 이동" class="link sfon1" onclick="javascript:fncLsLawPop('1035102139','ALLJO','');" href="javascript:;">「부패방지 및 국민권익위원회의 설치와 운영에 관한 법률」</a> <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102131','JO','');" href="javascript:;">제29조</a><a title="팝업으로 이동" class="link sfon3" onclick="javascript:fncLsLawPop('1035102135','JO','');" href="javascript:;">제2항</a> 각 호의 어느 하나에 해당하는 경우는 제외한다)에는 다음 각 호의 조치를 할 수 있다. </p> 
+       <p class="pty1_de2h">1. 공공기관에 대한 설명 또는 자료ㆍ서류 등의 제출 요구 및 실태조사 </p> 
+       <p class="pty1_de2h">2. 신변보호조치를 요구한 자, 참고인 또는 관계 공직자의 출석 및 의견진술 요구 </p> 
+       <p class="pty1_de2_1">③ 제1항에 따른 신변보호조치를 요구받은 경찰청장, 관할 시ㆍ도경찰청장, 관할 경찰서장은 <a title="팝업으로 이동" class="link" onclick="javascript:fncLsPttnLinkPop('152985');" href="javascript:;">대통령령</a>으로 정하는 바에 따라 즉시 신변보호조치를 하여야 한다. <span class="sfon">&lt;개정 2020. 12. 22.&gt;</span> </p> 
+       <p class="pty1_de2_1">④ 신고자등이 신고등을 한 이유로 피해를 입거나 입을 우려가 있다고 인정할 만한 상당한 이유가 있는 경우 해당 신고등과 관련한 조사 및 형사절차에서 <a title="팝업으로 이동" class="link sfon1" onclick="javascript:fncLsLawPop('1035102153','ALLJO','');" href="javascript:;">「특정범죄신고자 등 보호법」</a> <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102149','JO','');" href="javascript:;">제7조</a> 및 <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102151','JO','');" href="javascript:;">제9조</a>부터 <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102147','JO','');" href="javascript:;">제12조</a>까지의 규정을 준용한다. </p> 
+       <p></p> 
+      </div> 
+     </div> 
+     <a name="J22:0" id="J22:0"></a> 
+     <div class="pgroup"> 
+      <ul class="lawico01"> 
+       <li><a title="조문체계도 팝업으로 이동" style="text-decoration: none;" onclick="javascript:joStmdPop('290651', '0022', '00' );return false; " href="#AJAX"> <img alt="조문체계도버튼" src="/LSW/images/button/btn_jostmdico.gif" /> </a></li> 
+      </ul> 
+      <div class="lawcon"> 
+       <p class="pty1_p4"> <input name="joNoList" id="Y002200" style="vertical-align: middle;" onclick="javascript:getJoSelectLayer(this,'');" type="checkbox" value="22:0:002200:99504713" /> <span class="bl"><label for="Y002200"> 제22조(책임의 감면 등) </label> </span> ① 이 법에 따른 신고등과 관련하여 그와 관련된 자신의 범죄가 발견된 경우에는 그 신고자등에 대하여 형을 감경하거나 면제할 수 있다. </p>
+       <p class="pty1_de2_1">② 이 법에 따른 신고등과 관련하여 발견된 위법행위 등을 이유로 신고자등에게 징계를 하거나 불리한 행정처분을 하는 경우 위원회는 신고자등의 징계권자나 행정처분권자에게 그 징계나 행정처분의 감경 또는 면제를 요구할 수 있다. 이 경우 요구를 받은 자는 정당한 사유가 없으면 그 요구에 따라야 한다. </p> 
+       <p class="pty1_de2_1">③ 위원회는 제2항에 따른 징계나 행정처분의 감경 또는 면제를 요구하는 데 필요하다고 인정하면 징계권자나 행정처분권자 또는 해당 신고자등이 신고등을 한 기관에 관련 자료의 제출이나 의견의 진술 등을 요구할 수 있다. 이 경우 자료의 제출이나 의견의 진술을 요구받은 해당 기관은 정당한 사유가 없으면 그 요구에 따라야 한다. </p> 
+       <p class="pty1_de2_1">④ 이 법에 따라 신고등을 한 경우에는 다른 법령, 단체협약 또는 취업규칙 등의 관련 규정에도 불구하고 직무상 비밀준수 의무를 위반하지 아니한 것으로 본다. </p> 
+       <p></p> 
+      </div> 
+     </div> 
+     <a name="J23:0" id="J23:0"></a> 
+     <div class="pgroup"> 
+      <ul class="lawico01"> 
+       <li><a title="조문체계도 팝업으로 이동" style="text-decoration: none;" onclick="javascript:joStmdPop('290651', '0023', '00' );return false; " href="#AJAX"> <img alt="조문체계도버튼" src="/LSW/images/button/btn_jostmdico.gif" /> </a></li> 
+       <li><a title="연혁 팝업으로 이동" style="text-decoration: none;" onclick="javascript:fJoHstShow(this, '013463', '290651', '99504715', '010202');return false;" href="#AJAX"> <img alt="연혁" src="/LSW/images/button/btn_year3.gif" /> </a></li> 
+       <li><a href="javascript:;" onclick="javascript:openCtlInfoList('290651', '013463', '0023', '00');return false;" style="text-decoration: none;" title="관련규정 팝업으로 이동"> <img src="images/button/btn_entrust4_2.gif" alt="관련규제버튼" /> </a></li> 
+      </ul> 
+      <div class="lawcon"> 
+       <p class="pty1_p4"> <input name="joNoList" id="Y002300" style="vertical-align: middle;" onclick="javascript:getJoSelectLayer(this,'');" type="checkbox" value="23:0:002300:99504715" /> <span class="bl"><label for="Y002300"> 제23조(신고자 포상 및 보상 등) </label> </span> ① 위원회는 <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102237','JO','');" href="javascript:;">제17조</a>에 따른 신고로 공공기관에 현저한 재산상 이익을 얻게 하거나 손실을 방지한 경우 또는 공익을 증진한 경우에는 신고를 한 사람에게 <a title="팝업으로 이동" class="link sfon1" onclick="javascript:fncLsLawPop('1035102247','ALLJO','');" href="javascript:;">「부패방지 및 국민권익위원회의 설치와 운영에 관한 법률」</a> <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102249','JO','');" href="javascript:;">제69조</a>에 따른 보상심의위원회(이하 “보상심의위원회”라 한다)의 심의ㆍ의결을 거쳐 포상금을 지급하거나 <a title="팝업으로 이동" class="link sfon1" onclick="javascript:fncLsLawPop('1035102235','ALLJO','');" href="javascript:;">「상훈법」</a> 등의 규정에 따라 포상을 추천할 수 있다. </p>
+       <p class="pty1_de2_1">② <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102245','JO','');" href="javascript:;">제17조</a>에 따라 신고한 사람은 해당 신고로 인하여 다음 각 호의 어느 하나에 해당하는 조치를 통하여 공공기관의 직접적인 수입의 회복ㆍ증대 또는 비용의 절감에 기여한 경우에는 위원회에 보상금(補償金)의 지급을 신청할 수 있다. <span class="sfon">&lt;개정 2024. 3. 26.&gt;</span> </p> 
+       <p class="pty1_de2h">1. <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102233','JO','');" href="javascript:;">제8조</a>에 따른 부정이익등의 환수 </p> 
+       <p class="pty1_de2h">2. <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102251','JO','');" href="javascript:;">제9조</a>에 따른 제재부가금 부과 </p> 
+       <p class="pty1_de2_1">③ 신고자등과 그 친족 또는 동거인은 신고등과 관련하여 다음 각 호의 어느 하나에 해당하는 피해를 입었거나 비용을 지출한 경우 위원회에 구조금의 지급을 신청할 수 있다. <span class="sfon">&lt;개정 2024. 3. 26.&gt;</span> </p> 
+       <p class="pty1_de2h">1. 육체적ㆍ정신적 치료 등에 소요된 비용 </p> 
+       <p class="pty1_de2h">2. 전직ㆍ파견근무 등으로 소요된 이사비용 </p> 
+       <p class="pty1_de2h">3. 신고등을 이유로 한 쟁송절차에 소요된 비용 </p> 
+       <p class="pty1_de2h">4. <a title="팝업으로 이동" class="link sfon1" onclick="javascript:fncLsLawPop('1035102305','ALLJO','');" href="javascript:;">「공익신고자 보호법」</a> <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102307','JO','');" href="javascript:;">제2조</a><a title="팝업으로 이동" class="link sfon4" onclick="javascript:fncLsLawPop('1035102309','JO','');" href="javascript:;">제6호</a>에 따른 불이익조치 기간의 임금 손실액 </p> 
+       <p class="pty1_de2h">5. 그 밖에 중대한 경제적 손해(<a title="팝업으로 이동" class="link sfon1" onclick="javascript:fncLsLawPop('1035102297','ALLJO','');" href="javascript:;">「부패방지 및 국민권익위원회의 설치와 운영에 관한 법률」</a> <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102299','JO','');" href="javascript:;">제2조</a><a title="팝업으로 이동" class="link sfon4" onclick="javascript:fncLsLawPop('1035102289','JO','');" href="javascript:;">제7호</a><a title="팝업으로 이동" class="link sfon5" onclick="javascript:fncLsLawPop('1035102301','JO','');" href="javascript:;">아목</a> 및 <a title="팝업으로 이동" class="link sfon5" onclick="javascript:fncLsLawPop('1035102303','JO','');" href="javascript:;">자목</a>에 따른 손해는 제외한다) </p> 
+       <p class="pty1_de2_1">④ 위원회는 제1항에 따른 포상금 지급 또는 제2항에 따른 보상금 지급을 위하여 필요한 경우(<a title="팝업으로 이동" class="link sfon1" onclick="javascript:fncLsLawPop('1035102239','ALLJO','');" href="javascript:;">「부패방지 및 국민권익위원회의 설치와 운영에 관한 법률」</a> <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102241','JO','');" href="javascript:;">제29조</a><a title="팝업으로 이동" class="link sfon3" onclick="javascript:fncLsLawPop('1035102243','JO','');" href="javascript:;">제2항</a> 각 호의 어느 하나에 해당하는 경우는 제외한다)에는 다음 각 호의 조치를 할 수 있다. </p> 
+       <p class="pty1_de2h">1. 공공기관에 대한 설명 또는 자료ㆍ서류 등의 제출 요구 및 실태조사 </p> 
+       <p class="pty1_de2h">2. 제1항에 따른 포상금의 지급 대상자, 제2항에 따른 보상금의 지급을 신청한 자, 부정수익자, 부정청구등과 관련된 자, 참고인 또는 관계 공직자의 출석 및 의견진술 요구 </p> 
+       <p class="pty1_de2_1">⑤ 제3항에 따른 구조금 지급과 관련한 조사ㆍ조회, 구조금의 지급 범위 및 손해배상청구권의 대위에 관하여는 <a title="팝업으로 이동" class="link sfon1" onclick="javascript:fncLsLawPop('1035102291','ALLJO','');" href="javascript:;">「공익신고자 보호법」</a> <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102293','JO','');" href="javascript:;">제27조</a><a title="팝업으로 이동" class="link sfon3" onclick="javascript:fncLsLawPop('1035102295','JO','');" href="javascript:;">제3항부터 제5항</a>까지를 준용한다. 이 경우 “공익신고자등”은 “신고자등”으로 본다. <span class="sfon">&lt;신설 2024. 3. 26.&gt;</span> </p> 
+       <p class="pty1_de2_1">⑥ 제1항에 따른 포상금, 제2항에 따른 보상금 및 제3항에 따른 구조금의 지급 기준ㆍ대상 및 절차 등에 관한 사항은 <a title="팝업으로 이동" class="link" onclick="javascript:fncLsPttnLinkPop('152987');" href="javascript:;">대통령령</a>으로 정한다. <span class="sfon">&lt;개정 2024. 3. 26.&gt;</span> </p> 
+       <p class="pty1_de2"> <span class="sfon">[제목개정 2024. 3. 26.]</span> </p> 
+       <p></p> 
+      </div> 
+     </div> 
+     <a name="J24:0" id="J24:0"></a> 
+     <div class="pgroup"> 
+      <ul class="lawico01"> 
+       <li><a title="조문체계도 팝업으로 이동" style="text-decoration: none;" onclick="javascript:joStmdPop('290651', '0024', '00' );return false; " href="#AJAX"> <img alt="조문체계도버튼" src="/LSW/images/button/btn_jostmdico.gif" /> </a></li> 
+       <li><a title="연혁 팝업으로 이동" style="text-decoration: none;" onclick="javascript:fJoHstShow(this, '013463', '290651', '99504717', '010202');return false;" href="#AJAX"> <img alt="연혁" src="/LSW/images/button/btn_year3.gif" /> </a></li> 
+      </ul> 
+      <div class="lawcon"> 
+       <p class="pty1_p4"> <input name="joNoList" id="Y002400" style="vertical-align: middle;" onclick="javascript:getJoSelectLayer(this,'');" type="checkbox" value="24:0:002400:99504717" /> <span class="bl"><label for="Y002400"> 제24조(준용규정) </label> </span> ① <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102259','JO','');" href="javascript:;">제17조부터 제23조</a>까지에서 규정한 사항 외에 부정청구등에 대한 신고의 접수ㆍ처리, 신고자등의 보호, 포상 및 보상 등에 관하여는 <a title="팝업으로 이동" class="link sfon1" onclick="javascript:fncLsLawPop('1035102271','ALLJO','');" href="javascript:;">「부패방지 및 국민권익위원회의 설치와 운영에 관한 법률」</a> <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102273','JO','');" href="javascript:;">제56조</a>, <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102267','JO','');" href="javascript:;">제57조</a>, <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102327','JO','');" href="javascript:;">제58조</a>, <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102323','JO','');" href="javascript:;">제58조의2</a>, <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102311','JO','');" href="javascript:;">제59조부터 제61조</a>까지, <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102343','JO','');" href="javascript:;">제61조의2</a>, <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102257','JO','');" href="javascript:;">제63조</a>, <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102345','JO','');" href="javascript:;">제68조</a><a title="팝업으로 이동" class="link sfon3" onclick="javascript:fncLsLawPop('1035102313','JO','');" href="javascript:;">제4항부터 제6항</a>까지, <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102321','JO','');" href="javascript:;">제70조</a>, <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102319','JO','');" href="javascript:;">제70조의2</a> 및 <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102277','JO','');" href="javascript:;">제71조</a>를 준용한다. <span class="sfon">&lt;개정 2024. 3. 26.&gt;</span> </p>
+       <p class="pty1_de2_1">② 제1항에 따라 준용하는 경우 “부패행위”는 “부정청구등”으로, <a title="팝업으로 이동" class="link sfon1" onclick="javascript:fncLsLawPop('1035102315','ALLJO','');" href="javascript:;">「부패방지 및 국민권익위원회의 설치와 운영에 관한 법률」</a> <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102317','JO','');" href="javascript:;">제59조부터 제61조</a>까지 및 <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102341','JO','');" href="javascript:;">제61조의2</a>의 “위원회”는 “<a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102279','JO','');" href="javascript:;">제17조</a>에 따른 신고를 접수한 기관”으로, <a title="팝업으로 이동" class="link sfon1" onclick="javascript:fncLsLawPop('1035102333','ALLJO','');" href="javascript:;">같은 법</a> <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102335','JO','');" href="javascript:;">제68조</a><a title="팝업으로 이동" class="link sfon3" onclick="javascript:fncLsLawPop('1035102337','JO','');" href="javascript:;">제4항</a> 및 <a title="팝업으로 이동" class="link sfon3" onclick="javascript:fncLsLawPop('1035102339','JO','');" href="javascript:;">제5항</a>의 “<a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102325','JO','');" href="javascript:;">제69조</a>에 따른 보상심의위원회”는 “<a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102329','JO','');" href="javascript:;">제23조</a><a title="팝업으로 이동" class="link sfon3" onclick="javascript:fncLsLawPop('1035102331','JO','');" href="javascript:;">제1항</a>에 따른 보상심의위원회”로 본다. <span class="sfon">&lt;개정 2024. 3. 26.&gt;</span> </p> 
+       <p></p> 
+      </div> 
+     </div> 
+     <a name="pjuk:99504719" id="pjuk:99504719"></a> 
+     <div class="pgroup" style="padding-bottom: 0px; margin-bottom: 5px;"> 
+      <p class="gtit" style="padding-top: 5px; margin-bottom: 0px;" data-joidfull="002402" data-joseq="99504719">         제4장 보칙 </p> 
+     </div> 
+     <a name="J24:2" id="J24:2"></a> 
+     <div class="pgroup"> 
+      <ul class="lawico01"> 
+       <li><a title="조문체계도 팝업으로 이동" style="text-decoration: none;" onclick="javascript:joStmdPop('290651', '0024', '02' );return false; " href="#AJAX"> <img alt="조문체계도버튼" src="/LSW/images/button/btn_jostmdico.gif" /> </a></li> 
+       <li><a title="연혁 팝업으로 이동" style="text-decoration: none;" onclick="javascript:fJoHstShow(this, '013463', '290651', '99504721', '010202');return false;" href="#AJAX"> <img alt="연혁" src="/LSW/images/button/btn_year3.gif" /> </a></li> 
+      </ul> 
+      <div class="lawcon"> 
+       <p class="pty1_p4"> <input name="joNoList" id="Y002402" style="vertical-align: middle;" onclick="javascript:getJoSelectLayer(this,'');" type="checkbox" value="24:2:002402:99504721" /> <span class="bl"><label for="Y002402"> 제24조의2(공소제기 등의 통보) </label> </span> 지방공소청 또는 지방공소청 지청의 장은 다음 각 호의 어느 하나에 해당하는 사건에 대하여 공소를 제기하거나 기소유예 결정을 한 경우로서 해당 사건에 부정청구등이 있다고 인정되는 경우에는 그 사실을 공소제기 또는 기소유예 결정을 한 날부터 10일 이내에 <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102347','JO','');" href="javascript:;">제8조</a><a title="팝업으로 이동" class="link sfon3" onclick="javascript:fncLsLawPop('1035102349','JO','');" href="javascript:;">제1항</a>에 따라 부정이익등을 환수하여야 할 행정청에 통보하여야 한다. 이 경우 통보 내용은 부정이익등의 환수에 필요한 부분으로 한정한다. <span class="sfon">&lt;개정 2026. 3. 24.&gt;</span> </p>
+       <p class="pty1_de2_1"> </p> 
+       <p class="pty1_de2h">1. 수사기관이 부정청구등에 따른 범죄혐의가 있다고 인지한 사건 </p> 
+       <p class="pty1_de2h">2. <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102351','JO','');" href="javascript:;">제17조</a>에 따라 수사기관에 신고된 사건 </p> 
+       <p class="pty1_de2"> <span class="sfon">[본조신설 2021. 12. 7.]</span> </p> 
+       <p></p> 
+      </div> 
+     </div> 
+     <a name="J25:0" id="J25:0"></a> 
+     <div class="pgroup"> 
+      <ul class="lawico01"> 
+       <li><a title="조문체계도 팝업으로 이동" style="text-decoration: none;" onclick="javascript:joStmdPop('290651', '0025', '00' );return false; " href="#AJAX"> <img alt="조문체계도버튼" src="/LSW/images/button/btn_jostmdico.gif" /> </a></li> 
+      </ul> 
+      <div class="lawcon"> 
+       <p class="pty1_p4"> <input name="joNoList" id="Y002500" style="vertical-align: middle;" onclick="javascript:getJoSelectLayer(this,'');" type="checkbox" value="25:0:002500:99504723" /> <span class="bl"><label for="Y002500"> 제25조(제재부가금 부과 등 기록ㆍ관리) </label> </span> 행정청은 부정수익자의 부정청구등에 대하여 <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102069','JO','');" href="javascript:;">제7조</a>에 따른 공공재정지급금의 지급 중단, <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102065','JO','');" href="javascript:;">제8조</a>에 따른 부정이익등 환수, <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102063','JO','');" href="javascript:;">제9조</a>에 따른 제재부가금 부과, <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102067','JO','');" href="javascript:;">제12조</a>에 따른 가산금ㆍ체납처분 및 <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102061','JO','');" href="javascript:;">제16조</a>에 따른 명단 공표를 한 경우에는 <a title="팝업으로 이동" class="link" onclick="javascript:fncLsPttnLinkPop('152989');" href="javascript:;">대통령령</a>으로 정하는 바에 따라 그 사실을 기록ㆍ관리하여야 한다. </p> 
+      </div> 
+     </div> 
+     <a name="J26:0" id="J26:0"></a> 
+     <div class="pgroup"> 
+      <ul class="lawico01"> 
+       <li><a title="조문체계도 팝업으로 이동" style="text-decoration: none;" onclick="javascript:joStmdPop('290651', '0026', '00' );return false; " href="#AJAX"> <img alt="조문체계도버튼" src="/LSW/images/button/btn_jostmdico.gif" /> </a></li> 
+      </ul> 
+      <div class="lawcon"> 
+       <p class="pty1_p4"> <input name="joNoList" id="Y002600" style="vertical-align: middle;" onclick="javascript:getJoSelectLayer(this,'');" type="checkbox" value="26:0:002600:99504725" /> <span class="bl"><label for="Y002600"> 제26조(이행실태의 점검 등) </label> </span> ① 위원회는 공공기관의 장에게 <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102073','JO','');" href="javascript:;">제7조</a>에 따른 공공재정지급금의 지급 중단, <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102077','JO','');" href="javascript:;">제8조</a>에 따른 부정이익등 환수, <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102081','JO','');" href="javascript:;">제9조</a>에 따른 제재부가금 부과, <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102085','JO','');" href="javascript:;">제12조</a>에 따른 가산금ㆍ체납처분 및 <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102075','JO','');" href="javascript:;">제16조</a>에 따른 명단 공표에 관한 이행실태 자료 등의 제출을 요청할 수 있다. 이 경우 요청을 받은 해당 공공기관의 장은 특별한 사유가 없으면 그 요청에 따라야 한다. </p>
+       <p class="pty1_de2_1">② 위원회는 제1항에 따라 제출된 자료의 점검 결과 필요하다고 인정하는 경우에는 심의를 거쳐 공공기관이나 그 감독기관의 장에게 <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102079','JO','');" href="javascript:;">제7조</a>에 따른 공공재정지급금의 지급 중단, <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102087','JO','');" href="javascript:;">제8조</a>에 따른 부정이익등 환수, <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102083','JO','');" href="javascript:;">제9조</a>에 따른 제재부가금 부과, <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102071','JO','');" href="javascript:;">제12조</a>에 따른 가산금ㆍ체납처분 및 <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102089','JO','');" href="javascript:;">제16조</a>에 따른 명단 공표의 이행이나 제도 개선을 권고할 수 있다. </p> 
+       <p class="pty1_de2_1">③ 제2항에 따라 제도 개선을 권고받은 공공기관이나 그 감독기관의 장은 권고 사항에 대한 조치 결과를 위원회에 통보하여야 한다. </p> 
+       <p class="pty1_de2_1">④ 제2항에 따라 제도 개선을 권고받은 공공기관이나 그 감독기관의 장은 위원회의 권고대로 조치하기가 곤란한 경우에는 위원회에 재심의를 요청하여야 한다. 이 경우 위원회는 재심의를 하여야 한다. </p> 
+       <p></p> 
+      </div> 
+     </div> 
+     <a name="J27:0" id="J27:0"></a> 
+     <div class="pgroup"> 
+      <ul class="lawico01"> 
+       <li><a title="조문체계도 팝업으로 이동" style="text-decoration: none;" onclick="javascript:joStmdPop('290651', '0027', '00' );return false; " href="#AJAX"> <img alt="조문체계도버튼" src="/LSW/images/button/btn_jostmdico.gif" /> </a></li> 
+       <li><a title="연혁 팝업으로 이동" style="text-decoration: none;" onclick="javascript:fJoHstShow(this, '013463', '290651', '99504727', '010202');return false;" href="#AJAX"> <img alt="연혁" src="/LSW/images/button/btn_year3.gif" /> </a></li> 
+      </ul> 
+      <div class="lawcon"> 
+       <p class="pty1_p4"> <input name="joNoList" id="Y002700" style="vertical-align: middle;" onclick="javascript:getJoSelectLayer(this,'');" type="checkbox" value="27:0:002700:99504727" /> <span class="bl"><label for="Y002700"> 제27조(국회 등의 특례) </label> </span> 국회ㆍ법원ㆍ헌법재판소ㆍ중앙선거관리위원회ㆍ감사원ㆍ고위공직자범죄수사처는 부정청구등의 방지를 위하여 자체적으로 <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102143','JO','');" href="javascript:;">제25조</a> 및 <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102141','JO','');" href="javascript:;">제26조</a>의 업무를 성실히 추진하여야 한다. <span class="sfon">&lt;개정 2021. 1. 5.&gt;</span> </p> 
+      </div> 
+     </div> 
+     <a name="pjuk:99504729" id="pjuk:99504729"></a> 
+     <div class="pgroup" style="padding-bottom: 0px; margin-bottom: 5px;"> 
+      <p class="gtit" style="padding-top: 5px; margin-bottom: 0px;" data-joidfull="002800" data-joseq="99504729">         제5장 벌칙 </p> 
+     </div> 
+     <a name="J28:0" id="J28:0"></a> 
+     <div class="pgroup"> 
+      <ul class="lawico01"> 
+       <li><a title="조문체계도 팝업으로 이동" style="text-decoration: none;" onclick="javascript:joStmdPop('290651', '0028', '00' );return false; " href="#AJAX"> <img alt="조문체계도버튼" src="/LSW/images/button/btn_jostmdico.gif" /> </a></li> 
+      </ul> 
+      <div class="lawcon"> 
+       <p class="pty1_p4"> <input name="joNoList" id="Y002800" style="vertical-align: middle;" onclick="javascript:getJoSelectLayer(this,'');" type="checkbox" value="28:0:002800:99504731" /> <span class="bl"><label for="Y002800"> 제28조(인적사항 공개 등 금지 위반의 죄) </label> </span> <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102091','JO','');" href="javascript:;">제20조</a><a title="팝업으로 이동" class="link sfon3" onclick="javascript:fncLsLawPop('1035102093','JO','');" href="javascript:;">제1항</a>을 위반한 자는 3년 이하의 징역 또는 3천만원 이하의 벌금에 처한다. </p> 
+      </div> 
+     </div> 
+     <a name="J28:2" id="J28:2"></a> 
+     <div class="pgroup"> 
+      <ul class="lawico01"> 
+       <li><a title="조문체계도 팝업으로 이동" style="text-decoration: none;" onclick="javascript:joStmdPop('290651', '0028', '02' );return false; " href="#AJAX"> <img alt="조문체계도버튼" src="/LSW/images/button/btn_jostmdico.gif" /> </a></li> 
+       <li><a title="연혁 팝업으로 이동" style="text-decoration: none;" onclick="javascript:fJoHstShow(this, '013463', '290651', '99504733', '010202');return false;" href="#AJAX"> <img alt="연혁" src="/LSW/images/button/btn_year3.gif" /> </a></li> 
+      </ul> 
+      <div class="lawcon"> 
+       <p class="pty1_p4"> <input name="joNoList" id="Y002802" style="vertical-align: middle;" onclick="javascript:getJoSelectLayer(this,'');" type="checkbox" value="28:2:002802:99504733" /> <span class="bl"><label for="Y002802"> 제28조의2(부정청구등의 죄) </label> </span> ① 다음 각 호의 어느 하나에 해당하는 자는 3년 이하의 징역 또는 3천만원 이하의 벌금에 처한다. </p>
+       <p class="pty1_de2h">1. 거짓이나 그 밖의 부정한 방법으로 공공재정지급금을 청구할 자격이 없는데도 공공재정지급금을 지급받은 자 </p> 
+       <p class="pty1_de2h">2. 거짓이나 그 밖의 부정한 방법으로 공공재정지급금을 청구할 자격이 없는데도 공공재정지급금을 지급받으려는 자에게 그 사실을 알면서 공공재정지급금을 지급한 자 </p> 
+       <p class="pty1_de2_1">② 다음 각 호의 어느 하나에 해당하는 자는 1년 이하의 징역 또는 1천만원 이하의 벌금에 처한다. </p> 
+       <p class="pty1_de2h">1. 거짓이나 그 밖의 부정한 방법으로 받아야 할 공공재정지급금보다 과다하게 공공재정지급금을 지급받은 자 </p> 
+       <p class="pty1_de2h">2. 거짓이나 그 밖의 부정한 방법으로 받아야 할 공공재정지급금보다 과다하게 공공재정지급금을 지급받으려는 자에게 그 사실을 알면서 공공재정지급금을 지급한 자 </p> 
+       <p class="pty1_de2_1">③ 제1항 각 호 및 제2항 각 호의 미수범은 처벌한다. </p> 
+       <p class="pty1_de2"> <span class="sfon">[본조신설 2024. 3. 26.]</span> </p> 
+       <p></p> 
+      </div> 
+     </div> 
+     <a name="J29:0" id="J29:0"></a> 
+     <div class="pgroup"> 
+      <ul class="lawico01"> 
+       <li><a title="조문체계도 팝업으로 이동" style="text-decoration: none;" onclick="javascript:joStmdPop('290651', '0029', '00' );return false; " href="#AJAX"> <img alt="조문체계도버튼" src="/LSW/images/button/btn_jostmdico.gif" /> </a></li> 
+      </ul> 
+      <div class="lawcon"> 
+       <p class="pty1_p4"> <input name="joNoList" id="Y002900" style="vertical-align: middle;" onclick="javascript:getJoSelectLayer(this,'');" type="checkbox" value="29:0:002900:99504735" /> <span class="bl"><label for="Y002900"> 제29조(신고 방해 등의 죄) </label> </span> <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102095','JO','');" href="javascript:;">제18조</a>를 위반하여 신고등을 방해하거나 신고등을 취소하도록 강요한 자는 1년 이하의 징역 또는 1천만원 이하의 벌금에 처한다. </p> 
+      </div> 
+     </div> 
+     <a name="J30:0" id="J30:0"></a> 
+     <div class="pgroup"> 
+      <ul class="lawico01"> 
+       <li><a title="조문체계도 팝업으로 이동" style="text-decoration: none;" onclick="javascript:joStmdPop('290651', '0030', '00' );return false; " href="#AJAX"> <img alt="조문체계도버튼" src="/LSW/images/button/btn_jostmdico.gif" /> </a></li> 
+      </ul> 
+      <div class="lawcon"> 
+       <p class="pty1_p4"> <input name="joNoList" id="Y003000" style="vertical-align: middle;" onclick="javascript:getJoSelectLayer(this,'');" type="checkbox" value="30:0:003000:99504737" /> <span class="bl"><label for="Y003000"> 제30조(조치 요구에 대한 불이행의 죄) </label> </span> <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102097','JO','');" href="javascript:;">제19조</a><a title="팝업으로 이동" class="link sfon3" onclick="javascript:fncLsLawPop('1035102099','JO','');" href="javascript:;">제1항</a>에 따른 신분상 불이익을 주거나 근무조건상의 차별을 한 자가 <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102155','JO','');" href="javascript:;">같은 조</a> <a title="팝업으로 이동" class="link sfon3" onclick="javascript:fncLsLawPop('1035102157','JO','');" href="javascript:;">제7항</a>에 따른 조치 요구를 이행하지 아니하였을 때에는 1년 이하의 징역 또는 1천만원 이하의 벌금에 처한다. </p> 
+      </div> 
+     </div> 
+     <a name="J31:0" id="J31:0"></a> 
+     <div class="pgroup"> 
+      <ul class="lawico01"> 
+       <li><a title="조문체계도 팝업으로 이동" style="text-decoration: none;" onclick="javascript:joStmdPop('290651', '0031', '00' );return false; " href="#AJAX"> <img alt="조문체계도버튼" src="/LSW/images/button/btn_jostmdico.gif" /> </a></li> 
+      </ul> 
+      <div class="lawcon"> 
+       <p class="pty1_p4"> <input name="joNoList" id="Y003100" style="vertical-align: middle;" onclick="javascript:getJoSelectLayer(this,'');" type="checkbox" value="31:0:003100:99504739" /> <span class="bl"><label for="Y003100"> 제31조(과태료) </label> </span> ① 다음 각 호의 어느 하나에 해당하는 자에게는 1천만원 이하의 과태료를 부과한다. </p>
+       <p class="pty1_de2h">1. 정당한 사유 없이 <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102119','JO','');" href="javascript:;">제13조</a><a title="팝업으로 이동" class="link sfon3" onclick="javascript:fncLsLawPop('1035102103','JO','');" href="javascript:;">제1항</a>에 따른 행정청의 요구에 따르지 아니한 자 </p> 
+       <p class="pty1_de2h">2. <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102101','JO','');" href="javascript:;">제19조</a><a title="팝업으로 이동" class="link sfon3" onclick="javascript:fncLsLawPop('1035102111','JO','');" href="javascript:;">제1항</a>에 따른 신분상 불이익을 주거나 근무조건상의 차별을 한 자 </p> 
+       <p class="pty1_de2h">3. <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102109','JO','');" href="javascript:;">제19조</a><a title="팝업으로 이동" class="link sfon3" onclick="javascript:fncLsLawPop('1035102117','JO','');" href="javascript:;">제6항</a>을 위반하여 <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102159','JO','');" href="javascript:;">같은 조</a> <a title="팝업으로 이동" class="link sfon3" onclick="javascript:fncLsLawPop('1035102161','JO','');" href="javascript:;">제5항</a>에 따른 요구 또는 조회에 따르지 아니한 자 </p> 
+       <p class="pty1_de2h">4. 정당한 사유 없이 <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102105','JO','');" href="javascript:;">제19조</a><a title="팝업으로 이동" class="link sfon3" onclick="javascript:fncLsLawPop('1035102107','JO','');" href="javascript:;">제7항</a>에 따른 위원회의 조치 요구를 이행하지 아니한 자(제19조제1항에 따른 신분상 불이익을 주거나 근무조건상의 차별을 한 자는 제외한다) </p> 
+       <p class="pty1_de2_1">② 제1항제1호의 과태료는 <a title="팝업으로 이동" class="link" onclick="javascript:fncLsPttnLinkPop('152991');" href="javascript:;">대통령령</a>으로 정하는 바에 따라 <a title="팝업으로 이동" class="link sfon2" onclick="javascript:fncLsLawPop('1035102113','JO','');" href="javascript:;">제13조</a><a title="팝업으로 이동" class="link sfon3" onclick="javascript:fncLsLawPop('1035102115','JO','');" href="javascript:;">제1항</a>에 따른 요구를 한 행정청이 부과ㆍ징수한다. </p> 
+       <p class="pty1_de2_1">③ 제1항제2호부터 제4호까지의 과태료는 <a title="팝업으로 이동" class="link" onclick="javascript:fncLsPttnLinkPop('152993');" href="javascript:;">대통령령</a>으로 정하는 바에 따라 위원회가 부과ㆍ징수한다. </p> 
+       <p></p> 
+      </div> 
+     </div> 
+     <!-- 조문정보 --> 
+     <!-- 부칙 영역 끝 --> 
+     <br /> 
+     <div id="arDivArea"> 
+      <a name="arArea"></a> 
+      <a name="J12996033" id="J12996033"></a> 
+      <div class="pgroup"> 
+       <p class="pty3" style="margin-bottom: -1px;"> <a class="nun" onclick="javascript:arView('ar12996033','<법률 제16323호, 2019. 4. 16.>'); return false;" href="#AJAX"> <img id="ar12996033btn" style="vertical-align: middle;" alt="부칙 <법률 제16323호, 2019. 4. 16.>조문목록 접기" src="/LSW/images/button/btn_cocl.gif" /> </a> <input name="arInf" id="chk12996033" style="vertical-align: middle;" type="checkbox" alt="부칙 <법률 제16323호, 2019. 4. 16.>체크박스 " value="12996033" /> <a class="nun" onclick="javascript:arView('ar12996033','<법률 제16323호, 2019. 4. 16.>'); return false;" href="#AJAX"> <label for="chk12996033"> <span class="bl"> 부      칙</span> </label> <span class="sfon">&lt;법률 제16323호, 2019. 4. 16.&gt;</span> </a> <a class="nun" onclick="javascript:arView('ar12996033','<법률 제16323호, 2019. 4. 16.>');return false;" href="#AJAX"> <img id="ar12996033MrBtn" style="vertical-align: middle;" alt="부칙 <법률 제16323호, 2019. 4. 16.>보기" src="/LSW/images/button/btn_more_bu.gif" /> </a> </p> 
+       <p class="pty3_dep1"><span class="bl">제1조(시행일)</span> 이 법은 2020년 1월 1일부터 시행한다.</p>
+       <div id="ar12996033">
+        <p class="pty3_dep1"><span class="bl">제2조(부정청구등에 관한 적용례)</span> 이 법 중 부정청구등에 관한 규정은 이 법 시행 이후 최초로 지급된 공공재정지급금에 대한 부정청구등부터 적용한다.</p>
+       </div> 
+      </div> 
+      <a name="J12996035" id="J12996035"></a> 
+      <div class="pgroup"> 
+       <p class="pty3" style="margin-bottom: -1px;"> <a class="nun" onclick="javascript:arView('ar12996035','<법률 제17091호,  2020. 3. 24.>'); return false;" href="#AJAX"> <img id="ar12996035btn" style="vertical-align: middle;" alt="부칙 <법률 제17091호,  2020. 3. 24.>조문목록 접기" src="/LSW/images/button/btn_cocl.gif" /> </a> <input name="arInf" id="chk12996035" style="vertical-align: middle;" type="checkbox" alt="부칙 <법률 제17091호,  2020. 3. 24.>체크박스 " value="12996035" /> <a class="nun" onclick="javascript:arView('ar12996035','<법률 제17091호,  2020. 3. 24.>'); return false;" href="#AJAX"> <label for="chk12996035"> <span class="bl"> 부      칙</span> </label> <span class="sfon">&lt;법률 제17091호, 2020. 3. 24.&gt;</span> </a> <a class="nun" onclick="javascript:fncArLawPop('지방행정제재ㆍ부과금의 징수 등에 관한 법률', '20200324', '17091');" href="#AJAX"> <span class="sfon">(지방행정제재ㆍ부과금의 징수 등에 관한 법률) </span> </a> <a class="nun" onclick="javascript:arView('ar12996035','<법률 제17091호,  2020. 3. 24.>');return false;" href="#AJAX"> <img id="ar12996035MrBtn" style="vertical-align: middle;" alt="부칙 <법률 제17091호,  2020. 3. 24.>보기" src="/LSW/images/button/btn_more_bu.gif" /> </a> </p> 
+       <p class="pty3_dep1"><span class="bl">제1조(시행일)</span> 이 법은 공포한 날부터 시행한다. &lt;단서 생략&gt;</p>
+       <div id="ar12996035">
+        <p class="pty3_dep1"><span class="bl">제2조 및 제3조</span> 생략</p>
+        <p class="pty3_dep1"><span class="bl">제4조(다른 법률의 개정)</span> ①부터 ⑫까지 생략</p>
+        <p class="pty3_dep2"> ⑬ 공공재정 부정청구 금지 및 부정이익 환수 등에 관한 법률 일부를 다음과 같이 개정한다.</p>
+        <p class="pty3_dep2"> 제12조제2항 중 “「지방세외수입금의 징수 등에 관한 법률」”을 “「지방행정제재ㆍ부과금의 징수 등에 관한 법률」”로 한다.</p>
+        <p class="pty3_dep2"> ⑭부터 &lt;102&gt;까지 생략</p>
+        <p class="pty3_dep1"><span class="bl">제5조</span> 생략</p>
+       </div> 
+      </div> 
+      <a name="J12996037" id="J12996037"></a> 
+      <div class="pgroup"> 
+       <p class="pty3" style="margin-bottom: -1px;"> <a class="nun" onclick="javascript:arView('ar12996037','<법률 제17689호,  2020. 12. 22.>'); return false;" href="#AJAX"> <img id="ar12996037btn" style="vertical-align: middle;" alt="부칙 <법률 제17689호,  2020. 12. 22.>조문목록 접기" src="/LSW/images/button/btn_cocl.gif" /> </a> <input name="arInf" id="chk12996037" style="vertical-align: middle;" type="checkbox" alt="부칙 <법률 제17689호,  2020. 12. 22.>체크박스 " value="12996037" /> <a class="nun" onclick="javascript:arView('ar12996037','<법률 제17689호,  2020. 12. 22.>'); return false;" href="#AJAX"> <label for="chk12996037"> <span class="bl"> 부      칙</span> </label> <span class="sfon">&lt;법률 제17689호, 2020. 12. 22.&gt;</span> </a> <a class="nun" onclick="javascript:fncArLawPop('국가경찰과 자치경찰의 조직 및 운영에 관한 법률', '20201222', '17689');" href="#AJAX"> <span class="sfon">(국가경찰과 자치경찰의 조직 및 운영에 관한 법률) </span> </a> <a class="nun" onclick="javascript:arView('ar12996037','<법률 제17689호,  2020. 12. 22.>');return false;" href="#AJAX"> <img id="ar12996037MrBtn" style="vertical-align: middle;" alt="부칙 <법률 제17689호,  2020. 12. 22.>보기" src="/LSW/images/button/btn_more_bu.gif" /> </a> </p> 
+       <p class="pty3_dep1"><span class="bl">제1조(시행일)</span> 이 법은 2021년 1월 1일부터 시행한다.</p>
+       <div id="ar12996037">
+        <p class="pty3_dep1"><span class="bl">제2조부터 제6조까지</span> 생략</p>
+        <p class="pty3_dep1"><span class="bl">제7조(다른 법률의 개정)</span> ①부터 ⑧까지 생략</p>
+        <p class="pty3_dep2"> ⑨ 공공재정 부정청구 금지 및 부정이익 환수 등에 관한 법률 일부를 다음과 같이 개정한다.</p>
+        <p class="pty3_dep2"> 제21조제1항 후단 및 같은 조 제3항 중 “관할 지방경찰청장”을 각각 “관할 시ㆍ도경찰청장”으로 한다.</p>
+        <p class="pty3_dep2"> ⑩부터 &lt;53&gt;까지 생략</p>
+        <p class="pty3_dep1"><span class="bl">제8조</span> 생략</p>
+       </div> 
+      </div> 
+      <a name="J12996039" id="J12996039"></a> 
+      <div class="pgroup"> 
+       <p class="pty3" style="margin-bottom: -1px;"> <img id="ar12996039btn" style="vertical-align: middle;" alt="부칙<법률 제17881호, 2021. 1. 5.>조문목록 없음" src="/LSW/images/button/btn_dot.gif" /> <input name="arInf" id="chk12996039" style="vertical-align: middle;" type="checkbox" alt="부칙 <법률 제17881호, 2021. 1. 5.>체크박스 " value="12996039" /> <a class="nun" onclick="javascript:arView('ar12996039','<법률 제17881호, 2021. 1. 5.>'); return false;" href="#AJAX"> <label for="chk12996039"> <span class="bl"> 부      칙</span> </label> <span class="sfon">&lt;법률 제17881호, 2021. 1. 5.&gt;</span> </a> </p> 
+       <p class="pty3_dep1">이 법은 공포한 날부터 시행한다.</p> 
+      </div> 
+      <a name="J12996041" id="J12996041"></a> 
+      <div class="pgroup"> 
+       <p class="pty3" style="margin-bottom: -1px;"> <a class="nun" onclick="javascript:arView('ar12996041','<법률 제18575호,  2021. 12. 7.>'); return false;" href="#AJAX"> <img id="ar12996041btn" style="vertical-align: middle;" alt="부칙 <법률 제18575호,  2021. 12. 7.>조문목록 접기" src="/LSW/images/button/btn_cocl.gif" /> </a> <input name="arInf" id="chk12996041" style="vertical-align: middle;" type="checkbox" alt="부칙 <법률 제18575호,  2021. 12. 7.>체크박스 " value="12996041" /> <a class="nun" onclick="javascript:arView('ar12996041','<법률 제18575호,  2021. 12. 7.>'); return false;" href="#AJAX"> <label for="chk12996041"> <span class="bl"> 부      칙</span> </label> <span class="sfon">&lt;법률 제18575호, 2021. 12. 7.&gt;</span> </a> <a class="nun" onclick="javascript:arView('ar12996041','<법률 제18575호,  2021. 12. 7.>');return false;" href="#AJAX"> <img id="ar12996041MrBtn" style="vertical-align: middle;" alt="부칙 <법률 제18575호,  2021. 12. 7.>보기" src="/LSW/images/button/btn_more_bu.gif" /> </a> </p> 
+       <p class="pty3_dep1"><span class="bl">제1조(시행일)</span> 이 법은 공포한 날부터 시행한다.</p>
+       <div id="ar12996041">
+        <p class="pty3_dep1"><span class="bl">제2조(공소제기 등의 통보에 관한 적용례)</span> 제24조의2의 개정규정은 이 법 시행 이후 공소를 제기하거나 기소유예 결정을 하는 사건부터 적용한다.</p>
+       </div> 
+      </div> 
+      <a name="J12996043" id="J12996043"></a> 
+      <div class="pgroup"> 
+       <p class="pty3" style="margin-bottom: -1px;"> <a class="nun" onclick="javascript:arView('ar12996043','<법률 제19266호,  2023. 3. 21.>'); return false;" href="#AJAX"> <img id="ar12996043btn" style="vertical-align: middle;" alt="부칙 <법률 제19266호,  2023. 3. 21.>조문목록 접기" src="/LSW/images/button/btn_cocl.gif" /> </a> <input name="arInf" id="chk12996043" style="vertical-align: middle;" type="checkbox" alt="부칙 <법률 제19266호,  2023. 3. 21.>체크박스 " value="12996043" /> <a class="nun" onclick="javascript:arView('ar12996043','<법률 제19266호,  2023. 3. 21.>'); return false;" href="#AJAX"> <label for="chk12996043"> <span class="bl"> 부      칙</span> </label> <span class="sfon">&lt;법률 제19266호, 2023. 3. 21.&gt;</span> </a> <a class="nun" onclick="javascript:arView('ar12996043','<법률 제19266호,  2023. 3. 21.>');return false;" href="#AJAX"> <img id="ar12996043MrBtn" style="vertical-align: middle;" alt="부칙 <법률 제19266호,  2023. 3. 21.>보기" src="/LSW/images/button/btn_more_bu.gif" /> </a> </p> 
+       <p class="pty3_dep1"><span class="bl">제1조(시행일)</span> 이 법은 공포 후 3개월이 경과한 날부터 시행한다.</p>
+       <div id="ar12996043">
+        <p class="pty3_dep1"><span class="bl">제2조(보상금 지급에 관한 적용례)</span> 제23조제3항의 개정규정은 공직자였던 자가 이 법 시행 이후 재직 중 자기 직무와 관련한 사항을 신고한 경우부터 적용한다.</p>
+       </div> 
+      </div> 
+      <a name="J12996045" id="J12996045"></a> 
+      <div class="pgroup"> 
+       <p class="pty3" style="margin-bottom: -1px;"> <a class="nun" onclick="javascript:arView('ar12996045','<법률 제20426호,  2024. 3. 26.>'); return false;" href="#AJAX"> <img id="ar12996045btn" style="vertical-align: middle;" alt="부칙 <법률 제20426호,  2024. 3. 26.>조문목록 접기" src="/LSW/images/button/btn_cocl.gif" /> </a> <input name="arInf" id="chk12996045" style="vertical-align: middle;" type="checkbox" alt="부칙 <법률 제20426호,  2024. 3. 26.>체크박스 " value="12996045" /> <a class="nun" onclick="javascript:arView('ar12996045','<법률 제20426호,  2024. 3. 26.>'); return false;" href="#AJAX"> <label for="chk12996045"> <span class="bl"> 부      칙</span> </label> <span class="sfon">&lt;법률 제20426호, 2024. 3. 26.&gt;</span> </a> <a class="nun" onclick="javascript:arView('ar12996045','<법률 제20426호,  2024. 3. 26.>');return false;" href="#AJAX"> <img id="ar12996045MrBtn" style="vertical-align: middle;" alt="부칙 <법률 제20426호,  2024. 3. 26.>보기" src="/LSW/images/button/btn_more_bu.gif" /> </a> </p> 
+       <p class="pty3_dep1"><span class="bl">제1조(시행일)</span> 이 법은 공포 후 6개월이 경과한 날부터 시행한다. 다만, 제15조의 개정규정은 공포한 날부터 시행한다.</p>
+       <div id="ar12996045">
+        <p class="pty3_dep1"><span class="bl">제2조(공공재정지급금이 잘못 지급된 경우의 이자 환수에 관한 적용례)</span> 제8조제1항 단서의 개정규정은 이 법 시행 이후 부정이익등의 환수처분을 하는 경우부터 적용한다.</p>
+        <p class="pty3_dep1"><span class="bl">제3조(다른 법률에 이자의 환수에 관한 특별한 규정이 없는 경우의 이자의 환수에 관한 적용례)</span> 제8조제2항의 개정규정은 이 법 시행 이후 부정청구등이 발생하는 경우부터 적용한다.</p>
+        <p class="pty3_dep1"><span class="bl">제4조(제재부가금의 감경에 관한 적용례)</span> 제10조제1항의 개정규정은 이 법 시행 이후 부정수익자가 자진하여 신고하는 경우부터 적용한다.</p>
+        <p class="pty3_dep1"><span class="bl">제5조(구조금의 지급 신청에 관한 적용례)</span> 제23조제3항의 개정규정은 이 법 시행 이후 신고등을 하는 경우부터 적용한다.</p>
+        <p class="pty3_dep1"><span class="bl">제6조(보상금의 지급신청 기한 및 보상금등의 상환에 관한 적용례)</span> ① 제24조제1항의 개정규정(「부패방지 및 국민권익위원회의 설치와 운영에 관한 법률」 제68조제6항에 관한 개정부분으로 한정한다)은 이 법 시행 이후 제17조에 따른 신고를 하는 경우부터 적용한다.</p>
+        <p class="pty3_dep2"> ② 제24조제1항의 개정규정(「부패방지 및 국민권익위원회의 설치와 운영에 관한 법률」 제70조의2에 관한 개정부분으로 한정한다)은 이 법 시행 이후 보상금등을 지급하는 경우부터 적용한다.</p>
+        <p class="pty3_dep1"><span class="bl">제7조(신고로 인한 불이익처분의 원상회복 등에 든 비용의 지급에 관한 경과조치)</span> 이 법 시행 전에 한 신고에 대해서는 제23조제2항 각 호 외의 부분 후단의 개정규정에도 불구하고 종전의 규정에 따른다.</p>
+       </div> 
+      </div> 
+      <a name="J12996047" id="J12996047"></a> 
+      <div class="pgroup"> 
+       <p class="pty3" style="margin-bottom: -1px;"> <a class="nun" onclick="javascript:arView('ar12996047','<법률 제21490호,  2026. 3. 24.>'); return false;" href="#AJAX"> <img id="ar12996047btn" style="vertical-align: middle;" alt="부칙 <법률 제21490호,  2026. 3. 24.>조문목록 접기" src="/LSW/images/button/btn_cocl.gif" /> </a> <input name="arInf" id="chk12996047" style="vertical-align: middle;" type="checkbox" alt="부칙 <법률 제21490호,  2026. 3. 24.>체크박스 " value="12996047" /> <a class="nun" onclick="javascript:arView('ar12996047','<법률 제21490호,  2026. 3. 24.>'); return false;" href="#AJAX"> <label for="chk12996047"> <span class="bl"> 부      칙</span> </label> <span class="sfon">&lt;법률 제21490호, 2026. 3. 24.&gt;</span> </a> <a class="nun" onclick="javascript:fncArLawPop('공소청법', '20260324', '21490');" href="#AJAX"> <span class="sfon">(공소청법) </span> </a> <a class="nun" onclick="javascript:arView('ar12996047','<법률 제21490호,  2026. 3. 24.>');return false;" href="#AJAX"> <img id="ar12996047MrBtn" style="vertical-align: middle;" alt="부칙 <법률 제21490호,  2026. 3. 24.>보기" src="/LSW/images/button/btn_more_bu.gif" /> </a> </p> 
+       <p class="pty3_dep1"><span class="bl">제1조(시행일)</span> 이 법은 2026년 10월 2일부터 시행한다. &lt;단서 생략&gt;</p>
+       <div id="ar12996047">
+        <p class="pty3_dep1"><span class="bl">제2조부터 제8조까지</span> 생략</p>
+        <p class="pty3_dep1"><span class="bl">제9조(다른 법률의 개정)</span> ①부터 ④까지 생략</p>
+        <p class="pty3_dep2"> ⑤ 공공재정 부정청구 금지 및 부정이익 환수 등에 관한 법률 일부를 다음과 같이 개정한다.</p>
+        <p class="pty3_dep2"> 제24조의2 각 호 외의 부분 전단 중 “지방검찰청 또는 지방검찰청 지청”을 “지방공소청 또는 지방공소청 지청”으로 한다.</p>
+        <p class="pty3_dep2"> ⑥부터 &lt;51&gt;까지 생략</p>
+        <p class="pty3_dep1"><span class="bl">제10조 및 제11조</span> 생략</p>
+       </div> 
+      </div> 
+     </div> 
+     <!-- 부칙 영역 끝 --> 
+     <!-- 별표 서식 시작 --> 
+     <!-- 별표 서식 끝 --> 
+    </div> 
+   </div> 
+  </div> 
+ </body>
+</html>

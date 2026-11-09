@@ -1,0 +1,16 @@
+[
+ [
+  {
+   "이름": "초기_2_재추출_초기_A",
+   "프롬프트": "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\ontology\\추출\\초기\\2_재추출_초기\\프롬프트_A.md",
+   "상한": 3.0,
+   "입력검사": "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\ontology\\추출\\초기\\2_재추출_초기\\작업_A"
+  },
+  {
+   "이름": "초기_2_재추출_초기_B",
+   "프롬프트": "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\ontology\\추출\\초기\\2_재추출_초기\\프롬프트_B.md",
+   "상한": 3.0,
+   "입력검사": "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\3-1 여름방학\\금용공모전_github_최종본\\ontology\\추출\\초기\\2_재추출_초기\\작업_B"
+  }
+ ]
+]
