@@ -225,10 +225,15 @@ def _만료데모_정리() -> None:
     for (org,) in 만료된:
         org = str(org)
         with org_고정(org):
+            # 기관을 지우면 L3 문서 행은 CASCADE 로 사라지지만 원본 파일은 남는다. 지울 id 를 먼저 읽는다(리뷰 28-22)
+            문서들 = [str(r[0]) for r in _질의("SELECT doc_id FROM tenant.l3_documents WHERE org_id = %s", (org,)) or []]
             # decisions.org_id 가 SET NULL 되지 않도록 decisions 를 먼저 지운다
             _실행("DELETE FROM tenant.decisions WHERE org_id = %s", (org,))
             _실행("DELETE FROM tenant.expense_plans WHERE org_id = %s", (org,))
             rc = _실행("DELETE FROM tenant.orgs WHERE org_id = %s", (org,))
+        if rc > 0 and 문서들:
+            from .routes_l3 import _원본_삭제
+            _원본_삭제(문서들)
         if rc > 0:
             지움 += 1
     if 지움 != len(만료된):

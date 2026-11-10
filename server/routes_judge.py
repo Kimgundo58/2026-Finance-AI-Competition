@@ -22,7 +22,8 @@ import queue
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from server import auth, inquiry, response_cache, research_sessions, ontology_readiness
-from server._common import MOCK, _정수_환경변수, _sse, _sse응답, 답변_반영, 클라이언트_ip, 비목_ENUM, 온톨로지_사업
+from server._common import (MOCK, _정수_환경변수, _sse, _sse응답, _워커_대기, 답변_반영, 클라이언트_ip, 비목_ENUM,
+                            온톨로지_사업)
 from server.catalog import _비목_표준화, _사업명_표준화
 from server.judge_response import (_사용자프로필값_구성, 구_참조관계_이벤트, 구_판정키_포함,
                                    파이프라인결과_매핑, 할일_공개)
@@ -184,7 +185,9 @@ def judge(req: Request, body: 판정요청, mock: str | None = None,
         실패 = False
         워커실행 = False
         캐시진행 = False
-        if 조사세션 and 조사세션.판정결과 is not None:
+        # 세션에 둔 판정은 메인 캐시 키(프로필 해시 · 기록누적 · 노드결정 · 조건답 · L3 라벨 · 상황 노드)까지 같을 때만 다시 쓴다.
+        # 협약 수정 · 지출 추가 뒤의 낡은 판정이 나가지 않게 한다(리뷰 28-3). 기록을 못 읽었으면 다시 쓰지 않는다
+        if 조사세션 and 조사세션.판정결과 is not None and 조사세션.판정키 == k and not 기록오류:
             캐시진행 = True
             out, decision_id = 조사세션.판정결과
             out = dict(out)
@@ -203,16 +206,18 @@ def judge(req: Request, body: 판정요청, mock: str | None = None,
                                데이터버전_해시=데이터버전해시)
         else:
             워커실행 = True
-            out, 실패 = yield from _판정_실행(body, account_id, 사용자답변, 답변유실, 노드결정, 조건답, 상황노드, 기록누적, L3라벨, 조사세션, 조사)
+            out, 실패 = yield from _판정_실행(body, account_id, 사용자답변, 답변유실, 노드결정, 조건답, 상황노드, 기록누적, L3라벨, 조사세션, 조사,
+                                          판정키=None if 답변유실 else k)
             # decision_id 를 캐시에 넣으면 다른 요청이 남의 판정 행을 자기 계획에 연결한다.
             decision_id = out.pop("decision_id", None)
-            if not 실패 and not 조사세션:              # 조사 답은 다른 요청의 캐시에 넣지 않는다
+            # 조사 답은 다른 요청의 캐시에 넣지 않는다. 저장 질문을 못 읽어 낮춘 판정(답변유실)은 일시 장애라 캐시에 두지 않는다(리뷰 28-18)
+            if not 실패 and not 조사세션 and not 답변유실:
                 response_cache.저장(k, out, 종류="judge", org=body.org_id, account=account_id,
                                    데이터버전_해시=데이터버전해시)
         if 조사 is not None:
             out['조사'] = 조사
-        if 조사세션 and not 실패:
-            조사세션.판정결과 = (dict(out), decision_id)
+        if 조사세션 and not 실패 and not 답변유실:
+            조사세션.판정결과, 조사세션.판정키 = (dict(out), decision_id), k
         if 조사세션 and not 워커실행:
             조사세션.lock.release()
         if 캐시진행:
@@ -373,27 +378,29 @@ def _판정_이벤트(out: dict):
 def _판정_실행(body: 판정요청, account_id: str | None, 사용자답변: list[dict] | None = None,
             답변유실: bool = False, 노드결정: dict | None = None, 조건답: list[dict] | None = None,
             상황노드: list[str] | None = None, 기록누적: dict | None = None, L3라벨: list[dict] | None = None,
-            조사세션=None, 조사=None):
+            조사세션=None, 조사=None, 판정키: str | None = None):
     """_live_판정 을 워커 스레드에서 실행하고, 기다리는 동안 SSE keep-alive 주석을 yield 한다.
 
     `out, 실패 = yield from _판정_실행(body, account_id, 사용자답변, 답변유실)` 로 쓴다. 예외나 타임아웃은 판단불가 결과와
     실패=True 를 돌려준다. 타임아웃이 지난 워커는 기다리지 않고 백그라운드에서 끝나게 둔다
     (판정 파이프라인은 그대로 decisions 행을 기록한다).
+    조사 세션이 있으면 세션 예산을 나눠 쓰되 취소는 이 요청에만 건다(research_runtime.RequestBudget, 리뷰 28-6).
+    판정키 = 세션에 판정을 둘 때 함께 적는 메인 캐시 키. None 이면 세션에 두지 않는다.
     """
+    import research_runtime
+    요청예산 = 조사세션.budget.request() if 조사세션 else research_runtime.Budget()
     ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     # submit 은 컨텍스트 변수를 복사하지 않는다. 미들웨어가 설정한 현재_org 를 워커에 넘긴다.
     이벤트 = queue.Queue()
     def 작업():
         try:
-            import research_runtime
-            budget = 조사세션.budget if 조사세션 else research_runtime.Budget()
-            with research_runtime.activate(budget, emit=이벤트.put):
+            with research_runtime.activate(요청예산, emit=이벤트.put):
                 if 조사세션:
                     out = _live_판정(body, account_id, 사용자답변, 답변유실, 노드결정, 조건답, 상황노드, 기록누적, L3라벨, 조사)
-                    if not out.get('_실패'):
+                    if not out.get('_실패') and 판정키 is not None:
                         saved = {k: v for k, v in out.items() if k not in ('decision_id', '_실패')}
                         saved['조사'] = 조사
-                        조사세션.판정결과 = (saved, out.get('decision_id'))
+                        조사세션.판정결과, 조사세션.판정키 = (saved, out.get('decision_id')), 판정키
                     return out
                 return _live_판정(body, account_id, 사용자답변, 답변유실, 노드결정, 조건답, 상황노드, 기록누적, L3라벨)
         finally:
@@ -406,40 +413,24 @@ def _판정_실행(body: 판정요청, account_id: str | None, 사용자답변: 
             조사세션.lock.release()
         ex.shutdown(wait=False)
         raise
-    만료시각 = time.monotonic() + _판정_타임아웃초
-    마지막전송 = time.monotonic()
     try:
-        while True:
-            남은 = 만료시각 - time.monotonic()
-            if 남은 <= 0:
-                _log.error("judge 타임아웃(%s초) — 판단불가로 반환 (plan_id=%s)",
-                           _판정_타임아웃초, body.plan_id)
-                ex.shutdown(wait=False, cancel_futures=True)
-                if 조사세션:
-                    조사세션.budget.cancel()
-                return _실패_결과(body), True
-            try:
-                이벤트값 = 이벤트.get(timeout=min(0.2, 남은))
-                마지막전송 = time.monotonic()
-                yield _sse('진행', 이벤트값)
-                continue
-            except queue.Empty:
-                pass
-            if not future.done():
-                if time.monotonic() - 마지막전송 >= _하트비트_주기초:
-                    마지막전송 = time.monotonic()
-                    yield ': keep-alive\n\n'
-                continue
-            try:
-                out = future.result()
-            except Exception:                                 # noqa: BLE001
-                # 실패해도 네 판정 밖으로 나가지 않는다. 원인은 서버 로그에만 남긴다.
-                _log.exception("judge 실패 — 판단불가로 반환 (plan_id=%s)", body.plan_id)
-                return _실패_결과(body), True
-            return out, bool(out.pop("_실패", False))
+        끝남 = yield from _워커_대기(future, 이벤트, _하트비트_주기초, time.monotonic() + _판정_타임아웃초)
+        if not 끝남:
+            _log.error("judge 타임아웃(%s초) — 판단불가로 반환 (plan_id=%s)",
+                       _판정_타임아웃초, body.plan_id)
+            ex.shutdown(wait=False, cancel_futures=True)
+            요청예산.cancel()
+            return _실패_결과(body), True
+        try:
+            out = future.result()
+        except Exception:                                 # noqa: BLE001
+            # 실패해도 네 판정 밖으로 나가지 않는다. 원인은 서버 로그에만 남긴다.
+            _log.exception("judge 실패 — 판단불가로 반환 (plan_id=%s)", body.plan_id)
+            return _실패_결과(body), True
+        return out, bool(out.pop("_실패", False))
     finally:
-        if 조사세션 and not future.done():
-            조사세션.budget.cancel()
+        if not future.done():
+            요청예산.cancel()                       # 끊긴 요청의 워커만 멈춘다. 세션 예산은 다음 요청이 그대로 쓴다
         ex.shutdown(wait=False)
 
 

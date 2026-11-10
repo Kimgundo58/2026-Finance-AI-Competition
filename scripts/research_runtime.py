@@ -8,7 +8,7 @@ from threading import Lock
 import time
 import uuid
 
-_current: ContextVar["Budget | None"] = ContextVar("research_budget", default=None)
+_current: ContextVar["Budget | RequestBudget | None"] = ContextVar("research_budget", default=None)
 _final: ContextVar[bool] = ContextVar("research_final", default=False)
 _emitter: ContextVar[object] = ContextVar("research_emitter", default=None)
 
@@ -89,9 +89,61 @@ class Budget:
             self.evidence_used += len(text)
             return True
 
+    def request(self) -> "RequestBudget":
+        """이 예산(시간 · 호출 수 · 근거 글자)을 함께 쓰고 취소만 따로 갖는 요청 하나의 예산.
+        끊기거나 시간이 지난 요청의 취소가 같은 조사 세션의 다음 요청을 막지 않는다(리뷰 28-6)."""
+        return RequestBudget(self)
+
+
+class RequestBudget:
+    """세션 예산을 나눠 쓰는 요청 단위 보기. cancel() 은 이 요청만 멈춘다. 쓴 횟수 · 시간은 세션 예산에 쌓인다."""
+
+    def __init__(self, parent: Budget):
+        self._parent = parent
+        self._cancelled = False
+        self.emit = parent.emit
+
+    def __getattr__(self, name):                 # tools_used · llm_used · evidence_used 같은 관측값은 세션 예산 값
+        return getattr(self._parent, name)
+
+    @property
+    def ontology_state(self):                    # 추가 조회 상태(호출 수 · 결과)는 세션 단위다(ontology_research_plan)
+        return getattr(self._parent, "ontology_state", None)
+
+    @ontology_state.setter
+    def ontology_state(self, value):
+        self._parent.ontology_state = value
+
+    def cancel(self) -> None:
+        self._cancelled = True
+
+    def _enter(self):
+        self._parent._enter()
+
+    def _exit(self):
+        self._parent._exit()
+
+    def remaining_seconds(self) -> float:
+        return 0.0 if self._cancelled else self._parent.remaining_seconds()
+
+    def remaining_nonfinal_llm(self) -> int:
+        return 0 if self._cancelled else self._parent.remaining_nonfinal_llm()
+
+    def remaining_tools(self) -> int:
+        return 0 if self._cancelled else self._parent.remaining_tools()
+
+    def reserve_tool(self) -> bool:
+        return not self._cancelled and self._parent.reserve_tool()
+
+    def reserve_llm(self, *, final: bool = False) -> bool:
+        return not self._cancelled and self._parent.reserve_llm(final=final)
+
+    def add_evidence(self, text: str) -> bool:
+        return not self._cancelled and self._parent.add_evidence(text)
+
 
 @contextmanager
-def activate(budget: Budget, emit=None):
+def activate(budget: "Budget | RequestBudget", emit=None):
     budget._enter()
     token = _current.set(budget)
     event_token = _emitter.set(emit if emit is not None else budget.emit)
@@ -112,7 +164,7 @@ def final_call():
         _final.reset(token)
 
 
-def current_budget() -> Budget | None:
+def current_budget() -> "Budget | RequestBudget | None":
     return _current.get()
 
 

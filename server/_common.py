@@ -16,6 +16,7 @@ import functools
 import json
 import logging
 import os
+import queue
 import threading
 import time
 from typing import Any, Callable, Iterator
@@ -326,6 +327,32 @@ def ttl_캐시(ttl_env: str, 기본초: int, 빈값캐시: bool = False, *,
 
 def _sse(이름: str, 값: Any) -> str:
     return f"event: {이름}\ndata: {json.dumps(값, ensure_ascii=False, default=str)}\n\n"
+
+
+def _워커_대기(future, 이벤트, 하트비트초: float, 만료시각: float | None = None):
+    """워커 스레드가 끝날 때까지 진행 이벤트와 keep-alive 주석을 SSE 로 yield 한다(질문 · 판정 공용).
+
+    `끝남 = yield from _워커_대기(...)` 로 쓴다. 워커가 끝나면 남은 진행 이벤트를 다 보낸 뒤 True,
+    만료시각(time.monotonic 기준)이 지나면 False 를 돌려준다. 결과 · 예외 처리와 취소는 부르는 쪽이 한다."""
+    마지막전송 = time.monotonic()
+    while True:
+        남은 = None if 만료시각 is None else 만료시각 - time.monotonic()
+        if 남은 is not None and 남은 <= 0:
+            return False
+        try:
+            값 = 이벤트.get(timeout=0.2 if 남은 is None else min(0.2, 남은))
+            마지막전송 = time.monotonic()
+            yield _sse("진행", 값)
+            continue
+        except queue.Empty:
+            pass
+        if future.done():
+            while not 이벤트.empty():
+                yield _sse("진행", 이벤트.get_nowait())
+            return True
+        if time.monotonic() - 마지막전송 >= 하트비트초:
+            마지막전송 = time.monotonic()
+            yield ": keep-alive\n\n"
 
 
 def _sse응답(gen) -> StreamingResponse:

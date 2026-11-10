@@ -21,6 +21,7 @@ import uuid
 from dataclasses import dataclass
 from urllib.parse import parse_qsl, urlencode
 
+import anyio
 from fastapi import Header, HTTPException, Request
 
 from . import _common
@@ -82,6 +83,8 @@ class 주체:
 
 _jwks_잠금 = threading.Lock()
 _jwks_캐시: tuple[float, dict] | None = None
+# 모르는 kid 로 강제 갱신할 때의 최소 간격(초). 아무 kid 나 넣은 토큰으로 JWKS 를 계속 받아 오게 하지 못한다(리뷰 28-12)
+JWKS_강제갱신_간격 = 30
 
 
 def _jwks(강제갱신: bool = False) -> dict:
@@ -91,8 +94,10 @@ def _jwks(강제갱신: bool = False) -> dict:
     """
     global _jwks_캐시
     with _jwks_잠금:
-        if not 강제갱신 and _jwks_캐시 and time.time() - _jwks_캐시[0] < JWKS_TTL:
-            return _jwks_캐시[1]
+        if _jwks_캐시:
+            지난 = time.time() - _jwks_캐시[0]
+            if 지난 < (JWKS_강제갱신_간격 if 강제갱신 else JWKS_TTL):
+                return _jwks_캐시[1]
     if not JWKS_URL:
         raise HTTPException(503, "SUDDOE_JWKS_URL 이 설정되지 않아 Supabase 토큰을 검증할 수 없습니다")
     import httpx
@@ -335,7 +340,8 @@ class OrgId주입:
         헤더 = {k.decode("latin-1").lower(): v.decode("latin-1")
                 for k, v in scope.get("headers", [])}
         try:
-            주 = 토큰해석(헤더.get("authorization"))
+            # 토큰 해석은 JWKS 내려받기 · 계정 DB 조회를 한다. 이벤트 루프를 막지 않게 워커 스레드에서 돌린다(리뷰 28-11)
+            주 = await anyio.to_thread.run_sync(토큰해석, 헤더.get("authorization"))
         except HTTPException as e:
             return await _거부(send, e.status_code, e.detail)
 

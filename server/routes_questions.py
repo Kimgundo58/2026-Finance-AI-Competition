@@ -19,7 +19,7 @@ import queue
 from fastapi import APIRouter, HTTPException, Request
 
 from server import auth, response_cache, research_sessions, ontology_readiness
-from server._common import MOCK, 답변_반영, 비목_ENUM, 클라이언트_ip, _sse, _sse응답, 온톨로지_사업
+from server._common import MOCK, 답변_반영, 비목_ENUM, 클라이언트_ip, _sse, _sse응답, _워커_대기, 온톨로지_사업
 from server.catalog import _비목_표준화, _사업명_표준화
 from server.models import 질문요청
 from server.rate_limit import 제한
@@ -80,14 +80,16 @@ def questions(req: Request, body: 질문요청):
         raise
     세션.lock.release()
 
+    import research_runtime
+    요청예산 = 세션.budget.request()            # 세션 예산을 나눠 쓰고 취소는 이 요청에만 건다(리뷰 28-6)
+
     def 작업(emit):
-        import research_runtime
         if not 세션.lock.acquire(blocking=False):
             raise HTTPException(409, '조사가 진행 중입니다')
         try:
             if 세션.입력 is not None and (세션.입력 != 입력 or 세션.버전 != 버전 or getattr(세션, '요청키', None) != 요청키):
                 raise HTTPException(409, '입력이 변경되어 새 조사가 필요합니다')
-            with research_runtime.activate(세션.budget, emit=emit):
+            with research_runtime.activate(요청예산, emit=emit):
                 if body.웹조사 and body.조사답변 is None:
                     if not 세션.조사완료:
                         try:
@@ -109,7 +111,7 @@ def questions(req: Request, body: 질문요청):
                                 import web_research
                                 세션.조사 = web_research.research(body.공개검색어,
                                     requirements=준비['요건'], context=준비['문맥'],
-                                    public_url=body.판매URL, budget=세션.budget, emit=emit)
+                                    public_url=body.판매URL, budget=요청예산, emit=emit)
                         except Exception as e:
                             _log.warning('공개 정보 조사 실패: %s', type(e).__name__)
                             세션.조사 = {'상태': '실패', '후보': [], '출처': []}
@@ -145,32 +147,19 @@ def questions(req: Request, body: 질문요청):
         ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         future = ex.submit(contextvars.copy_context().run, 작업, 이벤트.put)
         끝남 = False
-        마지막전송 = time.monotonic()
         try:
-            while True:
-                try:
-                    이벤트값 = 이벤트.get(timeout=0.2)
-                    마지막전송 = time.monotonic()
-                    yield _sse('진행', 이벤트값)
-                except queue.Empty:
-                    if future.done():
-                        while not 이벤트.empty():
-                            yield _sse('진행', 이벤트.get_nowait())
-                        try:
-                            결과 = future.result()
-                        except Exception as e:
-                            _log.warning('조사 실패: %s', type(e).__name__)
-                            결과 = {**_실패_응답, '조사ID': 조사ID,
-                                  '조사': {'상태': '실패', '후보': [], '출처': []}}
-                        끝남 = True
-                        yield _sse('완료', 결과)
-                        break
-                    if time.monotonic() - 마지막전송 >= 12:
-                        마지막전송 = time.monotonic()
-                        yield ': keep-alive\n\n'
+            yield from _워커_대기(future, 이벤트, 12)
+            try:
+                결과 = future.result()
+            except Exception as e:
+                _log.warning('조사 실패: %s', type(e).__name__)
+                결과 = {**_실패_응답, '조사ID': 조사ID,
+                      '조사': {'상태': '실패', '후보': [], '출처': []}}
+            끝남 = True
+            yield _sse('완료', 결과)
         finally:
             if not 끝남:
-                세션.budget.cancel()
+                요청예산.cancel()
             ex.shutdown(wait=False, cancel_futures=True)
     return _sse응답(gen())
 

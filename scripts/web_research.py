@@ -294,7 +294,7 @@ def research(public_query: str | None = None, *, product_name: str | None = None
     보낸검색어 = set()
     읽기실패 = set()   # 본문을 못 가져온 주소는 다시 읽지 않는다
     계획자료 = _계획자료(requirements, context)
-    for _ in range(3):
+    for 회차 in range(3):
         remaining = min(deadline - time.monotonic(), web_deadline - time.monotonic(), budget.remaining_seconds())
         # LLM 호출 예산은 호출자의 llm_qwen 공통 후크가 HTTP 호출마다 예약한다.
         if remaining <= 1:
@@ -360,7 +360,8 @@ def research(public_query: str | None = None, *, product_name: str | None = None
                     break
             if action == "완료":
                 break
-            if tool_count >= 6 or time.monotonic() >= web_deadline:
+            # 마지막 계획 뒤에 시작한 도구 결과는 발췌를 고를 계획이 없어 쓰이지 않는다. 시작하지 않는다(리뷰 28-21)
+            if 회차 == 2 or tool_count >= 6 or time.monotonic() >= web_deadline:
                 break
             calls = []
             if action == "검색" and url_only:

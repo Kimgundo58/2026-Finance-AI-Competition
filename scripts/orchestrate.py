@@ -530,23 +530,24 @@ def _룰조회(상태: _판정상태, 확정: str | None) -> dict | None:
     return _종료(상태, 응답, 기록=상태.기록)
 
 
-def _l3_스레드(org_id, 비목):
-    """L3 조문 전체 조회. psycopg 커넥션은 스레드 간에 공유하지 않으므로 자기 커넥션을 연다."""
-    if not org_id:
-        return [], None
+def _자기연결(작업, 빈값):
+    """작업(cur) 을 자기 커넥션으로 돌린다. psycopg 커넥션은 스레드 간에 공유하지 않는다. 반환 (결과, None) | (빈값, 실패 사유)."""
     try:
         with db.connect(connect_timeout=5, autocommit=True) as c:
-            return l3_load.조문_조회(c.cursor(), org_id, 비목=비목) or [], None
+            return 작업(c.cursor()), None
     except Exception as e:                               # noqa: BLE001
-        return [], f"{type(e).__name__}: {e}"
+        return 빈값, f"{type(e).__name__}: {e}"
+
+
+def _l3_스레드(org_id, 비목):
+    """L3 조문 전체 조회(옛 경로)."""
+    if not org_id:
+        return [], None
+    return _자기연결(lambda cur: l3_load.조문_조회(cur, org_id, 비목=비목) or [], [])
 
 
 def _검색_스레드(질문, 사업명):
-    try:
-        with db.connect(connect_timeout=5, autocommit=True) as c:
-            return retrieve.검색(c.cursor(), 질문, 사업명, top_k=5, 사업필터=사업필터), None
-    except Exception as e:                               # noqa: BLE001
-        return _빈_검색결과(), f"{type(e).__name__}: {e}"
+    return _자기연결(lambda cur: retrieve.검색(cur, 질문, 사업명, top_k=5, 사업필터=사업필터), _빈_검색결과())
 
 
 def _검색단계(상태: _판정상태) -> dict | None:
@@ -687,6 +688,20 @@ def _모름_할일(사용자답변: list[dict]) -> list[dict]:
     return [{"항목": 항목, "설명": 이유, "구분": "결제전", "코드추정_제외": True} for 항목, 이유 in 문구.items()]
 
 
+def _전제확인_단계(상태: _판정상태, 응답: dict, 사용자프로필값: dict | None, 코드: list[str]) -> dict:
+    """⑤ 전제 확인. DB 의 프로필 값 위에 화면에서 방금 받은 사용자프로필값을 덮어 전제와 맞춘다.
+    매핑하지 못한 전제가 있으면 `코드` 에 PREMISE_UNMAPPED 를 더한다. 옛 경로 · 새 경로가 같이 쓴다."""
+    t = time.time()
+    프로필값 = 프로필값_경로키(상태.프로필값)
+    if 사용자프로필값:
+        프로필값.update(프로필값_경로키(사용자프로필값))
+    확인결과 = 전제확인(응답.get("전제목록") or [], 프로필값)
+    상태._지연기록("전제확인", t)
+    if 확인결과["미매핑"] and "PREMISE_UNMAPPED" not in 코드:
+        코드.append("PREMISE_UNMAPPED")
+    return 확인결과
+
+
 def _검증단계(상태: _판정상태, 사용자프로필값: dict | None) -> dict:
     t = time.time()
     org_id, 룰, 검색결과 = 상태.org_id, 상태.룰, 상태.검색결과
@@ -702,15 +717,7 @@ def _검증단계(상태: _판정상태, 사용자프로필값: dict | None) -> 
     상태._지연기록("검증", t)
     상태.처리단계.append("검증")
 
-    t = time.time()
-    # DB 의 프로필 값 위에 화면에서 방금 받은 사용자프로필값을 덮는다
-    프로필값 = 프로필값_경로키(상태.프로필값)
-    if 사용자프로필값:
-        프로필값.update(프로필값_경로키(사용자프로필값))
-    확인결과 = 전제확인(응답.get("전제목록") or [], 프로필값)
-    상태._지연기록("전제확인", t)
-    if 확인결과["미매핑"] and "PREMISE_UNMAPPED" not in 코드:
-        코드.append("PREMISE_UNMAPPED")
+    확인결과 = _전제확인_단계(상태, 응답, 사용자프로필값, 코드)
 
     응답.update(게이트="D", 처리단계="+".join(상태.처리단계), 비목=상태.비목, 정규화=상태.정규화결과,
                검색=검색결과, 참조관계=상태.참조관계,
@@ -1057,13 +1064,10 @@ def _온톨로지단계(상태: _판정상태) -> dict | None:
 
 
 def _새_l3_스레드(org_id):
+    """L3 조문 + 확인한 연결 조회(새 경로)."""
     if not org_id:
         return [], None
-    try:
-        with db.connect(connect_timeout=5, autocommit=True) as c:
-            return l3_load.조문_연결조회(c.cursor(), org_id) or [], None
-    except Exception as e:                               # noqa: BLE001
-        return [], f"{type(e).__name__}: {e}"
+    return _자기연결(lambda cur: l3_load.조문_연결조회(cur, org_id) or [], [])
 
 
 def 자금_거르기(cur, 자금: str | None):
@@ -1075,12 +1079,8 @@ def 자금_거르기(cur, 자금: str | None):
 
 
 def _새_검색_스레드(질의, 사업명, 자금: str | None = None):
-    try:
-        with db.connect(connect_timeout=5, autocommit=True) as c:
-            cur = c.cursor()
-            return retrieve.검색(cur, 질의, 사업명, top_k=10, 사업필터=사업필터, 거르기=자금_거르기(cur, 자금)), None
-    except Exception as e:                               # noqa: BLE001
-        return _빈_검색결과(), f"{type(e).__name__}: {e}"
+    return _자기연결(lambda cur: retrieve.검색(cur, 질의, 사업명, top_k=10, 사업필터=사업필터, 거르기=자금_거르기(cur, 자금)),
+                    _빈_검색결과())
 
 
 def _미해결_합치기(기존, 추가):
@@ -1514,14 +1514,7 @@ def _새_검증단계(상태: _판정상태, 사용자프로필값: dict | None)
     상태._지연기록("검증", t)
     상태.처리단계.append("검증")
 
-    t = time.time()
-    프로필값 = 프로필값_경로키(상태.프로필값)
-    if 사용자프로필값:
-        프로필값.update(프로필값_경로키(사용자프로필값))
-    확인결과 = 전제확인(응답.get("전제목록") or [], 프로필값)
-    상태._지연기록("전제확인", t)
-    if 확인결과["미매핑"] and "PREMISE_UNMAPPED" not in 코드:
-        코드.append("PREMISE_UNMAPPED")
+    확인결과 = _전제확인_단계(상태, 응답, 사용자프로필값, 코드)
     응답.update(게이트="D", 처리단계="+".join(상태.처리단계), 비목=상태.비목, 정규화=상태.정규화결과,
                검색=검색결과, 참조관계=상태.참조관계, 증빙목록=[],
                전제확인=확인결과, 검증코드=코드, 검증사유=사유,
