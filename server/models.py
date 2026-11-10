@@ -1,0 +1,530 @@
+# -*- coding: utf-8 -*-
+"""API 요청·응답 스키마(pydantic). 프론트가 보는 필드 이름은 모두 여기서 정한다.
+
+여러 라우터가 같이 쓰는 계약이라 필드를 추가할 때는 프론트와 먼저 합의한다.
+
+필드 이름은 프론트 요구사항의 용어를 따른다:
+    지출명   → 제목           예상 비목 → 확정비목
+    예상금액 → 금액           예상지출일 → 집행예정일
+    AI 점검 상태 → 판정 (가능·조건부·불가·판단불가 또는 null). null 은 '점검 전' 이며 판정 값이 아니다.
+
+이름을 바꾼 필드는 한 릴리스 동안 요청에서 이전 이름도 받고(validation_alias), 응답에는 이전 이름의
+읽기 전용 필드(computed_field)를 함께 내보낸다. 해당 줄에는 호환 표식 주석을 단다.
+"""
+from __future__ import annotations
+
+from datetime import date
+from typing import Any, Literal
+
+from pydantic import AliasChoices, BaseModel, Field, computed_field, model_validator
+
+# --- 공통 ---
+
+판정타입 = Literal["가능", "조건부", "불가", "판단불가"]
+부가세구분타입 = Literal["포함", "공급가액", "모름"]
+
+
+class 특수관계(BaseModel):
+    """특수관계 거래 여부. 판정 요청에만 쓰고 저장하지 않는다."""
+    친족거래: bool = False
+    전직임직원업체: bool = False
+
+
+# 필드 이름이 클래스 이름을 가리면 pydantic 이 타입을 해석하지 못한다. 별칭으로 참조한다.
+_특수관계 = 특수관계
+
+
+# --- 정규화 (POST /api/normalize) ---
+# 입력은 폼 경로가 기본이다. 자연어 경로는 골든셋 평가를 재현하려고 함께 유지한다.
+
+class 정규화요청(BaseModel):
+    # 폼 경로 (프론트 기본 경로)
+    품목: str | None = None
+    금액: float | None = None
+    용도: str | None = None
+    집행예정일: str | None = None
+    거래처: str | None = None          # 정규화에 쓰지 않는다. 정규화 없이 저장한 계획은 기본 정규화에 들어가 프롬프트에 보인다
+    추가설명: str | None = None        # 폼 필드에 없는 예외 상황 설명. 용도 뒤에 붙여 LLM 에 넘긴다
+
+    # 자연어 경로 (골든셋 질문이 이 경로로 들어온다. 지우지 않는다)
+    질문: str | None = Field(default=None, max_length=2000)
+
+    # 공통
+    사업명: str | None = None
+    부가세구분: 부가세구분타입 | None = None
+    특수관계: _특수관계 = Field(default_factory=_특수관계,
+                             validation_alias=AliasChoices("특수관계", "f5"))  # 구 이름 호환(제거 예정: 다음 릴리스)
+
+    @model_validator(mode="after")
+    def _질문_XOR_폼(self):
+        폼 = any(v is not None and v != "" for v in (self.품목, self.금액, self.용도))
+        자연어 = bool(self.질문 and self.질문.strip())
+        if 폼 and 자연어:
+            raise ValueError("질문(자연어)과 폼 필드를 동시에 보낼 수 없습니다. 하나만 쓰세요.")
+        if not 폼 and not 자연어:
+            raise ValueError("품목·금액·용도(폼) 또는 질문(자연어) 중 하나는 필요합니다.")
+        if 폼 and not (self.품목 and self.금액 is not None and self.용도):
+            raise ValueError("폼 경로는 품목·금액·용도가 모두 필요합니다.")
+        return self
+
+
+class 답변항목(BaseModel):
+    """/api/judge 가 받는 답 한 건. code 는 심층질문 code 또는 확인 질문 id(Q1 등)다."""
+    code: str
+    값: Any
+
+
+# --- 확인 질문 (POST /api/questions) ---
+
+class 조사답변항목(BaseModel):
+    id: str = Field(max_length=200)
+    답: Literal['맞아요', '아니에요', '모르겠어요']
+    정정: str | None = Field(default=None, max_length=1000)
+
+
+class 질문요청(BaseModel):
+    """판정 전 확인 질문 요청. org·계정은 토큰에서 정하므로 받지 않는다."""
+    사업명: str | None = None
+    확정비목: str
+    확정세목: str | None = None        # 분류 확인 화면에서 고른 세목 표기. 서버가 노드 ID 로 푼다(온톨로지 경로)
+    부가세구분: 부가세구분타입 | None = None
+    세부유형: str | None = None
+    품목: str | None = None
+    금액: float | None = None
+    용도: str | None = None
+    질문원문: str | None = Field(default=None, max_length=2000)
+    조사ID: str | None = Field(default=None, max_length=200)
+    웹조사: bool = False
+    공개검색어: str | None = Field(default=None, max_length=300)
+    판매URL: str | None = Field(default=None, max_length=2048)
+    조사답변: list[조사답변항목] | None = Field(default=None, max_length=30)
+
+
+# --- 판정 (POST /api/judge) ---
+
+class 판정요청(BaseModel):
+    정규화: dict[str, Any] = Field(default_factory=dict)
+    확정비목: str | None = None
+    사업명: str | None = None
+    org_id: str | None = None
+    plan_id: int | None = None         # 있으면 판정 후 expense_plans 에 연결한다
+    특수관계: _특수관계 = Field(default_factory=_특수관계,
+                             validation_alias=AliasChoices("특수관계", "f5"))  # 구 이름 호환(제거 예정: 다음 릴리스)
+    # 심층질문 답과 확인 질문 답. 비어 있으면 orchestrate.판정() 이 사용자 답 없이 프로필값을 계산한다.
+    답변: list[답변항목] = Field(default_factory=list)
+    # POST /api/questions 가 돌려준 키. 서버에 저장한 질문 문장과 답 값만 판정에 넣는다.
+    질문세트: str | None = None
+    # 온톨로지 경로: 분류 확인에서 고른 세목, 화면 숫자 칸 값, 입력 화면의 부가세 구분
+    확정세목: str | None = None
+    추가입력값: dict[str, Any] = Field(default_factory=dict)
+    부가세구분: 부가세구분타입 | None = None
+    # 화면의 예상 지출일(YYYY-MM-DD). 지난 기한의 조건 문장을 빼고, 프로필 협약 기간과 비교하는 시점 규범(5-14 D)에 쓴다. 날짜가 아니면 없는 것으로 본다.
+    # 비어 있으면 정규화가 질문 글에서 뽑은 날짜를 쓴다(화면 입력이 먼저)
+    사용일자: str | None = None
+    조사ID: str | None = Field(default=None, max_length=200)
+    조사답변: list[조사답변항목] = Field(default_factory=list, max_length=30)
+
+
+# --- 할일 (plan_tasks) ---
+# 체크리스트와 캘린더는 같은 테이블의 같은 행이다. due_date 가 있으면 캘린더에도 표시한다.
+
+할일유형 = Literal["기타", "계약", "비교견적", "사전승인", "사전확인", "증빙"]
+할일상태 = Literal["준비필요", "집행예정", "완료"]
+
+
+class 할일(BaseModel):
+    task_id: int
+    plan_id: int | None = None         # null 이면 계획과 무관한 사용자 일정
+    출처: Literal["ai", "user"] = "ai"
+    # corpus.check_items.code. 매칭하지 못하면 null. DB 컬럼 plan_tasks.코드 와 서버가 매핑한다
+    code: str | None = Field(default=None, validation_alias=AliasChoices("code", "코드"))  # 구 이름 호환(제거 예정: 다음 릴리스)
+    구분: Literal["결제전", "결제후", "집행"] = "결제전"
+    항목: str
+    설명: str | None = None
+    due_date: str | None = None        # null 이면 체크리스트에만, 값이 있으면 캘린더에도 표시
+    유형: 할일유형 = "기타"
+    날짜_사용자수정: bool = False
+    상태: 할일상태 = "준비필요"
+    계획제목: str | None = None        # 캘린더 행에 연결된 지출계획 제목
+    작성자: str | None = None          # 다른 구성원이 만든 일정이면 이메일 앞부분
+    집행예정일_연동: bool = False      # true 면 이 행의 due_date 는 계획의 집행예정일과 같다(계획 수정으로만 바뀐다)
+
+    @computed_field  # 구 이름 호환(제거 예정: 다음 릴리스)
+    @property
+    def 코드(self) -> str | None:  # 구 이름 호환(제거 예정: 다음 릴리스)
+        return self.code
+
+
+class 할일생성(BaseModel):
+    """사용자가 직접 추가하는 할일. 출처는 서버가 'user' 로 고정한다(재판정해도 바뀌지 않는다)."""
+    항목: str = Field(min_length=1, max_length=300)
+    설명: str | None = Field(default=None, max_length=2000)
+    구분: Literal["결제전", "결제후", "집행"] = "결제전"
+    due_date: date | None = None
+    유형: 할일유형 = "기타"
+    상태: 할일상태 = "준비필요"
+
+
+class 할일수정(BaseModel):
+    """할일 수정. 보낸 필드만 바뀐다. due_date 를 null 로 보내면 날짜를 비운다(날짜 미정으로 옮긴다)."""
+    항목: str | None = Field(default=None, min_length=1, max_length=300)
+    설명: str | None = Field(default=None, max_length=2000)
+    구분: Literal["결제전", "결제후", "집행"] | None = None
+    상태: 할일상태 | None = None
+    due_date: date | None = None
+    유형: 할일유형 | None = None
+
+
+class 할일동기화(BaseModel):
+    """판정 결과의 해야할일을 plan_tasks 에 반영하는 요청. 출처='ai' 행만 만든다."""
+    decision_id: int | None = None
+    해야할일: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class 할일동기화응답(BaseModel):
+    생성: int = 0
+    갱신: int = 0
+    보존_사용자: int = 0               # 건드리지 않은 사용자 행 수
+    보존_날짜수정: int = 0             # 날짜_사용자수정=true 라 덮어쓰지 않은 행 수
+    코드매칭: int = 0                  # check_items code 를 매칭한 행 수
+    코드미매칭: int = 0                # code 를 매칭하지 못해 NULL 로 넣은 행 수
+
+    @computed_field  # 구 이름 호환(제거 예정: 다음 릴리스)
+    @property
+    def 보존_user(self) -> int:  # 구 이름 호환(제거 예정: 다음 릴리스)
+        return self.보존_사용자
+
+    @computed_field  # 구 이름 호환(제거 예정: 다음 릴리스)
+    @property
+    def 코드미상(self) -> int:  # 구 이름 호환(제거 예정: 다음 릴리스)
+        return self.코드미매칭
+
+
+class 할일목록응답(BaseModel):
+    건수: int = 0
+    항목: list[할일] = Field(default_factory=list)
+
+
+
+# 필드 이름 `할일` 이 클래스 이름을 가리므로 별칭으로 참조한다(pydantic forward ref)
+_할일 = 할일
+
+# --- 지출계획 (expense_plans) ---
+
+class 계획생성(BaseModel):
+    사업명: str
+    제목: str | None = None            # 없으면 서버가 정규화 품목으로 채운다
+    품목: str
+    금액: float
+    용도: str
+    집행예정일: str | None = None
+    거래처: str | None = None
+    추가설명: str | None = None
+    확정비목: str | None = None        # 사용자가 확정한 비목
+    정규화: dict[str, Any] = Field(default_factory=dict)
+    질문원문: str | None = None        # 폼 값으로 합성한 문장. 없으면 서버가 합성한다
+    org_id: str | None = None
+
+
+class 계획수정(BaseModel):
+    """지출계획 수정. 보낸 필드만 바뀐다. 집행예정일을 null 로 보내면 지출일을 비운다."""
+    집행예정일: date | None = None
+    일정이동: bool = False             # true 면 완료 안 된 연결 일정을 지출일과 같은 일수만큼 옮긴다
+    실제지출일: date | None = None     # 실제 지출 등록. 실제지출액과 함께 보내고 집행 단계를 완료로 만든다
+    실제지출액: float | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def _실제지출_같이(self) -> "계획수정":
+        if (self.실제지출일 is None) != (self.실제지출액 is None):
+            raise ValueError("실제 지출일과 지출액은 함께 보내야 합니다")
+        return self
+
+
+class 단계항목(BaseModel):
+    """지출 건의 진행 단계 한 칸. plan_tasks 에서 계산하고 저장하지 않는다."""
+    단계: Literal["사전승인·확인", "견적", "계약", "집행", "증빙"]
+    상태: Literal["완료", "진행중", "시작전", "항목없음"]
+    완료: int = 0
+    전체: int = 0
+
+
+class 계획요약(BaseModel):
+    """계획 목록 표의 한 행."""
+    plan_id: int
+    제목: str | None = None            # 지출명
+    확정비목: str | None = None        # 예상 비목
+    금액: float | None = None          # 예상 금액
+    판정: 판정타입 | None = None       # AI 점검 상태. null 은 '점검 전'
+    집행예정일: str | None = None      # 예상 지출일
+    updated_at: str | None = None      # 최근 수정일
+    사업명: str | None = None
+    상태: Literal["draft", "judged"] = "draft"   # 진행 상태이지 판정 값이 아니다
+    실제지출일: str | None = None
+    실제지출액: float | None = None
+    단계요약: list[단계항목] = Field(default_factory=list)
+    현재단계: str | None = None        # 완료 안 된 첫 단계. 항목이 없거나 전부 끝났으면 null
+
+
+class 계획통계(BaseModel):
+    """홈 화면 통계 카드 값. 목록 응답에 포함해 보낸다(통계 전용 API 없음).
+
+    전체 = 확인필요 + 위험 + 특이사항없음 + 점검전.
+    """
+    전체: int = 0
+    확인필요: int = 0                  # 판정 ∈ (조건부, 판단불가)
+    위험: int = 0                      # 판정 = 불가
+    특이사항없음: int = 0              # 판정 = 가능
+    점검전: int = 0                    # 판정 없음 (draft)
+    금액합계: float = 0
+
+
+class 계획목록응답(BaseModel):
+    통계: 계획통계 = Field(default_factory=계획통계)
+    건수: int = 0                      # 필터 적용 후 총 건수 (페이지 크기가 아니다)
+    페이지: int = 1
+    크기: int = 20
+    항목: list[계획요약] = Field(default_factory=list)
+
+
+class 첨부항목(BaseModel):
+    attachment_id: str
+    원본파일명: str
+    크기: int
+    # 증빙 항목에 올린 파일이면 그 항목의 task_id
+    task_id: int | None = None
+    created_at: str | None = None
+    # 다른 구성원이 올렸으면 이메일 앞부분
+    작성자: str | None = None
+
+
+class 팀구성원(BaseModel):
+    account_id: str
+    이메일: str
+    나: bool = False
+    대표: bool = False
+
+
+class 팀정보(BaseModel):
+    팀이름: str
+    사업명: str
+    내역할: Literal["대표", "구성원"]
+    구성원: list[팀구성원] = Field(default_factory=list)
+    # 만들거나 재발급한 응답에만 있다. 서버는 해시만 저장해 다시 보여 줄 수 없다.
+    초대코드: str | None = None
+    초대코드_만료: str | None = None
+
+
+class 팀응답(BaseModel):
+    팀: 팀정보 | None = None
+
+
+class 팀만들기입력(BaseModel):
+    팀이름: str = Field(min_length=1, max_length=40)
+    사업명: str = Field(min_length=1, max_length=100)
+
+
+class 초대코드입력(BaseModel):
+    초대코드: str = Field(min_length=1, max_length=20)
+
+
+class 판정피드백(BaseModel):
+    평가: Literal["맞음", "틀림"]
+    이유: Literal["판정이 다름", "근거가 다름", "기타"] | None = None
+    의견: str | None = None
+
+
+class 팀평가항목(BaseModel):
+    """같은 판정에 다른 구성원이 남긴 평가."""
+    작성자: str
+    평가: Literal["맞음", "틀림"]
+    이유: Literal["판정이 다름", "근거가 다름", "기타"] | None = None
+    의견: str | None = None
+
+
+class 피드백입력(판정피드백):
+    의견: str | None = Field(default=None, max_length=1000)
+
+    @model_validator(mode="after")
+    def _평가별_정리(self):
+        """맞았어요에는 이유·의견을 남기지 않고, 틀렸어요에는 이유가 있어야 한다."""
+        if self.평가 == "맞음":
+            self.이유 = self.의견 = None
+        elif self.이유 is None:
+            raise ValueError("틀렸어요에는 이유가 필요합니다")
+        else:
+            self.의견 = (self.의견 or "").strip() or None
+        return self
+
+
+class 계획상세(계획요약):
+    질문원문: str | None = None
+    용도: str | None = None
+    거래처: str | None = None
+    추가설명: str | None = None
+    정규화: dict[str, Any] = Field(default_factory=dict)
+    latest_decision_id: int | None = None
+    # 판정 전문 (요약·해야할일·인용·전제·신뢰등급·규정버전·참조관계·검증사유·문의초안)
+    판정상세: dict[str, Any] | None = None
+    # 최신 판정에 반영한 확인 질문과 답 [{질문문, 답}]. 결과 화면의 「확인한 내용」과 같다
+    사용자답변: list[dict[str, Any]] = Field(default_factory=list)
+    # 지금 계정이 최신 판정에 남긴 평가. 재점검하면 새 판정이라 비어 있다
+    내피드백: 판정피드백 | None = None
+    팀평가: list[팀평가항목] = Field(default_factory=list)
+    첨부: list[첨부항목] = Field(default_factory=list)
+    할일: list[_할일] = Field(default_factory=list)
+    created_at: str | None = None
+
+
+# --- 기관 자체규정(L3) 업로드 ---
+
+class L3업로드응답(BaseModel):
+    doc_id: str
+    파일명: str
+    확장자: str
+    # 업로드 요청은 접수까지만 하고 202 를 돌려준다. 파싱은 백그라운드 작업이 한다.
+    # 확인필요: 다 읽었지만 세부기준이 맞는지 사용자 확인을 기다린다. 적용안함: 사용자가 쓰지 않기로 했다.
+    상태: Literal["파싱대기", "파싱중", "완료", "실패", "확인필요", "적용안함"] = "파싱대기"
+    조_건수: int | None = None
+    # 등록된 규정에서 찾지 못한 상위 규정 참조. 업로드 실패 안내에 쓴다
+    미해결참조: list[dict[str, Any]] = Field(default_factory=list)
+    메시지: str | None = None
+    # 상태가 '완료' 여도 warn(조문은 추출했지만 품질이 낮음)과 pass 를 프론트가 구분할 수 있게 한다
+    파싱품질: Literal["pending", "pass", "warn", "fail", "review"] | None = None
+    # 확인필요일 때 사용자에게 보여 줄 이유
+    검토이유: str | None = None
+    # 실패 분류 코드(스캔본·보호문서·조문없음·중단 등). 실패가 아니면 null. 안내 문구는 메시지에 있다
+    실패사유: str | None = None
+    # 이 기관이 지금 판정에 쓰는 L3 문서 이름(이 문서일 수도 있다). 없으면 null — 상위 규정만으로 판정한다
+    적용중_문서: str | None = None
+    # 텍스트를 얻은 방식(l3_documents.extraction). 'ocr' 이면 스캔본을 OCR 로 읽은 문서다
+    추출방식: str | None = None
+
+    @computed_field  # 구 이름 호환(제거 예정: 다음 릴리스)
+    @property
+    def dangling(self) -> list[dict[str, Any]]:  # 구 이름 호환(제거 예정: 다음 릴리스)
+        return self.미해결참조
+
+
+class L3현재문서(BaseModel):
+    """org 의 active L3 문서 한 건(적용 중·처리 중·최근 실패). superseded 문서는 뺀다.
+
+    파싱품질이 pending 인 채로 오래된 문서(파싱이 끊김)는 fail 로 내보낸다(server/routes_l3.py)."""
+    doc_id: str
+    원본파일명: str
+    version: str | None = None
+    시행일: str | None = None
+    # created_at 값. 시행일이 대부분 NULL 이라 화면에는 이 값을 표시한다
+    등록일: str | None = None
+    파싱품질: Literal["pending", "pass", "warn", "fail", "review"] | None = None
+    조_건수: int = 0
+    # 파싱품질이 review 일 때 사용자에게 보여 줄 이유
+    검토이유: str | None = None
+    # 텍스트를 얻은 방식(l3_documents.extraction). 'ocr' 이면 스캔본을 OCR 로 읽은 문서다
+    추출방식: str | None = None
+    # 조문 연결 확인(P4-5, 5-6b 「L3 업로드 연결」). 판정에 쓰는 문서(pass/warn)이고 새 경로 사업이 있을 때만 채운다.
+    # 연결상태: 추천작성중 · 추천완료 · 추천일부실패 · 추천실패 · 추천없음(추천을 만들지 않은 문서). None = 연결 화면을 보이지 않는다
+    연결상태: Literal["추천작성중", "추천완료", "추천일부실패", "추천실패", "추천없음"] | None = None
+    연결: list["L3연결조문항목"] | None = None
+    # 고를 수 있는 분류. concept_id 는 PATCH 에 돌려보내는 값이고 화면에 보이지 않는다
+    연결선택지: list["L3연결선택지항목"] | None = None
+
+
+class L3연결선택지항목(BaseModel):
+    concept_id: str
+    표시문: str
+
+
+class L3연결조문항목(BaseModel):
+    """조문 하나의 연결. `상태` 확인 = 사용자가 저장함(판정이 읽는다) · 추천 = 저장 전 추천 · 추천없음 = 추천을 만들지 못함."""
+    article_id: int
+    조번호: str
+    조제목: str | None = None
+    미리보기: str = ""
+    상태: Literal["확인", "추천", "추천없음"]
+    # 화면에 그릴 지금 값(확인값, 없으면 추천). [] = 모든 지출에 공통, None = 고른 분류 없음
+    concept_ids: list[str] | None = None
+    표시문: list[str] = Field(default_factory=list)
+    # 대체된 옛 판(L1 · L2)과 같고 현행 판에는 없는 문장 [{문장, 문서}]. 화면 경고용이고 판정은 읽지 않는다
+    옛판문구: list[dict[str, str]] = Field(default_factory=list)
+
+
+L3현재문서.model_rebuild()
+
+
+class L3현재문서목록응답(BaseModel):
+    """GET /api/l3/current 응답. org_id 가 없으면(게스트) 빈 목록이고, 다른 org 의 문서는 포함하지 않는다."""
+    문서: list[L3현재문서] = Field(default_factory=list)
+
+
+# --- 사업 목록 (GET /api/programs) ---
+
+class 우선순위규칙(BaseModel):
+    """corpus.precedence_rules 한 행. L1/L2/L3 중 어느 계층이 우선하는지."""
+    우선계층: str
+    후순위계층: str
+    범위: str | None = None
+    우선규범: str | None = None
+    해석: str | None = None
+
+    @computed_field  # 구 이름 호환(제거 예정: 다음 릴리스)
+    @property
+    def 열위계층(self) -> str:  # 구 이름 호환(제거 예정: 다음 릴리스)
+        return self.후순위계층
+
+
+class 사업정보(BaseModel):
+    사업명: str
+    별칭: list[str] = Field(default_factory=list)
+    비목체계: str | None = None        # 창업 | RND
+    트랙범위: str | None = None
+    # 프론트가 우선순위 규칙을 하드코딩하지 않도록 내려준다(추가 필드라 기존 계약은 그대로다)
+    우선순위규칙목록: list[우선순위규칙] = Field(default_factory=list)
+
+    @computed_field  # 구 이름 호환(제거 예정: 다음 릴리스)
+    @property
+    def 비목계통(self) -> str | None:  # 구 이름 호환(제거 예정: 다음 릴리스)
+        return self.비목체계
+
+
+class 사업목록응답(BaseModel):
+    사업: list[사업정보] = Field(default_factory=list)
+    비고: str | None = None
+
+
+# --- 기업 프로필 (GET·PUT /api/profile) ---
+# 협약은 현금 2개 필드와 자기부담 현물 총액 1개 필드다(정부지원 현물은 이 사업들에 없다).
+# 자기부담_현물 은 None = 미입력이고 0(현물 없음)과 다르다. 총사업비 = 정부지원_현금 + 자기부담_현금 + 자기부담_현물.
+# 집행내역에는 형태(현금/현물) 필드, 참여인력에는 이름 필드가 없다.
+
+class 협약정보(BaseModel):
+    정부지원_현금: float = 0
+    자기부담_현금: float = 0
+    자기부담_현물: float | None = None
+    협약시작일: str | None = None
+    협약종료일: str | None = None
+
+
+class 집행내역항목(BaseModel):
+    비목: str
+    재원: Literal["정부지원", "자기부담"]
+    거래처: str | None = None
+    인력역할: str | None = None
+    귀속월: str | None = None
+    금액: float = 0
+
+
+class 참여인력항목(BaseModel):
+    역할: str                          # 실명은 받지 않는다
+    고용형태: str | None = None
+    타사업참여율: float = 0
+    소속기관유형: str | None = None
+    겸직: bool = False
+
+
+class 프로필(BaseModel):
+    협약: 협약정보 = Field(default_factory=협약정보,
+                       validation_alias=AliasChoices("협약", "f1"))  # 구 이름 호환(제거 예정: 다음 릴리스)
+    집행내역: list[집행내역항목] = Field(default_factory=list,
+                                 validation_alias=AliasChoices("집행내역", "f3"))  # 구 이름 호환(제거 예정: 다음 릴리스)
+    참여인력: list[참여인력항목] = Field(default_factory=list,
+                                 validation_alias=AliasChoices("참여인력", "f4"))  # 구 이름 호환(제거 예정: 다음 릴리스)
