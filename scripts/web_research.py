@@ -46,11 +46,17 @@ _SCHEMA = {"type": "object", "additionalProperties": False, "properties": {
     "required": ["행동", "유형", "검색어", "부족정보", "확인항목", "URL", "후보"]}
 
 
-# 계획 LLM 3회와 검색·본문 호출이 들어가는 시간. 운영 측정: 계획 3~8초, 검색 0.4~22.9초, 본문 4~10초.
+# 계획 LLM 3회와 검색·본문 호출이 들어가는 시간. 운영 측정: 계획 3~8초, 검색 0.3~5초 또는 22~24초, 본문 4~10초.
 _웹_제한초 = 60
 # 도구 한 번이 창을 다 쓰지 않도록 호출별 상한을 두고, 읽은 본문에서 발췌를 고를 마지막 계획 시간을 남긴다.
-_도구상한초 = {"google_search": 20, "url_to_markdown": 15}
+# 운영 google_search 28회(2026-11-10): 22~24초에 오는 성공이 14%라 검색 상한을 30초로 둔다.
+_도구상한초 = {"google_search": 30, "url_to_markdown": 15}
 _추출여유초 = 10
+# 같은 측정에서 21%는 제공자 도구 오류 「[424] 외부 검색 처리에 실패」였고, 같은 검색어가 몇 분 뒤엔 성공했다.
+# 그런 오류면 잠깐 쉬고 한 번 더 보낸다(도구 1회로 셈). 시간초과 · IP 차단 · 키 · 입력 오류는 다시 보내지 않는다.
+_검색_재시도_쉼초 = 2
+_검색_재시도_최소초 = 5
+_재시도_분류 = ("APICK_TOOL", "APICK_HTTP", "APICK_REQUEST", "APICK_RESPONSE", "APICK_PROTOCOL")
 
 
 # 확인 질문에 쓰는 유형 이름. 화면에 그대로 나간다.
@@ -219,6 +225,35 @@ def _검색어(public_query: str, kind: str, proposed: object) -> str | None:
     return None
 
 
+def _검색_실패문장(exc) -> str:
+    """검색 실패를 화면 문장으로 바꾼다. 내부 분류 이름은 화면에 내지 않는다(분류는 apick_mcp 로그에 남는다)."""
+    code = getattr(exc, "code", None)
+    if code == "APICK_IP_DENIED":
+        return "검색 서비스 연결을 확인하지 못했어요."
+    if code == "APICK_TIMEOUT":
+        return "검색 응답이 늦어 이번에는 결과를 받지 못했어요."
+    if code in ("APICK_TOOL", "APICK_HTTP"):
+        return "검색 서비스가 지금 결과를 주지 못했어요."
+    return "공개 검색을 마치지 못했어요."
+
+
+def _검색(client, args: dict, timeout: float, 남은시간, 더보내기, 알림) -> tuple:
+    """google_search 한 번. 제공자 오류(`_재시도_분류`)로 실패하면 `_검색_재시도_쉼초` 쉬고 한 번만 다시 보낸다.
+    다시 보내려면 `남은시간()` 이 `_검색_재시도_최소초` 보다 길고 `더보내기()` 가 도구 예약에 성공해야 한다.
+    반환 (오류, 결과, 더 보낸 횟수)."""
+    try:
+        return None, client.call("google_search", args, timeout), 0
+    except ApickError as exc:
+        if exc.code not in _재시도_분류 or 남은시간() - _검색_재시도_쉼초 <= _검색_재시도_최소초 or not 더보내기():
+            return exc, None, 0
+    알림()
+    time.sleep(_검색_재시도_쉼초)
+    try:
+        return None, client.call("google_search", args, min(남은시간(), _도구상한초["google_search"])), 1
+    except ApickError as exc:
+        return exc, None, 1
+
+
 def _계획자료(requirements, context):
     """계획 입력은 자료로만 제공한다. 과도하게 크거나 직렬화가 안 되면 생략한다."""
     value = {"필요요건": requirements if isinstance(requirements, list) else [],
@@ -366,7 +401,22 @@ def research(public_query: str | None = None, *, product_name: str | None = None
                 if emit:
                     emit({"id": event_id, "단계": label, "상태": "진행중", "문장": f"{target} {label} 중"})
                 jobs.append((name, args, timeout, event_id, label, target))
-            if len(jobs) > 1:
+            if len(jobs) == 1 and jobs[0][0] == "google_search":
+                _, a, t, event_id, label, target = jobs[0]
+                def 더보내기():
+                    return tool_count < 6 and budget.reserve_tool()
+                def 알림():
+                    if emit:
+                        emit({"id": event_id, "단계": label, "상태": "진행중", "문장": f"{target} 검색이 실패해 한 번 더 요청하고 있어요."})
+                def 남은시간():
+                    return min(web_deadline - time.monotonic() - _추출여유초, deadline - time.monotonic(), budget.remaining_seconds())
+                try:
+                    exc, result, 더보냄 = _검색(client, a, t, 남은시간, 더보내기, 알림)
+                except Exception as e:      # 예상 밖 오류는 아래 공통 처리로 넘긴다
+                    exc, result, 더보냄 = e, None, 0
+                tool_count += 더보냄
+                done = [(exc, result)]
+            elif len(jobs) > 1:
                 with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
                     futures = [pool.submit(client.call, n, a, t) for n, a, t, *_ in jobs]
                     done = [(f.exception(), None if f.exception() else f.result()) for f in futures]
@@ -393,8 +443,7 @@ def research(public_query: str | None = None, *, product_name: str | None = None
             for (name, args, timeout, event_id, label, target), (exc, result) in zip(jobs, done):
                 if isinstance(exc, ApickError):
                     if emit:
-                        문장 = ("검색 서비스 연결을 확인하지 못했어요." if name == "google_search"
-                              else f"{target} 본문을 가져오지 못했어요.")
+                        문장 = _검색_실패문장(exc) if name == "google_search" else f"{target} 본문을 가져오지 못했어요."
                         emit({"id": event_id, "단계": label, "상태": "실패", "문장": 문장})
                     # 검색이 안 되면 더 할 일이 없다. 본문 하나가 실패해도 다른 본문과 다음 계획은 계속한다.
                     if name == "google_search":

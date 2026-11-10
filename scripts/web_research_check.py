@@ -174,8 +174,8 @@ def main():
     got = research("Example", budget=Budget(), client=two, llm_call=lambda p, s, t: next(two_plans))
     assert sorted(c[1].get("url", "") for c in two.calls[1:]) == ["https://a.example.com/x", "https://b.example.com/y"], two.calls
     assert len(got["후보"]) == 1 and got["출처"] == ["https://b.example.com/y"]
-    # 도구 호출별 상한: 검색 20초, 본문 15초
-    assert two.calls[0][2] <= 20 and all(c[2] <= 15 for c in two.calls[1:])
+    # 도구 호출별 상한: 검색 30초, 본문 15초
+    assert two.calls[0][2] <= 30 and all(c[2] <= 15 for c in two.calls[1:])
     # 동시에 읽은 묶음에 연결 설정 오류가 있으면 성공한 본문도 쓰지 않고 실패로 끝낸다.
     class MixedDenied(TwoLinks):
         def call(self, name, args, timeout):
@@ -338,7 +338,99 @@ def main():
         out = research(query, public_url=url, budget=Budget(), client=client,
                        llm_call=lambda p, s, t: (_ for _ in ()).throw(AssertionError("LLM 호출")))
         assert client.calls == [] and out["후보"] == [], (query, url, client.calls)
+    느린검색_검사(body)
+    apick_분류_검사()
     print("웹 조사 모의 검사 통과")
+
+
+def 느린검색_검사(body):
+    """검색이 제공자 오류([424] 등)로 실패하면 잠깐 쉬고 한 번 더 보내고, 실패 문장은 원인에 맞춘다."""
+    import web_research
+    plan = lambda p, s, t: {"행동": "검색", "유형": "가격", "검색어": "Example 요금 가격", "부족정보": ["가격"], "확인항목": [], "URL": "", "후보": []}
+    found = {"content": [{"type": "text", "text": '{"link":"https://example.com/product"}'}]}
+    tool424 = lambda: ApickError("MCP 도구 오류", code="APICK_TOOL", status=424)
+
+    class Script:
+        """검색 호출마다 정해진 결과 · 오류를 순서대로 돌려준다."""
+        def __init__(self, steps):
+            self.steps, self.calls = list(steps), []
+
+        def call(self, name, args, timeout):
+            self.calls.append((name, args, timeout))
+            value = self.steps.pop(0) if name == "google_search" else {"content": [{"type": "text", "text": body}]}
+            if isinstance(value, Exception):
+                raise value
+            return value
+
+    def search(steps, budget=None):
+        client, events = Script(steps), []
+        with patch.object(web_research, "_검색_재시도_쉼초", 0):
+            out = research("Example", budget=budget or Budget(), client=client, llm_call=plan, emit=events.append)
+        return out, [c for c in client.calls if c[0] == "google_search"], [e for e in events if e["단계"] == "공개 검색"]
+
+    # 검색 상한은 30초다
+    out, calls, ev = search([found])
+    assert len(calls) == 1 and calls[0][2] == 30 and ev[-1]["상태"] == "완료", (calls, ev)
+    # [424] 면 같은 검색어로 한 번 더 보내고, 다시 보낸 것도 도구 1회다. 진행 표시는 같은 줄을 고친다
+    budget = Budget(tools=6)
+    out, calls, ev = search([tool424(), found], budget)
+    assert len(calls) == 2 and calls[0][1] == calls[1][1], calls
+    assert [e["상태"] for e in ev] == ["진행중", "진행중", "완료"] and len({e["id"] for e in ev}) == 1, ev
+    assert "한 번 더" in ev[1]["문장"] and budget.tools <= 4, (ev, budget.tools)
+    # 두 번 다 [424] 면 서비스 오류 문장이고, 연결 설정 실패(상태 실패 · 사유)로 끝내지 않는다
+    out, calls, ev = search([tool424(), tool424()])
+    assert len(calls) == 2 and ev[-1]["문장"] == "검색 서비스가 지금 결과를 주지 못했어요.", ev
+    assert out["상태"] != "실패" and "사유" not in out, out
+    # 시간초과는 다시 보내지 않고 응답 지연 문장
+    out, calls, ev = search([ApickError("APICK 시간 초과", code="APICK_TIMEOUT"), found])
+    assert len(calls) == 1 and ev[-1]["문장"] == "검색 응답이 늦어 이번에는 결과를 받지 못했어요.", (calls, ev)
+    # 도구 예산이 없으면 다시 보내지 않는다
+    out, calls, ev = search([tool424(), found], Budget(tools=1))
+    assert len(calls) == 1 and ev[-1]["상태"] == "실패", (calls, ev)
+    # 남은 시간이 짧으면 다시 보내지 않는다
+    with patch.object(web_research, "_웹_제한초", web_research._추출여유초 + web_research._검색_재시도_최소초):
+        out, calls, ev = search([tool424(), found])
+    assert len(calls) == 1, calls
+    # IP 차단은 다시 보내지 않고 기존처럼 연결 설정 실패로 끝낸다
+    with patch("web_research._log.warning"):
+        out, calls, ev = search([ApickError("x", code="APICK_IP_DENIED"), found])
+    assert len(calls) == 1 and out["상태"] == "실패" and ev[-1]["문장"] == "검색 서비스 연결을 확인하지 못했어요.", (calls, out, ev)
+
+
+def apick_분류_검사():
+    """APICK 오류는 고정 분류 · 상태 숫자만 남기고, 로그에 검색어 · 키 · 응답 본문을 남기지 않는다."""
+    import socket
+    import urllib.error
+    import apick_mcp
+    tool = {"jsonrpc": "2.0", "id": 1, "result": {"isError": True,
+            "content": [{"type": "text", "text": "[424] 외부 검색 처리에 실패했습니다. fake-secret"}]}}
+    try:
+        parse_response(json.dumps(tool, ensure_ascii=False).encode(), "application/json")
+        raise AssertionError("도구 오류 허용")
+    except ApickError as exc:
+        assert (exc.code, exc.status) == ("APICK_TOOL", 424) and "fake-secret" not in str(exc)
+
+    def opener(error):
+        class Opener:
+            def open(self, req, timeout):
+                raise error
+        return lambda *a: Opener()
+
+    cases = ((socket.timeout("timed out"), "APICK_TIMEOUT", None),
+             (urllib.error.URLError(socket.timeout("x")), "APICK_TIMEOUT", None),
+             (urllib.error.HTTPError(apick_mcp.ENDPOINT, 503, "fake-secret", {}, None), "APICK_HTTP", 503),
+             (OSError("fake-secret"), "APICK_REQUEST", None))
+    for error, code, status in cases:
+        with patch.object(apick_mcp.urllib.request, "build_opener", opener(error)), \
+                patch.object(apick_mcp._log, "warning") as warning:
+            try:
+                ApickClient(api_key="fake-key").call("google_search", {"keyword": "비밀 검색어"}, 5)
+                raise AssertionError("오류 허용")
+            except ApickError as exc:
+                assert (exc.code, exc.status) == (code, status), (exc.code, exc.status)
+        logged = " ".join(str(x) for x in warning.call_args.args)
+        assert code in logged and "google_search" in logged, logged
+        assert not any(s in logged for s in ("비밀 검색어", "fake-key", "fake-secret")), logged
 
 
 if __name__ == "__main__":
