@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# DB 와 지출계획 첨부파일 일일 백업 (pg_dump -Fc, 볼륨 tar). setup_server.sh 가 cron 에 등록한다.
+# DB, 지출계획 첨부파일, 기관 L3 원본 일일 백업 (pg_dump -Fc, 볼륨 tar).
 #   30 4 * * * /opt/suddoe/deploy/ncp/backup.sh >> /var/log/suddoe-backup.log 2>&1
 #
-# - 덤프는 최근 KEEP 개(기본 14), 첨부 tar 는 최근 KEEP_ATTACH 개(기본 2)만 보관한다. tar 는 매번 전체 사본이다.
+# - 덤프는 최근 KEEP 개(기본 14), 각 파일 볼륨 tar 는 최근 KEEP_ATTACH/KEEP_L3 개(각 기본 2)를 보관한다.
 # - 백업이 서버 디스크에만 있으면 서버 장애 시 함께 유실된다. 주기적으로 서버 외부(로컬 PC 등)로 복사한다.
 # - 덤프에는 사용자 계정·기관 데이터가 포함된다. GitHub 이나 공유 드라이브에 올리지 않는다.
 set -euo pipefail
@@ -12,6 +12,7 @@ umask 077
 
 KEEP=${KEEP:-14}
 KEEP_ATTACH=${KEEP_ATTACH:-2}
+KEEP_L3=${KEEP_L3:-2}
 mkdir -p backups
 f="backups/suddoe_$(date +%Y%m%d_%H%M).dump"
 
@@ -35,3 +36,12 @@ tar -tzf "$a.part" > /dev/null
 mv "$a.part" "$a"
 ls -1t backups/attachments_*.tar.gz | tail -n +"$((KEEP_ATTACH + 1))" | xargs -r rm --
 echo "$(date '+%F %T') $a $(du -h "$a" | cut -f1)"
+
+# 기관 L3 업로드 원본은 지출 첨부와 별도 볼륨이다. DB의 파일 참조와 함께 보존한다.
+l="backups/l3_uploads_$(date +%Y%m%d_%H%M).tar.gz"
+trap 'rm -f -- "$f.part" "$a.part" "$l.part"' EXIT
+docker compose exec -T api tar -C /app/_l3_업로드 -czf - . > "$l.part"
+tar -tzf "$l.part" > /dev/null
+mv "$l.part" "$l"
+ls -1t backups/l3_uploads_*.tar.gz | tail -n +"$((KEEP_L3 + 1))" | xargs -r rm --
+echo "$(date '+%F %T') $l $(du -h "$l" | cut -f1)"

@@ -21,6 +21,7 @@ from pydantic import AliasChoices, BaseModel, Field, computed_field, model_valid
 # --- 공통 ---
 
 판정타입 = Literal["가능", "조건부", "불가", "판단불가"]
+부가세구분타입 = Literal["포함", "공급가액", "모름"]
 
 
 class 특수관계(BaseModel):
@@ -50,6 +51,7 @@ class 정규화요청(BaseModel):
 
     # 공통
     사업명: str | None = None
+    부가세구분: 부가세구분타입 | None = None
     특수관계: _특수관계 = Field(default_factory=_특수관계,
                              validation_alias=AliasChoices("특수관계", "f5"))  # 구 이름 호환(제거 예정: 다음 릴리스)
 
@@ -74,15 +76,28 @@ class 답변항목(BaseModel):
 
 # --- 확인 질문 (POST /api/questions) ---
 
+class 조사답변항목(BaseModel):
+    id: str = Field(max_length=200)
+    답: Literal['맞아요', '아니에요', '모르겠어요']
+    정정: str | None = Field(default=None, max_length=1000)
+
+
 class 질문요청(BaseModel):
     """판정 전 확인 질문 요청. org·계정은 토큰에서 정하므로 받지 않는다."""
     사업명: str | None = None
     확정비목: str
+    확정세목: str | None = None        # 분류 확인 화면에서 고른 세목 표기. 서버가 노드 ID 로 푼다(온톨로지 경로)
+    부가세구분: 부가세구분타입 | None = None
     세부유형: str | None = None
     품목: str | None = None
     금액: float | None = None
     용도: str | None = None
     질문원문: str | None = Field(default=None, max_length=2000)
+    조사ID: str | None = Field(default=None, max_length=200)
+    웹조사: bool = False
+    공개검색어: str | None = Field(default=None, max_length=300)
+    판매URL: str | None = Field(default=None, max_length=2048)
+    조사답변: list[조사답변항목] | None = Field(default=None, max_length=30)
 
 
 # --- 판정 (POST /api/judge) ---
@@ -99,6 +114,15 @@ class 판정요청(BaseModel):
     답변: list[답변항목] = Field(default_factory=list)
     # POST /api/questions 가 돌려준 키. 서버에 저장한 질문 문장과 답 값만 판정에 넣는다.
     질문세트: str | None = None
+    # 온톨로지 경로: 분류 확인에서 고른 세목, 화면 숫자 칸 값, 입력 화면의 부가세 구분
+    확정세목: str | None = None
+    추가입력값: dict[str, Any] = Field(default_factory=dict)
+    부가세구분: 부가세구분타입 | None = None
+    # 화면의 예상 지출일(YYYY-MM-DD). 지난 기한의 조건 문장을 빼고, 프로필 협약 기간과 비교하는 시점 규범(5-14 D)에 쓴다. 날짜가 아니면 없는 것으로 본다.
+    # 비어 있으면 정규화가 질문 글에서 뽑은 날짜를 쓴다(화면 입력이 먼저)
+    사용일자: str | None = None
+    조사ID: str | None = Field(default=None, max_length=200)
+    조사답변: list[조사답변항목] = Field(default_factory=list, max_length=30)
 
 
 # --- 할일 (plan_tasks) ---
@@ -397,6 +421,34 @@ class L3현재문서(BaseModel):
     검토이유: str | None = None
     # 텍스트를 얻은 방식(l3_documents.extraction). 'ocr' 이면 스캔본을 OCR 로 읽은 문서다
     추출방식: str | None = None
+    # 조문 연결 확인(P4-5, 5-6b 「L3 업로드 연결」). 판정에 쓰는 문서(pass/warn)이고 새 경로 사업이 있을 때만 채운다.
+    # 연결상태: 추천작성중 · 추천완료 · 추천일부실패 · 추천실패 · 추천없음(추천을 만들지 않은 문서). None = 연결 화면을 보이지 않는다
+    연결상태: Literal["추천작성중", "추천완료", "추천일부실패", "추천실패", "추천없음"] | None = None
+    연결: list["L3연결조문항목"] | None = None
+    # 고를 수 있는 분류. concept_id 는 PATCH 에 돌려보내는 값이고 화면에 보이지 않는다
+    연결선택지: list["L3연결선택지항목"] | None = None
+
+
+class L3연결선택지항목(BaseModel):
+    concept_id: str
+    표시문: str
+
+
+class L3연결조문항목(BaseModel):
+    """조문 하나의 연결. `상태` 확인 = 사용자가 저장함(판정이 읽는다) · 추천 = 저장 전 추천 · 추천없음 = 추천을 만들지 못함."""
+    article_id: int
+    조번호: str
+    조제목: str | None = None
+    미리보기: str = ""
+    상태: Literal["확인", "추천", "추천없음"]
+    # 화면에 그릴 지금 값(확인값, 없으면 추천). [] = 모든 지출에 공통, None = 고른 분류 없음
+    concept_ids: list[str] | None = None
+    표시문: list[str] = Field(default_factory=list)
+    # 대체된 옛 판(L1 · L2)과 같고 현행 판에는 없는 문장 [{문장, 문서}]. 화면 경고용이고 판정은 읽지 않는다
+    옛판문구: list[dict[str, str]] = Field(default_factory=list)
+
+
+L3현재문서.model_rebuild()
 
 
 class L3현재문서목록응답(BaseModel):
@@ -440,12 +492,14 @@ class 사업목록응답(BaseModel):
 
 
 # --- 기업 프로필 (GET·PUT /api/profile) ---
-# 현물 항목은 없다. 협약은 현금 2개 필드이고 집행내역에는 형태(현금/현물) 필드, 참여인력에는
-# 이름 필드가 없다.
+# 협약은 현금 2개 필드와 자기부담 현물 총액 1개 필드다(정부지원 현물은 이 사업들에 없다).
+# 자기부담_현물 은 None = 미입력이고 0(현물 없음)과 다르다. 총사업비 = 정부지원_현금 + 자기부담_현금 + 자기부담_현물.
+# 집행내역에는 형태(현금/현물) 필드, 참여인력에는 이름 필드가 없다.
 
 class 협약정보(BaseModel):
     정부지원_현금: float = 0
     자기부담_현금: float = 0
+    자기부담_현물: float | None = None
     협약시작일: str | None = None
     협약종료일: str | None = None
 

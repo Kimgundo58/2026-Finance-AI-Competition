@@ -7,7 +7,8 @@
 -> 청크 분할 -> KURE-v1 임베딩(retrieve.임베딩_모델) -> 참조(build_refs.scan) -> 한 트랜잭션으로 저장.
 BM25 색인 행(bm25_index 토큰화)은 활성화 트랜잭션에서 넣는다.
 쓰는 테이블: corpus.ingest_jobs, documents, doc_articles, chunks, refs, chunk_len·chunk_terms·term_df(활성화 때),
-tenant.judge_cache(활성화 때 삭제). 접속은 호출자가 넘기는 DSN(SUDDOE_INGEST_DSN, 롤 suddoe_ingest) 만 쓴다.
+concepts·norms 의 검수단계(활성화 때 이전 판 근거 행), tenant.judge_cache(활성화 때 삭제).
+접속은 호출자가 넘기는 DSN(SUDDOE_INGEST_DSN, 롤 suddoe_ingest) 만 쓴다.
 불변 조건: 추출 실패·조 0건은 failed 이고 staged 가 되지 않는다. staged 문서는 검색 필터(status='active')에
 걸리지 않고 BM25 통계에도 들어가지 않는다. 적용대상을 정하지 못한 조는 청크로 만들지 않는다.
 활성화는 한 트랜잭션에서 새 판을 active, 이전 판을 superseded 로 바꾼다.
@@ -218,25 +219,33 @@ def _실패_기록(dsn: str, doc_id: str, 사유: str, 저장경로: str | None 
         _log.exception("실패 상태를 기록하지 못했다 doc_id=%s", doc_id)
 
 
-def _준비(작업: dict) -> dict:
+def _준비(작업: dict, *, 복원조문: list[dict] | None = None) -> dict:
     """DB 에 쓰기 전의 계산 전부: 추출, 조문 분할, 품질 판정, 적용대상 태깅, 청크, 임베딩.
 
     반환: {조문, 전략, 추출방식, 품질, 경고, 청크}. staged 로 둘 수 없으면 _적재실패.
+    `복원조문` 을 주면 파일을 읽지 않고 그 조문을 쓴다(scripts/corpus_restored_load.py). 조 구조가 없는 안내 책자처럼
+    쪽 · 소제목 단위로 복원한 문서다. 품질은 high 로 둔다. 어떻게 대조했는지는 입력 메타 `대조` 칸이 필수이고
+    ingest_jobs.경고 에 남는다(대조 수준은 칸마다 다르다. 사람 대조가 아닐 수 있다).
     """
     from article_split import is_deleted, validate
 
     doc_id, layer = 작업["doc_id"], 작업["layer"]
-    조문, 전략, 추출방식 = _조문_추출(Path(작업["저장경로"]))
-    v = validate(조문, 전략)
-    if not v["ok"]:
-        raise _적재실패(f"조문을 하나도 찾지 못했습니다 (분할 전략 {전략}).")
+    if 복원조문 is not None:
+        if not 복원조문:
+            raise _적재실패("복원 조문이 비어 있습니다.")
+        조문, 전략, 추출방식, 품질, 경고 = [dict(a) for a in 복원조문], "복원본", "native", "high", []
+    else:
+        조문, 전략, 추출방식 = _조문_추출(Path(작업["저장경로"]))
+        v = validate(조문, 전략)
+        if not v["ok"]:
+            raise _적재실패(f"조문을 하나도 찾지 못했습니다 (분할 전략 {전략}).")
 
-    # 품질 기준은 기존 코퍼스와 같다: validate 가 low 로 보는 문서(단락·장 단위 분할, 조 5개 미만)는 low.
-    # 조번호 역전·빈 조 과다도 low 로 둔다. 조 경계나 본문 추출을 믿을 수 없다는 신호다.
-    # low 문서는 검색 필터(parse_quality='high')에 걸리지 않고, 활성화도 거부된다.
-    품질 = ("low" if v["quality"] == "low"
-            or any(f.startswith(("조번호역전:", "빈조과다:")) for f in v["flags"]) else "high")
-    경고 = list(v["flags"])
+        # 품질 기준은 기존 코퍼스와 같다: validate 가 low 로 보는 문서(단락·장 단위 분할, 조 5개 미만)는 low.
+        # 조번호 역전·빈 조 과다도 low 로 둔다. 조 경계나 본문 추출을 믿을 수 없다는 신호다.
+        # low 문서는 검색 필터(parse_quality='high')에 걸리지 않고, 활성화도 거부된다.
+        품질 = ("low" if v["quality"] == "low"
+                or any(f.startswith(("조번호역전:", "빈조과다:")) for f in v["flags"]) else "high")
+        경고 = list(v["flags"])
     # 범위 판정은 운영자가 입력한 문서명이 아니라 표준 사업명으로 한다. 별칭으로 올려도 같은 구간이 빠진다.
     조문, 범위밖_수 = _범위밖_제거(f"{작업['사업명'] or ''} {doc_id}", 조문)
     if 범위밖_수:
@@ -244,7 +253,13 @@ def _준비(작업: dict) -> dict:
     경고 += _조번호_중복_정리(조문)
     for a in 조문:
         a["삭제"] = is_deleted(a)
-    경고 += _적용대상_태깅(조문, layer=layer, 문서명=작업["문서명"], 기본값=작업["적용대상"])
+    if 복원조문 is not None:
+        # 책자는 조 제목이 "지원 개요" 같은 소제목이라 조별 태깅이 미정이 된다. 문서 전체가 같은 대상이다.
+        # 입력에 적용대상이 있으면 그 값을 쓴다. null 은 조문만 저장하고 청크를 만들지 않는다(공고의 로컬트랙 쪽).
+        for a in 조문:
+            a["적용대상"] = a.get("적용대상", 작업["적용대상"])
+    else:
+        경고 += _적용대상_태깅(조문, layer=layer, 문서명=작업["문서명"], 기본값=작업["적용대상"])
 
     사업 = [작업["사업명"]] if 작업["사업명"] else None
     청크, 표_제외 = _청크_만들기(조문, layer=layer, 사업=사업, doc_id=doc_id)
@@ -345,6 +360,12 @@ _본문_주어_구간 = 200       # 조 첫머리 몇 글자에서 주어를 찾
 # 조문 분할 때 다음 장·절 표제가 앞 조 본문 끝에 붙는다. 줄 첫머리에 있고 뒤에 공백·괄호·줄끝이 오는 것만
 # 표제로 본다("제2장에 따른" 같은 본문 속 참조는 제외).
 RE_표제_줄 = re.compile(r"(?m)^\s*[<〈]?\s*제\s*\d+\s*(?:절|장)(?=\s|[>〉]|$)")
+# 규칙이 틀리는 조. 원문을 읽어 정한 값이다. 조제목까지 맞을 때만 적용해 개정으로 조가 옮겨 가면 규칙으로 돌아간다.
+#   제46·50조: 주관기관과 후속지원자·진출자 양쪽의 의무다. 규칙은 「후속지원자」를 창업 쪽 말로 보지 않아 주관기관으로 잡는다.
+#   제52조: 해석 조항은 문서 전체에 적용된다.
+_적용대상_고정 = {"모두의 창업 프로젝트 세부관리기준": {("제46조", "사업비 사용실적 보고"): "공통",
+                                                  ("제50조", "성과의 활용"): "공통",
+                                                  ("제52조", "해석"): "공통"}}
 
 
 def _태깅_대상(layer: str, 문서명: str) -> bool:
@@ -420,6 +441,9 @@ def _적용대상_태깅(조문: list[dict], *, layer: str, 문서명: str, 기�
         값, 근거 = _조_주체(a.get("조제목"), a.get("본문") or "")
         if 근거 != "조제목" and 절.get(a["조번호"]) is not None:
             값 = 절[a["조번호"]]
+        for 접두, 표 in _적용대상_고정.items():
+            if 문서명.startswith(접두):
+                값 = 표.get((a["조번호"], a.get("조제목")), 값)
         a["적용대상"] = 값
     분포 = Counter(a["적용대상"] or "미정" for a in 조문 if not a["삭제"])
     경고 = ["적용대상 조별 태깅: " + ", ".join(f"{k} {분포[k]}" for k in ("창업기업", "주관기관", "공통", "미정")
@@ -674,7 +698,7 @@ def _저장(conn, 작업: dict, 적재데이터: dict) -> bool:
                     해결상태, 해결근거)
                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
                ON CONFLICT (src_doc_id, src_조번호, 참조문자열) DO NOTHING""",
-            _참조_만들기(cur, doc_id, 작업["문서명"], layer, 적재데이터["조문"]))
+            _참조_만들기(cur, doc_id, 작업["문서명"], layer, 적재데이터["조문"], 복원본=적재데이터["전략"] == "복원본"))
 
         cur.execute(
             """UPDATE corpus.ingest_jobs
@@ -685,7 +709,7 @@ def _저장(conn, 작업: dict, 적재데이터: dict) -> bool:
     return True
 
 
-def _참조_만들기(cur, doc_id: str, 문서명: str, layer: str, 조문: list[dict]) -> list[tuple]:
+def _참조_만들기(cur, doc_id: str, 문서명: str, layer: str, 조문: list[dict], *, 복원본: bool = False) -> list[tuple]:
     """조별 참조 표기 -> corpus.refs 행. 참조패턴 인식·해결은 build_refs 를 그대로 쓴다.
 
     대상 문서명 매핑은 build_refs.load_corpus_names 와 같은 규칙(L1_ 접두어·_YYYYMMDD 접미사를 뗀 제명과
@@ -705,15 +729,15 @@ def _참조_만들기(cur, doc_id: str, 문서명: str, layer: str, 조문: list
 
     약칭표 = build_refs.수집_약칭(" ".join(a["본문"] or "" for a in 조문))
     동적 = build_refs._동적패턴(약칭표)
-    행 = []
+    edges = []
     for a in 조문:
         if a["삭제"]:
             continue                      # 효력이 없는 조는 참조의 출발점이 아니다
-        for e in build_refs.scan(a["본문"], doc_id, 문서명_매핑, src_조번호=a["조번호"],
-                                 약칭표=약칭표, 동적=동적):
-            행.append((e["src_doc_id"], e["src_조번호"], layer, e["참조문자열"], e["관계"],
-                       e["dst_doc_id"], e["dst_조번호"], e["해결상태"], e["해결근거"]))
-    return 행
+        edges += build_refs.scan(a["본문"], doc_id, 문서명_매핑, src_조번호=a["조번호"],
+                                 약칭표=약칭표, 동적=동적)
+    build_refs.자기_표기_잇기(edges, 조문, 복원본=복원본)
+    return [(e["src_doc_id"], e["src_조번호"], layer, e["참조문자열"], e["관계"],
+             e["dst_doc_id"], e["dst_조번호"], e["해결상태"], e["해결근거"]) for e in edges]
 
 
 # 활성화·삭제
@@ -726,7 +750,7 @@ def 활성화(conn, doc_id: str, *, 대체_doc_id: str | None = None, 신규문�
     이전 판을 정할 수 없음, 신규문서인데 비슷한 active 문서가 있음(중복_허용 이 아니면).
     이전 판은 chunks 를 지우고 doc_articles 는 남긴다(기존 superseded 문서와 같은 상태).
     retrieval_scope 는 이전 판의 값을 이어받는다. BM25 색인 행을 넣고 term_df 를 갱신한다.
-    tenant.judge_cache 는 전부 지운다.
+    이전 판을 근거로 가진 노드 · 규범은 검수단계를 `재검토` 로 내린다. tenant.judge_cache 는 전부 지운다.
     """
     with conn.transaction():
         cur = conn.cursor()
@@ -793,7 +817,9 @@ def 활성화(conn, doc_id: str, *, 대체_doc_id: str | None = None, 신규문�
                 # 운영 DB 에는 eval 스키마가 없다. 트랜잭션 전체가 롤백되므로 아무것도 바뀌지 않는다.
                 raise 요청거부(f"이전 판 청크를 {e.diag.schema_name}.{e.diag.table_name} 가 참조하고 있어 "
                            "지울 수 없습니다. eval.golden_chunks 라면 골든셋 청크 재매칭을 먼저 하세요.") from e
+            경고 += _참조_옮기기(cur, 이전[0], doc_id)
             경고 += _활성화_경고(cur, 이전[0])
+            경고 += _재검토_하향(cur, 이전[0])
         cur.execute("UPDATE corpus.ingest_jobs SET 이전판_doc_id = %s, updated_at = now() "
                     "WHERE doc_id = %s", (이전[0] if 이전 else None, doc_id))
         _bm25_색인(cur, doc_id)
@@ -873,19 +899,66 @@ def _이전판_후보(cur, layer: str, 키: str, 사업명: str | None) -> list[
     return 후보[:10]
 
 
+def _참조_옮기기(cur, 이전_doc_id: str, doc_id: str) -> list[str]:
+    """active 문서에서 이전 판으로 가는 참조를 새 판으로 옮긴다. 활성화 트랜잭션 안이라 참조가 끊기는 구간이 없다.
+
+    참조 확장은 도착 문서가 active 일 때만 따라가므로(retrieve.참조확장SQL), 옮기지 않으면 판이 바뀌는 순간
+    그 문서의 조문이 근거 문맥에서 판단불가 없이 조용히 빠진다. 새 판에 없는 조로 가는 행은 옮기되 경고한다(확장되지 않는다).
+    """
+    없는조 = [r[0] for r in cur.execute(
+        """SELECT DISTINCT r.dst_조번호
+             FROM corpus.refs r JOIN corpus.documents s ON s.doc_id = r.src_doc_id AND s.status = 'active'
+            WHERE r.dst_doc_id = %(옛)s AND r.dst_조번호 IS NOT NULL AND r.src_doc_id NOT IN (%(옛)s, %(새)s)
+              AND EXISTS (SELECT 1 FROM corpus.doc_articles a WHERE a.doc_id = %(옛)s AND a.조번호 = r.dst_조번호)
+              AND NOT EXISTS (SELECT 1 FROM corpus.doc_articles a WHERE a.doc_id = %(새)s AND a.조번호 = r.dst_조번호)
+            ORDER BY 1""", {"옛": 이전_doc_id, "새": doc_id}).fetchall()]
+    cur.execute(
+        """UPDATE corpus.refs r SET dst_doc_id = %(새)s
+             FROM corpus.documents s
+            WHERE r.dst_doc_id = %(옛)s AND s.doc_id = r.src_doc_id AND s.status = 'active'
+              AND r.src_doc_id NOT IN (%(옛)s, %(새)s)""", {"옛": 이전_doc_id, "새": doc_id})
+    return [f"새 판에 없는 조로 가는 참조가 있습니다(확장되지 않음): {', '.join(없는조[:10])}"] if 없는조 else []
+
+
 def _활성화_경고(cur, 이전_doc_id: str) -> list[str]:
-    """이전 판을 가리키는 룰 근거와 다른 문서의 참조 수. 활성화가 자동으로 고치지 않는 부분이다."""
-    룰수, 참조수 = cur.execute(
-        """SELECT (SELECT count(*) FROM corpus.rules
-                    WHERE 근거 @> jsonb_build_array(jsonb_build_object('doc_id', %(d)s::text))),
-                  (SELECT count(*) FROM corpus.refs WHERE dst_doc_id = %(d)s AND src_doc_id <> %(d)s)""",
-        {"d": 이전_doc_id}).fetchone()
-    경고 = []
-    if 룰수:
-        경고.append(f"이전 판을 근거로 가진 corpus.rules {룰수}건은 재검수가 필요합니다.")
-    if 참조수:
-        경고.append(f"다른 문서의 참조 {참조수}건이 이전 판을 가리킵니다 (참조를 다시 만들기 전까지 그대로 남습니다).")
-    return 경고
+    """이전 판을 가리키는 룰 근거 수. 활성화가 자동으로 고치지 않는 부분이다."""
+    룰수 = cur.execute(
+        """SELECT count(*) FROM corpus.rules
+            WHERE 근거 @> jsonb_build_array(jsonb_build_object('doc_id', %(d)s::text))""",
+        {"d": 이전_doc_id}).fetchone()[0]
+    return [f"이전 판을 근거로 가진 corpus.rules {룰수}건은 재검수가 필요합니다."] if 룰수 else []
+
+
+def _재검토_하향(cur, 이전_doc_id: str) -> list[str]:
+    """이전 판을 근거(provenance)로 가진 노드 · 규범 · 용어 풀이의 검수단계를 `재검토` 로 내린다(docs/5_룰/5-8_저장과_조회.md 개정판).
+
+    norms.verified 는 생성 칼럼이라 자동으로 false 가 된다. 그러면 코드 게이트가 그 규범으로 불가를 내지 않고(ontology_gate._사용가능)
+    '가능' 은 조건부로 내려간다. 내용을 검토하지 않았으니 옛 판 기준으로 판정을 확정하지 않는다.
+    용어 풀이는 `AI검증` 이상만 화면 · 질문 프롬프트에 나가므로(ontology_terms.화면_단계) 재검토가 되면 빠진다.
+    """
+    규범 = cur.execute(
+        """UPDATE corpus.norms SET 검수단계 = '재검토'
+            WHERE 검수단계 <> '재검토' AND norm_id IN (
+                  SELECT owner_id FROM corpus.provenance WHERE owner_kind = '규범' AND doc_id = %s)""",
+        (이전_doc_id,)).rowcount
+    개념 = cur.execute(
+        """UPDATE corpus.concepts SET 검수단계 = '재검토'
+            WHERE 검수단계 <> '재검토' AND concept_id IN (
+                  SELECT owner_id FROM corpus.provenance WHERE owner_kind = '개념' AND doc_id = %s)""",
+        (이전_doc_id,)).rowcount
+    용어 = cur.execute(
+        """UPDATE corpus.terminology SET 검수단계 = '재검토'
+            WHERE 검수단계 <> '재검토' AND term_id IN (
+                  SELECT owner_id FROM corpus.provenance WHERE owner_kind = '용어' AND doc_id = %s)""",
+        (이전_doc_id,)).rowcount
+    # UPDATE가 0행이어도 statement trigger는 dirty를 표시한다. 같은 활성화 트랜잭션에서
+    # AGE까지 갱신해야 옛 판의 검증된 규범이 그래프에 남지 않는다. 실패는 활성화도 롤백한다.
+    import ontology_age
+    ontology_age.동기화(cur)
+    if not 규범 and not 개념 and not 용어:
+        return []
+    return [f"이전 판을 근거로 가진 규범 {규범}건 · 노드 {개념}건 · 용어 풀이 {용어}건을 재검토로 내렸습니다. 원천(ontology/)을 새 판과 대조해 고치고, "
+            "schema.json 문서키를 바꿔 다시 적재하세요. 고치지 않은 행은 다시 적재해도 재검토로 남습니다."]
 
 
 def 삭제(conn, doc_id: str) -> dict:

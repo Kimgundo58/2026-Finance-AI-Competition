@@ -80,8 +80,8 @@ docker compose ps                                              # 3개 모두 hea
 | 이미지 정리 | deploy.sh 가 지난 레지스트리 태그를 지운다. 손으로 만든 `rollback-*` 는 직접 `docker rmi`. api 이미지 1개가 6.5GB 라 디스크(50GB)를 확인한다 |
 | 스키마 변경 | `db/migrations/README.md` 순서대로 postgres 롤로 적용 (적용 전 `./backup.sh`) |
 | 로그 | `docker compose logs -f api` (json-file, 20MB × 5 로테이션) |
-| 수동 백업 | `./backup.sh` → `backups/`(DB 덤프 14개, 첨부 볼륨 `plan_attachments` tar 2개 보관) |
-| 백업 외부 보관 | 로컬 PC 에서 `scp root@<IP>:/opt/suddoe/deploy/ncp/backups/*.dump .` 주기적으로 |
+| 수동 백업 | `./backup.sh` → `backups/`(DB 덤프 14개, `plan_attachments`와 `l3_uploads` tar 각 2개 보관). DB와 파일은 순서대로 생성되므로 쓰기가 계속되면 시점이 다를 수 있다. |
+| 백업 외부 보관 | DB 덤프와 두 볼륨 tar 모두 접근이 제한된 별도 보관소에 복사하고, 빈 대상에서 복원·참조를 검증한다. |
 | 재시작 | `docker compose restart api` (서버 재부팅 시 `restart: unless-stopped` 로 자동 기동) |
 
 ## 주의
@@ -93,6 +93,7 @@ docker compose ps                                              # 3개 모두 hea
 - 덤프는 `--no-privileges` 라 권한이 복원되지 않는다. `restore.sh` 가 `db/init/10b_app_grants.sql` 로
   권한과 search_path 를 다시 설정한다(로컬 init 과 같은 파일, `extensions` 스키마 USAGE 포함).
 - Caddy 는 요청 본문을 35MB 로 제한한다(L3 업로드 앱 상한 30MB).
+- 두 파일 볼륨은 각각 빈 복원 대상에 `tar -xzf <백업> -C <대상>`으로 복원하고 DB 파일 참조와 대조한다. 운영 볼륨을 덮어쓰지 않는다.
 - 로컬 사전 점검 결과 (2026-10-27, Docker Desktop): 이미지 콜드 빌드 16분, 복원+검증 22초, API healthy 20초,
   HTTPS·CORS·관리자 토큰·데모 세션·검색 정상, DashScope 키 없이 판정 시 판단불가로 종료.
 - 측정하지 않은 것: 2vCPU/8GB 에서 동시 판정 4건 부하.

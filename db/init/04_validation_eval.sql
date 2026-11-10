@@ -9,12 +9,11 @@ SET lock_timeout = '10s';
 
 BEGIN;
 
--- 현물 제거 — 현물은 협약 시점 산정 회계 항목이지 집행 승인 대상이 아니다.
--- 자기부담금 구성비율(현금/현물 하한) 검증은 이 컬럼 삭제로 더는 할 수 없다.
--- 다시 필요하면 profile_agreements 에 현물 총액 컬럼 하나만 추가하면 된다.
+-- 정부지원 현물 제거 — 이 사업들에는 정부지원 현물이 없다.
+-- 자기부담_현물(현물 총액)은 남긴다. 「현물은 총사업비의 20% 이하」 같은 비율 한도를 계산할 때 쓴다
+-- (총사업비 = 정부지원_현금 + 자기부담_현금 + 자기부담_현물, migrations/2026-11-08_자기부담_현물.sql).
 
 ALTER TABLE tenant.profile_agreements DROP COLUMN IF EXISTS "정부지원_현물";
-ALTER TABLE tenant.profile_agreements DROP COLUMN IF EXISTS "자기부담_현물";
 
 -- 형태 컬럼이 사라지면 ix_exec_agg 도 같이 사라진다 — 재생성한다. 형태_check 는 컬럼과 함께 삭제된다.
 ALTER TABLE tenant.profile_expenditures DROP COLUMN IF EXISTS "형태";
@@ -68,6 +67,27 @@ ALTER TABLE tenant.decisions ADD COLUMN IF NOT EXISTS "검증코드" TEXT[] NOT 
 ALTER TABLE tenant.decisions ADD COLUMN IF NOT EXISTS "처리단계" TEXT;
 ALTER TABLE tenant.decisions ADD COLUMN IF NOT EXISTS "실패단계" TEXT;
 ALTER TABLE tenant.decisions ADD COLUMN IF NOT EXISTS "사용자답변" JSONB NOT NULL DEFAULT '[]';
+-- 경로 : 판정이 지난 경로. 옛 · 온톨로지(docs/5_룰/5-11_전환_계획.md). 전환 전 행은 NULL.
+ALTER TABLE tenant.decisions ADD COLUMN IF NOT EXISTS "경로" TEXT;
+ALTER TABLE tenant.decisions DROP CONSTRAINT IF EXISTS "decisions_경로_check";
+ALTER TABLE tenant.decisions ADD CONSTRAINT "decisions_경로_check"
+    CHECK ("경로" IN ('옛', '온톨로지'));
+-- 온톨로지결과 : 결과 화면 값(분류 · 근거경로 · 코드판정 · 조건 · 용어풀이). 계획 다시 열기가 읽는다. 옛 경로는 NULL.
+ALTER TABLE tenant.decisions ADD COLUMN IF NOT EXISTS "온톨로지결과" JSONB;
+-- 규범 : 온톨로지 경로 판정에 쓴 규범 ID {코드판정, 조건, 문맥, 자연어답}(5-15 ④). 옛 경로는 NULL. 집계는 eval."v_규범별_판정"
+ALTER TABLE tenant.decisions ADD COLUMN IF NOT EXISTS "규범" JSONB;
+CREATE OR REPLACE VIEW eval."v_규범별_판정" AS
+SELECT x."역할", x."규범ID", d."판정", d."경로", count(*) AS "건수", max(d.created_at) AS "최근"
+  FROM tenant.decisions d
+ CROSS JOIN LATERAL (
+        SELECT '코드판정'::text AS "역할", d."규범"->>'코드판정' AS "규범ID" WHERE d."규범"->>'코드판정' IS NOT NULL
+        UNION ALL
+        SELECT '조건', jsonb_array_elements_text(COALESCE(d."규범"->'조건', '[]'::jsonb))
+        UNION ALL
+        SELECT '문맥', jsonb_array_elements_text(COALESCE(d."규범"->'문맥', '[]'::jsonb))
+       ) x
+ WHERE d."규범" IS NOT NULL
+ GROUP BY x."역할", x."규범ID", d."판정", d."경로";
 
 -- 검증코드 허용 목록. 목록 밖의 코드는 거부해 오타가 지표를 갈라놓지 못하게 한다.
 -- 기준 목록은 scripts/llm_validate.py 의 검증코드_전체 이고, 이 CHECK 는 같은 순서로 맞춘다.
@@ -86,7 +106,8 @@ ALTER TABLE tenant.decisions
     'DOMAIN_WARN','PRECEDENCE_OVERRIDE',
     'TASK_STATE_UNSOURCED','TASK_STATE_MISMATCH',
     'TASK_NUMBER_UNSOURCED','TASK_BASIS_NOT_IN_MAP',
-    'ANSWER_UNCONFIRMED'
+    'ANSWER_UNCONFIRMED',
+    'ONTOLOGY_BAN','LIMIT_EXCEEDED','VAT_BASIS_UNKNOWN'
   ]::text[]);
 
 CREATE INDEX IF NOT EXISTS "ix_decisions_처리단계" ON tenant.decisions ("처리단계");

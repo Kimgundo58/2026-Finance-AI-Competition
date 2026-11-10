@@ -13,7 +13,7 @@ import re
 
 from fastapi import APIRouter, HTTPException
 
-from server._common import MOCK, _질의, ttl_캐시, 비목_ENUM, 창업활동비_사업
+from server._common import MOCK, _질의, ttl_캐시, 비목_ENUM, 창업활동비_사업, 온톨로지_사업
 from server.models import 사업목록응답, 사업정보, 우선순위규칙
 
 _log = logging.getLogger("suddoe.catalog")
@@ -140,9 +140,12 @@ def _심층질문마스터() -> list[dict]:
 # 라우트
 
 def _사업_비목(사업명: str | None) -> list[str]:
-    """사업에 있는 비목. 창업활동비는 예비창업패키지에만 있다. 사업명은 표준 표기로 받는다."""
+    """사업에 있는 비목. 창업활동비는 예비창업패키지와 온톨로지 경로 사업에 있다(모두의 창업 창업활동자금 = 안내 책자 비목).
+
+    사업명은 표준 표기로 받는다.
+    """
     return [b for b in 비목_ENUM
-            if b != "창업활동비" or 사업명 is None or 사업명 in 창업활동비_사업]
+            if b != "창업활동비" or 사업명 is None or 사업명 in 창업활동비_사업 or 온톨로지_사업(사업명)]
 
 
 @router.get("/api/vocab")

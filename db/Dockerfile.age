@@ -1,0 +1,27 @@
+# PostgreSQL 17 + pgvector 기존 이미지에 Apache AGE 1.6.0(PG17 안정판)을 추가한다.
+# Apache 공식 소스와 SHA-512: https://archive.apache.org/dist/age/PG17/1.6.0/
+# 개발 패키지는 빌드 단계에만 두고, 최종 이미지의 PostgreSQL 데이터는 건드리지 않는다.
+FROM pgvector/pgvector:pg17@sha256:ac08538c6f8b9904c33c8224c5e5706dbe760aca29db1d096972b4052c22a75d AS age-build
+
+USER root
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends build-essential flex bison postgresql-server-dev-17 ca-certificates wget \
+ && rm -rf /var/lib/apt/lists/*
+WORKDIR /tmp/age
+RUN wget -q -O age.tar.gz https://archive.apache.org/dist/age/PG17/1.6.0/apache-age-1.6.0-src.tar.gz \
+ && echo 'b3021cc6bb0d88a209066596a7f31fb848e4281f2ed719c105f301c7e8017969f5b472fc4b55261105b36ab3dae788e00c4bfff2febe1f147b3b13cddcead2aa  age.tar.gz' | sha512sum -c - \
+ && tar -xzf age.tar.gz --strip-components=1 \
+ && /usr/lib/postgresql/17/bin/pg_config --version | grep -E '^PostgreSQL 17([. ]|$)' \
+ && make PG_CONFIG=/usr/lib/postgresql/17/bin/pg_config \
+ && make PG_CONFIG=/usr/lib/postgresql/17/bin/pg_config DESTDIR=/age-install install
+
+FROM pgvector/pgvector:pg17@sha256:ac08538c6f8b9904c33c8224c5e5706dbe760aca29db1d096972b4052c22a75d
+COPY --from=age-build /age-install/usr/lib/postgresql/17/lib/age.so /usr/lib/postgresql/17/lib/age.so
+COPY --from=age-build /age-install/usr/lib/postgresql/17/lib/bitcode/age/ /usr/lib/postgresql/17/lib/bitcode/age/
+COPY --from=age-build /age-install/usr/lib/postgresql/17/lib/bitcode/age.index.bc /usr/lib/postgresql/17/lib/bitcode/age.index.bc
+COPY --from=age-build /age-install/usr/share/postgresql/17/extension/age.control /usr/share/postgresql/17/extension/age.control
+COPY --from=age-build /age-install/usr/share/postgresql/17/extension/age--1.6.0.sql /usr/share/postgresql/17/extension/age--1.6.0.sql
+# 비수퍼유저는 PostgreSQL이 허용하는 $libdir/plugins/age 경로로 LOAD한다.
+RUN mkdir -p /usr/lib/postgresql/17/lib/plugins \
+ && ln -s ../age.so /usr/lib/postgresql/17/lib/plugins/age.so \
+ && ! ldd /usr/lib/postgresql/17/lib/age.so | grep -q 'not found'

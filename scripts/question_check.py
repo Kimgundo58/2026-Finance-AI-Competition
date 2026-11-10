@@ -174,17 +174,17 @@ def 판정비교(표본수: int, 반복: int, 동시: int, 출력파일: str | N
     sys.path.insert(0, str(_ROOT))
     import orchestrate
     from _lib import db
-    from eval_store import 평가용_사업명
+    from eval_store import 기존세트_SQL, 평가용_사업명
     from question_generate import 답변_구성, 질문생성
     from server._common import 비목_ENUM
     from server.models import 정규화요청
     from server.routes_normalize import _live_정규화
 
     with db.connect(autocommit=True) as c:
-        행 = c.execute("""SELECT gold_id, 질문, 사업명, 적용범위, 비목, 정답판정 FROM eval.golden_set
-                           WHERE 정답판정 <> '가능' AND 세트 <> 'L3'
-                             AND coalesce(평가범위, '') NOT LIKE '범위밖%%'
-                           ORDER BY gold_id""").fetchall()
+        행 = c.execute(f"""SELECT gold_id, 질문, 사업명, 적용범위, 비목, 정답판정 FROM eval.golden_set
+                            WHERE 정답판정 <> '가능' AND 세트 <> 'L3' AND {기존세트_SQL}
+                              AND coalesce(평가범위, '') NOT LIKE '범위밖%%'
+                            ORDER BY gold_id""").fetchall()
     행 = [r for r in 행 if 평가용_사업명(r[2], r[3])]
     if 제외파일:
         제외 = {x["gold_id"] for x in json.load(open(제외파일, encoding="utf-8"))}

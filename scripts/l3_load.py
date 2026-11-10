@@ -424,6 +424,35 @@ def 조문_조회(cur, org_id: str, 비목: str | None = None) -> list[dict[str,
             for a in _조문들(cur, org_id)]
 
 
+def 조문_연결조회(cur, org_id: str) -> list[dict[str, Any]]:
+    """`조문_조회` + 조마다 온톨로지 연결 `concept_ids`(None = 미확인, [] = 확인했고 해당 세목 없음) · `연결상위`. 새 경로 전용.
+
+    조마다 `doc_id` · `원본파일명` 도 있다(5-15 ⑤ 기관 규정 숫자).
+    `연결상위` 는 연결한 개념의 상위 노드(`상위` 관계, 재귀)다. 문맥 구성이 비목만 고른 판정에 그 아래 세목에 연결한 조를 넣는 데 쓴다
+    (ontology_context._l3_넣기). 사용자가 확인하기 전 추천(`연결초안`)은 읽지 않는다.
+    """
+    org = _org정규화(org_id)
+    if org is None:
+        return []
+    # 문서 id · 원본 파일명도 싣는다: 기관 규정 숫자 기준(5-15 ⑤)이 어느 문서의 어느 조인지 말하고 인용하는 데 쓴다
+    조문 = [{**{k: a[k] for k in ("article_id", "조번호", "조제목", "본문")}, "doc_id": str(a["doc_id"]), "원본파일명": a["원본파일명"]} for a in _조문들(cur, org)]
+    if not 조문:
+        return []
+    with cur.connection.transaction():
+        _rls_org_설정(cur, _org정규화(org_id))
+        연결 = dict(cur.execute("SELECT article_id, concept_ids FROM tenant.l3_articles WHERE article_id = ANY(%s)",
+                               ([a["article_id"] for a in 조문],)).fetchall())
+        개념들 = sorted({c for ids in 연결.values() for c in ids or ()})
+        상위: dict[str, set[str]] = {}
+        if 개념들:
+            import ontology_graph
+            for 시작, 위, _, _, _ in ontology_graph.경로(cur, 개념들, ["상위"]):
+                if 시작 != 위:
+                    상위.setdefault(시작, set()).add(위)
+    return [{**a, "concept_ids": 연결.get(a["article_id"]),
+             "연결상위": sorted({p for c in 연결.get(a["article_id"]) or () for p in 상위.get(c, ())})} for a in 조문]
+
+
 def l3룰(cur, org_id: str, 비목: str) -> dict[str, Any] | None:
     """현재 기관 L3 에 이 비목 규정이 있으면 룰 dict, 없으면 None.
 
