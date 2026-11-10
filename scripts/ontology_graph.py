@@ -3,11 +3,25 @@
 from __future__ import annotations
 
 import json
+import threading
+import weakref
+
 import ontology_age
+
+# 준비 확인(상태 행 + 행 수 6개)을 이미 통과한 커넥션. 커넥션은 요청마다 새로 열므로(_lib.db.connect, 풀 없음)
+# 요청당 한 번만 센다(리뷰 28-20). 커넥션이 닫혀 사라지면 기록도 사라진다
+_확인됨: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+_확인됨_잠금 = threading.Lock()
 
 
 def 준비(cur):
-    ontology_age.준비_확인(cur)
+    conn = cur.connection
+    with _확인됨_잠금:
+        확인 = conn in _확인됨
+    if not 확인:
+        ontology_age.준비_확인(cur)
+        with _확인됨_잠금:
+            _확인됨[conn] = True
     cur.execute("LOAD '$libdir/plugins/age'")
     cur.execute("""SELECT set_config('search_path',
         CASE WHEN current_setting('search_path') LIKE 'ag_catalog,extensions,%%'

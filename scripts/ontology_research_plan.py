@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from datetime import date
 
+import psycopg
+
 import ontology_age
 import ontology_research
 import research_runtime
@@ -87,7 +89,11 @@ def 추가_조회(cur, 조회: dict, 입력: dict, *, 요청: str | None = None,
         raise ValueError('추가 조회 횟수 오류')
     if 요청 is not None and (not isinstance(요청, str) or len(요청) > 1000):
         raise ValueError('추가 확인 요청 오류')
-    버전 = ontology_age.준비_버전(cur)
+    try:
+        버전 = ontology_age.준비_버전(cur)
+    except psycopg.Error:                   # 선택 조회의 DB 오류는 이 조회만 실패로 둔다(리뷰 28-9)
+        research_runtime.emit('규정추가조회', '추가 규정의 확인을 마치지 못했어요.', '실패')
+        return 마침('실패')
     확인문맥 = 확인정보_문맥(입력.get('_조사확인'))
     범위키 = (입력.get('사업명'), 대상['비목_id'], 조회.get('자금'), 버전, ontology_query_map.지도_버전,
            입력.get('품목'), 입력.get('용도'), 입력.get('질문'))
@@ -98,6 +104,7 @@ def 추가_조회(cur, 조회: dict, 입력: dict, *, 요청: str | None = None,
                                       '기준일': date.today(), '결과': {}, '지도': {}}
     if 상태['버전'] != 버전:
         raise RuntimeError('추가 조사 중 온톨로지 판본 변경')
+    상태['budget'] = budget                 # 같은 조사 세션의 다음 요청은 그 요청의 예산(취소 포함)으로 조회한다
     # 판정 준비 요청은 앞선 질문의 결과를 본 뒤, 새로운 목적의 조회다.
     캐시키 = (입력키, 요청 or '')
     결과 = 상태['결과'].get(캐시키)
@@ -159,7 +166,9 @@ def 추가_조회(cur, 조회: dict, 입력: dict, *, 요청: str | None = None,
                 if 결과['상한도달']:
                     research_runtime.emit('규정추가조회', '조회 결과가 많아 일부만 확인했어요.', '완료')
             상태['결과'][캐시키] = 결과
-        except (ValueError, RuntimeError, LLM실패):
+        except (ValueError, RuntimeError, LLM실패, psycopg.Error):
+            # psycopg.Error = statement_timeout(QueryCanceled) 같은 DB 오류. 읽기 전용 트랜잭션은 이미 되돌렸다.
+            # 선택 조회라 전체 판정을 판단불가로 만들지 않고 이 조회만 실패로 둔다(리뷰 28-9)
             상태['결과'][캐시키] = {'완료': False, '상태': '실패', '지도부분': 지도부분, '입력잘림': 입력잘림, '규범': [], '근거행': []}
             research_runtime.emit('규정추가조회', '추가 규정의 확인을 마치지 못했어요.', '실패')
             return 마침('실패')

@@ -33,8 +33,12 @@ def normalize(req: Request, body: 정규화요청):
     # 되므로 키에 넣는다. 집행예정일·거래처는 정규화에 쓰이지 않아 넣지 않는다.
     org = auth.검증된_org(req)
     account = auth.검증된_account(req)
-    조사ID = research_sessions.생성(org, account)
-    조사세션 = research_sessions.조회(조사ID, org, account)
+    # 세션을 못 만들어도 정규화는 한다. 조사ID 없이 답하면 화면은 질문 단계에서 새 조사를 연다(리뷰 28-7)
+    try:
+        조사ID = research_sessions.생성(org, account)
+        조사세션 = research_sessions.조회(조사ID, org, account)
+    except Exception:  # noqa: BLE001
+        조사ID, 조사세션 = None, None
     # 캐시 행은 계정 단위라(RLS) 키에도 org·계정을 넣는다. 키가 같으면 다른 계정 행과 PRIMARY KEY 가 겹친다.
     k = response_cache.캐시키("normalize", org, account, (body.질문 or "").strip(),
                             body.품목, body.금액, body.용도, body.추가설명, body.사업명,
@@ -59,7 +63,7 @@ def normalize(req: Request, body: 정규화요청):
         yield _sse("진행", {"단계": "정규화", "상태": "진행중", "문장": "입력에서 지출 정보를 추출하고 있어요." if not MOCK else "연결 확인용 분석 결과를 준비하고 있어요.", "설명": "입력 분석"})
         try:
             import research_runtime
-            with research_runtime.activate(조사세션.budget):
+            with research_runtime.activate(조사세션.budget if 조사세션 else research_runtime.Budget()):
                 out, 실패 = (dict(mock_정규화), False) if MOCK else _live_정규화(body)
         except Exception as e:                                # noqa: BLE001
             # 500 을 내지 않고 오류 이벤트로 끝낸다.

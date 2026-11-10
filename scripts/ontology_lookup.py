@@ -7,7 +7,7 @@ L3 는 여기서 다루지 않는다(능력 질문 시험의 `문맥_구성` 호
 documents · doc_articles.
 
     python scripts/ontology_lookup.py --cq-test ontology/테스트/능력질문.json     # 전부 일치해야 0 으로 끝난다(DB 필요)
-    python scripts/ontology_lookup.py --self-test   # 조문 ID 풀이 · 근거 경로 문장 · 조 단위 식(식은 DB 필요, 없으면 건너뜀)
+    python scripts/ontology_lookup.py --self-test   # 조문 ID 풀이 · 근거 경로 문장 · 조 단위 ID · DB 사례(DB 없으면 건너뜀)
 """
 from __future__ import annotations
 
@@ -15,7 +15,6 @@ import argparse
 import functools
 import json
 import os
-import re
 import sys
 from pathlib import Path
 
@@ -37,10 +36,16 @@ import ontology_age  # noqa: E402
 준용_관계 = ("준용", "위임")
 _스키마_경로 = ROOT / "ontology" / "schema.json"
 
-# 조문 ID 에서 항 · 호 · 표 · 별지 행을 뗀 조 단위 ID. 조 전체를 준용한 관계가 그 조의 항에도 걸리게 한다.
-_조단위_식 = (r"regexp_replace({0}, '^(조:[^#]+#(?:제[0-9]+조(?:의[0-9]+)?|(?:별지|별표|붙임)\s*[0-9]*"
-             r"|부칙(?:\s*제[0-9]+조(?:의[0-9]+)?)?|(?:참고[0-9]+-)?p[0-9]+-[0-9]+"
-             r"|제[0-9]+편(?:[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]+(?:-[0-9]+)?)?|표지)).*$', '\1')")
+
+
+def _조단위_id(조문ID: str) -> str:
+    """조문 ID 에서 항 · 호 · 표 · 별지 행을 뗀 조 단위 ID. 조 전체를 준용한 관계가 그 조의 항에도 걸리게 한다.
+    조번호는 `ontology_norm.조문ID_풀이` 와 같은 기준으로 읽는다(`참고2/…` 의 앞 조문도 찾는다, 리뷰 28-19). 풀 수 없는 ID 는 그대로 둔다."""
+    try:
+        x = 조문ID_풀이(조문ID)
+    except ValueError:
+        return 조문ID
+    return f"조:{x['문서키']}#{x['조번호']}"
 
 
 @functools.lru_cache(maxsize=1)
@@ -109,7 +114,7 @@ def _우선순위_적용(규범들: list[dict]) -> tuple[list[dict], list[dict]]
     """원천에 적힌 값으로만 중복을 정리한다. 텍스트로 추측하지 않는다.
 
     결과.대체 = [규범 ID]: 그 규범이 대상 규범을 대신한다. 대상은 규범 목록에서 빠지고 우선순위_적용 에 남는다.
-    해석미결 규범은 코드 판정에 쓰지 않으므로 다른 규범을 대체하지 못한다.
+    코드 판정에 쓸 수 없는 규범(AI검증 미만 · 해석미결, `ontology_gate._사용가능` 과 같은 기준)은 다른 규범을 대체하지 못한다.
     예외 = [규범 ID]: 단서는 조건이 맞을 때만 원칙을 덮어쓰므로 원칙을 목록에서 빼지 않는다. 빼면 원칙(금지)이 문맥에서
     사라져 틀린 '가능' 이 될 수 있다. 관계만 우선순위_적용 에 남긴다(조건.규범에_남음 = true).
     """
@@ -121,7 +126,7 @@ def _우선순위_적용(규범들: list[dict]) -> tuple[list[dict], list[dict]]
         결과 = n.get("결과") if isinstance(n.get("결과"), dict) else {}
         대체 = 결과.get("대체") or []
         for 대상 in ([대체] if isinstance(대체, str) else 대체):
-            if 대상 not in 표 or n.get("해석미결"):
+            if 대상 not in 표 or not (n.get("verified") and not n.get("해석미결")):
                 continue
             r = _우선순위_찾기(우선순위들, n, 표[대상])
             제외됨.add(대상)
@@ -263,10 +268,7 @@ def 근거_조문(cur, 규범들: list[dict], 깊이: int = 3, 대상_id: str | 
             시작_넣기(r[0], r[1], r[2], "개념근거", 노드순위[r[3]])
 
     시작목록 = sorted(시작)
-    # SQL의 조 단위 정규식과 동일하게 항·호 등 조 뒤의 부분을 제거한다.
-    조단위 = re.compile(r"^(조:[^#]+#(?:제[0-9]+조(?:의[0-9]+)?|(?:별지|별표|붙임)\s*[0-9]*|부칙(?:\s*제[0-9]+조(?:의[0-9]+)?)?|(?:참고[0-9]+-)?p[0-9]+-[0-9]+|제[0-9]+편(?:[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]+(?:-[0-9]+)?)?|표지)).*$")
-    def 조단위_id(value):
-        return 조단위.sub(r"\1", value)
+    조단위_id = _조단위_id
 
     역방향_edges = ontology_graph.간선(cur, list({x for start in 시작목록 for x in (start, 조단위_id(start))}), 준용_관계, 역방향=True, 사업들=사업들)
     앞_행들 = sorted({(start, src, kind) for start in 시작목록 for src, dst, kind, _ in 역방향_edges
@@ -869,19 +871,26 @@ def _자체시험() -> int:
               근거경로_문장(["조:지침#부칙 제2조", "미특정:사업별 세부관리기준"], 표) == "지침 부칙 제2조 → 사업별 세부관리기준"))
     t.append(("근거 경로: 부칙만 있는 조, 항까지 있는 부칙",
               근거경로_문장(["조:모두의창업#부칙", "조:지침#부칙 제1조①"], 표) == "모두의 창업 부칙 → 지침 부칙 제1조①"))
-    # 조 단위 식은 SQL 이라 Postgres 로 돌린다. 테이블은 읽지 않는다
+    # 리뷰 28-5: 검증 안 된 대체 규범은 검증된 규범을 밀어내지 못한다(해석미결도 같다)
+    원래 = {"norm_id": "원래", "종류": "한도", "verified": True, "해석미결": False}
+    for 이름, 대체 in (("미검증", {"verified": False, "해석미결": False}), ("해석미결", {"verified": True, "해석미결": True})):
+        남은, 쓴 = _우선순위_적용([원래, {"norm_id": "대체", "종류": "한도", **대체, "결과": {"대체": ["원래"]}}])
+        t.append((f"{이름} 대체 규범은 원래 규범을 빼지 않는다", "원래" in {n["norm_id"] for n in 남은} and not 쓴))
+    남은, 쓴 = _우선순위_적용([원래, {"norm_id": "대체", "종류": "한도", "verified": True, "해석미결": False, "결과": {"대체": ["원래"]}}])
+    t.append(("검증된 대체 규범은 원래 규범을 뺀다", "원래" not in {n["norm_id"] for n in 남은} and len(쓴) == 1))
+    # 조 단위 ID 는 조문ID_풀이 로 줄인다(리뷰 28-19, DB 불필요)
     사례 = {"조:지침#부칙 제1조": "조:지침#부칙 제1조", "조:지침#부칙 제2조①": "조:지침#부칙 제2조",
           "조:지침#부칙 제1조의2①": "조:지침#부칙 제1조의2", "조:팁스#부칙": "조:팁스#부칙",
           "조:지침#제36조①": "조:지침#제36조", "조:지침#제29조의2②": "조:지침#제29조의2",
           "조:모두의창업#별지2/지급수수료/정의": "조:모두의창업#별지2", "조:안내책자#참고2-p29-1": "조:안내책자#참고2-p29-1",
-          "조:집행지침#제2편Ⅱ-12": "조:집행지침#제2편Ⅱ-12", "조:집행지침#제3편": "조:집행지침#제3편", "조:집행지침#표지": "조:집행지침#표지"}
+          "조:집행지침#제2편Ⅱ-12": "조:집행지침#제2편Ⅱ-12", "조:집행지침#제3편": "조:집행지침#제3편", "조:집행지침#표지": "조:집행지침#표지",
+          # 리뷰 28-19: 옛 정규식은 아래 둘을 조 단위로 줄이지 못했다
+          "조:안내책자#참고2/p29-1": "조:안내책자#참고2", "조:모두의창업#별표1의2/가": "조:모두의창업#별표1의2",
+          "형식 밖": "형식 밖"}
+    for k, v in 사례.items():
+        t.append((f"조 단위 ID {k} → {v}", _조단위_id(k) == v))
     try:
         from _lib import db
-        with db.connect(connect_timeout=3, autocommit=True) as conn:
-            식 = _조단위_식.format("%s::text")
-            실제 = {k: conn.execute(f"SELECT {식}", (k,)).fetchone()[0] for k in 사례}
-        for k, v in 사례.items():
-            t.append((f"조 단위 식 {k} → {v}", 실제[k] == v))
         # 품목 · 세목 경로(적재된 온톨로지가 있을 때만). 1-1 · 2-5 · 3-6 · 2-2
         with db.connect(connect_timeout=3, autocommit=True) as conn:
             cur = conn.cursor()
@@ -954,7 +963,7 @@ def _자체시험() -> int:
                 t.append(("창업활동자금: 공통 우선순위 규범은 게이트에 그대로 쓴다(L3 적용 순서)",
                           any(n["종류"] == "우선순위" for n in 창["적용"]["규범"]) and 창["게이트"]["상한"] == "조건부"))
     except Exception as e:  # noqa: BLE001 - CI 에는 DB 가 없다
-        print(f"건너뜀: 조 단위 식(DB 없음: {type(e).__name__})")
+        print(f"건너뜀: DB 사례(DB 없음: {type(e).__name__})")
     실패 = [x for x, ok in t if not ok]
     for x, ok in t:
         print("ok  " if ok else "FAIL", x)

@@ -150,11 +150,15 @@ def _이전_결과(cur, org_id, doc_id: str, sha: str) -> dict | None:
 def 문서_판별(cur, doc_id: str, org_id, 파일명: str, 본문: str, arts: list[dict], 전략: str, sha: str) -> dict:
     """{결과: 적용|확인, 단계, 이유, ...}. 예외를 던지지 않는다. 알 수 없으면 확인(사용자에게 묻기)이다."""
     try:
-        행 = cur.execute("SELECT 기관명 FROM tenant.orgs WHERE org_id=%s", (org_id,)).fetchone()
-        기관명 = 행[0] if 행 else ""
-        if 코드_통과(본문, 기관명, len(arts), 전략):
+        # DB 조회는 세이브포인트 안에서 한다. 여기서 난 DB 오류를 삼켜도 파싱 트랜잭션이 깨지지 않아
+        # 뒤의 결과 기록(파싱품질 · 검토결과)이 그대로 된다(리뷰 28-24). LLM 호출은 세이브포인트 밖이다
+        with cur.connection.transaction():
+            행 = cur.execute("SELECT 기관명 FROM tenant.orgs WHERE org_id=%s", (org_id,)).fetchone()
+            기관명 = 행[0] if 행 else ""
+            통과 = 코드_통과(본문, 기관명, len(arts), 전략)
+            이전 = None if 통과 else _이전_결과(cur, org_id, doc_id, sha)
+        if 통과:
             return {"결과": "적용", "단계": "코드"}
-        이전 = _이전_결과(cur, org_id, doc_id, sha)
         if 이전:
             # 사용자가 전에 이 파일을 적용했으면 다시 묻지 않는다. 거절했거나 의심 판정이었으면 같은 이유로 다시 묻는다
             적용 = 이전.get("사용자확인") is True or (이전.get("결과") == "적용" and not 이전.get("사용자거절"))

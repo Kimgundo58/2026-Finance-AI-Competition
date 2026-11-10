@@ -20,8 +20,9 @@ import uuid
 from fastapi import (APIRouter, BackgroundTasks, Body, File, Form, HTTPException,
                      Request, UploadFile)
 
-from ._common import DSN, MOCK, 트랜잭션, _org조건, _질의, _실행
+from ._common import DSN, MOCK, 트랜잭션, _org조건, _질의, _실행, 클라이언트_ip
 from .file_format import 실제형식
+from .rate_limit import 시도제한
 from .models import L3업로드응답, L3연결선택지항목, L3연결조문항목, L3현재문서, L3현재문서목록응답
 from . import auth, mock_data
 
@@ -32,6 +33,10 @@ router = APIRouter(prefix="/api/l3", tags=["L3 업로드"])
 허용_확장자 = {"pdf", "hwpx", "hwp"}
 거부_확장자 = {"doc", "docx"}          # 파서가 없다
 최대_바이트 = 30 * 1024 * 1024
+# 업로드 한 건마다 파싱 · 문서 확인 LLM · 조문 연결 LLM 이 돈다. 기관별 · IP 별 시간당 상한을 둔다(리뷰 28-13)
+_기관_업로드_제한 = 시도제한(최대=10, 초=3600)
+_IP_업로드_제한 = 시도제한(최대=20, 초=3600)
+_업로드_제한_메시지 = "규정 파일을 너무 자주 올렸습니다. 한 시간쯤 뒤에 다시 올려 주세요."
 
 _접수_메시지 = "접수했습니다. 문서를 다 읽으면 상태가 「완료」로 바뀝니다."
 _확인_메시지 = "세부기준 문서가 맞는지 확인이 필요합니다. 확인 전까지는 이 문서를 판정에 쓰지 않습니다."
@@ -97,6 +102,9 @@ def 업로드(
 ) -> L3업로드응답:
     # 클라이언트가 보낸 org_id 가 아래 처리에 섞이지 않도록 맨 앞에서 확정한다
     org_id = _업로드_org(요청, org_id)
+    # 파일을 읽기 전에 막는다. IP 를 먼저 보고 기관을 센다(IP 에서 막힌 요청이 기관 횟수를 쓰지 않게)
+    if not _IP_업로드_제한.통과(클라이언트_ip(요청)) or not _기관_업로드_제한.통과(str(org_id)):
+        raise HTTPException(429, _업로드_제한_메시지)
 
     이름 = 파일.filename or ""
     확장자 = 이름.rsplit(".", 1)[-1].lower() if "." in 이름 else ""
@@ -145,7 +153,7 @@ def 현재문서(org_id: str | None = None) -> L3현재문서목록응답:
                     검토이유=_mock_검토이유 if v["품질"] == "review" else None)
             for k, v in mock_data.mock_L3확인대기.items()])
     조건, org인자 = _org조건(org_id, "d")
-    행 = _질의(
+    행 = _조회(
         f'SELECT d.doc_id, d."원본파일명", d.version, d."시행일", d.created_at, {_표시_품질_SQL}, '
         f'       (SELECT count(*) FROM tenant.l3_articles a WHERE a.doc_id = d.doc_id), d.extraction, '
         f'       d."검토결과"->>\'이유\' '
@@ -337,8 +345,8 @@ def _live_확인처리(doc_id: str, org_id: str | None, 적용: bool) -> L3업�
     except ValueError:
         raise HTTPException(404, f"L3 문서 {doc_id} 을(를) 찾을 수 없습니다") from None
     조건, org인자 = _org조건(org_id, "d")
-    문서_org = _질의(f"SELECT d.org_id FROM tenant.l3_documents d WHERE d.doc_id = %s AND {조건}",
-                  (doc_id, *org인자), 예외전파=True)
+    문서_org = _조회(f"SELECT d.org_id FROM tenant.l3_documents d WHERE d.doc_id = %s AND {조건}",
+                  (doc_id, *org인자))
     if not 문서_org:
         raise HTTPException(404, f"L3 문서 {doc_id} 을(를) 찾을 수 없습니다")
     with 트랜잭션() as cur:
@@ -360,7 +368,21 @@ def _live_확인처리(doc_id: str, org_id: str | None, 적용: bool) -> L3업�
             검토["사용자거절"] = True
             cur.execute('UPDATE tenant.l3_documents SET status=\'superseded\', "검토결과"=%s WHERE doc_id=%s',
                         (json.dumps(검토, ensure_ascii=False), doc_id))
+        대체됨 = _대체된_문서(cur, 문서_org[0][0])
+    _원본_삭제(대체됨)                                  # 거절 · 교체된 문서의 원본은 커밋 뒤에 지운다(리뷰 28-22)
     return _live_상태(doc_id, org_id)
+
+
+_DB오류_메시지 = "기관 규정 정보를 잠시 불러오지 못했습니다. 잠시 후 다시 시도해 주세요."
+
+
+def _조회(sql: str, 인자: tuple = ()) -> list[tuple]:
+    """DB 조회. 장애를 「문서 없음」(빈 목록 · 404)으로 바꾸지 않고 503 으로 낸다(리뷰 28-23)."""
+    try:
+        return _질의(sql, 인자, 예외전파=True)
+    except Exception as e:                              # noqa: BLE001
+        _log.warning("L3 DB 조회 실패: %s", type(e).__name__)
+        raise HTTPException(503, _DB오류_메시지) from e
 
 
 # 확장자 → l3_documents.extraction 값. pdf 는 'native'(pdftext.py 추출)로 기록한다
@@ -375,7 +397,7 @@ def _live_업로드(본문: bytes, 파일명: str, 확장자: str, org_id: str) 
     행을 지우고 500.
     """
     추출방식 = _확장자별_추출방식.get(확장자, "native")
-    행 = _질의(
+    행 = _조회(
         """INSERT INTO tenant.l3_documents
                (org_id, "원본파일명", status, extraction, "파싱품질", "미해결참조수")
            VALUES (%s, %s, 'active', %s, 'pending', 0)
@@ -402,6 +424,20 @@ def _live_업로드(본문: bytes, 파일명: str, 확장자: str, org_id: str) 
     )
 
 
+def _대체된_문서(cur, org_id) -> list[str]:
+    from l3_parse import 대체된_문서              # scripts/ — 서버 기동 때 파서를 import 하지 않는다
+    return 대체된_문서(cur, org_id)
+
+
+def _원본_삭제(doc_ids) -> None:
+    """교체 · 거절 · 데모 정리로 쓰지 않게 된 L3 원본 파일을 지운다. 실패는 응답 · 파싱 결과를 바꾸지 않고 로그만 남긴다."""
+    try:
+        from l3_parse import 원본_삭제
+        원본_삭제(doc_ids)
+    except Exception:                                   # noqa: BLE001
+        _log.exception("L3 원본 파일 정리 실패")
+
+
 def 백그라운드_파싱(doc_id: str, org_id: str) -> None:
     """업로드 응답 뒤 백그라운드 작업으로 파서를 실행한다(202 + 상태 폴링 계약).
 
@@ -423,7 +459,9 @@ def 백그라운드_파싱(doc_id: str, org_id: str) -> None:
                     # 이 연결은 app.org_id 만 설정하므로 RLS 때문에 계정 없는 행(데모 세션)만 지워진다.
                     # 계정별 행은 남지만 캐시키의 l3_해시가 바뀌어 이전 근거로 답하지 않는다.
                     cur.execute("DELETE FROM tenant.judge_cache WHERE org_id = %s", (str(org_id),))
+                대체됨 = _대체된_문서(cur, org_id)
             conn.commit()
+        _원본_삭제(대체됨)                              # 교체된 이전 문서의 원본은 커밋 뒤에 지운다(리뷰 28-22)
         if not 결과.get("ok", True):
             _log.error("L3 파싱 실패(예외 아님) doc_id=%s 사유=%s", doc_id, 결과.get("사유"))
     except Exception:                                   # noqa: BLE001
@@ -468,6 +506,7 @@ def _실패_직접기록(doc_id: str, org_id: str, 실패사유: str) -> None:
     """
     try:
         import psycopg
+        대체됨: list[str] = []
         with psycopg.connect(DSN, connect_timeout=10) as conn:
             conn.execute("SELECT set_config('app.org_id', %s, true)", (str(org_id),))
             try:
@@ -478,7 +517,9 @@ def _실패_직접기록(doc_id: str, org_id: str, 실패사유: str) -> None:
             else:
                 with conn.cursor() as cur:
                     실패_기록(cur, doc_id, org_id, 실패사유)
+                    대체됨 = _대체된_문서(cur, org_id)
             conn.commit()
+        _원본_삭제(대체됨)
         _log.error("  → 파싱품질을 fail 로 기록했다 (실패사유=%s)", 실패사유)
     except Exception:                                   # noqa: BLE001
         _log.exception("L3 실패 기록도 실패했다 doc_id=%s — 상태 조회에서 %d분 뒤 실패로 보인다",
@@ -546,7 +587,7 @@ def _live_상태(doc_id: str, org_id: str | None) -> L3업로드응답:
     `_org조건()` 을 써서 게스트(org_id 없음)는 0행, 즉 404 가 된다.
     """
     조건, org인자 = _org조건(org_id, "d")
-    행 = _질의(
+    행 = _조회(
         f'SELECT d."원본파일명", d."파싱품질", {_표시_품질_SQL}, d."미해결참조수", d."실패사유", '
         f'       d.status, d.org_id, d.created_at, d.extraction, d."검토결과"->>\'이유\' '
         f'FROM tenant.l3_documents d '
@@ -560,15 +601,15 @@ def _live_상태(doc_id: str, org_id: str | None) -> L3업로드응답:
         실패사유 = "중단"                     # 파싱이 끊겨 'pending' 으로 남은 문서
     확장자 = 파일명.rsplit(".", 1)[-1].lower() if "." in (파일명 or "") else ""
 
-    개수 = _질의('SELECT count(*) FROM tenant.l3_articles WHERE doc_id = %s', (doc_id,))
-    적용 = _질의(
+    개수 = _조회('SELECT count(*) FROM tenant.l3_articles WHERE doc_id = %s', (doc_id,))
+    적용 = _조회(
         'SELECT doc_id, "원본파일명" FROM tenant.l3_documents '
         " WHERE org_id = %s AND status = 'active' AND \"파싱품질\" IN ('pass', 'warn') "
         ' ORDER BY created_at DESC LIMIT 1', (문서_org,))
     적용_id, 적용_이름 = (str(적용[0][0]), 적용[0][1]) if 적용 else (None, None)
     이전 = []
     if 적용_id == doc_id:
-        이전 = _질의(
+        이전 = _조회(
             'SELECT "원본파일명" FROM tenant.l3_documents '
             " WHERE org_id = %s AND status = 'superseded' AND \"파싱품질\" IN ('pass', 'warn') "
             '   AND created_at < %s ORDER BY created_at DESC LIMIT 1', (문서_org, 등록))

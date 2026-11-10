@@ -570,6 +570,10 @@ def 검증(llm출력: dict, 문장맵: dict, *,
     ).to_dict()
     # 검증코드는 tenant.decisions.검증코드 로 그대로 저장된다
     d["검증코드"] = 검증기록.코드
+    # 판정값이 enum 밖이거나 인용 없이 판정한 출력은 모델 출력 실패다. 다시 점검하면 달라질 수 있어
+    # 실패 경로로 둔다(캐시 · 계획 연결 안 함, 판정 기록은 남긴다). orchestrate 의 요약 금액 불일치와 같다(리뷰 28-17)
+    if {"INVALID_JUDGMENT", "NO_CITATION"} & set(검증기록.코드):
+        d["실패경로"] = True
     return d, 검증기록.사유
 
 

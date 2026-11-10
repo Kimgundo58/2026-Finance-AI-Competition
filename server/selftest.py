@@ -486,6 +486,50 @@ def main() -> int:
     확인("캐시 적중 수가 /admin/status 에 나온다",
          c.get("/admin/status", headers=관리).json()["캐시"]["적중"] > 0)
 
+    print("\n[조사 세션 · 요청 예산]")
+    import research_runtime
+    from server import research_sessions
+    from server.catalog import _사업명_표준화
+    from server._common import 온톨로지_사업
+    세션예산 = research_runtime.Budget(llm=3)
+    끊긴요청 = 세션예산.request()
+    끊긴요청.cancel()
+    다음요청 = 세션예산.request()
+    확인("끊긴 요청의 취소는 그 요청만 멈추고 같은 세션의 다음 요청은 LLM 을 예약한다(리뷰 28-6)",
+         not 끊긴요청.reserve_llm(final=True) and 끊긴요청.remaining_seconds() == 0
+         and 다음요청.reserve_llm() and 다음요청.remaining_seconds() > 0 and 세션예산.llm_used == 1)
+    최대전 = research_sessions._최대
+    research_sessions._최대 = 3
+    try:
+        만든 = [research_sessions.생성(None, None) for _ in range(5)]
+        확인("조사 세션이 가득 차도 오류 없이 오래된 세션부터 지운다(리뷰 28-7)",
+             len(research_sessions._세션) <= 3 and research_sessions.조회(만든[0], None, None) is None
+             and research_sessions.조회(만든[-1], None, None) is not None)
+    finally:
+        research_sessions._최대 = 최대전
+    # 같은 조사ID · 같은 요청 본문이라도 판정에 영향을 주는 값(여기서는 프로필 해시)이 바뀌면 세션의 옛 판정을 쓰지 않는다(리뷰 28-3)
+    조사ID = research_sessions.생성(None, None)
+    세션 = research_sessions.조회(조사ID, None, None)
+    사업 = _사업명_표준화("예비창업패키지")
+    세션.입력 = research_sessions.입력키(사업, "기계장치", None, "맥북", 2500000, "디자인", None, "맥북 250만원")
+    세션.버전 = json.dumps([response_cache.요청_해시(), response_cache.l3_해시(None), 온톨로지_사업(사업)], ensure_ascii=False)
+    세션.질문세트, 세션.질문결과 = "selftest-질문세트", {"상태": "없음"}
+    세션.확인답키 = research_sessions.답변키(research_sessions.후보_답변(세션, []))
+    판정본문 = {"정규화": {"품목": "맥북", "금액": 2500000, "용도": "디자인", "질문원문": "맥북 250만원"}, "사업명": "예비창업패키지",
+             "확정비목": "기계장치", "조사ID": 조사ID, "질문세트": "selftest-질문세트", "조사답변": []}
+    _, 첫 = sse("/api/judge", 판정본문)
+    _, 같음 = sse("/api/judge", 판정본문)
+    프로필해시전 = response_cache.프로필_해시
+    response_cache.프로필_해시 = lambda *a, **k: "selftest-바뀐-프로필"
+    try:
+        _, 바뀜 = sse("/api/judge", 판정본문)
+    finally:
+        response_cache.프로필_해시 = 프로필해시전
+    저장결과 = lambda e: any(x.get("id") == "저장결과" for x in e.get("진행", []))
+    확인("조사 세션 판정: 같은 요청은 세션 판정을 다시 쓰고, 프로필이 바뀌면 새로 판정한다(리뷰 28-3)",
+         "판정" in 첫 and not 저장결과(첫) and 저장결과(같음) and "판정" in 바뀜 and not 저장결과(바뀜),
+         f"{[list(e) for e in (첫, 같음, 바뀜)]}")
+
     확인("/admin/feedback 는 토큰 없이 403", c.get("/admin/feedback").status_code == 403)
     확인("/admin/feedback 는 토큰이 맞으면 목록을 준다", "항목" in c.get("/admin/feedback", headers=관리).json())
     평가 = c.put("/api/decisions/101/feedback", json={"평가": "틀림", "이유": "기타", "의견": " 메모 "})

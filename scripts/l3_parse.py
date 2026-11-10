@@ -43,6 +43,28 @@ _스캔본_사유 = "텍스트가 없다(스캔본으로 보임) — OCR 이 설
 중단_판정_분 = 10
 
 
+def 대체된_문서(cur, org_id) -> list[str]:
+    """이 기관에서 판정에 쓰지 않게 된(superseded: 교체 · 거절) 문서 id. 원본 파일을 지울 대상이다.
+    RLS 때문에 기관 GUC 가 걸린 트랜잭션 안에서 부른다. 파일은 커밋 뒤 `원본_삭제` 로 지운다."""
+    return [str(r[0]) for r in cur.execute(
+        "SELECT doc_id FROM tenant.l3_documents WHERE org_id=%s AND status='superseded'", (str(org_id),)).fetchall()]
+
+
+def 원본_삭제(doc_ids) -> int:
+    """문서 원본 파일을 지운다(리뷰 28-22). 없는 파일은 넘어간다. 실패해도 예외를 던지지 않는다(판정 · 상태는 DB 가 정한다)."""
+    지움 = 0
+    for d in doc_ids or []:
+        for 확장 in _허용_확장자:
+            try:
+                p = 원본경로(d, 확장)
+                if p.exists():
+                    p.unlink()
+                    지움 += 1
+            except (OSError, ValueError):
+                continue
+    return 지움
+
+
 def 원본경로(doc_id: str, 확장: str) -> Path:
     """L3_저장소/<doc_id>.<확장>. doc_id 는 UUID 표준 표기로 바꿔 쓴다(UUID 가 아니면 ValueError).
 
@@ -239,6 +261,12 @@ def 파싱(cur, doc_id: str) -> dict:
         성공 = 파싱품질 in ("pass", "warn")
         확인대기 = 파싱품질 == "review"
         _기관_정리_잠금(cur, org_id)          # `_상태_기록` 의 행 잠금보다 먼저 잡는다(교착 방지)
+        if 적용중 and not (성공 or 확인대기):
+            # 판정에 쓰는 문서의 재파싱이 실패했다. 파싱품질 · 조문 · 적용 상태는 그대로 두고 실패 사유만 남긴다.
+            # fail 로 바꾸면 기관 L3 가 0건이 된다(리뷰 28-10). 조문은 `_조문_저장` 세이브포인트가 이미 되돌렸다
+            cur.execute('UPDATE tenant.l3_documents SET "실패사유"=%s WHERE doc_id=%s', (부가.get("실패사유"), doc_id))
+            return {"ok": False, "파싱품질": 이전품질, "조_건수": 조_건수, "미해결참조수": 미해결참조수,
+                    "추출방식": 추출방식, "기존유지": True, **부가}
         _상태_기록(cur, doc_id, 파싱품질, 미해결참조수, None if 성공 or 확인대기 else 부가.get("실패사유"), 추출방식)
         적용문서_정리(cur, doc_id, org_id, 성공, 확인대기)
         return {"ok": 성공 or 확인대기, "파싱품질": 파싱품질, "조_건수": 조_건수, "미해결참조수": 미해결참조수,
@@ -334,6 +362,8 @@ def main() -> None:
             with conn.transaction():
                 cur.execute("SELECT set_config('app.org_id', %s, true)", (str(org_id),))
                 r = 파싱(cur, str(doc_id))
+                대체됨 = 대체된_문서(cur, org_id)
+            원본_삭제(대체됨)
             print(f"  {doc_id}  ->  {r}")
 
 

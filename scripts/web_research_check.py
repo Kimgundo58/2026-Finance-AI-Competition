@@ -87,6 +87,15 @@ def main():
     ])
     query_result = research("Example", budget=Budget(), client=query_client, llm_call=lambda p, s, t: next(query_plans))
     assert query_client.calls[1][1]["url"] == safe and query_result["후보"][0]["출처"][0]["url"] == safe
+    # 리뷰 28-21: 세 번째 계획 뒤에는 결과를 쓸 계획이 없으므로 도구를 시작하지 않는다
+    늦은_client = Client("본문")
+    늦은계획 = iter([
+        {"행동": "검색", "유형": "제품성격", "검색어": "Example official product", "후보": []},
+        {"행동": "본문", "URL": "https://example.com/product", "후보": []},
+        {"행동": "검색", "유형": "가격", "검색어": "Example official pricing", "후보": []},
+    ])
+    research("Example", budget=Budget(), client=늦은_client, llm_call=lambda p, s, t: next(늦은계획))
+    assert [n for n, _ in 늦은_client.calls] == ["google_search", "url_to_markdown"], 늦은_client.calls
     body = "Example official documentation. This is a search API for developers. Terms apply to all accounts."
     result, calls, events = run(body, "This is a search API for developers.")
     assert len(calls) == 2 and len(events) == 4

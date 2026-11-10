@@ -42,6 +42,7 @@ class Session:
     확인답키: str | None = None
     판정요청키: str | None = None
     판정결과: tuple | None = None
+    판정키: str | None = None          # 판정결과를 만든 요청의 메인 캐시 키(routes_judge). 다르면 다시 판정한다
 
 
 def _서명(token):
@@ -53,8 +54,11 @@ def 생성(org, account):
     with _잠금:
         for k in [k for k, s in _세션.items() if s.expires <= now]:
             del _세션[k]
+        # 가득 차면 가장 먼저 끝날 세션부터 지운다. 오류로 정규화 · 질문을 막지 않는다(리뷰 28-7).
+        # 지운 세션으로 다시 오면 「만료」(400)라 화면이 새 조사를 시작한다
         if len(_세션) >= _최대:
-            raise RuntimeError('조사 세션 수 초과')
+            for k in sorted(_세션, key=lambda k: _세션[k].expires)[:len(_세션) - _최대 + 1]:
+                del _세션[k]
         token = secrets.token_urlsafe(32)
         _세션[token] = Session((org, account), now + _TTL)
     return token + '.' + _서명(token)
