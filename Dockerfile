@@ -1,0 +1,69 @@
+# syntax=docker/dockerfile:1
+# 써도돼요 API 컨테이너 — FastAPI + KURE-v1(CPU 임베딩).
+# 빌더 단계에서 모델을 이미지에 포함하고, 런타임은 HF_HUB_OFFLINE=1 로 모델 다운로드를 막는다.
+# LLM 은 외부 API(DashScope)로 호출한다.
+
+# ── 1단계 — 의존성 설치 + 모델 다운로드 ────────────────────────────
+FROM python:3.10-slim AS builder
+
+ENV PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+COPY requirements-api.txt /tmp/requirements-api.txt
+RUN pip install -r /tmp/requirements-api.txt
+
+# KURE-v1 을 SentenceTransformer 로 실제 로드해 받는다(snapshot_download 는 onnx/openvino 변형까지 함께 내려받는다).
+# 캐시 마운트에 받아 두고 이미지로 복사만 한다 — BuildKit 필수(DOCKER_BUILDKIT=1).
+ENV HF_HOME=/opt/hf
+RUN --mount=type=cache,target=/root/.hfcache,sharing=locked \
+    mkdir -p /opt/hf \
+ && HF_HOME=/root/.hfcache python -c "\
+from sentence_transformers import SentenceTransformer; \
+m = SentenceTransformer('nlpai-lab/KURE-v1', device='cpu'); \
+m.max_seq_length = 1024; \
+print('model cached:', m.encode(['워밍업']).shape)" \
+ && cp -a /root/.hfcache/. /opt/hf/
+
+# kiwipiepy 사전(BM25 토큰화)이 휠 안에 있는지 빌드에서 확인한다.
+RUN python -c "from kiwipiepy import Kiwi; print('kiwi:', len(Kiwi().tokenize('워밍업')))"
+
+# ── 2단계 — 런타임 ─────────────────────────────────────────────────
+FROM python:3.10-slim
+
+ENV PATH="/opt/venv/bin:$PATH" \
+    HF_HOME=/opt/hf \
+    HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1 \
+    TOKENIZERS_PARALLELISM=false \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    OMP_NUM_THREADS=2 \
+    SUDDOE_MOCK=0
+
+COPY --from=builder /opt/venv /opt/venv
+COPY --from=builder /opt/hf /opt/hf
+
+WORKDIR /app
+# server/ 는 scripts/ 를 sys.path 에 넣고 import 하므로 둘 다 복사한다.
+# 비목 어휘집은 판정 스키마를 만들 때 llm_schema.py 가 읽는다.
+# ontology/schema.json 은 ontology_lookup.py 가 문서키 ↔ doc_id 와 문서 표시명을 읽는다.
+COPY server/ /app/server/
+COPY scripts/ /app/scripts/
+COPY 2026_Finance_DATA_FOR_RAG/_비목_어휘집.json /app/2026_Finance_DATA_FOR_RAG/
+COPY ontology/schema.json /app/ontology/schema.json
+
+# import 가 되는지 빌드에서 확인한다. import 시점에는 DB 에 접속하지 않는다.
+RUN python -c "import server.main; print('import ok')"
+
+RUN useradd -m -u 10001 suddoe \
+ && mkdir -p /app/_l3_업로드 /app/_plan_attachments \
+ && chown -R suddoe:suddoe /app/_l3_업로드 /app/_plan_attachments
+USER suddoe
+
+EXPOSE 8080
+# exec 로 넘겨야 SIGTERM 이 uvicorn 에 닿는다.
+CMD ["sh", "-c", "exec uvicorn server.main:app --host 0.0.0.0 --port ${PORT:-8080}"]

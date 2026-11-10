@@ -1,0 +1,117 @@
+# -*- coding: utf-8 -*-
+"""요청 제한: 서비스 운영 기간, 일일 판정 한도, IP 별 시간당 한도.
+
+/api/normalize·/api/judge 가 첫 줄에서 `제한.통과(ip)` 를 부르고, 막히면 429 를 낸다.
+/api/questions 는 캐시에 없을 때만 부르고, 막히면 오류 대신 상태 '실패'(200)로 답한다. 판정 요청이 자기 한도 오류를 낸다.
+환경변수: SUDDOE_DAILY_JUDGE_LIMIT(기본 2000), SUDDOE_IP_HOURLY_LIMIT(기본 60),
+SUDDOE_SERVICE_START·SUDDOE_SERVICE_END(ISO 시각, 비우면 기간 제한 없음). 이전 변수 이름도 한 릴리스 동안 읽는다.
+카운터는 프로세스 메모리에만 있어 재시작하면 초기화된다. AnyIO 워커 스레드가 동시에 부르므로 락 안에서만 바꾼다.
+"""
+from __future__ import annotations
+
+import threading
+import time
+from collections import deque
+from datetime import datetime, timezone
+
+from server._common import _정수_환경변수, _환경값
+
+
+class 요청제한:
+    def __init__(self) -> None:
+        self.일일한도 = _정수_환경변수("SUDDOE_DAILY_JUDGE_LIMIT", 2000,
+                                    구이름="SUDDOE_DAILY_CAP")  # 구 이름 호환(제거 예정: 다음 릴리스)
+        self.IP시간당 = _정수_환경변수("SUDDOE_IP_HOURLY_LIMIT", 60,
+                                  구이름="SUDDOE_IP_HOURLY")  # 구 이름 호환(제거 예정: 다음 릴리스)
+        self.운영시작 = _환경값("SUDDOE_SERVICE_START", "",
+                            구이름="SUDDOE_OPEN_FROM").strip()  # 구 이름 호환(제거 예정: 다음 릴리스)
+        self.운영종료 = _환경값("SUDDOE_SERVICE_END", "",
+                            구이름="SUDDOE_OPEN_UNTIL").strip()  # 구 이름 호환(제거 예정: 다음 릴리스)
+
+        self._날짜 = self._오늘()
+        self.오늘_호출 = 0
+        self._ip: dict[str, deque] = {}
+        self.차단: dict[str, int] = {}
+        self._락 = threading.Lock()
+
+    @staticmethod
+    def _오늘() -> str:
+        return datetime.now(timezone.utc).strftime("%Y-%m-%d")      # 일일 한도는 UTC 자정에 초기화
+
+    def 운영기간인가(self) -> tuple[bool, str]:
+        지금 = datetime.now(timezone.utc)
+        for 값, 방향 in ((self.운영시작, "전"), (self.운영종료, "후")):
+            if not 값:
+                continue
+            try:
+                t = datetime.fromisoformat(값)
+            except ValueError:
+                continue                      # 형식이 틀리면 제한 없음으로 본다
+            t = t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+            if (방향 == "전" and 지금 < t) or (방향 == "후" and 지금 > t):
+                return False, (f"서비스 운영 기간이 아닙니다 "
+                               f"(운영 {self.운영시작 or '-'} ~ {self.운영종료 or '-'})")
+        return True, ""
+
+    def 통과(self, ip: str) -> tuple[bool, str]:
+        """(통과 여부, 거부 사유). 통과하면 일일·IP 카운트를 하나 올린다."""
+        운영중, 사유 = self.운영기간인가()
+        with self._락:
+            # 차단 집계 키는 /admin/status 응답에 그대로 나간다.
+            if not 운영중:
+                self.차단["운영기간외"] = self.차단.get("운영기간외", 0) + 1
+                return False, 사유
+            if self._날짜 != self._오늘():
+                self._날짜, self.오늘_호출, self._ip = self._오늘(), 0, {}
+            if self.오늘_호출 >= self.일일한도:
+                self.차단["일일한도"] = self.차단.get("일일한도", 0) + 1
+                return False, f"오늘의 판정 한도({self.일일한도}건)를 모두 썼습니다. 내일 다시 시도해 주세요."
+            지금 = time.time()
+            q = self._ip.setdefault(ip, deque())
+            while q and 지금 - q[0] > 3600:
+                q.popleft()
+            if len(q) >= self.IP시간당:
+                self.차단["IP시간당"] = self.차단.get("IP시간당", 0) + 1
+                return False, f"시간당 요청 한도({self.IP시간당}건)를 넘었습니다. 잠시 후 다시 시도해 주세요."
+            q.append(지금)
+            self.오늘_호출 += 1
+            return True, ""
+
+    def 카운트_복원(self) -> None:
+        """캐시로 답한 요청은 LLM 을 부르지 않았으므로 일일 카운트를 하나 되돌린다."""
+        with self._락:
+            self.오늘_호출 = max(0, self.오늘_호출 - 1)
+
+    def 상태(self) -> dict:
+        운영중, 사유 = self.운영기간인가()
+        with self._락:
+            return {"오늘": self._날짜, "오늘_호출": self.오늘_호출, "일일한도": self.일일한도,
+                    "IP시간당": self.IP시간당, "추적중인_IP": len(self._ip),
+                    "운영기간": {"운영중": 운영중, "사유": 사유,
+                              "시작": self.운영시작 or None, "종료": self.운영종료 or None},
+                    "차단": dict(self.차단)}
+
+
+class 시도제한:
+    """키별 시도 횟수 제한. 초대 코드처럼 맞혀 보는 요청을 막는다. 프로세스 메모리에 둔다."""
+
+    def __init__(self, 최대: int, 초: int) -> None:
+        self.최대, self.초 = 최대, 초
+        self._기록: dict[str, deque] = {}
+        self._락 = threading.Lock()
+
+    def 통과(self, 키: str) -> bool:
+        지금 = time.time()
+        with self._락:
+            for k in [k for k, q in self._기록.items() if not q or 지금 - q[-1] > self.초]:
+                del self._기록[k]
+            q = self._기록.setdefault(키, deque())
+            while q and 지금 - q[0] > self.초:
+                q.popleft()
+            if len(q) >= self.최대:
+                return False
+            q.append(지금)
+            return True
+
+
+제한 = 요청제한()
