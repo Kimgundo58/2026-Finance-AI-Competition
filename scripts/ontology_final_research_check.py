@@ -17,12 +17,14 @@ def 상태():
     return s
 
 
-def 실행(준비, 결과, 가능=True):
+def 실행(준비, 결과, 가능=True, 상태들=None):
     s, events, 재구성 = 상태(), [], []
+    if 상태들 is not None:
+        상태들.append(s)
     with R.activate(R.Budget(), emit=events.append), \
          patch.object(O.ontology_research_plan, '추가조회_가능', return_value=가능, create=True), \
          patch.object(O.ontology_research_plan, '추가_조회', return_value=결과) as 조회, \
-         patch.object(O, '_판정준비_호출', return_value=준비) as 호출, \
+         patch.object(O, '_판정준비_호출', **({'side_effect': 준비} if isinstance(준비, Exception) else {'return_value': 준비})) as 호출, \
          patch.object(O, '_새_검색단계', side_effect=lambda s, **kw: 재구성.append(kw)), \
          patch.object(O, '_새_프롬프트단계', side_effect=lambda s: 재구성.append('프롬프트')), \
          patch.object(O, '_실패응답', return_value={'판정': '판단불가'}):
@@ -37,13 +39,26 @@ def main():
     응답, 조회, 호출, 재구성, _ = 실행(요청, 정상)
     assert 응답 is None and 조회.call_args.kwargs == {'요청': '별도 허용 근거', '최대조회': 1}
     assert 재구성 == [{'재구성': True}, '프롬프트']
-    # 조회 실패·예산 소진·결과 상한은 판단불가.
+    # 조회 실패·예산 소진·결과 상한은 앞서 찾은 근거로 판정한다(판단불가로 끝내지 않음). 「가능」은 검증 단계에서 조건부로 낮춘다
     for 결과 in ({'추가조사상태': {'상태': '실패'}},
               {'추가조사상태': {'상태': '건너뜀'}},
               {'추가조사상태': {'상태': '부분', '추가규범수': 1, '추가근거수': 1},
                '근거행': [{'article_id': 1, 'doc_id': 'd', '조번호': '제1조', '항호': None}]}):
-        응답, _, _, 재구성, _ = 실행(요청, 결과)
-        assert 응답['판정'] == '판단불가' and not 재구성
+        상태들 = []
+        응답, _, _, 재구성, _ = 실행(요청, 결과, 상태들=상태들)
+        assert 응답 is None and not 재구성 and 상태들[0].추가조회미완, 결과
+    # 준비 호출 실패 · 빈 요청도 같다
+    for 준비 in (ValueError('준비 실패'), {'행동': '추가조회', '요청': ' '}):
+        상태들 = []
+        응답, 조회, _, 재구성, _ = 실행(준비, 정상, 상태들=상태들)
+        assert 응답 is None and not 조회.called and not 재구성 and 상태들[0].추가조회미완, 준비
+    # 조회 예외도 같다
+    s = 상태()
+    with R.activate(R.Budget()), \
+         patch.object(O.ontology_research_plan, '추가조회_가능', return_value=True, create=True), \
+         patch.object(O.ontology_research_plan, '추가_조회', side_effect=RuntimeError('조회 예외')), \
+         patch.object(O, '_판정준비_호출', return_value=요청):
+        assert O._새_판정준비단계(s) is None and s.추가조회미완
     # 정상 조회의 새 근거 0건은 필요한 규정이 이미 제시된 것: 기존 근거로 판정하고 문맥을 바꾸지 않는다.
     for 결과 in ({'추가조사상태': {'상태': '0건'}},
               {'추가조사상태': {'상태': '추가없음'}},
