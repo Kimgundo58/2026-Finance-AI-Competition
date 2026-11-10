@@ -110,11 +110,17 @@ def _우선순위_찾기(우선순위들: list[dict], 채택: dict, 제외: dict
     return None
 
 
+def _판정용(n: dict) -> bool:
+    """코드 판정에 쓸 수 있는 규범인가(`ontology_gate._사용가능` 과 같은 기준)."""
+    return bool(n.get("verified")) and not n.get("해석미결")
+
+
 def _우선순위_적용(규범들: list[dict]) -> tuple[list[dict], list[dict]]:
     """원천에 적힌 값으로만 중복을 정리한다. 텍스트로 추측하지 않는다.
 
     결과.대체 = [규범 ID]: 그 규범이 대상 규범을 대신한다. 대상은 규범 목록에서 빠지고 우선순위_적용 에 남는다.
-    코드 판정에 쓸 수 없는 규범(AI검증 미만 · 해석미결, `ontology_gate._사용가능` 과 같은 기준)은 다른 규범을 대체하지 못한다.
+    코드 판정에 쓸 수 없는 규범(AI검증 미만 · 해석미결, `ontology_gate._사용가능` 과 같은 기준)은 쓸 수 있는 규범을 대체하지 못한다.
+    둘 다 쓸 수 없는 규범이면 대체를 그대로 적용한다(문맥 정리일 뿐 코드 판정에는 영향이 없다).
     예외 = [규범 ID]: 단서는 조건이 맞을 때만 원칙을 덮어쓰므로 원칙을 목록에서 빼지 않는다. 빼면 원칙(금지)이 문맥에서
     사라져 틀린 '가능' 이 될 수 있다. 관계만 우선순위_적용 에 남긴다(조건.규범에_남음 = true).
     """
@@ -126,7 +132,7 @@ def _우선순위_적용(규범들: list[dict]) -> tuple[list[dict], list[dict]]
         결과 = n.get("결과") if isinstance(n.get("결과"), dict) else {}
         대체 = 결과.get("대체") or []
         for 대상 in ([대체] if isinstance(대체, str) else 대체):
-            if 대상 not in 표 or not (n.get("verified") and not n.get("해석미결")):
+            if 대상 not in 표 or (_판정용(표[대상]) and not _판정용(n)):
                 continue
             r = _우선순위_찾기(우선순위들, n, 표[대상])
             제외됨.add(대상)
@@ -878,6 +884,9 @@ def _자체시험() -> int:
         t.append((f"{이름} 대체 규범은 원래 규범을 빼지 않는다", "원래" in {n["norm_id"] for n in 남은} and not 쓴))
     남은, 쓴 = _우선순위_적용([원래, {"norm_id": "대체", "종류": "한도", "verified": True, "해석미결": False, "결과": {"대체": ["원래"]}}])
     t.append(("검증된 대체 규범은 원래 규범을 뺀다", "원래" not in {n["norm_id"] for n in 남은} and len(쓴) == 1))
+    미검증원래 = {**원래, "verified": False}
+    남은, 쓴 = _우선순위_적용([미검증원래, {"norm_id": "대체", "종류": "한도", "verified": False, "해석미결": False, "결과": {"대체": ["원래"]}}])
+    t.append(("둘 다 미검증이면 대체를 적용한다(CQ-09-3)", "원래" not in {n["norm_id"] for n in 남은} and len(쓴) == 1))
     # 조 단위 ID 는 조문ID_풀이 로 줄인다(리뷰 28-19, DB 불필요)
     사례 = {"조:지침#부칙 제1조": "조:지침#부칙 제1조", "조:지침#부칙 제2조①": "조:지침#부칙 제2조",
           "조:지침#부칙 제1조의2①": "조:지침#부칙 제1조의2", "조:팁스#부칙": "조:팁스#부칙",
