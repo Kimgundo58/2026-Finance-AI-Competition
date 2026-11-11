@@ -441,7 +441,7 @@ def _실패_결과(body: 판정요청) -> dict:
            "해야할일": [], "인용": [], "전제": [], "신뢰등급": None, "규정버전": None,
            "참조관계": [], "사용자답변": []}
     try:
-        초안 = inquiry.문의초안(body.정규화, "판단불가", [], [], body.사업명)
+        초안 = inquiry.문의초안(body.정규화, "판단불가", body.사업명, body.확정비목)
     except Exception:                                         # noqa: BLE001
         # 실패 경로의 실패다. 초안 없이라도 판단불가 결과는 반드시 돌려준다.
         _log.exception("실패 결과의 문의 초안을 만들지 못했다 (plan_id=%s)", body.plan_id)
