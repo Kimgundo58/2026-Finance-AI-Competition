@@ -497,8 +497,7 @@ def _live_상세(plan_id: int, org_id: str | None) -> 계획상세:
         try:
             from .inquiry import 문의초안 as _초안
             판정상세["문의초안"] = _초안(
-                정규화=정규화, 판정=r["판정"] or "",
-                인용=r["인용"] or [], 전제=r["전제"] or [], 사업명=r["사업명"])
+                정규화=정규화, 판정=r["판정"] or "", 사업명=r["사업명"], 비목=r["확정비목"])
         except Exception:                                     # noqa: BLE001
             # 부가 정보라서 초안 생성이 실패해도 계획 조회는 실패시키지 않는다
             _log.exception("문의초안 재생성 실패 plan_id=%s", plan_id)
