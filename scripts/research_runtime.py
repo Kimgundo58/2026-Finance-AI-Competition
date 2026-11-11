@@ -12,6 +12,8 @@ _current: ContextVar["Budget | RequestBudget | None"] = ContextVar("research_bud
 _final: ContextVar[bool] = ContextVar("research_final", default=False)
 _emitter: ContextVar[object] = ContextVar("research_emitter", default=None)
 
+공개조사_실패문장 = "공개 정보를 확인하지 못했어요. 입력한 내용으로 계속 점검할 수 있어요."
+
 
 class Budget:
     def __init__(self, *, seconds: float = 120, tools: int = 6, llm: int = 9,

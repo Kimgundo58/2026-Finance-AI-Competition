@@ -348,6 +348,7 @@ def main():
                        llm_call=lambda p, s, t: (_ for _ in ()).throw(AssertionError("LLM 호출")))
         assert client.calls == [] and out["후보"] == [], (query, url, client.calls)
     느린검색_검사(body)
+    조사실패_알림_검사(body)
     apick_분류_검사()
     print("웹 조사 모의 검사 통과")
 
@@ -404,6 +405,44 @@ def 느린검색_검사(body):
     with patch("web_research._log.warning"):
         out, calls, ev = search([ApickError("x", code="APICK_IP_DENIED"), found])
     assert len(calls) == 1 and out["상태"] == "실패" and ev[-1]["문장"] == "검색 서비스 연결을 확인하지 못했어요.", (calls, out, ev)
+
+
+def 조사실패_알림_검사(body):
+    """조사를 하지 못하고 끝나면 화면 로그에 실패 한 줄(내부 값 없는 한국어)과 상태 실패를 남기고, 정상 종료엔 남기지 않는다."""
+    from research_runtime import 공개조사_실패문장
+    def 실행(llm_call, query="Example", **kw):
+        ev = []
+        out = research(query, budget=kw.pop("budget", Budget()), client=Client(body), llm_call=llm_call, emit=ev.append, **kw)
+        return out, [e for e in ev if e["단계"] == "공개 조사"]
+    def 확인(out, ev):
+        assert out["상태"] == "실패" and out["후보"] == [] and len(ev) == 1, (out, ev)
+        assert ev[0]["상태"] == "실패" and ev[0]["문장"] == 공개조사_실패문장 and ev[0]["id"], ev
+    def 던짐(prompt, schema, timeout):
+        raise RuntimeError("403 Forbidden secret-detail")
+    확인(*실행(던짐))                                               # 계획 LLM 호출이 예외
+    확인(*실행(lambda p, s, t: "not-a-dict"))                       # 계획 형식이 틀림
+    확인(*실행(lambda p, s, t: {}, query="맥북(M3)"))                # 공개 조사 규칙에 맞지 않는 검색어
+    class 느린예산(Budget):
+        def remaining_seconds(self):
+            return 0.5
+    확인(*실행(lambda p, s, t: {}, budget=느린예산()))                  # 첫 계획 전에 시간이 없다
+    assert "secret" not in 공개조사_실패문장 and "403" not in 공개조사_실패문장
+    # 정상 종료(계획이 완료·사용자확인·후보 없음)는 실패 줄도 실패 상태도 없다
+    완료 = {"행동": "완료", "부족정보": [], "확인항목": [], "URL": "", "후보": []}
+    out, ev = 실행(lambda p, s, t: 완료)
+    assert out["상태"] == "미확인" and ev == [], (out, ev)
+    확인필요 = {"행동": "사용자확인", "부족정보": [], "확인항목": ["실제사용"], "URL": "", "후보": []}
+    out, ev = 실행(lambda p, s, t: 확인필요)
+    assert out["상태"] == "확인필요" and ev == [], (out, ev)
+    # 일부를 얻은 뒤 둘째 계획에서 예외가 나도(사용자확인 항목이 있음) 실패로 덮지 않는다
+    계획들 = iter([{"행동": "검색", "유형": "가격", "검색어": "Example 요금 가격", "부족정보": ["가격"], "확인항목": ["실제사용"], "URL": "", "후보": []}])
+    def 둘째예외(p, s, t):
+        try:
+            return next(계획들)
+        except StopIteration:
+            raise RuntimeError("두 번째 계획 실패")
+    out, ev = 실행(둘째예외)
+    assert out["상태"] == "확인필요" and ev == [], (out, ev)
 
 
 def apick_분류_검사():

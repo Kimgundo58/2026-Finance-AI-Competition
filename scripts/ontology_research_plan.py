@@ -45,7 +45,8 @@ def 조사_준비(입력: dict, *, org_id=None, account_id=None) -> dict:
         cur = conn.cursor()
         if not ontology_lookup.새경로_대상(cur, 입력.get("사업명")):
             return {"요건": [], "문맥": 문맥}
-        with research_runtime.task("조사준비", "선택한 분류의 규정에서 확인할 정보를 찾고 있어요.", "공개 조사에 필요한 규정 정보를 준비했어요."):
+        with research_runtime.task("조사준비", "선택한 분류의 규정에서 확인할 정보를 찾고 있어요.", "확인할 규정 요건을 정리했어요.",
+                                "확인할 규정 요건을 정리하지 못했어요."):
             조회 = orchestrate.온톨로지_조회(cur, 입력.get("사업명"), 입력["비목"], 입력.get("확정세목"),
                                        {}, 확정=False, 품목=입력.get("품목"))
             규범들 = 조회["적용"]["규범"]
