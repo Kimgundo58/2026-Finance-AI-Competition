@@ -17,6 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
+from research_runtime import 공개조사_실패문장
 from apick_mcp import ApickClient, ApickError, public_url as url_ok, strip_tracking
 
 _log = logging.getLogger("uvicorn.error")
@@ -265,6 +266,14 @@ def _계획자료(requirements, context):
         return {"필요요건": [], "지출문맥": {}}
 
 
+def _조사_못함(output: dict, emit) -> dict:
+    """계획·검색을 시작하지 못했거나 도중에 예상 밖 오류로 끝나 얻은 것이 없을 때. 화면 로그에 실패 한 줄을 남기고 상태를 실패로 둔다."""
+    if emit:
+        emit({"id": uuid.uuid4().hex, "단계": "공개 조사", "상태": "실패", "문장": 공개조사_실패문장})
+    output["상태"] = "실패"
+    return output
+
+
 def research(public_query: str | None = None, *, product_name: str | None = None,
              requirements: list[dict] | None = None,
              context: dict | None = None, public_url: str | None = None, budget,
@@ -278,7 +287,7 @@ def research(public_query: str | None = None, *, product_name: str | None = None
     # 검색어 없이 공개 URL만 받은 경우: google_search 없이 그 주소 하나만 읽는다. 외부로 나가는 값은 그 URL뿐이다.
     url_only = not public_query and isinstance(public_url, str) and url_ok(public_url)
     if not url_only and (not _product_ok(public_query) or (public_url and not url_ok(public_url))):
-        return output
+        return _조사_못함(output, emit)   # 검색어·주소가 공개 조사 규칙에 맞지 않아 시작하지 못했다
     if llm_call is None:
         from llm_qwen import 기본_모델, llm_호출
         def llm_call(prompt, schema, timeout):
@@ -294,6 +303,8 @@ def research(public_query: str | None = None, *, product_name: str | None = None
     보낸검색어 = set()
     읽기실패 = set()   # 본문을 못 가져온 주소는 다시 읽지 않는다
     계획자료 = _계획자료(requirements, context)
+    계획받음 = False   # 첫 계획을 받기 전에 끝나면 조사를 못 한 것이다
+    오류끝 = False     # 계획·도구 처리 중 예상 밖 오류로 끝남
     for 회차 in range(3):
         remaining = min(deadline - time.monotonic(), web_deadline - time.monotonic(), budget.remaining_seconds())
         # LLM 호출 예산은 호출자의 llm_qwen 공통 후크가 HTTP 호출마다 예약한다.
@@ -316,6 +327,7 @@ def research(public_query: str | None = None, *, product_name: str | None = None
                     else llm_call(prompt, _SCHEMA, remaining))
             if isinstance(plan, tuple):
                 plan = plan[0]
+            계획받음 = isinstance(plan, dict)   # 형식이 틀린 계획은 받지 못한 것으로 본다
             if time.monotonic() >= web_deadline or time.monotonic() >= deadline or budget.remaining_seconds() <= 0 or not isinstance(plan, dict):
                 break
             for c in plan.get("후보", [])[:12]:
@@ -476,7 +488,10 @@ def research(public_query: str | None = None, *, product_name: str | None = None
             if stop:
                 break
         except Exception:
+            오류끝 = True
             break
+    if (not 계획받음 or 오류끝) and output["상태"] == "미확인" and not (output["후보"] or output.get("사용자확인") or output.get("부족정보")):
+        return _조사_못함(output, emit)   # 얻은 것이 없다. 도구 오류·연결 설정 실패(상태 실패)는 이미 자기 문장을 냈다
     if output["후보"] or (output["상태"] == "미확인" and (output.get("사용자확인") or output.get("부족정보"))):
         output["상태"] = "확인필요"
     return output

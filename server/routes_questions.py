@@ -115,6 +115,7 @@ def questions(req: Request, body: 질문요청):
                         except Exception as e:
                             _log.warning('공개 정보 조사 실패: %s', type(e).__name__)
                             세션.조사 = {'상태': '실패', '후보': [], '출처': []}
+                            research_runtime.emit('공개 조사', research_runtime.공개조사_실패문장, 상태='실패')
                         세션.조사완료 = True
                         세션.입력, 세션.버전, 세션.요청키 = 입력, 버전, 요청키
                     return {'상태': '조사확인', '질문세트': None, '질문': [], '추가입력': [],
