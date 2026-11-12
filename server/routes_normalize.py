@@ -73,7 +73,8 @@ def normalize(req: Request, body: 정규화요청):
             yield _sse("완료", {"실패": True})
             return
         out.setdefault("질문원문", _합성_질문(body))
-        # 거래처: 한 문장에 적혀 있을 때만 값(스펙 8-1). live 문장 정리는 아직 뽑지 않아 null 이다. 폼 값은 화면이 이미 갖고 있다
+        # 거래처: 한 문장에 적혀 있을 때만 값(스펙 8-1). live 는 질의변환 LLM 이 뽑고 입력 글에 그대로 있는 이름만 남긴다
+        # (normalize_run._입력에_적힌_이름). 폼 요청 · 옛 경로 사업은 null 이다(폼 값은 화면이 이미 갖고 있다). 화면은 이 값을 거래처 칸에 채운다
         out.setdefault("거래처", None)
         if not 실패:                  # 일시적 LLM 오류로 빈 비목후보가 캐시에 남지 않게 한다
             response_cache.저장(k, out, 종류="normalize", org=org, account=account)
