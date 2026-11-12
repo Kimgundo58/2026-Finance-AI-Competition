@@ -576,6 +576,15 @@ def 검색어없는_조사_검사():
     assert _개인정보_없음("Figma 프로페셔널(연간, 팀용)") and not _개인정보_없음("이메일 주소") and not _개인정보_없음("010 1234 5678 9")
     assert _검색어(None, "제품성격", "Figma 01012345678", "Figma 01012345678 요금") is None   # 제목에 나온 긴 숫자도 보내지 않는다
     assert _검색어(None, "제품성격", "Figma 요금", "Figma 요금") == "Figma 요금"
+    # (4-2) 이메일 주소(`@` 가 든 낱말)가 든 칸도 뺀다. http · www 주소의 `@` 는 막지 않는다. 사람 이름은 코드로 거르지 않는다(화면 안내)
+    문맥3 = {"품목": "외주 디자인 hong@naver.com 으로 시안 받음", "용도": "디자인 시안"}
+    out, calls, prompts, _ = 실행([검색_계획("외주 디자인"), 검색_계획("디자인 시안")], 문맥3)
+    assert 보낸검색어(calls) == ["디자인 시안"], calls
+    assert "hong@" not in json.dumps([calls, prompts], ensure_ascii=False) and "품목" not in 계획자료(prompts[0])["지출문맥"], prompts[0][-300:]
+    assert not _개인정보_없음("hong@naver.com 외주") and not _개인정보_없음("문의 a@b") and not _개인정보_없음("메일(hong@naver.com)로")
+    assert _개인정보_없음("https://example.com/@figma 디자인") and _개인정보_없음("www.example.com/@figma")
+    assert _검색어(None, "제품성격", "hong@naver.com 외주", "홍길동 hong@naver.com 외주 디자인 작업",
+                 공개글="홍길동 hong@naver.com 외주 디자인 작업") is None
     # (5) 판매 URL 을 받으면 그 페이지를 먼저 읽고, 후보가 없으면 계획(검색)으로 이어 간다. 공개 주소가 아닌 URL 은 읽지 않고 검색한다
     out, calls, prompts, _ = 실행([검색_계획("Figma 디자인")], 문맥, public_url=page)
     assert [n for n, _ in calls] == ["url_to_markdown", "google_search"] and calls[0][1]["url"] == page, calls
