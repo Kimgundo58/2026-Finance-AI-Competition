@@ -47,7 +47,7 @@ ontology/*.json → ontology_check (발췌·참조·OWL/HermiT)
 
 ## 설치와 전환
 
-`db/Dockerfile.age`는 PostgreSQL 17·pgvector 기반에 AGE 1.6.0(PG17)을 소스 해시로 확인해 빌드한다. 앱의 제한된 LOAD와 JIT에 필요한 라이브러리·비트코드를 포함한다. AGE는 OWL 추론기를 대신하지 않는다.
+`db/Dockerfile.age`는 PostgreSQL 17·pgvector 기반에 AGE 1.6.0(PG17)을 소스 해시로 확인해 빌드한다. 빌드 헤더(`postgresql-server-dev-17`)는 base 이미지 서버 패키지와 같은 버전으로 고정하고, 본 저장소에 없으면 PGDG 아카이브에서 받는다(minor 가 다르면 `age.so` 로드 실패). 앱의 제한된 LOAD와 JIT에 필요한 라이브러리·비트코드를 포함한다. AGE는 OWL 추론기를 대신하지 않는다.
 
 1. 격리된 DB에서 새 이미지를 빌드하고 기존 백업 복원·확장·권한·조회 검사를 먼저 한다.
 2. 운영 전 백업·이미지 ID·볼륨·PostgreSQL 주버전을 확인한다. 기존 볼륨을 삭제하거나 새 빈 DB로 바꾸지 않는다. DB 이미지 교체에는 재시작이 필요하므로 기존 API 전용 자동 배포 절차만으로 처리하지 않는다.
