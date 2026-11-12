@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ontology_age  # noqa: E402
 from ontology_age_validate import 간선_동등성 as _간선_동등성  # noqa: E402
 import ontology_lookup  # noqa: E402
+import ontology_norm  # noqa: E402
 
 
 def _dsn(name, user, disposable):
@@ -45,13 +46,14 @@ def _ready_failure(cur):
 
 
 def _상황_후보_동등성(cur):
-    """원천 SQL과 AGE 경로의 순서·상한 결과를 사업별로 비교한다."""
+    """원천 SQL과 AGE 경로의 순서·상한 결과를 사업별로 비교한다. 판정이 쓰는 규범은 AI대조 이상(ontology_norm.확정_검수단계, 2026-11-13)이라
+    생성 칼럼 verified(AI검증 이상)가 아니라 검수단계로 고른다."""
     reference = """SELECT c.concept_id, c.pref_label,
                   count(*) FILTER (WHERE n.종류 = ANY(%s)) AS 먼저수
              FROM corpus.norms n
              CROSS JOIN LATERAL unnest(n.대상) AS d(id)
              JOIN corpus.concepts c ON c.concept_id = d.id
-            WHERE n.verified AND NOT n.해석미결 AND n.종류 <> '우선순위'
+            WHERE n.검수단계 = ANY(%s) AND NOT n.해석미결 AND n.종류 <> '우선순위'
               AND (n.적용사업 IS NULL OR n.적용사업 = ANY(%s))
               AND c.종류 = ANY(%s) AND (c.적용사업 IS NULL OR c.적용사업 = ANY(%s))
             GROUP BY c.concept_id, c.pref_label
@@ -60,7 +62,7 @@ def _상황_후보_동등성(cur):
     for program in [None, *programs]:
         businesses = [program] if program else []
         kinds = list(ontology_lookup.상황_먼저_종류)
-        params = (kinds, businesses, list(ontology_lookup.상황_종류), businesses, kinds)
+        params = (kinds, list(ontology_norm.확정_검수단계), businesses, list(ontology_lookup.상황_종류), businesses, kinds)
         rows = cur.execute(reference, params).fetchall()
         expected = [{"id": row[0], "정식명": row[1]} for row in rows]
         assert ontology_lookup.상황_후보(cur, program, None) == expected, f"상황 후보 차이: {program}"
