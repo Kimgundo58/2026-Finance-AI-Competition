@@ -2,7 +2,6 @@
 """DB·외부 호출 없이 조사 세션과 실제 HTTP/SSE 경로를 확인한다."""
 import json
 import os
-import sys
 import types
 from unittest.mock import patch
 
@@ -30,13 +29,15 @@ def main():
     candidate = {'id': 'a', '유형': '공개정보', '내용': '공개 정보',
                  '출처': [{'제목': '안내', 'url': 'https://example.com', '발췌': '공개 정보'}], '상태': '확인필요'}
     calls = []
-    def research(product_name, *, public_url, budget, emit, requirements=None, context=None, vendor=None):
-        calls.append(product_name)
-        if emit:
-            emit({'id': 'e', '단계': '판매처', '상태': '진행중', '문장': '확인 중'})
+    # MOCK 의 ② 품목 조사는 web_research 대신 mock_flow.품목조사 를 부른다(스펙 8-5). 그 자리를 가짜로 바꿔 세션 경로만 본다
+    import research_runtime
+    from server import mock_flow
+    def research(품목, 거래처):
+        calls.append(품목)
+        research_runtime.emit('판매처', '확인 중', id='e')
         return {'상태': '확인필요', '후보': [candidate], '출처': ['https://example.com']}
-    original = sys.modules.get('web_research')
-    sys.modules['web_research'] = types.SimpleNamespace(research=research)
+    original = mock_flow.품목조사
+    mock_flow.품목조사 = research
     try:
         with TestClient(app) as client:
             norm = {'품목': 'API', '금액': 100, '용도': '개발', '사업명': '예비창업패키지'}
@@ -77,11 +78,12 @@ def main():
             assert client.post('/api/questions', json={**request, '조사ID': token + 'x'}).status_code == 400
             assert research_sessions.조회(token, 'other', None) is None
             token_empty = sse(client.post('/api/normalize', json=norm))['결과'][0]['조사ID']
+            # MOCK 은 공개 검색어가 없어도 품목 조사를 한다(새 흐름에는 검색어 칸이 없다, 스펙 8-2 · 8-5)
             empty_req = {**request, '조사ID': token_empty, '공개검색어': None}
             empty_first = client.post('/api/questions', json=empty_req).json()
-            assert empty_first['상태'] == '조사확인' and not empty_first['조사']['후보']
-            empty_final = client.post('/api/questions', json={**empty_req, '조사답변': []}).json()
-            assert empty_final['질문세트'] and calls == ['API']
+            assert empty_first['상태'] == '조사확인' and empty_first['조사']['후보'][0]['id'] == 'a'
+            empty_final = client.post('/api/questions', json={**empty_req, '조사답변': [{'id': 'a', '답': '맞아요'}]}).json()
+            assert empty_final['질문세트'] and calls == ['API', 'API']
             session = research_sessions.조회(token, None, None)
             session.expires = 0
             assert client.post('/api/questions', json=request).status_code == 400
@@ -109,10 +111,7 @@ def main():
             routes_judge.judge(fake_req, jb, mock=None, 목=None)
             assert not s.lock.locked()
     finally:
-        if original is None:
-            del sys.modules['web_research']
-        else:
-            sys.modules['web_research'] = original
+        mock_flow.품목조사 = original
     print('조사 세션 HTTP/SSE 검사 통과')
 
 

@@ -206,8 +206,18 @@ def judge(req: Request, body: 판정요청, mock: str | None = None,
         elif 기록오류:
             out, 실패, decision_id = _실패_결과(body), True, None
         elif MOCK:
+            # 분류 없이 온 요청(새 흐름에서 분류를 끝내 못 찾음)은 ?mock= 이 없으면 문의 초안이 붙는 확인 필요다(스펙 8-3).
+            # 분류 칸은 요청의 비목 · 세목을 보인다(live 와 같다). 분류가 없으면 null
             out = {"사용자답변": [], "기준문서": mock_data.mock_기준문서(),
-                   **mock_판정.get(mock or "가능", mock_판정["가능"])}
+                   **mock_판정.get(mock or ("가능" if body.확정비목 else "근거부족"), mock_판정["가능"])}
+            if 조사세션 is not None:
+                분류값 = 조사세션.분류 or {}
+                if not body.확정비목:
+                    out["분류"] = None
+                elif 분류값.get("비목") == body.확정비목:
+                    out["분류"] = {k: 분류값.get(k) for k in ("비목", "세목", "표시문")}
+                else:
+                    out["분류"] = {"비목": body.확정비목, "세목": body.확정세목, "표시문": body.확정비목}
             decision_id = None
             response_cache.저장(k, out, 종류="judge", org=body.org_id, account=account_id,
                                데이터버전_해시=데이터버전해시)

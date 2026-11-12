@@ -106,6 +106,9 @@ class 질문요청(BaseModel):
     조사답변: list[조사답변항목] | None = Field(default=None, max_length=30)
     거래처: str | None = Field(default=None, max_length=200)          # ② 업체 정보 조사에 쓴다
     품목설명: str | None = Field(default=None, max_length=1000)       # 조사 없이 [직접 입력하기] 한 설명. ③ 분류 자료
+    # ③-R 재조사 후보에 대한 답(스펙 8-2 ③). 응답 `재조사.후보` 의 id 마다 [맞아요] | [직접 입력하기]. 판정 요청에는 보내지 않는다:
+    # 서버가 조사 세션에 두고 판정의 답변 검증이 같이 읽는다(research_sessions.재조사_답변)
+    재조사답변: list[조사답변항목] | None = Field(default=None, max_length=30)
 
 
 # --- 판정 (POST /api/judge) ---
