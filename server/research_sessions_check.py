@@ -646,7 +646,8 @@ def 재조사_시간_검사():
     가짜웹.research = lambda q, **k: (받음.update(k), {'후보': []})[1]
     with patch.dict(sys.modules, {'web_research': 가짜웹}), patch.dict(os.environ, {'SUDDOE_CLASSIFY_TIMEOUT': ''}):
         assert item_classify.분류_제한초() == 40
-        for 남은, 기대 in ((300, 60), (220, 60), (200, 40), (175, 15), (174, None), (165, None)):
+        # 경계 바로 위는 176 으로 둔다: 175 는 남은 시간이 174.99… 로 읽혀 시계 해상도(리눅스 CI)에 따라 15 미만이 된다
+        for 남은, 기대 in ((300, 60), (220, 60), (200, 40), (176, 16), (174, None), (165, None)):
             받음.clear()
             with research_runtime.activate(research_runtime.Budget(seconds=남은)):
                 routes_questions._재조사(body, ['구입인지 구독인지'])
