@@ -489,10 +489,12 @@ def main() -> int:
         화면글 = " ".join(e["문장"] for e in 사건)
         확인("④-2 화면 줄: 쉬운 한국어 시작 · 끝 줄, 조건 번호 · 키 없음",
              _Q.판정조사_시작문장 in 화면글 and "1개를 확인했어요" in 화면글 and not re.search(r"\bC\d|[0-9a-f]{12}", 화면글), 화면글)
-        불림 = []
-        with _patch.object(_W, "research", lambda *a, **k: 불림.append(1)), _R.activate(_R.Budget(seconds=60)):
+        불림, 건너뜀줄 = [], []
+        with _patch.object(_W, "research", lambda *a, **k: 불림.append(1)), _R.activate(_R.Budget(seconds=60), emit=건너뜀줄.append):
             짧음 = _Q.판정용_조사({}, 판단줄, {"거래처": "느티"})
         확인("④-2: 남은 시간이 적으면 조사하지 않는다(질문 · 판정 시간을 남긴다)", 짧음["상태"] == "시간없음" and not 불림)
+        확인("④-2: 시간이 없어 건너뛰면 작업 줄 「시간이 부족해 공개 웹 확인은 건너뛰었어요.」(v048, 스펙 8-2 시간 예산)",
+             [e["문장"] for e in 건너뜀줄] == ["시간이 부족해 공개 웹 확인은 건너뛰었어요."], str(건너뜀줄))
 
         def 터짐(*a, **k):
             raise RuntimeError("x")
@@ -965,6 +967,15 @@ def _새흐름_검사(c, sse, 확인) -> None:
              and {"id", "유형", "내용", "질문", "출처"} <= set(q2["재조사"]["후보"][0]) and bool(q2.get("분류안내")),
              str(q2)[:200])
         확인("재조사 · ② 진행 줄 「품목을 더 알아보고 있어요.」", "품목을 더 알아보고 있어요." in 줄, str(줄))
+        from server import research_sessions as _세션들
+        # 조율 결정(v048): 재조사 후보에 답하지 않고 품목설명만 보내면 조사답변 과 같은 규칙으로 받지 않는다(JSON 400 · SSE 요청 처리 실패)
+        q거절, _, _ = 묻기(n, 조사답변=맞아요(q1["조사"]), 품목설명="팀 디자인 도구")
+        r거절 = c.post("/api/questions", json={"사업명": 사업, "품목": n["품목"], "금액": n["금액"], "용도": n["용도"],
+                                              "질문원문": n.get("질문원문"), "조사ID": n["조사ID"], "웹조사": True,
+                                              "조사답변": 맞아요(q1["조사"]), "품목설명": "팀 디자인 도구"})
+        확인("재조사 · 재조사 후보에 답하지 않고 품목설명만 보냄 → 거절(SSE 실패 · JSON 400), 설명은 세션에 남지 않음",
+             q거절.get("상태") == "실패" and "분류" not in q거절 and r거절.status_code == 400
+             and _세션들.조회(n["조사ID"], None, None).품목설명 is None, f"{q거절} {r거절.status_code}")
         q3, _, _ = 묻기(n, 조사답변=맞아요(q1["조사"]), 재조사답변=맞아요(q2["재조사"]))
         확인("재조사 · ③ 재조사 답 → 분류됨 + 질문", 분류됨(q3) and len(q3.get("질문") or []) == 1, str(q3)[:160])
         from server import research_sessions

@@ -396,6 +396,15 @@ _계획_지시 = (
     "넣지 않는다. 자료에 없는 이름 · 식별자 · 주소를 만들지 마라.\n")
 
 
+# ③-R 재조사(5-1, v048): 분류 LLM 이 맞는 후보를 못 찾고 적은 필요정보가 지출문맥에 있을 때만 계획 · 후보 지시 끝에 붙인다.
+# 프롬프트 구조 · 검색어 안전장치는 ② 와 같고 조사 목적만 필요정보로 바꾼다. 필요정보가 없는 ② 프롬프트는 그대로다
+_재조사_계획_지시 = (
+    "이번 조사는 규정의 분류를 정하지 못해 한 번 더 하는 조사다. 지출문맥의 필요정보는 분류 담당이 무엇을 더 알면 분류를 고를 수 "
+    "있는지 적은 것이다. 품목이 무엇인지에 더해 그 필요정보를 드러내는 공개 본문을 찾는다. 검색어 규칙은 위와 같다.\n")
+_재조사_후보_지시 = (
+    "이번 후보는 지출문맥의 필요정보에 답하는 사실을 중심으로 쓴다. 본문에 그런 사실이 없으면 위 규칙대로 품목이 무엇인지 쓴다.\n")
+
+
 # 후보 작성 LLM 지시. 본문을 읽은 뒤마다 부른다. 자료(공개검색어 · 지출문맥 · 본문 JSON)는 이 뒤에 붙는다.
 # 문구는 2026-11-12 운영 분리 실험(flash, 후보 6/6, 발췌 글자 그대로)과 같다. 그 실험 프롬프트 끝의 부족정보 문장만 뺐다(스키마에 없는 칸)
 _후보_지시 = (
@@ -660,7 +669,9 @@ def research(public_query: str | None = None, *, product_name: str | None = None
         llm_call = _기본_계획호출()
     client = client or ApickClient()
     started = time.monotonic()
-    deadline = started + (min(_요건_웹_제한초, 제한초) if 요건모드 and 제한초 is not None else _요건_웹_제한초 if 요건모드 else _전체_제한초)
+    # 제한초: ④-2 판정용 조사(남은 예산에서) · ③-R 재조사(최대 60초, routes_questions._재조사)가 더 짧게 준다
+    기본초 = _요건_웹_제한초 if 요건모드 else _전체_제한초
+    deadline = started + (min(기본초, 제한초) if 제한초 is not None else 기본초)
     web_deadline = min(deadline, started + (_요건_웹_제한초 if 요건모드 else _웹_제한초))
     urls = [public_url] if public_url else []
     제목 = {}         # 주소 → 검색 결과 제목
@@ -678,6 +689,8 @@ def research(public_query: str | None = None, *, product_name: str | None = None
     # 보내지 않는다(품목 · 용도에 직접 적은 낱말은 예외, _검색어 공개글). 금액도 넣지 않는다
     문맥글 = " ".join(v for k, v in 계획자료["지출문맥"].items() if k in ("품목", "용도") and isinstance(v, str))
     거래처글 = " ".join(v for v in (vendor, (context or {}).get("거래처")) if isinstance(v, str))
+    재조사중 = not 요건모드 and bool(계획자료["지출문맥"].get("필요정보"))
+    재조사_계획, 재조사_후보 = (_재조사_계획_지시, _재조사_후보_지시) if 재조사중 else ("", "")
     계획받음 = False   # 첫 계획을 받기 전에 끝나면 조사를 못 한 것이다(URL만 받은 조사는 첫 읽기가 계획을 대신한다)
     오류끝 = False     # 계획·후보 작성·도구 처리 중 예상 밖 오류로 끝남
     계획수 = 0        # 계획 LLM 횟수(최대 계획최대). 후보 작성 호출과 URL만 받은 조사의 첫 읽기는 세지 않는다
@@ -711,7 +724,7 @@ def research(public_query: str | None = None, *, product_name: str | None = None
         if t <= 1:
             return False, None
         자료 = {"공개검색어": public_query or "", "지출문맥": 계획자료["지출문맥"], "본문": bodies}
-        out = llm_call(_후보_지시 + json.dumps(자료, ensure_ascii=False), 후보스키마, t)
+        out = llm_call(_후보_지시 + 재조사_후보 + json.dumps(자료, ensure_ascii=False), 후보스키마, t)
         if isinstance(out, tuple):
             out = out[0]
         if not isinstance(out, dict):
@@ -770,7 +783,7 @@ def research(public_query: str | None = None, *, product_name: str | None = None
             if 본문먼저:
                 plan = {"행동": "본문", "URL": [public_url]}
             else:
-                plan = llm_call((_요건_계획_지시 if 요건모드 else _계획_지시) + json.dumps({
+                plan = llm_call((_요건_계획_지시 if 요건모드 else _계획_지시 + 재조사_계획) + json.dumps({
                     "공개검색어": public_query or "", **계획자료,
                     **({"요건상태": [{"조건": k, "결과": v["결과"], "이유": v["이유"]} for k, v in 요건결과.items()]} if 요건모드 else {}),
                     "검색용어": {k: _한국어검색[k] + " / " + _검색용어[k] for k in 유형들},
