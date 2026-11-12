@@ -98,6 +98,7 @@ def main():
             필요정보_검사()
             재조사_시간_검사()
             재조사_검색어_검사()
+            재조사_사용자글_검사()
         # 응답 객체만 만들고 스트림을 전혀 읽지 않는 요청도 세션 잠금을 남기지 않는다.
         from server import routes_judge, routes_questions
         from server.models import 질문요청, 판정요청
@@ -708,12 +709,62 @@ def 재조사_검색어_검사():
     assert 보냄 == [], 보냄
     보냄, _ = 돌리기({'품목': '피그마', '용도': '디자인', '필요정보': ['판매사 구독']}, ['피그마 판매사'], vendor='판매사')
     assert 보냄 == [], 보냄
-    # ② 가 읽은 판매 주소는 재조사가 먼저 다시 읽지 않는다(읽은주소 없으면 지금처럼 먼저 읽는다)
+    # 사용자가 준 판매 주소는 ② 가 읽었어도 재조사가 먼저 다시 읽는다(v048 재검토: 필요정보를 담고 있을 가장 좋은 자료).
+    # 읽은주소 에 다른 주소가 같이 있어도, 어느 것이 판매 주소이든 그 주소만 예외다
     보냄, _ = 돌리기({'품목': '피그마', '용도': '디자인', '필요정보': 필요}, ['피그마 구독'],
-                    public_url='https://example.com/p', 읽은주소=['https://example.com/p'])
-    assert 보냄 == ['피그마 구독'], 보냄
+                    public_url='https://example.com/p', 읽은주소=['https://example.com/p', 'https://example.com/q'])
+    assert 보냄[0] == 'https://example.com/p', 보냄
     보냄, _ = 돌리기({'품목': '피그마', '용도': '디자인', '필요정보': 필요}, ['피그마 구독'], public_url='https://example.com/p')
     assert 보냄[0] == 'https://example.com/p', 보냄
+    보냄, _ = 돌리기({'품목': '피그마', '용도': '디자인', '필요정보': 필요}, ['피그마 구독'],
+                    public_url='https://example.com/q', 읽은주소=['https://example.com/p', 'https://example.com/q'])
+    assert 보냄[0] == 'https://example.com/q', 보냄
+
+
+def 재조사_사용자글_검사():
+    """v048 재검토 새 문제 1: [직접 입력하기] 정정 · 품목설명에 쓴 사람 이름이 분류 LLM 의 필요정보에 옮겨져도 재조사 검색어로 나가지
+    않는다. 지출 항목 · 사용 목적 낱말은 필요정보에 있어도 검색어에 쓸 수 있다. routes_questions._분류없음_다음 → _재조사 →
+    web_research.research 를 그대로 지나고 계획 LLM · 검색기만 가짜(외부 호출 없음). 판매URL 은 ② 가 읽었어도 다시 읽는다."""
+    import sys
+    import research_runtime
+    import web_research
+    from server import routes_questions
+    from server.models import 질문요청
+    필요 = ['김민수 디자이너에게 맡기는 용역인지 로고를 사서 갖는지']
+    # 낱말 거르기 자체: 정정 · 품목설명에만 나온 낱말(조사가 붙어도)은 빠지고, 품목 · 용도 낱말은 조사가 붙어도 남는다
+    assert routes_questions._필요정보_거르기(필요, '김민수 디자이너가 만들어요', '로고 디자인 홍보') ==         ['맡기는 용역인지 로고를 사서 갖는지']
+    assert routes_questions._필요정보_거르기(['민수님 작업인지'], '민수님께 맡겨요', '로고') == ['작업인지']
+    assert routes_questions._필요정보_거르기(['김민수'], '김민수', '로고') == []
+    assert routes_questions._필요정보_거르기(['로고 구독인지'], '로고 구독이에요', '로고 디자인 구독') == ['로고 구독인지']
+
+    class 검색기:
+        def __init__(self):
+            self.보냄 = []
+
+        def call(self, name, args, timeout):
+            self.보냄.append(args.get('keyword') or args.get('url'))
+            return {'items': []}
+    body = 질문요청(사업명='예비창업패키지', 품목='로고 디자인', 금액=100, 용도='홍보', 웹조사=True,
+                 판매URL='https://example.com/p', 품목설명='김민수 디자이너에게 맡겨요')
+    조사확인 = {'확인한정보': [{'id': 'p1', '내용': '로고 디자인', '답': '직접입력', '정정': '김민수 디자이너가 만드는 로고예요'}]}
+    계획 = [{'행동': '검색', '유형': '제품성격', '검색어': q, 'URL': []}
+          for q in ('김민수 디자이너 용역', '김민수 로고', '로고 디자인 용역')]
+    받은 = []
+
+    def llm(prompt, schema, timeout=None, **k):
+        if web_research._후보역할(schema):
+            return {'후보': []}
+        받은.append(prompt)
+        return 계획.pop(0) if 계획 else {'행동': '완료', '유형': '제품성격', '검색어': '', 'URL': []}
+    c = 검색기()
+    with patch.object(web_research, '_기본_계획호출', lambda: llm), patch.object(web_research, 'ApickClient', lambda: c),          patch.dict(sys.modules, {'web_research': web_research}),          research_runtime.activate(research_runtime.Budget(seconds=300)):
+        r = routes_questions._분류없음_다음(body, 조사확인, False, 필요, None, None, ['https://example.com/p'])
+    assert r['다음행동'] == '판정' and r['재조사'] == {'후보': []}, r
+    assert c.보냄[0] == 'https://example.com/p', c.보냄              # 판매URL 은 ② 가 읽었어도 다시 읽는다
+    assert '김민수 디자이너 용역' not in c.보냄 and '김민수 로고' not in c.보냄, c.보냄
+    assert '로고 디자인 용역' in c.보냄, c.보냄                       # 필요정보의 「용역」 · 품목 낱말은 쓴다
+    assert not any('김민수' in p or '디자이너에게' in p for p in 받은), '계획 LLM 지출문맥에 사용자 낱말'
+    assert any('용역인지' in p for p in 받은), 받은[:1]
 
 
 def 분류없이_판정_검사():

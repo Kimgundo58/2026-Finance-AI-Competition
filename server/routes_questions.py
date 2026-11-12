@@ -17,6 +17,7 @@ import concurrent.futures
 import contextvars
 import json
 import queue
+import re
 
 from fastapi import APIRouter, HTTPException, Request
 
@@ -274,7 +275,7 @@ def _분류(body: 질문요청, 조사확인: dict | None, 조사ID: str | None 
     (호출자는 이 결과를 같은 답에 다시 내주지 않는다). 디버그(버린 후보 · 다른 경로 · LLM 이유)는 로그에 개수만 남긴다.
     재조사함 = 조사 세션에 재조사 결과가 있다(세션.재조사). 조사ID 는 mock 가지가 읽는다. ip 는 재조사의 요청 한도 확인용.
     대기재조사 = 재조사 후보를 보여 줬는데 아직 답이 없는 세션.재조사(없으면 None). 분류가 없으면 이 후보로 재조사확인 을 다시 낸다.
-    읽은주소 = ② 품목 조사가 읽은 주소. 재조사가 같은 페이지를 다시 읽지 않는다.
+    읽은주소 = ② 품목 조사가 읽은 주소. 재조사가 같은 페이지를 다시 읽지 않는다(판매URL 은 다시 읽는다).
     설명캐시(세션.설명정리): 사용자가 쓴 한 문장을 분류 자료 JSON 으로 바꾼 결과(5-2, item_classify.설명_반영). MOCK 은 바꾸지 않는다.
     조사확인 은 바꾸지 않는다: 질문 · 판정 프롬프트의 사용자 진술은 쓴 문장 그대로다(8-4).
     """
@@ -318,6 +319,7 @@ def _분류없음_다음(body: 질문요청, 조사확인: dict | None, 재조�
         return {"안내": 재조사확인_안내, "다음행동": "재조사확인", "재조사": 대기재조사}
     재조사 = None
     if not 재조사함:
+        필요정보 = _필요정보_거르기(필요정보, _사용자글(조사확인, body), " ".join(x for x in (body.품목, body.용도) if isinstance(x, str)))
         재조사 = _재조사(body, 필요정보, ip, 읽은주소) if 필요정보 else {"후보": []}
         if 재조사["후보"]:
             return {"안내": 재조사확인_안내, "다음행동": "재조사확인", "재조사": 재조사}
@@ -326,11 +328,56 @@ def _분류없음_다음(body: 질문요청, 조사확인: dict | None, 재조�
     return {**다음, **({"재조사": 재조사} if 재조사 is not None else {})}
 
 
+def _사용자글(조사확인: dict | None, body: 질문요청) -> str:
+    """사용자가 자유롭게 쓴 글: 조사 · 재조사 답의 [직접 입력하기] 정정(확인한정보 에 합쳐 있다)과 품목설명."""
+    글 = [str(x.get('정정')) for x in (조사확인 or {}).get('확인한정보') or [] if isinstance(x, dict) and x.get('정정')]
+    글 += [x for x in ((조사확인 or {}).get('품목설명'), body.품목설명) if isinstance(x, str)]
+    return " ".join(글)
+
+
+# 낱말 끝에 붙는 조사 · 흔한 어미(「김민수에게」 · 「김민수님」). 긴 것을 먼저 둔다. 떼고 남은 말로 필요정보 낱말과 맞춰 본다
+_낱말끝 = re.compile(r"(?:에게서|한테서|으로부터|로부터|에서|에게|한테|께서|으로|이랑|하고|부터|까지|처럼|보다|입니다|이에요|예요|에요"
+                   r"|님|씨|로|에|의|을|를|이|가|은|는|와|과|랑|도|만|요)$")
+
+
+def _필요정보_거르기(필요정보: list[str], 사용자글: str, 공개글: str) -> list[str]:
+    """③-R 재조사에 넘길 필요정보(분류 LLM 글)에서 사용자가 자유롭게 쓴 글(정정 · 품목설명)에만 나온 낱말을 뺀다(v048 재검토).
+    필요정보 낱말은 재조사 검색어에 쓸 수 있는 말이 되므로(web_research 허용글), 정정에 적은 사람 이름이 분류 LLM 을 거쳐 외부
+    검색어로 나가지 않게 한다. 지출 항목 · 사용 목적(공개글)에 있는 낱말은 원래 검색어에 쓸 수 있으므로 남긴다.
+    비교는 web_research._검색어 허용 검사와 같이 casefold 한 글자 포함으로 본다: 공개글에 들어 있는 필요정보 낱말(끝의 조사를 떼고)은 남기고,
+    공개글에 없는 사용자 낱말(끝의 조사를 뗀 말)이 필요정보 낱말에 들어 있거나 그 반대면 뺀다. 낱말을 다 뺀 항목은 버린다."""
+    공개 = 공개글.casefold()
+
+    def 공개말(w: str) -> bool:
+        """지출 항목 · 사용 목적에 있는 낱말(끝의 조사를 떼어도 된다)."""
+        뗀 = _낱말끝.sub('', w)
+        return w in 공개 or (len(뗀) >= 2 and 뗀 in 공개)
+    사용자말 = set()
+    for w in 사용자글.casefold().split():
+        if 공개말(w):
+            continue
+        사용자말.add(w)
+        if len(뗀 := _낱말끝.sub('', w)) >= 2:
+            사용자말.add(뗀)
+
+    def 사용자것(w: str) -> bool:
+        w = w.casefold()
+        if 공개말(w):
+            return False
+        return any((u in w if len(u) >= 2 else u == w) or (len(w) >= 2 and w in u) for u in 사용자말)
+    out = []
+    for x in 필요정보 or []:
+        if isinstance(x, str) and (남은 := " ".join(w for w in x.split() if not 사용자것(w))):
+            out.append(남은)
+    return out
+
+
 def _재조사(body: 질문요청, 필요정보: list[str], ip: str | None = None, 읽은주소: list[str] | None = None) -> dict:
     """③-R 분류용 재조사(스펙 5-1). ② 와 같은 web_research.research(계획 LLM · 후보 LLM · 코드 검사)를 조사 목적만 필요정보로 바꿔
     한 번 돈다. 반환 {후보: [② 후보와 같은 모양]}. 후보 [] = 못 찾음 · 검색 실패 · 시간 부족 · 요청 한도. 예외를 올리지 않는다.
     시간: 세션 예산에서 ④-2 몫(재조사_남길초) + 다시 분류할 시간(item_classify.분류_제한초())을 남기고 최대 재조사_최대초.
-    결과는 세션.조사 와 따로 세션.재조사 에 둔다(호출자). 읽은주소(② 가 읽은 페이지)는 다시 읽지 않는다."""
+    결과는 세션.조사 와 따로 세션.재조사 에 둔다(호출자). 읽은주소(② 가 읽은 페이지)는 판매URL 말고는 다시 읽지 않는다.
+    필요정보는 호출자(_분류없음_다음)가 _필요정보_거르기 로 사용자 정정 · 품목설명에만 나온 낱말을 뺀 값이다."""
     import item_classify
     import research_runtime
     import uuid
