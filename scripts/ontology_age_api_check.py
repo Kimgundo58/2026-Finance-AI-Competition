@@ -57,7 +57,7 @@ def main() -> int:
             cur.execute(retrieve.DENSE.format(사업=''), {'v': vector, 'k': 1}).fetchall()
     print('통과 AGE 준비 후 기존 search_path·고정 벡터 DENSE SQL')
 
-    calls = {'cypher': 0, 'llm': 0}
+    calls = {'cypher': 0, 'llm': 0, '보조': 0}
     original_query = G._조회
 
     def cypher(*a, **kw):
@@ -69,6 +69,13 @@ def main() -> int:
     O.판정 = lambda q, **kw: original_judge(q, **{**kw, '기록': False})
 
     def fixed_llm(prompt, schema, **kw):
+        # 판정과 따로 도는 짧은 호출(재설계 v043: 할 일 다듬기 · 금지 재확인)은 준비 · 판정 호출 수와 따로 센다
+        if '할일다듬기' in schema.get('properties', {}):
+            calls['보조'] += 1
+            return {'할일다듬기': []}, {'모델': '고정', '입력토큰': 0, '출력토큰': 0}
+        if schema is O._금지재확인_스키마:
+            calls['보조'] += 1
+            return {'이유': '', '결과': '해당없음'}, {'모델': '고정', '입력토큰': 0, '출력토큰': 0}
         calls['llm'] += 1
         if '행동' in schema.get('properties', {}):
             return {'행동': '판정', '요청': ''}, {'모델': '고정', '입력토큰': 0, '출력토큰': 0}
