@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 from typing import Any
 
@@ -54,15 +55,21 @@ _규칙 = """너는 정부 창업지원사업 비용 규정의 분류 담당이�
 """
 
 
+def _자리채우기(틀: str, 값: dict[str, str]) -> str:
+    """틀의 자리표시 `{이름}` 을 한 번에 바꾼다. 차례로 `.replace` 하면 앞서 넣은 사용자 글 안의 `{후보}` 같은 글자가
+    뒤 치환에서 바뀌므로, 정규식 한 번 치환으로 틀에 있던 자리표시만 바꾸고 넣은 글은 그대로 둔다."""
+    return re.sub("|".join(re.escape("{" + k + "}") for k in 값), lambda m: 값[m.group(0)[1:-1]], 틀)
+
+
 def _프롬프트(입력: dict, 확인정보: list[str], 후보: list[dict]) -> str:
     """<지출> · <확인한정보> 에 넣는 사용자 글 · 공개 확인문장 · 변환 결과는 이스케이프(꺾쇠 → 전각)해 자료 태그를 닫거나 흉내 내지 못하게 한다
     (질문 · 판정 프롬프트와 같은 방식, ontology_research_plan.확인정보_문맥). <후보> 는 온톨로지 이름이라 그대로 둔다."""
     지출 = {k: 입력.get(k) for k in ("품목", "용도", "금액", "거래처") if 입력.get(k) not in (None, "")}
     줄 = [f'N{i + 1} | {c["정식명"]} | {", ".join(c["별칭"]) or "-"} | {", ".join(c.get("비목") or []) or "-"}'
          for i, c in enumerate(후보)]
-    return (_규칙.replace("{지출}", 이스케이프(json.dumps(지출, ensure_ascii=False)))
-            .replace("{확인}", "\n".join(f"- {이스케이프(x)}" for x in 확인정보) or "(없음)")
-            .replace("{후보}", "\n".join(줄)))
+    return _자리채우기(_규칙, {"지출": 이스케이프(json.dumps(지출, ensure_ascii=False)),
+                           "확인": "\n".join(f"- {이스케이프(x)}" for x in 확인정보) or "(없음)",
+                           "후보": "\n".join(줄)})
 
 
 성격_ENUM = ("구입", "임차", "용역", "구독", "수수료", "식음료", "기타")
@@ -139,7 +146,7 @@ def 설명_정리(문장: str, llm=llm_호출) -> dict | None:
     예산: 호출한 요청의 research_runtime.Budget 을 llm_호출 이 그대로 쓴다(횟수 · 남은 시간).
     문장은 이스케이프(꺾쇠 → 전각)해 넣는다. 문장 안의 `</설명>` 이 자료 태그를 닫지 못한다."""
     try:
-        출력, _ = llm(_설명_규칙.replace("{설명}", 이스케이프(문장)), _설명_스키마, 온도=0.0, 추론=False, 최대토큰=300,
+        출력, _ = llm(_자리채우기(_설명_규칙, {"설명": 이스케이프(문장)}), _설명_스키마, 온도=0.0, 추론=False, 최대토큰=300,
                     타임아웃=int(os.environ.get("SUDDOE_CLASSIFY_TIMEOUT") or 40),
                     모델=os.environ.get("SUDDOE_CLASSIFY_MODEL") or None)
     except (LLM실패, AttributeError, TypeError, ValueError) as e:
