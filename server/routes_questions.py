@@ -155,7 +155,7 @@ def questions(req: Request, body: 질문요청):
                     return 세션.질문결과
                 분류결과 = None
                 if not body.확정비목:
-                    분류결과 = _분류(body, 조사확인, 조사ID, 재조사함=세션.재조사 is not None)
+                    분류결과 = _분류(body, 조사확인, 조사ID, 재조사함=세션.재조사 is not None, 설명캐시=세션.설명정리)
                     세션.분류, 세션.노드결정 = 분류결과['분류'], 분류결과['노드결정']
                     if 분류결과.get('재조사') and 세션.재조사 is None:     # 재조사는 세션마다 한 번(스펙 8-2 서버 순서)
                         세션.재조사 = 분류결과['재조사']
@@ -225,13 +225,16 @@ def _판정조사_설정(body: 질문요청) -> dict | None:
 _분류실패_안내 = "지금은 분류를 확인하지 못했어요. 잠시 후 다시 시도해 주세요."
 
 
-def _분류(body: 질문요청, 조사확인: dict | None, 조사ID: str | None = None, 재조사함: bool = False) -> dict:
+def _분류(body: 질문요청, 조사확인: dict | None, 조사ID: str | None = None, 재조사함: bool = False,
+         설명캐시: dict | None = None) -> dict:
     """③ 품목 → 세목 → 비목(재설계 11-11). {분류 | None, 노드결정 | None, 안내, 실패}. 화면에는 분류 이름과 안내만 나간다.
 
     분류 = {비목, 세목, 표시문, 품목}. 맞는 분류가 없으면 분류 None 이고 화면은 [직접 입력하기] 로 품목 설명을 받아 다시 부른다.
     장애(DB 예외 · 분류 LLM 실패)도 분류 None 이지만 실패=True 와 _분류실패_안내 로 구분한다(호출자는 이 결과를 같은 답에 다시 내주지 않는다).
     디버그(버린 후보 · 다른 경로 · LLM 이유)는 로그에 개수만 남긴다.
     조사ID · 재조사함(세션.재조사 가 있음)은 mock 가지가 읽는다. live 재조사(③-R)는 v048 에서 재조사함 을 읽는다.
+    설명캐시(세션.설명정리): 사용자가 쓴 한 문장을 분류 자료 JSON 으로 바꾼 결과(5-2, item_classify.설명_반영). MOCK 은 바꾸지 않는다.
+    조사확인 은 바꾸지 않는다: 질문 · 판정 프롬프트의 사용자 진술은 쓴 문장 그대로다(8-4).
     """
     if MOCK:                    # 외부 호출 없는 고정 분류(스펙 8-5). 낱말별 가지는 mock_flow.분류
         return mock_flow.분류(body, 조사확인, 조사ID, 재조사함)
@@ -243,13 +246,14 @@ def _분류(body: 질문요청, 조사확인: dict | None, 조사ID: str | None 
             cur = c.cursor()
             레이블 = [x for x in ontology_lookup.레이블_목록(cur, body.사업명) if x["비목"] in 비목_ENUM]
             r = item_classify.분류(cur, body.사업명, {"품목": body.품목, "용도": body.용도, "금액": body.금액, "거래처": body.거래처},
-                                  레이블, item_classify.확인정보_글(조사확인, (조사확인 or {}).get('품목설명') or body.품목설명))
+                                  레이블, item_classify.확인정보_글(조사확인, (조사확인 or {}).get('품목설명') or body.품목설명),
+                                  설명캐시=설명캐시)
     except Exception as e:                                    # noqa: BLE001
         _log.warning("분류 실패: %s", type(e).__name__)
         return {"분류": None, "노드결정": None, "안내": _분류실패_안내, "실패": True}
     d = r["디버그"]
-    _log.info("분류 방법=%s 후보=%s 버림=%s 다른경로=%s ms=%s", r["방법"], d.get("후보수"), len(d.get("버린후보") or []),
-              len(d.get("다른경로") or []), d.get("ms"))
+    _log.info("분류 방법=%s 후보=%s 버림=%s 다른경로=%s 설명정리=%s ms=%s", r["방법"], d.get("후보수"), len(d.get("버린후보") or []),
+              len(d.get("다른경로") or []), d.get("설명정리"), d.get("ms"))
     if not r["분류"] and d.get("LLM실패"):                    # 분류 LLM 이 실패했다. 맞는 분류가 없다는 뜻이 아니다
         return {"분류": None, "노드결정": None, "안내": _분류실패_안내, "실패": True, "_디버그": d}
     return {"분류": r["분류"], "노드결정": r["노드결정"], "안내": item_classify.안내문(r["분류"]), "_디버그": d}
