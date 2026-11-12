@@ -298,7 +298,9 @@ def main() -> int:
          not any(x in 글 for x in ("충족답", "할일", "근거조문")) and not re.search(r"\bS\d{2,3}\b", 글))
     확인("POST /api/questions — 비목 enum 밖은 422",
          c.post("/api/questions", json={"확정비목": "회식비"}).status_code == 422)
-    확인("POST /api/questions — 비목이 없으면 422", c.post("/api/questions", json={}).status_code == 422)
+    빈 = c.post("/api/questions", json={})
+    확인("POST /api/questions — 비목이 없으면 422 가 아니라 서버 분류 경로(조사ID 를 준다, v045)",
+         빈.status_code == 200 and bool(빈.json().get("조사ID")), f"{빈.status_code} {빈.text[:120]}")
 
     _, e = sse("/api/judge?mock=가능", {"정규화": {"품목": "판정 키 확인", "심층질문": [{"code": "ㄱ"}]},
                                       "확정비목": "기계장치", "질문세트": "mock-question-set",
@@ -1085,6 +1087,23 @@ def _새흐름_검사(c, sse, 확인) -> None:
         q2, _, _ = 묻기(n, 조사답변=맞아요(q1["조사"]))
         확인("입력칸만 · 질문 0 · 추가입력 1개 이상 · 분류됨",
              분류됨(q2) and q2.get("질문") == [] and len(q2.get("추가입력") or []) >= 1, str(q2)[:160])
+
+        # v045 서버 분류: 비목 없이 JSON(SSE 아님) · 조사ID 없이 온 요청도 서버가 분류해 분류 · 분류안내를 준다
+        r = c.post("/api/questions", json={"사업명": 사업, "품목": "맥북 별칭", "금액": 160000, "용도": "디자인 시안 작업"})
+        q = r.json() if r.status_code == 200 else {}
+        확인("v045 · 비목 없는 JSON 요청 → 422 가 아니라 서버 분류(분류 · 분류안내 · 조사ID)",
+             r.status_code == 200 and 분류됨(q) and bool(q.get("조사ID")), f"{r.status_code} {r.text[:160]}")
+        r = c.post("/api/questions", json={"사업명": 사업, "확정비목": "지급수수료", "품목": "맥북", "금액": 160000, "용도": "작업"})
+        확인("v045 · 비목을 준 옛 JSON 요청은 지금 모양 그대로(조사ID · 분류 키 없음)",
+             r.status_code == 200 and "조사ID" not in r.json() and "분류" not in r.json(), r.text[:160])
+        # 재점검: 저장된 분류(확정비목 · 확정세목) + 웹조사 false → 분류를 다시 하지 않고 질문 → 판정 결과 분류.표시문
+        n = 정리("재점검 노트북")
+        q, 줄, _ = 묻기(n, 웹조사=False, 확정비목="지급수수료", 확정세목="소프트웨어 구독료")
+        확인("v045 · 재점검(확정비목 · 웹조사 false) → 분류 키 없이 질문, 판정용 조사 줄 있음",
+             q.get("상태") == "있음" and "분류" not in q and any("공개 웹에서" in x for x in 줄), str(q)[:160])
+        r, _, j = 판정하기(n, {**q, "분류": {"비목": "지급수수료", "세목": "소프트웨어 구독료"}}, [])
+        확인("v045 · 재점검 판정 결과에 분류.표시문(결과 화면 분류 줄)",
+             r.status_code == 200 and (j.get("분류") or {}).get("표시문") == "지급수수료 > 소프트웨어 구독료", f"{r.status_code} {str(j.get('분류'))}")
 
         # 옛 경로 사업(TIPS): 품목확인 없음 · 비목후보 → 화면이 고른 비목으로 질문 → 분류 칸 없음
         n = 정리("옛경로 장비")
