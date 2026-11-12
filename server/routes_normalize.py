@@ -31,7 +31,7 @@ def normalize(req: Request, body: 정규화요청):
     body.사업명 = _사업명_표준화(body.사업명)
 
     # 특수관계 값은 판정 후 폐기하는 값이라 키에 해시로만 들어간다. 추가설명은 용도에 합쳐져 LLM 입력이
-    # 되므로 키에 넣는다. 집행예정일·거래처는 정규화에 쓰이지 않아 넣지 않는다.
+    # 되므로 키에 넣는다. 거래처는 정규화에 쓰이지 않아 넣지 않는다. 집행예정일은 온톨로지 폼 경로 결과의 사용일자가 되므로 넣는다.
     org = auth.검증된_org(req)
     account = auth.검증된_account(req)
     # 세션을 못 만들어도 정규화는 한다. 조사ID 없이 답하면 화면은 질문 단계에서 새 조사를 연다(리뷰 28-7)
@@ -45,7 +45,7 @@ def normalize(req: Request, body: 정규화요청):
                             body.품목, body.금액, body.용도, body.추가설명, body.사업명,
                             body.특수관계.친족거래, body.특수관계.전직임직원업체,
                             # 온톨로지 경로는 응답 모양이 달라 옛 경로의 저장값을 쓰지 않는다
-                            body.부가세구분, 온톨로지_사업(body.사업명))
+                            body.부가세구분, 온톨로지_사업(body.사업명), body.집행예정일)
     캐시 = response_cache.조회(k, org, account)
 
     def gen():
@@ -146,8 +146,10 @@ def _온톨로지_정규화(body: 정규화요청) -> tuple[dict, bool] | None:
         if 폼 and body.추가설명:
             용도 = f"{용도} ({body.추가설명})".strip()
         if 폼:
+            # 사용일자 = 화면의 예상 지출일(스펙 8-1). 판정은 날짜로 읽히는 값만 쓴다(orchestrate.유효_날짜)
             out = {"품목": body.품목, "금액": body.금액, "금액_추정여부": False, "용도": 용도,
-                   "질의문": f"{용도} {body.품목 or ''}".strip(), "수치": {}, "거래처유형": None}
+                   "질의문": f"{용도} {body.품목 or ''}".strip(), "수치": {}, "거래처유형": None,
+                   "사용일자": (body.집행예정일 or "").strip() or None}
         else:
             out, _메타 = 질의변환({"질문": body.질문, "부가세구분": body.부가세구분, "사업명": body.사업명}, 레이블)
         # 별칭 정확 일치만(LLM 없음). 같으면 ② · ③-1 을 건너뛴다

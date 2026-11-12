@@ -1348,9 +1348,10 @@ def _새_판정준비단계(상태: _판정상태) -> dict | None:
     budget = research_runtime.current_budget()
     if 상태.dry or 상태.주입 or budget is None or not ontology_research_plan.추가조회_가능(budget):
         return None
-    # 추가 조회를 할 수 없는 조회(비목 없음 · 코드 게이트가 판정을 정함)면 판정 준비 LLM 과 화면 문장을 내지 않는다.
+    # 추가 조회를 할 수 없는 조회(조회 대상에 비목_id 가 없음 · 코드 게이트가 판정을 정함)면 판정 준비 LLM 과 화면 문장을 내지 않는다.
     # 2026-11-12 실행기록 20261112_225525: 비목이 없는데 준비 LLM 이 「추가조회」를 골랐고 조회는 건너뛰어 「마치지 못해」가 보였다.
-    # 비목이 없으면 게이트(확정=False)가 상한을 확인 필요로 두고, 게이트 종류가 있으면 합치기가 코드 판정을 쓴다. 「가능」은 나오지 않는다
+    # 확정비목이 없어도 정규화 분류후보(CLI · 옛 캐시)로 조회했으면 대상 비목_id 가 있어 판정 준비가 돈다. 그때도 게이트(확정=False)가
+    # 상한을 확인 필요로 둔다. 게이트 종류가 있으면 합치기가 코드 판정을 쓴다. 어느 쪽이든 「가능」은 나오지 않는다
     if not ontology_research_plan.추가조회_대상(상태.온톨로지 or {}):
         return None
     event_id = uuid.uuid4().hex
