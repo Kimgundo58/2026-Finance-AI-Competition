@@ -18,6 +18,7 @@ from typing import Any
 
 from _lib import paths  # noqa: F401  (scripts 경로)
 import ontology_lookup
+from assemble_context import 이스케이프
 from llm_qwen import LLM실패, llm_호출
 
 _log = logging.getLogger(__name__)
@@ -54,11 +55,13 @@ _규칙 = """너는 정부 창업지원사업 비용 규정의 분류 담당이�
 
 
 def _프롬프트(입력: dict, 확인정보: list[str], 후보: list[dict]) -> str:
+    """<지출> · <확인한정보> 에 넣는 사용자 글 · 공개 확인문장 · 변환 결과는 이스케이프(꺾쇠 → 전각)해 자료 태그를 닫거나 흉내 내지 못하게 한다
+    (질문 · 판정 프롬프트와 같은 방식, ontology_research_plan.확인정보_문맥). <후보> 는 온톨로지 이름이라 그대로 둔다."""
     지출 = {k: 입력.get(k) for k in ("품목", "용도", "금액", "거래처") if 입력.get(k) not in (None, "")}
     줄 = [f'N{i + 1} | {c["정식명"]} | {", ".join(c["별칭"]) or "-"} | {", ".join(c.get("비목") or []) or "-"}'
          for i, c in enumerate(후보)]
-    return (_규칙.replace("{지출}", json.dumps(지출, ensure_ascii=False))
-            .replace("{확인}", "\n".join(f"- {x}" for x in 확인정보) or "(없음)")
+    return (_규칙.replace("{지출}", 이스케이프(json.dumps(지출, ensure_ascii=False)))
+            .replace("{확인}", "\n".join(f"- {이스케이프(x)}" for x in 확인정보) or "(없음)")
             .replace("{후보}", "\n".join(줄)))
 
 
@@ -83,15 +86,23 @@ def _확신_검사(확신: str, 번호: str, 같은후보) -> str:
 
 
 class 사용자설명(str):
-    """확인정보 중 사용자가 쓴 한 문장([직접 입력하기] 정정 · 품목설명). 분류 LLM 을 부르기 직전에 설명_반영 이 JSON 칸으로 바꾼다(5-2)."""
+    """확인정보 중 사용자가 품목이 무엇인지 쓴 한 문장(품목설명_유형 후보의 [직접 입력하기] 정정 · 품목설명).
+    분류 LLM 을 부르기 직전에 설명_반영 이 JSON 칸으로 바꾼다(5-2)."""
+
+
+# 품목이 무엇인지 말하는 조사 유형. web_research.조사_유형 과 같다(판매자 · 업체이용조건 같은 거래처 유형, 가격 등은 품목 설명이 아니다).
+# 이 유형의 정정만 JSON 칸으로 바꾸고, 그 밖의 정정은 글자 그대로(이스케이프만) 분류 자료로 둔다.
+품목설명_유형 = ("제품성격",)
 
 
 def 확인정보_글(조사확인: dict | None, 품목설명: str | None) -> list[str]:
     """② 조사에서 사용자가 [맞아요] 한 확인문장(없으면 발췌)과 [직접 입력하기] 설명. 분류 LLM 의 자료다(판정 근거는 아니다).
-    사용자가 쓴 문장은 사용자설명 으로 표시해 분류() 가 JSON 칸으로 바꾼다. 조사확인 자체는 바꾸지 않는다(판정 프롬프트는 원문, 8-4)."""
+    품목이 무엇인지 쓴 문장(품목설명_유형 정정 · 품목설명)은 사용자설명 으로 표시해 분류() 가 JSON 칸으로 바꾸고, 그 밖의 정정은 글자 그대로 둔다.
+    조사확인 자체는 바꾸지 않는다(판정 프롬프트는 원문, 8-4). 이스케이프는 _프롬프트 가 한다."""
     out = [c.get("확인문장") or c["내용"] for c in (조사확인 or {}).get("확인한정보") or []
            if c.get("답") == "맞아요" and (c.get("확인문장") or c.get("내용"))]
-    out += [사용자설명(c["정정"]) for c in (조사확인 or {}).get("확인한정보") or [] if c.get("정정")]
+    out += [사용자설명(c["정정"]) if c.get("유형") in 품목설명_유형 else str(c["정정"])
+            for c in (조사확인 or {}).get("확인한정보") or [] if c.get("정정")]
     if 품목설명 and 품목설명.strip():
         out.append(사용자설명(품목설명.strip()))
     return list(dict.fromkeys(out))
@@ -125,9 +136,10 @@ _설명_스키마 = {"type": "object", "additionalProperties": False, "required"
 
 def 설명_정리(문장: str, llm=llm_호출) -> dict | None:
     """사용자 한 문장 → {품목, 성격, 설명, 용도}. LLM 1회. 실패 · 시간 초과 · 형식 오류는 None(호출자가 문장을 그대로 쓴다).
-    예산: 호출한 요청의 research_runtime.Budget 을 llm_호출 이 그대로 쓴다(횟수 · 남은 시간)."""
+    예산: 호출한 요청의 research_runtime.Budget 을 llm_호출 이 그대로 쓴다(횟수 · 남은 시간).
+    문장은 이스케이프(꺾쇠 → 전각)해 넣는다. 문장 안의 `</설명>` 이 자료 태그를 닫지 못한다."""
     try:
-        출력, _ = llm(_설명_규칙.replace("{설명}", 문장), _설명_스키마, 온도=0.0, 추론=False, 최대토큰=300,
+        출력, _ = llm(_설명_규칙.replace("{설명}", 이스케이프(문장)), _설명_스키마, 온도=0.0, 추론=False, 최대토큰=300,
                     타임아웃=int(os.environ.get("SUDDOE_CLASSIFY_TIMEOUT") or 40),
                     모델=os.environ.get("SUDDOE_CLASSIFY_MODEL") or None)
     except (LLM실패, AttributeError, TypeError, ValueError) as e:
