@@ -126,18 +126,19 @@ def _몇번째(조사ID, 가지명: str) -> int:
         return _시도[k]
 
 
-def 분류(body, 조사확인: dict | None, 조사ID) -> dict:
+def 분류(body, 조사확인: dict | None, 조사ID, 재조사함: bool = False) -> dict:
     """③ 분류 고정 응답. routes_questions._분류 와 같은 모양에 분류없음 일 때 다음행동(+재조사)을 싣는다.
 
     서버 순서(8-2): 재조사를 아직 안 했으면 재조사 → 찾으면 재조사확인 / 설명을 받은 적 없으면 설명입력 / 둘 다 했으면 판정.
+    재조사함 = 조사 세션에 재조사 결과가 있다(이번 요청의 재조사답변 유무가 아니다). 조사확인 은 세션에 남긴 품목설명 ·
+    재조사 답까지 든 확인 결과다(routes_questions). 그래서 다음 요청이 재조사답변 을 빼고 보내도 재조사를 다시 하지 않는다.
     """
     from item_classify import 안내문
     from server.routes_questions import _분류실패_안내
     조사확인 = 조사확인 or {}
     g = 가지(body.품목)
-    재조사함 = bool(조사확인.get("재조사확인"))
-    설명받음 = bool(조사확인.get("품목설명")) or any(
-        (x.get("정정") or "").strip() for x in [*(조사확인.get("확인한정보") or []), *(조사확인.get("재조사확인") or [])])
+    # 「설명을 받았다」 = 품목설명 이 있거나 조사 답 · 재조사 답(확인한정보 에 합쳐 있다)에 직접입력(정정)이 있다
+    설명받음 = bool(조사확인.get("품목설명")) or any((x.get("정정") or "").strip() for x in 조사확인.get("확인한정보") or [])
     없음 = {"분류": None, "노드결정": None}
     if g == "처리실패" and _몇번째(조사ID, g) == 1:
         raise RuntimeError("mock 요청 처리 실패")
