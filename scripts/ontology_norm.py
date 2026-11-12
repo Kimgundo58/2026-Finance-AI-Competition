@@ -12,6 +12,19 @@ import unicodedata
 
 # 모든 비목에 걸리는 노드. ontology_fund · ontology_context · ontology_lookup · ontology_load · ontology_check 가 쓴다
 모든비목 = "비목:창업/*"
+# 판정에 쓰는 규범의 검수단계(2026-11-13 사용자: AI대조 도 확정으로 본다. AI초안 · 재검토 만 미확정).
+# DB 의 생성 칼럼 verified(AI검증 · 사람확정)는 그대로 두고 판정 쪽은 이 값과 확정_규범() 으로 고른다
+확정_검수단계 = ("AI대조", "AI검증", "사람확정")
+
+
+def 확정_규범(n: dict) -> bool:
+    """코드 판정에 쓸 수 있는 규범: 검수단계가 확정_검수단계 이고 해석미결이 아니다.
+
+    검수단계가 없는 dict(옛 호출 · 시험용)는 verified 값으로 읽는다.
+    """
+    단계 = n.get("검수단계")
+    확정 = 단계 in 확정_검수단계 if 단계 is not None else bool(n.get("verified"))
+    return 확정 and not n.get("해석미결")
 _따옴표 = str.maketrans({"“": '"', "”": '"', "″": '"', "‘": "'", "’": "'"})
 # 줄 전체가 페이지 표식이거나 본문 사이에 끼어든 `- 14 -`. 숫자 범위 표기(10-20)는 공백이 없어 걸리지 않는다.
 _페이지표식 = re.compile(r"(?:(?<=\s)|^)-\s*\d{1,3}\s*-(?=\s|$)")

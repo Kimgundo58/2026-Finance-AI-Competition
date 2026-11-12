@@ -95,9 +95,9 @@ def 판정_검사():
         with patch.dict(os.environ, {'SUDDOE_ONTOLOGY_PROGRAMS': 사업}), \
              patch.object(orchestrate.db, 'connect', side_effect=lambda **k: Connection(Cursor(row))), \
              patch.object(lookup.ontology_graph, '준비', side_effect=RuntimeError('AGE 장애') if age_error else None), \
-             patch.object(orchestrate, '_실패응답', side_effect=lambda *a, **k: {'판정': '판단불가'}), \
+             patch.object(orchestrate, '_실패응답', side_effect=lambda *a, **k: {'판정': '확인 필요'}), \
              patch.object(orchestrate, '_룰조회', side_effect=AssertionError('옛 경로 호출')) as 옛:
-            assert orchestrate.판정('출장', 사업명=사업, 기록=False)['판정'] == '판단불가'
+            assert orchestrate.판정('출장', 사업명=사업, 기록=False)['판정'] == '확인 필요'
             assert not 옛.called
     with patch.dict(os.environ, {'SUDDOE_ONTOLOGY_PROGRAMS': 사업}), \
          patch.object(orchestrate.db, 'connect', side_effect=lambda **k: Connection(Cursor((1,)))), \
@@ -147,7 +147,7 @@ def 캐시_API_검사():
             assert 결과.status_code == 200 and 결과.json()['상태'] == '실패'
             assert not 캐시.called
             결과 = _events(client.post('/api/judge', json=judge))
-            assert 결과['결과'][0]['판정'] == '판단불가' and 결과['완료'][0]['실패']
+            assert 결과['결과'][0]['판정'] == '확인 필요' and 결과['완료'][0]['실패']
             assert not 캐시.called
             token = research_sessions.생성(None, None)
             session = research_sessions.조회(token, None, None)
@@ -157,7 +157,7 @@ def 캐시_API_검사():
                                        headers={'Accept': 'text/event-stream'})
             assert sse_question.status_code == 503
             결과 = _events(client.post('/api/judge', json={**judge, '조사ID': token}))
-            assert 결과['결과'][0]['판정'] == '판단불가' and 결과['완료'][0]['실패']
+            assert 결과['결과'][0]['판정'] == '확인 필요' and 결과['완료'][0]['실패']
     with patch.dict(os.environ, {'SUDDOE_ONTOLOGY_PROGRAMS': 사업}), \
          patch.object(routes_normalize, '_온톨로지_정규화', return_value=None), \
          patch.object(routes_normalize, '_사업_비목', side_effect=AssertionError('옛 정규화 호출')):

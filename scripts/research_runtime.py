@@ -16,8 +16,12 @@ _emitter: ContextVar[object] = ContextVar("research_emitter", default=None)
 
 
 class Budget:
-    def __init__(self, *, seconds: float = 120, tools: int = 6, llm: int = 9,
-                 evidence_chars: int = 60000, emit=None):
+    # 횟수 상한(2026-11-12 사용자: 비용 · 호출 횟수는 상관없다, 막지 말 것). 실제로 묶는 건 시간(전체 300초)이다.
+    # 300초 · LLM 100 · 도구 60(2026-11-13): ② 품목 조사(계획 6 · 도구 10 · 120초)에 ④-2 판정용 조사(계획 15 · 도구 30)가 더해졌다.
+    # LLM 횟수에는 게이트웨이 일시 오류 재시도(llm_qwen._일시오류_추가)도 HTTP 호출마다 예약된다
+    # 읽은 본문 글자 상한 150,000(2026-11-13): ④-2 가 본문을 최대 30번 더 읽는다
+    def __init__(self, *, seconds: float = 300, tools: int = 60, llm: int = 100,
+                 evidence_chars: int = 150000, emit=None):
         self._seconds = max(0, seconds)
         self._elapsed = 0.0
         self._started = None

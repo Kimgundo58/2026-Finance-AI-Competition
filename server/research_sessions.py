@@ -43,6 +43,11 @@ class Session:
     판정요청키: str | None = None
     판정결과: tuple | None = None
     판정키: str | None = None          # 판정결과를 만든 요청의 메인 캐시 키(routes_judge). 다르면 다시 판정한다
+    분류: dict | None = None           # ③ 서버가 정한 분류 {비목, 세목, 표시문, 품목}. 판정 요청의 확정비목 · 세목이 이 값이면 입력키는 분류 전 값으로 맞춘다
+    노드결정: dict | None = None       # ③ 이 고른 품목 노드 {id, 확신, 품목}. 질문 LLM 실패와 상관없이 판정이 읽는다(routes_judge)
+    품목설명: str | None = None        # ③ 조사 결과 없이 [직접 입력하기] 한 설명. 판정 요청에는 없어 답변_검증 이 여기서 읽는다
+    판정조사: dict | None = None       # ④-2 판정용 조사 {상태, 요건결과: {조건키: …}, 출처}. 질문 요청이 저장하고 답변_검증 이 판정에 넘긴다
+    분류실패: bool = False            # ③ 분류가 장애(DB · LLM)로 끝났다. 질문결과를 같은 답에 다시 내주지 않고 분류를 다시 한다(routes_questions)
 
 
 def _서명(token):
@@ -88,47 +93,66 @@ def 입력키(사업, 비목, 세목, 품목, 금액, 용도, 부가세구분=No
 
 
 def 후보_답변(s, 답변):
-    """서버 저장 후보 ID에만 사용자의 확인·정정을 결합한다."""
+    """서버 저장 후보 ID에만 사용자의 답을 결합한다. 답은 맞아요 | 직접입력(+정정=사용자 설명) 두 가지(재설계 11-11 ②).
+
+    후보마다 답이 있어야 다음 단계로 간다(답하지 않은 후보가 있으면 ValueError). 직접입력 설명은 ③ 분류 LLM 의 자료다.
+    """
     후보 = s.조사.get('후보') or []
     표 = {x['id']: x for x in 후보}
     if len(표) != len(후보):
         raise ValueError('조사 후보 오류')
     답표 = {}
     for a in 답변:
-        if a['id'] not in 표 or a['id'] in 답표:
+        if a['id'] not in 표 or a['id'] in 답표 or a.get('답') not in ('맞아요', '직접입력'):
             raise ValueError('조사 답변 오류')
-        if a.get('정정') and a['답'] != '아니에요':
+        if a['답'] == '직접입력' and not (a.get('정정') or '').strip():
+            raise ValueError('직접 입력 설명 없음')
+        if a.get('정정') and a['답'] != '직접입력':
             raise ValueError('조사 정정 오류')
         답표[a['id']] = a
-    확인, 미확인, 업체 = [], [], []
+    if set(답표) != set(표):
+        raise ValueError('답하지 않은 조사 후보')
+    확인, 업체 = [], []
     for c in 후보:
-        a = 답표.get(c['id'], {'답': '모르겠어요'})
+        a = 답표[c['id']]
         row = {**copy.deepcopy(c), '답': a['답']}
         if a.get('정정'):
             row['정정'] = a['정정'].strip()
-        if a['답'] == '맞아요' or (a['답'] == '아니에요' and row.get('정정')):
-            확인.append(row)
-        else:
-            미확인.append(row)
+        확인.append(row)
         if c.get('유형') == '업체이용조건':
             업체.append(row)
     return {'상태': s.조사.get('상태', '없음'), '확인한정보': 확인,
-            '업체이용조건': 업체, '미확인': 미확인, '출처': copy.deepcopy(s.조사.get('출처') or []),
-            **{k: copy.deepcopy(s.조사[k]) for k in ('부족정보', '사용자확인') if k in s.조사},
+            '업체이용조건': 업체, '미확인': [], '출처': copy.deepcopy(s.조사.get('출처') or []),
+            **{k: copy.deepcopy(s.조사[k]) for k in ('부족정보',) if k in s.조사},
             **({'사유': s.조사['사유']} if s.조사.get('사유') else {})}
+
+
+def 설명_붙이기(조사, 품목설명):
+    """[직접 입력하기] 품목 설명을 확인 결과에 넣는다. 확인정보_문맥 이 질문 · 판정 프롬프트에 사용자 진술로 넣는다."""
+    if isinstance(품목설명, str) and 품목설명.strip():
+        조사['품목설명'] = 품목설명.strip()
+    return 조사
 
 
 def 답변키(조사):
     답 = [{'id': x['id'], '답': x['답'], '정정': x.get('정정') or None}
          for x in [*조사['확인한정보'], *조사['미확인']]]
-    return hashlib.sha256(json.dumps(sorted(답, key=lambda x: x['id']), ensure_ascii=False,
-                                     sort_keys=True).encode()).hexdigest()
+    값 = sorted(답, key=lambda x: x['id'])
+    if 조사.get('품목설명'):
+        값 = {'답': 값, '품목설명': 조사['품목설명']}
+    return hashlib.sha256(json.dumps(값, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+
+
+def 화면_조사(조사):
+    """판정 응답 · 판정 캐시에 넣는 조사 값. ④-2 판정용 조사(조건키 · 조건 번호가 든 서버 전용 값)는 뺀다."""
+    return {k: v for k, v in 조사.items() if k != '판정조사'} if isinstance(조사, dict) else 조사
 
 
 def 답변_검증(s, 답변, 질문세트, 입력, 버전):
     if s.입력 != 입력 or s.버전 != 버전 or s.질문세트 != 질문세트 or s.질문결과 is None:
         raise ValueError('조사 입력 또는 질문이 변경되었습니다')
-    조사 = 후보_답변(s, 답변)
+    조사 = 설명_붙이기(후보_답변(s, 답변), s.품목설명)
     if s.확인답키 != 답변키(조사):
         raise 재질문('확인 내용이 변경되어 질문을 다시 만들어야 합니다')
-    return 조사
+    # ④-2 판정용 조사 결과는 답키 계산 뒤에 붙인다(답키는 사용자가 확인한 내용만으로 만든다). 판정이 조사["판정조사"] 로 읽는다
+    return {**조사, '판정조사': s.판정조사} if isinstance(조사, dict) and s.판정조사 else 조사

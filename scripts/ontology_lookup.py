@@ -2,7 +2,7 @@
 """온톨로지 조회 함수(읽기 전용, docs/5_룰/5-8_저장과_조회.md). 판정 · 질문 생성의 새 경로가 쓴다.
 
 노드_결정 · 품목_노드 · 경로밖_품목 · 품목_후보 · 노드결정_적용 · 상위_세목 · 경로밖_규범 · 상황_후보 · 상황_규범 · 비율_규범 · 비목_품목금지 · 조문_행 · 세목_한도_있음 · 적용_규범 · 근거_조문 · 새경로_대상 · 근거경로_문장. 쓰지 않는다. 어떤 예외도 호출자에게 그대로 올린다
-(호출자 orchestrate 가 판단불가로 바꾼다). 없는 노드 ID 는 LookupError 다.
+(호출자 orchestrate 가 확인 필요(실패)로 바꾼다). 없는 노드 ID 는 LookupError 다.
 L3 는 여기서 다루지 않는다(능력 질문 시험의 `문맥_구성` 호출만 판정과 같은 문맥 구성 함수로 L3 연결을 본다). 읽는 테이블: corpus.age_concepts · concept_labels · concept_relations · norms · provenance ·
 documents · doc_articles.
 
@@ -28,7 +28,7 @@ from _lib import paths  # noqa: E402
 
 ROOT = paths.ensure_on_path()
 
-from ontology_norm import 모든비목, 조문ID_풀이, 조번호_표시  # noqa: E402
+from ontology_norm import 모든비목, 조문ID_풀이, 조번호_표시, 확정_검수단계, 확정_규범  # noqa: E402
 from rule_lookup import _norm  # noqa: E402
 import ontology_graph  # noqa: E402
 import ontology_age  # noqa: E402
@@ -50,7 +50,7 @@ def _조단위_id(조문ID: str) -> str:
 
 @functools.lru_cache(maxsize=1)
 def _스키마() -> dict:
-    """ontology/schema.json. 문서키 ↔ doc_id 표의 기준이다. 없으면 예외(호출자가 판단불가로 바꾼다)."""
+    """ontology/schema.json. 문서키 ↔ doc_id 표의 기준이다. 없으면 예외(호출자가 확인 필요(실패)로 바꾼다)."""
     return json.loads(_스키마_경로.read_text(encoding="utf-8"))
 
 
@@ -112,7 +112,7 @@ def _우선순위_찾기(우선순위들: list[dict], 채택: dict, 제외: dict
 
 def _판정용(n: dict) -> bool:
     """코드 판정에 쓸 수 있는 규범인가(`ontology_gate._사용가능` 과 같은 기준)."""
-    return bool(n.get("verified")) and not n.get("해석미결")
+    return 확정_규범(n)
 
 
 def _우선순위_적용(규범들: list[dict]) -> tuple[list[dict], list[dict]]:
@@ -431,7 +431,7 @@ def 별칭_후보(cur, 표현: str | None, 사업명: str | None, 레이블: lis
 
 
 def 대상_노드(cur, 사업명: str | None, 비목: str, 세목: str | None = None) -> dict:
-    """화면에서 확정한 비목 · 세목 표기 → 노드 ID. 세목이 주어졌는데 그 비목 아래에 없으면 LookupError(판단불가)."""
+    """화면에서 확정한 비목 · 세목 표기 → 노드 ID. 세목이 주어졌는데 그 비목 아래에 없으면 LookupError(확인 필요, 실패)."""
     사업들 = [사업명] if 사업명 else []
     행 = cur.execute("""SELECT concept_id FROM corpus.age_concepts WHERE 종류 = '비목' AND pref_label = %s
                          AND (적용사업 IS NULL OR 적용사업 = ANY(%s)) ORDER BY 적용사업 NULLS LAST LIMIT 1""",
@@ -553,6 +553,59 @@ def 상위_세목(cur, 사업명: str | None, 노드_id: str, 비목_id: str) ->
     return {"id": 세목들[0], "세목": 이름} if 풀이["대상_id"] == 세목들[0] and 풀이["비목_id"] == 비목_id else None
 
 
+def 후보_정리(cur, 사업명: str | None, 레이블: list[dict]) -> tuple[list[dict], list[dict]]:
+    """③-0 품목 → 세목 → 비목 분류의 후보(재설계 11-11). (남김, 버림).
+
+    범위: 이 사업이 쓰는 비목(레이블의 비목 행) 전체와 모든 비목(`비목:창업/*`) 아래 세목 · 품목 노드. 비목을 먼저 고르지 않는다.
+    같은 정식명이 공통(적용사업 NULL, L1)과 이 사업(L2) 둘 다면 이 사업 노드만 남긴다(사용자 결정 11-11).
+    남김 = [{id, 정식명, 별칭, 비목: [소속 비목 이름], 적용사업}] concept_id 순. 버림 = [{id, 정식명, 대신: [남긴 id]}] — ④ 안전망 재료.
+    """
+    뿌리 = {x["노드"]: x["비목"] for x in 레이블 if x.get("세목") is None}
+    전체: dict[str, dict] = {}
+    for b, 이름 in [*뿌리.items(), (모든비목, "모든 비목")]:
+        for h in 품목_후보(cur, 사업명, b, 모든비목_포함=False):
+            전체.setdefault(h["id"], {**h, "비목": []})["비목"].append(이름)   # 비목: 프롬프트 참고용 소속 비목 이름
+    적용 = dict(cur.execute("SELECT concept_id, 적용사업 FROM corpus.age_concepts WHERE concept_id = ANY(%s)",
+                            (list(전체),)).fetchall())
+    이름별: dict[str, list[str]] = {}
+    for i, h in 전체.items():
+        이름별.setdefault(_norm(h["정식명"]), []).append(i)
+    남김, 버림 = [], []
+    for i in sorted(전체):
+        h = 전체[i]
+        같은이름_사업 = [j for j in 이름별[_norm(h["정식명"])] if 적용.get(j)]
+        if 적용.get(i) is None and 같은이름_사업:
+            버림.append({"id": i, "정식명": h["정식명"], "대신": 같은이름_사업})
+            continue
+        남김.append({**h, "적용사업": 적용.get(i)})
+    return 남김, 버림
+
+
+def 분류_경로(cur, 사업명: str | None, 노드_id: str, 레이블: list[dict]) -> dict | None:
+    """③-2 노드에서 위로 올라가 가장 가까운 분류(레이블 행) 하나 → {비목, 세목, 표시문, 비목_노드, 세목_노드, 다른경로}.
+
+    레이블 행이 세목이면 그 세목과 부모 비목, 비목이면 세목 없음. 가장 가까운 단계에 레이블이 둘 이상이면 이 사업 노드를 먼저,
+    그다음 concept_id 순으로 하나를 고르고 나머지를 `다른경로`(표시문 목록, 디버그 전용)에 남긴다. 화면은 하나만 안내한다.
+    모든 비목(`비목:창업/*`) 아래에만 있는 노드처럼 닿는 레이블이 없으면 None.
+    """
+    사업들 = [사업명] if 사업명 else []
+    표 = {x["노드"]: x for x in 레이블}
+    깊이 = {노드_id: 0}
+    for 하, 상 in _상위_경로(cur, 노드_id, 사업들):     # 깊이 순. 처음 닿은 깊이가 가장 짧은 거리다
+        if 하 in 깊이 and 상 not in 깊이:
+            깊이[상] = 깊이[하] + 1
+    닿음 = sorted((i for i in 깊이 if i in 표), key=lambda i: (깊이[i], "@" not in i, i))
+    if not 닿음:
+        return None
+    x = 표[닿음[0]]
+    비목행 = next((r for r in 레이블 if r["세목"] is None and r["비목"] == x["비목"]), None)
+    # 고른 분류의 부모 비목은 같은 경로다. 다른 비목이거나 같은 단계의 다른 분류만 다른 경로다
+    다른 = list(dict.fromkeys(표[i]["표시문"] for i in 닿음[1:]
+                             if 표[i]["비목"] != x["비목"] or 깊이[i] == 깊이[닿음[0]]))
+    return {"비목": x["비목"], "세목": x["세목"], "표시문": x["표시문"],
+            "비목_노드": 비목행["노드"] if 비목행 else None, "세목_노드": x["노드"] if x["세목"] else None, "다른경로": 다른}
+
+
 def 경로밖_규범(cur, 사업명: str | None, 품목들: list[str], 적용: dict) -> list[dict]:
     """경로 밖 품목에 걸린 규범 중 이미 적용 규범에 있는 것과 우선순위를 뺀 것. 그 품목의 상위 묶음 노드 규범도 포함한다."""
     이미 = {n["norm_id"] for n in 적용["규범"]}
@@ -574,7 +627,7 @@ def 경로밖_규범(cur, 사업명: str | None, 품목들: list[str], 적용: d
 def 상황_후보(cur, 사업명: str | None, 상한: int | None = 상황후보_상한) -> list[dict]:
     """규범의 `대상` 에 쓰인 절차 · 시간 · 주체 노드 [{id, 정식명}](5-14 C). 질문 LLM 이 질문 글에 드러난 상황을 고르는 후보다.
 
-    세지는 규범: `AI검증` 이상(verified) · 해석미결 아님 · 우선순위 아님 · 적용사업이 NULL 이거나 이 사업. 노드도 적용사업이 NULL 이거나 이 사업.
+    세지는 규범: `AI대조` 이상(ontology_norm.확정_검수단계) · 해석미결 아님 · 우선순위 아님 · 적용사업이 NULL 이거나 이 사업. 노드도 적용사업이 NULL 이거나 이 사업.
     비목에서 닿는 규범으로 좁히지 않는다(안 닿는 규범에 가는 길이 목적이다). 금지 · 한도 · 임계값 · 요건 규범의 대상을 먼저, 그 안에서는 그런 규범이 많은 노드를 먼저 두고
     상한(`상한`, None 이면 자르지 않음)까지 자른다. 같은 입력이면 항상 같은 순서다(판정 때 다시 만들어 ID 를 확인한다).
     """
@@ -587,11 +640,11 @@ def 상황_후보(cur, 사업명: str | None, 상한: int | None = 상황후보_
              FROM 대상_규범 n
              CROSS JOIN LATERAL unnest(n.대상) AS d(id)
              JOIN 대상_개념 c ON c.concept_id = d.id
-            WHERE n.verified AND NOT n.해석미결 AND n.종류 <> '우선순위' AND (n.적용사업 IS NULL OR n.적용사업 = ANY(%s))
+            WHERE n.검수단계 = ANY(%s) AND NOT n.해석미결 AND n.종류 <> '우선순위' AND (n.적용사업 IS NULL OR n.적용사업 = ANY(%s))
               AND c.종류 = ANY(%s) AND (c.적용사업 IS NULL OR c.적용사업 = ANY(%s))
             GROUP BY c.concept_id, c.pref_label
             ORDER BY (count(*) FILTER (WHERE n.종류 = ANY(%s)) = 0), 3 DESC, c.concept_id""",
-        (list(상황_먼저_종류), 사업들, list(상황_종류), 사업들, list(상황_먼저_종류))).fetchall()
+        (list(상황_먼저_종류), list(확정_검수단계), 사업들, list(상황_종류), 사업들, list(상황_먼저_종류))).fetchall()
     out = [{"id": r[0], "정식명": r[1]} for r in 행들]
     return out if 상한 is None else out[:상한]
 
@@ -610,8 +663,8 @@ def 상황_규범(cur, 사업명: str | None, 노드들: list[str], 이미: set[
     사업들 = [사업명] if 사업명 else []
     행들 = cur.execute(
         f"""SELECT {", ".join(f'n."{c}"' for c in _규범_컬럼)} FROM corpus.age_norms n
-             WHERE n.verified AND NOT n.해석미결 AND n.종류 <> '우선순위' AND (n.적용사업 IS NULL OR n.적용사업 = ANY(%s)) AND n.대상 && %s
-             ORDER BY n.norm_id""", (사업들, 노드들)).fetchall()
+             WHERE n.검수단계 = ANY(%s) AND NOT n.해석미결 AND n.종류 <> '우선순위' AND (n.적용사업 IS NULL OR n.적용사업 = ANY(%s)) AND n.대상 && %s
+             ORDER BY n.norm_id""", (list(확정_검수단계), 사업들, 노드들)).fetchall()
     규범들 = [n for n in (dict(zip(_규범_컬럼, r)) for r in 행들) if n["norm_id"] not in 이미]
     순서 = {k: i for i, k in enumerate(상황_먼저_종류)}
     규범들 = sorted(규범들, key=lambda n: (순서.get(n["종류"], len(순서)), n["norm_id"]))[:상황규범_상한]
@@ -628,9 +681,9 @@ def 비율_규범(cur, 사업명: str | None) -> list[dict]:
     사업들 = [사업명] if 사업명 else []
     행들 = cur.execute(
         f"""SELECT {", ".join(f'n."{c}"' for c in _규범_컬럼)} FROM corpus.age_norms n
-             WHERE n.종류 = '의무' AND n.verified AND NOT n.해석미결 AND (n.적용사업 IS NULL OR n.적용사업 = ANY(%s))
+             WHERE n.종류 = '의무' AND n.검수단계 = ANY(%s) AND NOT n.해석미결 AND (n.적용사업 IS NULL OR n.적용사업 = ANY(%s))
                AND (n.결과->>'문장') ~ '[0-9]\\s*(%%|퍼센트)' AND (n.결과->>'문장') ~ '총\\s*사업비'
-             ORDER BY n.norm_id""", (사업들,)).fetchall()
+             ORDER BY n.norm_id""", (list(확정_검수단계), 사업들)).fetchall()
     규범들 = [dict(zip(_규범_컬럼, r)) for r in 행들]
     _근거_붙이기(cur, 규범들)
     return 규범들
@@ -970,7 +1023,7 @@ def _자체시험() -> int:
                           and not {x for x in 창조 if x[0] == "B2. 이" and x[1] in ("지침 제47조", "모두의 창업 제4조")}
                           and ("B2. 이", "지침 제47조") in 옛창))
                 t.append(("창업활동자금: 공통 우선순위 규범은 게이트에 그대로 쓴다(L3 적용 순서)",
-                          any(n["종류"] == "우선순위" for n in 창["적용"]["규범"]) and 창["게이트"]["상한"] == "조건부"))
+                          any(n["종류"] == "우선순위" for n in 창["적용"]["규범"]) and 창["게이트"]["상한"] == "확인 필요"))
     except Exception as e:  # noqa: BLE001 - CI 에는 DB 가 없다
         print(f"건너뜀: DB 사례(DB 없음: {type(e).__name__})")
     실패 = [x for x, ok in t if not ok]

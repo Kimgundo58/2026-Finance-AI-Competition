@@ -6,7 +6,7 @@
 필드 이름은 프론트 요구사항의 용어를 따른다:
     지출명   → 제목           예상 비목 → 확정비목
     예상금액 → 금액           예상지출일 → 집행예정일
-    AI 점검 상태 → 판정 (가능·조건부·불가·판단불가 또는 null). null 은 '점검 전' 이며 판정 값이 아니다.
+    AI 점검 상태 → 판정 (가능·확인 필요·불가 또는 null). null 은 '점검 전' 이며 판정 값이 아니다.
 
 이름을 바꾼 필드는 한 릴리스 동안 요청에서 이전 이름도 받고(validation_alias), 응답에는 이전 이름의
 읽기 전용 필드(computed_field)를 함께 내보낸다. 해당 줄에는 호환 표식 주석을 단다.
@@ -20,14 +20,17 @@ from pydantic import AliasChoices, BaseModel, Field, computed_field, model_valid
 
 # --- 공통 ---
 
-판정타입 = Literal["가능", "조건부", "불가", "판단불가"]
+판정타입 = Literal["가능", "확인 필요", "불가"]      # 2026-11-11: 옛 조건부·판단불가 → 확인 필요
 부가세구분타입 = Literal["포함", "공급가액", "모름"]
 
 
 class 특수관계(BaseModel):
-    """특수관계 거래 여부. 판정 요청에만 쓰고 저장하지 않는다."""
-    친족거래: bool = False
-    전직임직원업체: bool = False
+    """거래처 관계(거래 제한 · 특수관계). 판정 요청에만 쓰고 저장하지 않는다.
+
+    True 만 사용자 진술로 판정 프롬프트(B5.7)에 들어가고, 판정이 가능이면 코드가 확인 필요로 낮춘다(orchestrate._거래처관계_상한).
+    False 는 넣지 않는다: 지금 화면은 묻지 않고 기본값 false 를 보낸다. 확인 질문에서는 묻지 않는다(2026-11-12)."""
+    친족거래: bool = False          # 거래처가 대표자의 배우자 · 직계존비속 등 친족이 운영하는 업체
+    전직임직원업체: bool = False    # 거래처가 우리 회사의 전 · 현직 임직원(팀원 포함)이 운영하는 업체
 
 
 # 필드 이름이 클래스 이름을 가리면 pydantic 이 타입을 해석하지 못한다. 별칭으로 참조한다.
@@ -78,15 +81,18 @@ class 답변항목(BaseModel):
 
 class 조사답변항목(BaseModel):
     id: str = Field(max_length=200)
-    답: Literal['맞아요', '아니에요', '모르겠어요']
+    # ② 품목 조사 답(재설계 11-11): [맞아요] | [직접 입력하기]. 직접입력이면 정정에 사용자 설명을 담는다
+    답: Literal['맞아요', '직접입력']
     정정: str | None = Field(default=None, max_length=1000)
 
 
 class 질문요청(BaseModel):
     """판정 전 확인 질문 요청. org·계정은 토큰에서 정하므로 받지 않는다."""
     사업명: str | None = None
-    확정비목: str
-    확정세목: str | None = None        # 분류 확인 화면에서 고른 세목 표기. 서버가 노드 ID 로 푼다(온톨로지 경로)
+    # ③ 재설계(11-11): 화면은 분류를 고르지 않는다. 비우면 서버가 품목 → 세목 → 비목으로 정해 응답 `분류` 로 알린다.
+    # 값을 주면(옛 화면 · 평가) 지금 길 그대로다
+    확정비목: str | None = None
+    확정세목: str | None = None
     부가세구분: 부가세구분타입 | None = None
     세부유형: str | None = None
     품목: str | None = None
@@ -98,6 +104,8 @@ class 질문요청(BaseModel):
     공개검색어: str | None = Field(default=None, max_length=300)
     판매URL: str | None = Field(default=None, max_length=2048)
     조사답변: list[조사답변항목] | None = Field(default=None, max_length=30)
+    거래처: str | None = Field(default=None, max_length=200)          # ② 업체 정보 조사에 쓴다
+    품목설명: str | None = Field(default=None, max_length=1000)       # 조사 없이 [직접 입력하기] 한 설명. ③ 분류 자료
 
 
 # --- 판정 (POST /api/judge) ---
@@ -271,7 +279,7 @@ class 계획통계(BaseModel):
     전체 = 확인필요 + 위험 + 특이사항없음 + 점검전.
     """
     전체: int = 0
-    확인필요: int = 0                  # 판정 ∈ (조건부, 판단불가)
+    확인필요: int = 0                  # 판정 = 확인 필요
     위험: int = 0                      # 판정 = 불가
     특이사항없음: int = 0              # 판정 = 가능
     점검전: int = 0                    # 판정 없음 (draft)

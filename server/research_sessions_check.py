@@ -30,7 +30,7 @@ def main():
     candidate = {'id': 'a', '유형': '공개정보', '내용': '공개 정보',
                  '출처': [{'제목': '안내', 'url': 'https://example.com', '발췌': '공개 정보'}], '상태': '확인필요'}
     calls = []
-    def research(product_name, *, public_url, budget, emit, requirements=None, context=None):
+    def research(product_name, *, public_url, budget, emit, requirements=None, context=None, vendor=None):
         calls.append(product_name)
         if emit:
             emit({'id': 'e', '단계': '판매처', '상태': '진행중', '문장': '확인 중'})
@@ -63,13 +63,13 @@ def main():
             assert answer.status_code == 200 and sse(answer)['결과'][0]['조사']['확인한정보'][0]['내용'] == '공개 정보'
             again = sse(client.post('/api/judge', json=judge))
             assert again['진행'][0]['단계'] == '판정'
-            changed = {**judge, '조사답변': [{'id': 'a', '답': '아니에요'}]}
+            changed = {**judge, '조사답변': [{'id': 'a', '답': '직접입력', '정정': '사용자 설명'}]}
             assert client.post('/api/judge', json=changed).status_code == 409
             newq = client.post('/api/questions', json={**request, '조사답변': changed['조사답변']}).json()
             assert calls == ['API']
             changed['질문세트'] = newq['질문세트']
             revised = sse(client.post('/api/judge', json=changed))['결과'][0]['조사']
-            assert not revised['확인한정보'] and revised['미확인'][0]['답'] == '아니에요'
+            assert revised['확인한정보'][0]['답'] == '직접입력' and revised['확인한정보'][0]['정정'] == '사용자 설명'
             forged = {**judge, '조사답변': [{'id': 'wrong', '답': '맞아요'}]}
             assert client.post('/api/judge', json=forged).status_code == 400
             assert client.post('/api/judge', json={**judge, '질문세트': 'wrong'}).status_code == 400
@@ -85,6 +85,8 @@ def main():
             session = research_sessions.조회(token, None, None)
             session.expires = 0
             assert client.post('/api/questions', json=request).status_code == 400
+            분류실패_검사(client, norm)
+            판정조사_검사(client, norm)
         # 응답 객체만 만들고 스트림을 전혀 읽지 않는 요청도 세션 잠금을 남기지 않는다.
         from server import routes_judge, routes_questions
         from server.models import 질문요청, 판정요청
@@ -112,6 +114,81 @@ def main():
         else:
             sys.modules['web_research'] = original
     print('조사 세션 HTTP/SSE 검사 통과')
+
+
+def 판정조사_검사(client, norm):
+    """④-2 판정용 조사 결과는 세션에만 남고(질문 응답 · 판정 응답에는 없다) 판정의 조사 값(답변_검증)으로 넘어간다. 답키는 바뀌지 않는다."""
+    from server import routes_questions
+    token = sse(client.post('/api/normalize', json=norm))['결과'][0]['조사ID']
+    request = {'조사ID': token, '사업명': '예비창업패키지', '확정비목': '여비', '품목': 'API', '금액': 100, '용도': '개발',
+               '웹조사': True, '공개검색어': 'API'}
+    client.post('/api/questions', json=request)
+    결과 = {'상태': '일부', '요건결과': {'k1': {'번호': 'C1', '결과': '확인됨', '값': '원화', '발췌': '원화 결제', 'URL': 'https://example.com', '이유': ''}},
+          '출처': ['https://example.com']}
+    받은 = {}
+    def 가짜(req, body, 조사확인=None, 답키=None, 준비확인=False, 노드결정=None, 판정조사설정=None):
+        받은['설정'] = 판정조사설정
+        return {'상태': '없음', '질문세트': None, '질문': [], '추가입력': [], '용어풀이': [], '_판정조사': 결과}
+    with patch.object(routes_questions, '_기존_질문', 가짜):
+        q = client.post('/api/questions', json={**request, '조사답변': [{'id': 'a', '답': '맞아요'}]}).json()
+    s = research_sessions.조회(token, None, None)
+    assert '_판정조사' not in q and '판정조사' not in json.dumps(q, ensure_ascii=False), q
+    assert s.판정조사 == 결과 and 받은['설정'] is None      # MOCK 은 판정용 조사를 하지 않는다(설정 없음)
+    조사 = research_sessions.답변_검증(s, [{'id': 'a', '답': '맞아요'}], s.질문세트, s.입력, s.버전)
+    assert 조사['판정조사'] == 결과 and research_sessions.답변키({k: v for k, v in 조사.items() if k != '판정조사'}) == s.확인답키
+    assert '판정조사' not in research_sessions.화면_조사(조사)
+    judge = {'조사ID': token, '사업명': '예비창업패키지', '확정비목': '여비',
+             '정규화': {'품목': 'API', '금액': 100, '용도': '개발'}, '질문세트': s.질문세트, '조사답변': [{'id': 'a', '답': '맞아요'}]}
+    answer = client.post('/api/judge', json=judge)
+    assert answer.status_code == 200 and '판정조사' not in answer.text, answer.text[:300]
+
+
+def 분류실패_검사(client, norm):
+    """③ 분류가 장애(DB · LLM)로 끝나면 화면 안내는 「확인하지 못했어요 · 다시 시도」이고, 같은 답으로 다시 부르면 저장된 결과를 내지 않고
+    분류를 다시 한다. 맞는 분류가 없다는 결과는 예전처럼 안내문(None)이고 저장해 다시 쓴다(2026-11-12 실행기록 20261112_225525)."""
+    from server import routes_questions
+    import item_classify
+    token = sse(client.post('/api/normalize', json=norm))['결과'][0]['조사ID']
+    req = {'조사ID': token, '사업명': '예비창업패키지', '품목': 'API', '금액': 100, '용도': '개발',
+           '웹조사': True, '공개검색어': 'API'}
+    client.post('/api/questions', json=req)
+    확인 = {**req, '조사답변': [{'id': 'a', '답': '맞아요'}]}
+    결과들 = [{'분류': None, '노드결정': None, '안내': routes_questions._분류실패_안내, '실패': True},
+            {'분류': None, '노드결정': None, '안내': item_classify.안내문(None)}]
+    불림 = []
+    def 가짜분류(body, 조사확인):
+        불림.append(1)
+        return 결과들[min(len(불림), 2) - 1]
+    with patch.object(routes_questions, '_분류', 가짜분류):
+        첫 = client.post('/api/questions', json=확인).json()
+        assert 첫['상태'] == '분류없음' and 첫['분류안내'] == routes_questions._분류실패_안내 and len(불림) == 1, 첫
+        assert set(첫) >= {'상태', '질문세트', '질문', '추가입력', '용어풀이', '조사ID', '조사', '분류', '분류안내'}, 첫
+        둘 = client.post('/api/questions', json=확인).json()      # 장애 결과는 다시 쓰지 않고 분류를 다시 한다
+        assert len(불림) == 2 and 둘['분류안내'] == item_classify.안내문(None), 둘
+        셋 = client.post('/api/questions', json=확인).json()      # 맞는 분류가 없다는 결과는 저장해 다시 쓴다
+        assert len(불림) == 2 and 셋 == 둘, 셋
+    assert routes_questions._분류실패_안내 != item_classify.안내문(None)
+    # _분류 자체: DB 예외 · 분류 LLM 실패는 실패=True, 맞는 분류 없음은 실패 없이 안내문(None)
+    body = types.SimpleNamespace(사업명='예비창업패키지', 품목='API', 용도='개발', 금액=100, 거래처=None, 품목설명=None)
+    from _lib import db
+    class 연결:
+        def __enter__(self):
+            return types.SimpleNamespace(cursor=lambda: None)
+        def __exit__(self, *a):
+            return False
+    def 끊김(**k):
+        raise ConnectionError('synthetic')
+    import ontology_lookup
+    with patch.object(routes_questions, 'MOCK', False):
+        with patch.object(db, 'connect', 끊김):
+            r = routes_questions._분류(body, None)
+            assert r['실패'] and r['분류'] is None and r['안내'] == routes_questions._분류실패_안내, r
+        with patch.object(db, 'connect', lambda **k: 연결()), patch.object(ontology_lookup, '레이블_목록', lambda *a: []):
+            for 디버그, 실패 in (({'LLM실패': 'LLM실패'}, True), ({}, False)):
+                with patch.object(item_classify, '분류', lambda *a, **k: {'분류': None, '노드결정': None, '방법': '없음', '디버그': 디버그}):
+                    r = routes_questions._분류(body, None)
+                assert bool(r.get('실패')) is 실패 and r['분류'] is None, r
+                assert r['안내'] == (routes_questions._분류실패_안내 if 실패 else item_classify.안내문(None)), r
 
 
 if __name__ == '__main__':

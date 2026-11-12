@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
-"""POST /api/judge — 정규화된 지출 하나를 판정한다(가능·조건부·불가·판단불가). SSE.
+"""POST /api/judge — 정규화된 지출 하나를 판정한다(가능·확인 필요·불가). SSE.
 
 orchestrate.판정() 을 워커 스레드에서 실행하고 judge_response 로 응답 계약에 맞춘 뒤, plan_id 가 있으면
 persist.판정_저장() 으로 계획에 연결한다. 응답은 response_cache 에 캐시한다.
 질문세트(POST /api/questions 의 키)와 답변이 오면 서버에 저장한 질문 문장과 답 값으로 사용자답변을 만들어 판정에 넣는다.
 이벤트 순서: 진행*3 → 판정 → 해야할일 → 인용 → 전제 → 참조관계 → (문의초안) → 결과 → 저장 → 완료.
 이벤트 이름과 순서는 프론트 계약이다. 참조관계 이벤트 바로 뒤에 같은 내용을 이전 이벤트 이름으로 한 번
-더 보낸다(한 릴리스 동안, judge_response 호환 블록). 예외·타임아웃·파이프라인 실패는 모두 판단불가로
+더 보낸다(한 릴리스 동안, judge_response 호환 블록). 예외·타임아웃·파이프라인 실패는 모두 확인 필요로
 반환하고, 그 결과는 캐시하지 않으며 계획에도 연결하지 않는다.
 환경변수: SUDDOE_JUDGE_HEARTBEAT_SEC(12), SUDDOE_JUDGE_DEADLINE_SEC(180), SUDDOE_JUDGE_ANSWERS(1, 0 이면 확인 질문·답변 미반영).
 """
@@ -39,16 +39,16 @@ router = APIRouter()
 
 # 판정을 기다리는 동안 SSE 주석(: keep-alive)을 보내는 주기(초). 프록시 idle timeout 에 끊기지 않게 한다.
 _하트비트_주기초 = _정수_환경변수("SUDDOE_JUDGE_HEARTBEAT_SEC", 12)
-# 판정 한 건의 전체 타임아웃(초). 넘기면 워커를 기다리지 않고 판단불가로 반환한다.
+# 판정 한 건의 전체 타임아웃(초). 넘기면 워커를 기다리지 않고 확인 필요(실패)로 반환한다.
 _판정_타임아웃초 = _정수_환경변수("SUDDOE_JUDGE_DEADLINE_SEC", 180)
 
 
 @router.post("/api/judge")
 def judge(req: Request, body: 판정요청, mock: str | None = None,
           목: str | None = Query(None, include_in_schema=False)):  # 구 이름 호환(제거 예정: 다음 릴리스)
-    """mock 모드에서는 ?mock=가능|조건부|불가|판단불가 로 네 판정의 고정 응답을 받는다.
+    """mock 모드에서는 ?mock=가능|확인 필요|불가|근거부족 으로 고정 응답을 받는다(근거부족 = 문의 초안이 붙는 확인 필요).
 
-    판단불가는 오류가 아니라 정상 응답이다. 저장은 부수 효과라 실패해도 스트림은 완료까지 간다.
+    확인 필요는 오류가 아니라 정상 응답이다. 저장은 부수 효과라 실패해도 스트림은 완료까지 간다.
     """
     mock = mock or 목  # 구 이름 호환(제거 예정: 다음 릴리스)
     ok, 사유 = 제한.통과(클라이언트_ip(req))
@@ -77,6 +77,7 @@ def judge(req: Request, body: 판정요청, mock: str | None = None,
                 yield _sse('완료', {'실패': True})
             return _sse응답(규정오류())
     조사세션, 조사 = None, None
+    서버분류 = False
     if body.조사ID:
         조사세션 = research_sessions.조회(body.조사ID, body.org_id, account_id)
         if 조사세션 is None:
@@ -85,7 +86,10 @@ def judge(req: Request, body: 판정요청, mock: str | None = None,
             raise HTTPException(409, '조사가 진행 중입니다')
         try:
             n = body.정규화
-            입력 = research_sessions.입력키(body.사업명, body.확정비목, body.확정세목,
+            # ③ 서버가 정한 분류(재설계 11-11)를 그대로 보냈으면 조사 세션의 입력은 분류 전 값(비목 · 세목 없음)이다
+            분류 = 조사세션.분류 or {}
+            서버분류 = bool(분류) and body.확정비목 == 분류.get('비목') and body.확정세목 == 분류.get('세목')
+            입력 = research_sessions.입력키(body.사업명, None if 서버분류 else body.확정비목, None if 서버분류 else body.확정세목,
                                          n.get('품목'), n.get('금액'), n.get('용도'), body.부가세구분,
                                          (n.get('질문원문') or n.get('질문') or n.get('_원문') or '')[:2000] or None)
             규정버전, 기관버전 = response_cache.요청_해시(), response_cache.l3_해시(body.org_id)
@@ -115,6 +119,9 @@ def judge(req: Request, body: 판정요청, mock: str | None = None,
     # 질문이 0개라 질문세트가 오지 않아도 노드 결정은 판정을 바꾸므로, 결정 전 결과가 캐시에서 나오면 안 된다
     노드결정 = (_노드결정_읽기(body, account_id)
               if 반영 and not MOCK and 온톨로지_사업(body.사업명) else None)
+    # ③ 서버 분류(재설계 11-11)를 그대로 보냈으면 그때 고른 품목 노드를 쓴다. 질문 LLM 이 실패해 질문세트가 없어도 같은 노드에서 판정한다
+    if 서버분류 and 조사세션.노드결정 and 온톨로지_사업(body.사업명):
+        노드결정 = {k: 조사세션.노드결정[k] for k in ("id", "확신")}
     # 확인 질문 LLM 이 고른 상황 노드(5-14 C). 같은 서버 저장값에서 읽는다. 문맥 · 조건 문장을 바꾸므로 키에 넣는다
     상황노드 = (_상황노드_읽기(body, account_id)
               if 반영 and not MOCK and 온톨로지_사업(body.사업명) else None)
@@ -215,7 +222,7 @@ def judge(req: Request, body: 판정요청, mock: str | None = None,
                 response_cache.저장(k, out, 종류="judge", org=body.org_id, account=account_id,
                                    데이터버전_해시=데이터버전해시)
         if 조사 is not None:
-            out['조사'] = 조사
+            out['조사'] = research_sessions.화면_조사(조사)
         if 조사세션 and not 실패 and not 답변유실:
             조사세션.판정결과, 조사세션.판정키 = (dict(out), decision_id), k
         if 조사세션 and not 워커실행:
@@ -369,7 +376,7 @@ def _판정_이벤트(out: dict):
     yield _sse("전제", out.get("전제", []))
     yield _sse("참조관계", out.get("참조관계", []))
     yield _sse(구_참조관계_이벤트, out.get("참조관계", []))  # 구 이름 호환(제거 예정: 다음 릴리스)
-    if out.get("판정") == "판단불가" and out.get("문의초안"):
+    if out.get("판정") == "확인 필요" and out.get("문의초안"):
         yield _sse("문의초안", out["문의초안"])
     # 증빙목록은 persist 가 plan_tasks 에 넣는 내부 키라 결과 이벤트에서만 뺀다(저장에는 out 을 그대로 쓴다).
     yield _sse("결과", {k: v for k, v in out.items() if k != "증빙목록"})
@@ -381,7 +388,7 @@ def _판정_실행(body: 판정요청, account_id: str | None, 사용자답변: 
             조사세션=None, 조사=None, 판정키: str | None = None):
     """_live_판정 을 워커 스레드에서 실행하고, 기다리는 동안 SSE keep-alive 주석을 yield 한다.
 
-    `out, 실패 = yield from _판정_실행(body, account_id, 사용자답변, 답변유실)` 로 쓴다. 예외나 타임아웃은 판단불가 결과와
+    `out, 실패 = yield from _판정_실행(body, account_id, 사용자답변, 답변유실)` 로 쓴다. 예외나 타임아웃은 확인 필요 결과와
     실패=True 를 돌려준다. 타임아웃이 지난 워커는 기다리지 않고 백그라운드에서 끝나게 둔다
     (판정 파이프라인은 그대로 decisions 행을 기록한다).
     조사 세션이 있으면 세션 예산을 나눠 쓰되 취소는 이 요청에만 건다(research_runtime.RequestBudget, 리뷰 28-6).
@@ -399,7 +406,7 @@ def _판정_실행(body: 판정요청, account_id: str | None, 사용자답변: 
                     out = _live_판정(body, account_id, 사용자답변, 답변유실, 노드결정, 조건답, 상황노드, 기록누적, L3라벨, 조사)
                     if not out.get('_실패') and 판정키 is not None:
                         saved = {k: v for k, v in out.items() if k not in ('decision_id', '_실패')}
-                        saved['조사'] = 조사
+                        saved['조사'] = research_sessions.화면_조사(조사)
                         조사세션.판정결과, 조사세션.판정키 = (saved, out.get('decision_id')), 판정키
                     return out
                 return _live_판정(body, account_id, 사용자답변, 답변유실, 노드결정, 조건답, 상황노드, 기록누적, L3라벨)
@@ -416,7 +423,7 @@ def _판정_실행(body: 판정요청, account_id: str | None, 사용자답변: 
     try:
         끝남 = yield from _워커_대기(future, 이벤트, _하트비트_주기초, time.monotonic() + _판정_타임아웃초)
         if not 끝남:
-            _log.error("judge 타임아웃(%s초) — 판단불가로 반환 (plan_id=%s)",
+            _log.error("judge 타임아웃(%s초) — 확인 필요로 반환 (plan_id=%s)",
                        _판정_타임아웃초, body.plan_id)
             ex.shutdown(wait=False, cancel_futures=True)
             요청예산.cancel()
@@ -424,8 +431,8 @@ def _판정_실행(body: 판정요청, account_id: str | None, 사용자답변: 
         try:
             out = future.result()
         except Exception:                                 # noqa: BLE001
-            # 실패해도 네 판정 밖으로 나가지 않는다. 원인은 서버 로그에만 남긴다.
-            _log.exception("judge 실패 — 판단불가로 반환 (plan_id=%s)", body.plan_id)
+            # 실패해도 세 판정 밖으로 나가지 않는다. 원인은 서버 로그에만 남긴다.
+            _log.exception("judge 실패 — 확인 필요로 반환 (plan_id=%s)", body.plan_id)
             return _실패_결과(body), True
         return out, bool(out.pop("_실패", False))
     finally:
@@ -435,15 +442,15 @@ def _판정_실행(body: 판정요청, account_id: str | None, 사용자답변: 
 
 
 def _실패_결과(body: 판정요청) -> dict:
-    """예외·타임아웃 때의 판단불가 결과. 이 요청의 정규화 값으로만 문의 초안을 만든다."""
-    out = {"판정": "판단불가",
+    """예외·타임아웃 때의 확인 필요 결과. 이 요청의 정규화 값으로만 문의 초안을 만든다."""
+    out = {"판정": "확인 필요",
            "요약": "일시적인 오류로 판정하지 못했습니다. 잠시 후 다시 시도해 주세요.",
            "해야할일": [], "인용": [], "전제": [], "신뢰등급": None, "규정버전": None,
            "참조관계": [], "사용자답변": []}
     try:
-        초안 = inquiry.문의초안(body.정규화, "판단불가", body.사업명, body.확정비목)
+        초안 = inquiry.문의초안(body.정규화, {"판정": "확인 필요", "실패경로": True}, body.사업명, body.확정비목)
     except Exception:                                         # noqa: BLE001
-        # 실패 경로의 실패다. 초안 없이라도 판단불가 결과는 반드시 돌려준다.
+        # 실패 경로의 실패다. 초안 없이라도 확인 필요 결과는 반드시 돌려준다.
         _log.exception("실패 결과의 문의 초안을 만들지 못했다 (plan_id=%s)", body.plan_id)
         초안 = None
     if 초안:
@@ -476,6 +483,7 @@ def _live_판정(body: 판정요청, account_id: str | None = None, 사용자답
                        사용자답변=사용자답변, 답변유실=답변유실,
                        확정세목=body.확정세목, 추가입력값=body.추가입력값, 부가세구분=body.부가세구분, 사용일자=body.사용일자,
                        노드결정=노드결정, 조건답=조건답, 상황노드=상황노드, 기록누적=기록누적, l3숫자라벨=L3라벨,
+                       거래처관계=body.특수관계.model_dump(),
                        **({'조사': 조사} if 조사 is not None else {}))
     return 파이프라인결과_매핑(r, body)
 

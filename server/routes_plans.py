@@ -376,7 +376,7 @@ def _live_통계(org_id: str | None) -> dict:
     행 = _질의(f"""
         SELECT
             count(*),
-            count(*) FILTER (WHERE d.판정 IN ('조건부', '판단불가')),
+            count(*) FILTER (WHERE d.판정 = '확인 필요'),
             count(*) FILTER (WHERE d.판정 = '불가'),
             count(*) FILTER (WHERE d.판정 = '가능'),
             count(*) FILTER (WHERE d.판정 IS NULL),
@@ -454,7 +454,8 @@ _상세_컬럼 = ("plan_id", "제목", "확정비목", "금액", "판정", "집�
              "updated_at", "created_at", "사업명", "상태", "질문원문",
              "거래처", "추가설명", "정규화", "latest_decision_id",
              "요약", "해야할일", "인용", "전제", "신뢰등급", "규정버전",
-             "참조관계", "검증사유", "사용자답변", "온톨로지결과", "실제지출일", "실제지출액", "기준문서")
+             "참조관계", "검증사유", "사용자답변", "온톨로지결과", "실제지출일", "실제지출액", "기준문서",
+             "검증코드", "처리단계", "실패단계")
 
 # 응답 키 순서. DB 컬럼 plan_tasks.코드 는 응답 키 code 로 내보낸다.
 _계획할일_컬럼 = ("task_id", "plan_id", "출처", "code", "구분", "항목", "설명", "due_date",
@@ -469,7 +470,8 @@ def _live_상세(plan_id: int, org_id: str | None) -> 계획상세:
                p.updated_at, p.created_at, p.사업명, p.상태, p.질문원문,
                p.거래처, p.추가설명, p.정규화, p.latest_decision_id,
                d.요약, d.해야할일, d.인용, d.전제, d.신뢰등급, d.규정버전,
-               d.참조관계, d.검증사유, d."사용자답변", d."온톨로지결과", p."실제지출일", p."실제지출액", d."기준문서"
+               d.참조관계, d.검증사유, d."사용자답변", d."온톨로지결과", p."실제지출일", p."실제지출액", d."기준문서",
+               d."검증코드", d."처리단계", d."실패단계"
         FROM tenant.expense_plans p
         LEFT JOIN tenant.decisions d ON d.decision_id = p.latest_decision_id
         WHERE p.plan_id = %s AND {조건}
@@ -493,11 +495,12 @@ def _live_상세(plan_id: int, org_id: str | None) -> 계획상세:
         판정상세 = 구_판정키_포함(판정상세)  # 구 이름 호환(제거 예정: 다음 릴리스)
         # 문의초안은 저장하지 않고 조회 때마다 만든다. 저장된 인용·전제·정규화에서 파생되는
         # 글이라 스키마를 늘릴 필요가 없고, 문구를 고치면 이전 판정에도 적용된다.
-        # 판단불가가 아니면 문의초안() 이 None 을 준다
+        # 근거가 부족한 확인 필요(inquiry.근거부족: 인용 0건 · 검증코드 · 처리단계)가 아니면 문의초안() 이 None 을 준다
         try:
             from .inquiry import 문의초안 as _초안
             판정상세["문의초안"] = _초안(
-                정규화=정규화, 판정=r["판정"] or "", 사업명=r["사업명"], 비목=r["확정비목"])
+                정규화=정규화, 결과={k: r[k] for k in ("판정", "인용", "검증코드", "처리단계", "실패단계")},
+                사업명=r["사업명"], 비목=r["확정비목"])
         except Exception:                                     # noqa: BLE001
             # 부가 정보라서 초안 생성이 실패해도 계획 조회는 실패시키지 않는다
             _log.exception("문의초안 재생성 실패 plan_id=%s", plan_id)

@@ -108,14 +108,14 @@ def main():
 
 def 금액_검사():
     import orchestrate as O
-    for 값, 기대 in [('가능', '조건부'), ('조건부', '조건부'), ('불가', '불가'), ('판단불가', '판단불가')]:
+    for 값, 기대 in [('가능', '확인 필요'), ('확인 필요', '확인 필요'), ('불가', '불가')]:
         응답, 사유 = {'판정': 값, '요약': '시험'}, []
         O._시행일_미확인_반영(응답, 사유)
         assert 응답['판정'] == 기대 and 응답['시행일미확인'] and '시행일' in 응답['요약'] and 사유
     assert '시행일미확인' in O.온톨로지결과_칸
     from server.judge_response import 파이프라인결과_매핑
     from server.models import 판정요청
-    mapped = 파이프라인결과_매핑({'판정': '조건부', '요약': '시행일 확인', '시행일미확인': True}, 판정요청(정규화={}))
+    mapped = 파이프라인결과_매핑({'판정': '확인 필요', '요약': '시행일 확인', '시행일미확인': True}, 판정요청(정규화={}))
     assert mapped['시행일미확인'] is True
     def run(제시):
         s = O._판정상태(질문='이용료 집행', 사업명='사업', org_id=None, plan_id=None,
@@ -134,7 +134,7 @@ def 금액_검사():
              patch.object(O.ontology_lookup, '_스키마', return_value={}), \
              patch.object(O, '_종료', side_effect=lambda 상태, 응답, 기록: 응답):
             return O._새_검증단계(s, None)
-    assert run('관련 요건을 만족해야 합니다.')['판정'] == '판단불가'
+    assert run('관련 요건을 만족해야 합니다.')['판정'] == '확인 필요'
     assert run('최대 5만원까지 지원합니다.')['판정'] == '가능'
     print('제시하지 않은 원문 금액 하향 검사 통과')
 
@@ -150,7 +150,7 @@ def 예외_처리_검사():
          patch.object(O.ontology_context, '문맥_구성', return_value={'L3_초과': True, '근거초과': True, '빠진수': 1}), \
          patch.object(O, '_종료', side_effect=lambda 상태, 응답, 기록: 응답):
         결과 = O._새_검색단계(s)
-    assert 결과['판정'] == '판단불가' and 결과['게이트'] == 'B' and 'L3 미연결' in 결과['검증사유'][0]
+    assert 결과['판정'] == '확인 필요' and 결과['게이트'] == 'B' and 'L3 미연결' in 결과['검증사유'][0]
     print('L3 안내 우선·미해결 관계 병합 검사 통과')
 
 

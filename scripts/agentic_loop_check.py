@@ -26,12 +26,24 @@ def _조사(답, 정정=None):
 
 def main():
     확인 = _조사("맞아요")
-    정정 = _조사("아니에요", "새 판매자")
-    거부 = _조사("아니에요")
+    정정 = _조사("직접입력", "새 판매자")
+    # ② 재설계(11-11): 답은 맞아요 | 직접입력(설명 필수). 설명 없는 직접입력 · 답하지 않은 후보는 다음 단계로 못 간다
+    for 잘못 in (lambda: _조사("직접입력"), lambda: _조사("아니에요")):
+        try:
+            잘못()
+            raise AssertionError("잘못된 조사 답 허용")
+        except ValueError:
+            pass
+    빈세션 = research_sessions.Session((None, None), 999999999)
+    빈세션.조사 = {"상태": "확인필요", "후보": [{"id": "c1", "유형": "제품성격", "내용": "x", "출처": [], "상태": "확인필요"}], "출처": []}
+    try:
+        research_sessions.후보_답변(빈세션, [])
+        raise AssertionError("답하지 않은 후보 허용")
+    except ValueError:
+        pass
     assert "원래 판매자 안내" in plan.확인정보_문맥(확인)
     assert "새 판매자" in plan.확인정보_문맥(정정)
     assert "원래 판매자 안내" not in plan.확인정보_문맥(정정)
-    assert plan.확인정보_문맥(거부) == ""
     import question_generate
     질문프롬프트 = []
     def 질문llm(prompt, schema, **kwargs):
