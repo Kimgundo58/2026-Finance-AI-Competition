@@ -160,8 +160,12 @@ def questions(req: Request, body: 질문요청):
                     return 세션.질문결과
                 분류결과 = None
                 if not body.확정비목:
+                    # 대기재조사: 재조사 후보를 보여 주고 아직 답을 받지 않았다. 분류가 없으면 설명입력 · 판정 대신 이 후보로 재조사확인 을
+                    # 다시 낸다(위 400 규칙과 어긋나지 않게, v048 검토). 읽은주소: ② 가 읽은 주소(세션.조사 출처)를 재조사가 다시 읽지 않게 넘긴다
                     분류결과 = _분류(body, 조사확인, 조사ID, 재조사함=세션.재조사 is not None, 설명캐시=세션.설명정리,
-                                   ip=클라이언트_ip(req))
+                                   ip=클라이언트_ip(req),
+                                   대기재조사=세션.재조사 if research_sessions.재조사_답_대기(세션) else None,
+                                   읽은주소=_출처_주소(세션.조사))
                     세션.분류, 세션.노드결정 = 분류결과['분류'], 분류결과['노드결정']
                     # 재조사는 세션마다 한 번(스펙 8-2 서버 순서). 못 찾음 · 시간 부족({후보: []})도 「했음」 으로 남겨 다시 하지 않는다
                     if isinstance(분류결과.get('재조사'), dict) and 세션.재조사 is None:
@@ -236,15 +240,32 @@ _분류실패_안내 = "지금은 분류를 확인하지 못했어요. 잠시 �
 분류없이판정_안내 = "규정에서 맞는 분류를 찾지 못했어요. 분류 없이 점검하고 집행 전에 확인할 곳을 알려 드릴게요."
 
 # ③-R 재조사 시간(스펙 8-2 시간 예산): ④-2 판정용 조사 몫(question_generate.판정조사_예비초 100 + 판정조사_최소초 20)을
-# 남길 수 있을 때만, 최대 60초. 남는 시간이 15초보다 짧으면 검색 한 번도 끝내기 어려워 재조사 없이 설명입력 으로 간다
+# 남길 수 있을 때만, 최대 60초. 남는 시간이 15초보다 짧으면 검색 한 번도 끝내기 어려워 재조사 없이 설명입력 으로 간다.
+# 재조사와 ④-2 사이에는 다시 분류(분류 LLM 한 번, item_classify.분류_제한초() = SUDDOE_CLASSIFY_TIMEOUT 기본 40초)가 있어
+# 그 시간도 더 남긴다(v048 검토: 120초만 남기면 재조사가 제한초를 다 쓴 세션은 ④-2 가 늘 건너뛰어졌다).
+# [직접 입력하기] 정정이 있을 때 도는 설명 정리 LLM(같은 제한 시간)은 남기지 않는다: 둘 다 남기면 재조사 시작에 215초가 필요해
+# ② 품목 조사 뒤에는 재조사가 거의 돌지 못한다
 재조사_남길초 = 120
 재조사_최대초 = 60
 재조사_최소초 = 15
 재조사_시작문장 = "품목을 더 알아보고 있어요."
+재조사_찾음문장 = "품목 정보를 더 찾았어요."
+재조사_없음문장 = "더 찾은 품목 정보는 없어요."
+
+
+def _출처_주소(조사: dict | None) -> list[str]:
+    """② 품목 조사가 읽은 주소(세션.조사 출처). 실제 조사는 주소 글, mock 은 {url} 이라 둘 다 받는다."""
+    out = []
+    for x in (조사 or {}).get('출처') or []:
+        u = x if isinstance(x, str) else x.get('url') if isinstance(x, dict) else None
+        if isinstance(u, str) and u and u not in out:
+            out.append(u)
+    return out
 
 
 def _분류(body: 질문요청, 조사확인: dict | None, 조사ID: str | None = None, 재조사함: bool = False,
-         설명캐시: dict | None = None, ip: str | None = None) -> dict:
+         설명캐시: dict | None = None, ip: str | None = None, 대기재조사: dict | None = None,
+         읽은주소: list[str] | None = None) -> dict:
     """③ 품목 → 세목 → 비목(재설계 11-11). {분류 | None, 노드결정 | None, 안내, 실패?, 다음행동?, 재조사?}. 화면에는 분류 이름과 안내만 나간다.
 
     분류 = {비목, 세목, 표시문, 품목}. 맞는 분류가 없으면 분류 None 이고 _분류없음_다음 이 ③-R 재조사(세션에서 한 번)와
@@ -252,11 +273,13 @@ def _분류(body: 질문요청, 조사확인: dict | None, 조사ID: str | None 
     장애(DB 예외 · 분류 LLM 실패)도 분류 None 이지만 실패=True · 다음행동 다시시도 · _분류실패_안내 로 구분하고 재조사하지 않는다
     (호출자는 이 결과를 같은 답에 다시 내주지 않는다). 디버그(버린 후보 · 다른 경로 · LLM 이유)는 로그에 개수만 남긴다.
     재조사함 = 조사 세션에 재조사 결과가 있다(세션.재조사). 조사ID 는 mock 가지가 읽는다. ip 는 재조사의 요청 한도 확인용.
+    대기재조사 = 재조사 후보를 보여 줬는데 아직 답이 없는 세션.재조사(없으면 None). 분류가 없으면 이 후보로 재조사확인 을 다시 낸다.
+    읽은주소 = ② 품목 조사가 읽은 주소. 재조사가 같은 페이지를 다시 읽지 않는다.
     설명캐시(세션.설명정리): 사용자가 쓴 한 문장을 분류 자료 JSON 으로 바꾼 결과(5-2, item_classify.설명_반영). MOCK 은 바꾸지 않는다.
     조사확인 은 바꾸지 않는다: 질문 · 판정 프롬프트의 사용자 진술은 쓴 문장 그대로다(8-4).
     """
     if MOCK:                    # 외부 호출 없는 고정 분류(스펙 8-5). 낱말별 가지는 mock_flow.분류
-        return mock_flow.분류(body, 조사확인, 조사ID, 재조사함)
+        return mock_flow.분류(body, 조사확인, 조사ID, 재조사함, 대기재조사)
     import item_classify
     import ontology_lookup
     from _lib import db
@@ -277,19 +300,25 @@ def _분류(body: 질문요청, 조사확인: dict | None, 조사ID: str | None 
         return {"분류": None, "노드결정": None, "안내": _분류실패_안내, "실패": True, "다음행동": "다시시도", "_디버그": d}
     if not r["분류"]:
         return {"분류": None, "노드결정": None, "_디버그": d,
-                **_분류없음_다음(body, 조사확인, 재조사함, r.get("필요정보") or [], ip)}
+                **_분류없음_다음(body, 조사확인, 재조사함, r.get("필요정보") or [], ip, 대기재조사, 읽은주소)}
     return {"분류": r["분류"], "노드결정": r["노드결정"], "안내": item_classify.안내문(r["분류"]), "_디버그": d}
 
 
-def _분류없음_다음(body: 질문요청, 조사확인: dict | None, 재조사함: bool, 필요정보: list[str], ip: str | None = None) -> dict:
+def _분류없음_다음(body: 질문요청, 조사확인: dict | None, 재조사함: bool, 필요정보: list[str], ip: str | None = None,
+               대기재조사: dict | None = None, 읽은주소: list[str] | None = None) -> dict:
     """맞는 분류가 없을 때(장애 아님)의 서버 순서(스펙 8-2): 재조사를 아직 안 했으면 ③-R 재조사(한 번) →
     찾음: 재조사확인 / 못 찾음 · 검색 실패 · 시간 부족: 설명을 받은 적이 없으면 설명입력, 있으면 판정.
     재조사 뒤 다시 분류해도 없으면(재조사함) 같은 규칙으로 설명입력 | 판정. 반환 {안내, 다음행동, 재조사?}.
-    재조사를 시도했으면(찾지 못했어도) 재조사 {후보: [...]} 를 실어 호출자가 세션에 「했음」 으로 남긴다."""
+    재조사를 시도했으면(찾지 못했어도) 재조사 {후보: [...]} 를 실어 호출자가 세션에 「했음」 으로 남긴다.
+    재조사 후보에 아직 답하지 않았으면(대기재조사) 재조사를 다시 돌리지 않고 그 후보로 재조사확인 을 다시 낸다: 설명입력 을 내면
+    그 품목설명을 400 으로 거절하게 된다(questions() 의 재조사_답_대기 규칙, v048 검토).
+    필요정보가 비면 재조사를 돌리지 않는다(② 와 같은 조사가 된다). 못 찾음과 같이 「했음」 으로 남기고 설명입력 | 판정 으로 간다."""
     import item_classify
+    if 대기재조사 and 대기재조사.get("후보"):
+        return {"안내": 재조사확인_안내, "다음행동": "재조사확인", "재조사": 대기재조사}
     재조사 = None
     if not 재조사함:
-        재조사 = _재조사(body, 필요정보, ip)
+        재조사 = _재조사(body, 필요정보, ip, 읽은주소) if 필요정보 else {"후보": []}
         if 재조사["후보"]:
             return {"안내": 재조사확인_안내, "다음행동": "재조사확인", "재조사": 재조사}
     다음 = ({"안내": 분류없이판정_안내, "다음행동": "판정"} if research_sessions.설명_받음(조사확인)
@@ -297,14 +326,17 @@ def _분류없음_다음(body: 질문요청, 조사확인: dict | None, 재조�
     return {**다음, **({"재조사": 재조사} if 재조사 is not None else {})}
 
 
-def _재조사(body: 질문요청, 필요정보: list[str], ip: str | None = None) -> dict:
+def _재조사(body: 질문요청, 필요정보: list[str], ip: str | None = None, 읽은주소: list[str] | None = None) -> dict:
     """③-R 분류용 재조사(스펙 5-1). ② 와 같은 web_research.research(계획 LLM · 후보 LLM · 코드 검사)를 조사 목적만 필요정보로 바꿔
     한 번 돈다. 반환 {후보: [② 후보와 같은 모양]}. 후보 [] = 못 찾음 · 검색 실패 · 시간 부족 · 요청 한도. 예외를 올리지 않는다.
-    시간: 세션 예산에서 ④-2 몫(재조사_남길초)을 남기고 최대 재조사_최대초. 결과는 세션.조사 와 따로 세션.재조사 에 둔다(호출자)."""
+    시간: 세션 예산에서 ④-2 몫(재조사_남길초) + 다시 분류할 시간(item_classify.분류_제한초())을 남기고 최대 재조사_최대초.
+    결과는 세션.조사 와 따로 세션.재조사 에 둔다(호출자). 읽은주소(② 가 읽은 페이지)는 다시 읽지 않는다."""
+    import item_classify
     import research_runtime
     import uuid
     예산 = research_runtime.current_budget()
-    제한초 = min(재조사_최대초, (예산.remaining_seconds() if 예산 is not None else 0) - 재조사_남길초)
+    제한초 = min(재조사_최대초,
+              (예산.remaining_seconds() if 예산 is not None else 0) - 재조사_남길초 - item_classify.분류_제한초())
     if 예산 is None or 제한초 < 재조사_최소초:
         _log.info("재조사 건너뜀: 시간 부족")
         return {"후보": []}
@@ -324,12 +356,12 @@ def _재조사(body: 질문요청, 필요정보: list[str], ip: str | None = Non
     try:
         import web_research
         r = web_research.research(None, requirements=[], context=문맥, public_url=body.판매URL, vendor=body.거래처,
-                                  budget=예산, emit=알림, 제한초=제한초)
+                                  budget=예산, emit=알림, 제한초=제한초, 읽은주소=읽은주소)
     except Exception as e:                                    # noqa: BLE001
         _log.warning("재조사 실패: %s", type(e).__name__)
         r = {}
     후보 = [c for c in (r.get("후보") if isinstance(r, dict) else None) or [] if isinstance(c, dict) and c.get("id")]
-    research_runtime.emit("재조사", "품목 정보를 더 찾았어요." if 후보 else "더 찾은 품목 정보는 없어요.", "완료", id=event_id)
+    research_runtime.emit("재조사", 재조사_찾음문장 if 후보 else 재조사_없음문장, "완료", id=event_id)
     return {"후보": 후보}
 
 

@@ -156,13 +156,19 @@ _설명_스키마 = {"type": "object", "additionalProperties": False, "required"
     "용도": {"type": "string"}}}
 
 
+def 분류_제한초() -> int:
+    """분류 LLM · 설명 정리 LLM 한 번의 제한 시간(초). `SUDDOE_CLASSIFY_TIMEOUT`, 비어 있으면 40.
+    routes_questions._재조사 가 재조사 뒤 다시 분류할 시간을 남기는 데도 쓴다."""
+    return int(os.environ.get("SUDDOE_CLASSIFY_TIMEOUT") or 40)
+
+
 def 설명_정리(문장: str, llm=llm_호출) -> dict | None:
     """사용자 한 문장 → {품목, 성격, 설명, 용도}. LLM 1회. 실패 · 시간 초과 · 형식 오류는 None(호출자가 문장을 그대로 쓴다).
     예산: 호출한 요청의 research_runtime.Budget 을 llm_호출 이 그대로 쓴다(횟수 · 남은 시간).
     문장은 이스케이프(꺾쇠 → 전각)해 넣는다. 문장 안의 `</설명>` 이 자료 태그를 닫지 못한다."""
     try:
         출력, _ = llm(_자리채우기(_설명_규칙, {"설명": 이스케이프(문장)}), _설명_스키마, 온도=0.0, 추론=False, 최대토큰=300,
-                    타임아웃=int(os.environ.get("SUDDOE_CLASSIFY_TIMEOUT") or 40),
+                    타임아웃=분류_제한초(),
                     모델=os.environ.get("SUDDOE_CLASSIFY_MODEL") or None)
     except (LLM실패, AttributeError, TypeError, ValueError) as e:
         _log.warning("설명 정리 LLM 실패: %s", type(e).__name__)
@@ -226,7 +232,7 @@ def 분류(cur, 사업명: str | None, 입력: dict, 레이블: list[dict], 확�
         자료, 디버그["설명정리"] = 설명_반영(확인정보 or [], llm, 설명캐시)   # 실패한 문장은 글자 그대로 넘긴다
         try:
             출력, 메타 = llm(_프롬프트(입력, 자료, 남김), _스키마(len(남김)), 온도=0.0, 추론=False,
-                         최대토큰=400, 타임아웃=int(os.environ.get("SUDDOE_CLASSIFY_TIMEOUT") or 40),
+                         최대토큰=400, 타임아웃=분류_제한초(),
                          모델=os.environ.get("SUDDOE_CLASSIFY_MODEL") or None)
             디버그.update(LLM이유=출력.get("이유"), LLM번호=출력.get("번호"), LLM확신=출력.get("확신"), LLM지연ms=메타.get("지연ms"),
                         LLM성격=출력.get("성격"), LLM성격이같은후보=출력.get("성격이같은후보"))
