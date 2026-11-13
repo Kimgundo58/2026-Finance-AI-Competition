@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """POST /api/questions — 판정 전에 사용자에게 물을 확인 질문을 규정 원문에서 만든다.
 
+새 화면은 비목을 고르지 않는다: 확정비목 없이 오면 ③ 서버 분류(_분류)가 정해 응답 `분류`({비목, 세목, 표시문, 품목}) · `분류안내` 로 알리고,
+화면은 그 비목 · 세목을 /api/judge 의 확정비목 · 확정세목 으로 보낸다(판정 결과 `분류.표시문` 이 결과 화면 분류 줄, 저장은 persist.판정_저장).
 question_generate.질문생성() 을 부르고 질문_공개() 로 화면 값만 내보낸다. 충족답·할일·근거조문은 서버에 남긴다.
 응답의 질문세트는 응답 캐시 키다. 화면이 이 값을 /api/judge 로 보내면 판정이 저장해 둔 질문으로 답을 맞춘다(24시간 보관).
 어떤 실패도 오류로 보이지 않는다. DB·LLM 오류와 요청 한도는 200 과 상태 '실패' 로 답하고 화면은 바로 결과로 넘어간다.
@@ -45,7 +47,8 @@ def _로그(상태: str, 질문수: int, 버린사유: list[str], 캐시: bool, 
 def questions(req: Request, body: 질문요청):
     # 조사 계약을 요청하지 않은 기존 JSON 클라이언트는 원래 응답 모양을 유지한다.
     # 새 화면은 SSE 또는 조사ID로 흐름을 시작한다(재점검은 SSE로 새 ID 발급).
-    if (not body.조사ID and not body.웹조사 and body.조사답변 is None
+    # 비목 없이 온 요청은 JSON 이어도 조사 세션 경로로 보내 ③ 서버 분류(응답 분류 · 분류안내)를 받게 한다(v045)
+    if (body.확정비목 and not body.조사ID and not body.웹조사 and body.조사답변 is None
             and 'text/event-stream' not in req.headers.get('accept', '')):
         return _기존_질문(req, body)
     org, account = auth.검증된_org(req), auth.검증된_account(req)

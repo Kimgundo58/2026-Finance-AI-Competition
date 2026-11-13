@@ -220,7 +220,9 @@ def judge(req: Request, body: 판정요청, mock: str | None = None,
                 elif 분류값.get("비목") == body.확정비목:
                     out["분류"] = {k: 분류값.get(k) for k in ("비목", "세목", "표시문")}
                 else:
-                    out["분류"] = {"비목": body.확정비목, "세목": body.확정세목, "표시문": body.확정비목}
+                    # live 표시문과 같은 꼴(ontology_lookup: 「비목 > 세목」, 세목이 없으면 비목)
+                    out["분류"] = {"비목": body.확정비목, "세목": body.확정세목,
+                                 "표시문": f"{body.확정비목} > {body.확정세목}" if body.확정세목 else body.확정비목}
             decision_id = None
             response_cache.저장(k, out, 종류="judge", org=body.org_id, account=account_id,
                                데이터버전_해시=데이터버전해시)
