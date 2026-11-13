@@ -51,6 +51,7 @@ class Session:
     재조사: dict | None = None         # ③-R 재조사 결과 {후보: [...]}. 세션.조사 와 따로 둔다(조사답변 id 는 세션.조사 후보와 맞아야 한다).
                                        # None 이 아니면 재조사를 이미 했다(한 번만 한다, 스펙 8-2 서버 순서)
     재조사확인: list | None = None     # 재조사 후보 + 사용자 답. 한 번 받으면 남기고 다음 요청 · 판정(답변_검증)이 여기서 읽는다(품목설명 과 같다)
+    설명정리: dict = field(default_factory=dict)  # 5-2 사용자 한 문장 → 분류 자료 JSON 글(item_classify.설명_반영). 같은 문장은 세션에서 한 번만 바꾼다
 
 
 def _서명(token):
