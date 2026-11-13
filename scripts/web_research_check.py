@@ -461,6 +461,7 @@ def main():
         assert client.calls == [] and out["후보"] == [], (query, url, client.calls)
     느린검색_검사(body)
     조사실패_알림_검사(body)
+    검색어없는_조사_검사()
     계획LLM_검사(body)
     조사모델_검사()
     apick_분류_검사()
@@ -511,6 +512,101 @@ def 추론끔_검사(llm_qwen):
         except llm_qwen.LLM실패 as e:
             assert "출력 잘림" in str(e) and all(k["extra_body"] == 끔 for k in 보냄), (e, 보냄)
             assert [k["model"] for k in 보냄] == [llm_qwen.기본_모델] * 2 + [llm_qwen.폴백_모델], 보냄
+
+
+def 검색어없는_조사_검사():
+    """v046: 화면이 공개 검색어를 보내지 않아도 지출 항목 · 사용 목적 낱말로 조사한다(스펙 8-2 「검색어」 ①②③).
+    개인 정보 거르기는 낱말 · 긴 숫자만 지출 항목 · 사용 목적에 걸고, 글자 제한(쉼표 · 괄호)은 걸지 않는다."""
+    import web_research
+    from web_research import _검색어, _개인정보_없음
+    본문글 = "Figma 프로페셔널은 팀이 함께 쓰는 디자인 협업 도구입니다. 요금은 편집자 1인당 매월 청구됩니다."
+    발췌 = "Figma 프로페셔널은 팀이 함께 쓰는 디자인 협업 도구입니다."
+    page = "https://example.com/product"
+
+    class 페이지검색(Client):
+        def call(self, name, args, timeout):
+            self.calls.append((name, args))
+            if name == "google_search":
+                return {"content": [{"type": "text", "text": json.dumps({"results": [
+                    {"title": "Figma 요금제", "link": page}]}, ensure_ascii=False)}]}
+            return {"content": [{"type": "text", "text": self.body}]}
+
+    def 실행(계획들, context, 후보들=(), **kw):
+        client, 기록, ev = 페이지검색(본문글), [], []
+        out = research(None, budget=Budget(tools=10), client=client, llm_call=역할(계획들, 후보들, 기록),
+                       emit=ev.append, context=context, **kw)
+        return out, client.calls, [p for r, p, *_ in 기록 if r == "계획"], ev
+
+    def 보낸검색어(calls):
+        return [a["keyword"] for n, a in calls if n == "google_search"]
+
+    # (1) 공개 검색어 없이 시작한다. 쉼표 · 괄호가 든 지출 항목 · 사용 목적도 조사한다(글자 제한을 걸지 않는다)
+    문맥 = {"품목": "Figma 프로페셔널(연간, 팀용)", "용도": "디자인 시안, 협업", "금액": 160000}
+    out, calls, prompts, ev = 실행([검색_계획("Figma 프로페셔널(연간, 디자인"), 본문_계획(page)], 문맥, [후보(page, 발췌)])
+    assert 보낸검색어(calls) == ["Figma 프로페셔널(연간, 디자인"] and calls[1] == ("url_to_markdown", {"url": page, "format": "markdown", "max_chars": 30000}), calls
+    assert out["상태"] == "확인필요" and len(out["후보"]) == 1, out
+    첫자료 = 계획자료(prompts[0])
+    assert 첫자료["공개검색어"] == "" and 첫자료["지출문맥"]["품목"] == 문맥["품목"], 첫자료
+    문장 = [e["문장"] for e in ev]
+    assert "「Figma 프로페셔널(연간, 디자인」 검색 중" in 문장 and "관련 페이지 1개를 찾았어요." in 문장, 문장
+    assert not any("공개 주소" in x or "공개 검색 중" in x for x in 문장), 문장
+    # (2) 지출 항목 · 사용 목적 · 검색용어 · 제목에 없는 낱말, 금액은 보내지 않는다. 대신 보낼 공개 검색어가 없어 그 검색은 건너뛰고
+    #     다음 계획에 알린다. 다음 계획이 맞는 검색어를 내면 보낸다
+    out, calls, prompts, _ = 실행([검색_계획("Figma 강남"), 검색_계획("Figma 160000"), 검색_계획("Figma 협업")], 문맥)
+    assert 보낸검색어(calls) == ["Figma 협업"], calls
+    assert 계획자료(prompts[1])["검색기록"] == [{"알림": web_research._검색어_알림}], 계획자료(prompts[1])
+    # 이미 보낸 검색어를 다시 내도 끝내지 않고 알린다
+    out, calls, prompts, _ = 실행([검색_계획("Figma 협업"), 검색_계획("Figma 협업"), 검색_계획("Figma 디자인")], 문맥)
+    assert 보낸검색어(calls) == ["Figma 협업", "Figma 디자인"], calls
+    # (3) 거래처 이름은 지출 항목 · 사용 목적에 없으면 보내지 않는다. 지출 항목에 직접 적은 낱말이면 보낸다
+    out, calls, _, _ = 실행([검색_계획("Figma 피그마코리아"), 검색_계획("Figma 디자인")], 문맥, vendor="피그마코리아")
+    assert 보낸검색어(calls) == ["Figma 디자인"] and "피그마코리아" not in json.dumps(calls, ensure_ascii=False), calls
+    out, calls, _, _ = 실행([검색_계획("Figma 프로페셔널(연간,")], 문맥, vendor="Figma")
+    assert 보낸검색어(calls) == ["Figma 프로페셔널(연간,"], calls
+    # (4) 개인 정보: 낱말(전화번호 등) · 긴 숫자가 든 칸은 검색어 자료와 LLM 자료에서 뺀다. 남은 칸으로 조사한다
+    문맥2 = {"품목": "맥북 010-1234-5678 로 연락", "용도": "개발 장비"}
+    out, calls, prompts, _ = 실행([검색_계획("맥북 개발"), 검색_계획("개발 장비")], 문맥2)
+    assert 보낸검색어(calls) == ["개발 장비"], calls
+    assert "010" not in json.dumps([calls, prompts], ensure_ascii=False) and "품목" not in 계획자료(prompts[0])["지출문맥"], prompts[0][-300:]
+    for 칸 in ({"품목": "전화번호 알려 드림"}, {"품목": "계좌 1234567890123"}, {}):
+        client = Client(본문글)
+        out = research(None, budget=Budget(), client=client, context=칸,
+                       llm_call=lambda p, s, t: (_ for _ in ()).throw(AssertionError("LLM 호출")))
+        assert client.calls == [] and out["상태"] == "실패", (칸, client.calls, out)
+    assert _개인정보_없음("Figma 프로페셔널(연간, 팀용)") and not _개인정보_없음("이메일 주소") and not _개인정보_없음("010 1234 5678 9")
+    assert _검색어(None, "제품성격", "Figma 01012345678", "Figma 01012345678 요금") is None   # 제목에 나온 긴 숫자도 보내지 않는다
+    assert _검색어(None, "제품성격", "Figma 요금", "Figma 요금") == "Figma 요금"
+    # (4-2) 이메일 주소(`@` 가 든 낱말)가 든 칸도 뺀다. http · www 주소의 `@` 는 막지 않는다. 사람 이름은 코드로 거르지 않는다(화면 안내)
+    문맥3 = {"품목": "외주 디자인 hong@naver.com 으로 시안 받음", "용도": "디자인 시안"}
+    out, calls, prompts, _ = 실행([검색_계획("외주 디자인"), 검색_계획("디자인 시안")], 문맥3)
+    assert 보낸검색어(calls) == ["디자인 시안"], calls
+    assert "hong@" not in json.dumps([calls, prompts], ensure_ascii=False) and "품목" not in 계획자료(prompts[0])["지출문맥"], prompts[0][-300:]
+    assert not _개인정보_없음("hong@naver.com 외주") and not _개인정보_없음("문의 a@b") and not _개인정보_없음("메일(hong@naver.com)로")
+    assert _개인정보_없음("https://example.com/@figma 디자인") and _개인정보_없음("www.example.com/@figma")
+    assert _검색어(None, "제품성격", "hong@naver.com 외주", "홍길동 hong@naver.com 외주 디자인 작업",
+                 공개글="홍길동 hong@naver.com 외주 디자인 작업") is None
+    # (5) 판매 URL 을 받으면 그 페이지를 먼저 읽고, 후보가 없으면 계획(검색)으로 이어 간다. 공개 주소가 아닌 URL 은 읽지 않고 검색한다
+    out, calls, prompts, _ = 실행([검색_계획("Figma 디자인")], 문맥, public_url=page)
+    assert [n for n, _ in calls] == ["url_to_markdown", "google_search"] and calls[0][1]["url"] == page, calls
+    out, calls, _, _ = 실행([검색_계획("Figma 디자인")], 문맥, public_url="http://127.0.0.1/a")
+    assert [n for n, _ in calls] == ["google_search"], calls
+    # (6) 요건 모드(④-2)도 공개 검색어 없이 지출 항목 · 조건 낱말로 검색한다
+    사실 = [{"번호": "C1", "조건": "외화로 결제하는 경우", "원문": "외화 결제는 승인되지 않습니다.", "시점": "결제 시"}]
+    client, 기록 = 페이지검색(본문글), []
+    def llm(p, s, t):
+        기록.append(p)
+        return {"읽지못함": [], "결과": []} if web_research._요건역할(s) else (검색_계획("Figma 외화 결제") if len(기록) == 1 else 완료())
+    out = research(None, budget=Budget(tools=10), client=client, llm_call=llm, 사실확인=사실, context=문맥)
+    assert 보낸검색어(client.calls) == ["Figma 외화 결제"] and out["상태"] == "못찾음", (client.calls, out)
+
+
+# 위 검사의 계획 모양(검사 안 지역 이름과 겹치지 않게 따로 둔다)
+def 검색_계획(검색어, 유형="제품성격"):
+    return 검색(검색어, 유형)
+
+
+def 본문_계획(*urls):
+    return 본문(*urls)
 
 
 def 계획LLM_검사(body):

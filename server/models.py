@@ -101,7 +101,7 @@ class 질문요청(BaseModel):
     질문원문: str | None = Field(default=None, max_length=2000)
     조사ID: str | None = Field(default=None, max_length=200)
     웹조사: bool = False
-    공개검색어: str | None = Field(default=None, max_length=300)
+    공개검색어: str | None = Field(default=None, max_length=300)      # 옛 화면 호환으로 받아 요청키에만 넣는다. 조사에는 쓰지 않는다(v046)
     판매URL: str | None = Field(default=None, max_length=2048)
     조사답변: list[조사답변항목] | None = Field(default=None, max_length=30)
     거래처: str | None = Field(default=None, max_length=200)          # ② 업체 정보 조사에 쓴다

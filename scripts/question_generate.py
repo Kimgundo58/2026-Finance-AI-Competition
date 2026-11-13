@@ -448,7 +448,8 @@ def 판정용_조사(입력: dict, 판단줄: list[dict], 설정: dict) -> dict:
         e = dict(e)
         research_runtime.emit(e.pop("단계", "판정조사"), e.pop("문장", ""), e.pop("상태", "진행중"), **e)
     try:
-        r = web_research.research(설정.get("공개검색어") or None, public_url=설정.get("판매URL") or None, 사실확인=사실,
+        # 공개 검색어는 넘기지 않는다(v046). 계획 LLM 이 지출 항목 · 사용 목적 · 조건 낱말로 검색어를 만든다
+        r = web_research.research(None, public_url=설정.get("판매URL") or None, 사실확인=사실,
                                   context=문맥, budget=예산, emit=알림, vendor=설정.get("거래처"), 제한초=제한)
     except Exception as e:                                  # noqa: BLE001
         _log.warning("판정용 조사 실패: %s", type(e).__name__)
@@ -546,7 +547,7 @@ def _새경로_질문(cur, conn, 입력: dict, org_id, 모델: str, 타임아웃
     분류결정 = {"노드결정": 입력["_노드결정"]} if 입력.get("_노드결정") else {}   # 판정 라우트가 질문세트 저장값에서 읽는다
     if "바로" in 준비:
         return {"상태": "바로판정", "질문": [], "추가입력": [], "메타": {**메타, "사유": 준비["바로"]}, **분류결정}
-    # ④-2 판정용 조사(재설계 11-13): ③ 분류 · ④ 조회 뒤, 질문 작성 앞. 공개 조사를 켠 흐름(_판정조사설정)에서만 한다
+    # ④-2 판정용 조사(재설계 11-13): ③ 분류 · ④ 조회 뒤, 질문 작성 앞. 라우트가 _판정조사설정 을 주면(v046 부터 MOCK 밖 항상) 한다
     판정조사 = 판정용_조사(입력, 준비["판단조건"], 입력["_판정조사설정"]) if 입력.get("_판정조사설정") and 준비["판단조건"] else None
     확인키 = {k for k, v in ((판정조사 or {}).get("요건결과") or {}).items() if v.get("결과") == "확인됨"}
     준비["조건목록"] = _조건목록_자르기(조건목록_구성(준비["자연어조건"], 준비["판단조건"], 준비["규범표"], 확인키))

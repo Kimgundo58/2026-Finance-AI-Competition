@@ -175,7 +175,7 @@ def 질의변환_스키마(표시문들: list[str]) -> dict[str, Any]:
     수 = {"type": ["number", "null"], "minimum": 0}
     return {
         "type": "object", "additionalProperties": False,
-        "required": ["품목", "금액", "금액_추정여부", "용도", "질의문", "수치", "거래처유형", "사용일자", "누락필드"],
+        "required": ["품목", "금액", "금액_추정여부", "용도", "질의문", "수치", "거래처유형", "거래처", "사용일자", "누락필드"],
         "properties": {
             "품목": {"type": "string", "minLength": 1, "maxLength": 60},
             "금액": 수,
@@ -187,6 +187,8 @@ def 질의변환_스키마(표시문들: list[str]) -> dict[str, Any]:
                    "properties": {"인원": 수, "일수": 수, "박수": 수, "시간": 수, "계약총액": 수,
                                   "부가세구분": {"type": "string", "enum": ["포함", "공급가액", "모름"]}}},
             "거래처유형": {"type": ["string", "null"], "maxLength": 40},
+            # 한 문장에 적힌 업체 · 판매처 이름(v046). 코드가 입력 글에 그대로 있는지 다시 본다(normalize_run._입력에_적힌_이름)
+            "거래처": {"type": ["string", "null"], "maxLength": 60},
             # 입력에 연월일이 다 적힌 지출 날짜만(5-14 D 예비 길). 코드가 날짜로 읽히는지 다시 검사하고, 화면 입력이 있으면 그것이 먼저다
             "사용일자": {"type": ["string", "null"], "maxLength": 10},
             "누락필드": {"type": "array", "maxItems": 6, "items": {"type": "string"}},

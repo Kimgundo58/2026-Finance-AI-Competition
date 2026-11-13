@@ -90,6 +90,7 @@ def main():
             분류실패_검사(client, norm)
             판정조사_검사(client, norm)
             실제_품목조사_검사(client)
+            판정조사_항상_검사(client, norm)
         # 응답 객체만 만들고 스트림을 전혀 읽지 않는 요청도 세션 잠금을 남기지 않는다.
         from server import routes_judge, routes_questions
         from server.models import 질문요청, 판정요청
@@ -146,7 +147,8 @@ def 판정조사_검사(client, norm):
 def 실제_품목조사_검사(client):
     """실제(비 MOCK) 경로의 ② 품목 조사 호출부(routes_questions 의 web_research.research)를 합성으로 지난다.
 
-    web_research 를 가짜 모듈로 바꿔 불렸는지 · 받은 인자만 본다. 외부 호출 · DB 없음. 검색어 · 주소가 둘 다 없으면 부르지 않고 미확인.
+    web_research 를 가짜 모듈로 바꿔 불렸는지 · 받은 인자만 본다. 외부 호출 · DB 없음. v046: 공개 검색어는 넘기지 않고(None),
+    검색어 · 주소가 둘 다 없어도 지출 항목 · 사용 목적으로 조사한다.
     """
     import sys
     from server import routes_questions
@@ -161,13 +163,67 @@ def 실제_품목조사_검사(client):
     with patch.dict(sys.modules, {'web_research': 가짜}), patch.object(routes_questions, 'MOCK', False),          patch.object(routes_questions.ontology_readiness, '확인', lambda *a: None),          patch.object(routes_questions.response_cache, '요청_해시', lambda: 'v-합성'),          patch.object(routes_questions.제한, '통과', lambda ip: (True, None)),          patch.object(routes_questions.mock_flow, '품목조사', lambda *a: (_ for _ in ()).throw(AssertionError('mock 경로'))):
         r = sse(client.post('/api/questions', json=본문, headers={'Accept': 'text/event-stream'}))['완료'][0]
         assert r['상태'] == '조사확인' and r['조사']['후보'][0]['id'] == 'w', r
-        assert len(불림) == 1 and 불림[0][0] == 'API 크레딧', 불림
+        assert len(불림) == 1 and 불림[0][0] is None, 불림
         k = 불림[0][1]
         assert k['public_url'] == 'https://example.com/p' and k['vendor'] == '판매사' and k['budget'] is not None, k
         assert k['context'] == {'품목': 'API', '용도': '개발', '금액': 100} and k['requirements'] == [], k
         빈 = sse(client.post('/api/questions', json={**본문, '공개검색어': None, '판매URL': None},
                             headers={'Accept': 'text/event-stream'}))['완료'][0]
-        assert 빈['조사']['상태'] == '미확인' and len(불림) == 1, (빈, 불림)
+        assert 빈['상태'] == '조사확인' and len(불림) == 2 and 불림[1][0] is None, (빈, 불림)
+
+
+def 판정조사_항상_검사(client, norm):
+    """v046: ④-2 판정용 조사는 웹조사 값과 상관없이 돈다 — 별칭 일치(웹조사 false · 비목 없음 → 서버 분류)와 재점검(확정비목 ·
+    웹조사 false)에서도 질문 생성에 설정 {판매URL, 거래처} 가 넘어가고, 공개 검색어는 넘기지 않는다. live 경로를 MOCK 끄고
+    DB · LLM 자리를 가짜로 바꿔 본다. 조사 확인 없이 온 요청의 질문세트 키에는 거래처 · 판매URL 이 들어간다."""
+    from server import routes_questions
+    import question_generate
+    받은 = []
+
+    def 가짜질문(req, body, 조사확인=None, 답키=None, 준비확인=False, 노드결정=None, 판정조사설정=None):
+        받은.append(판정조사설정)
+        return {'상태': '없음', '질문세트': None, '질문': [], '추가입력': [], '용어풀이': []}
+    분류 = {'비목': '지급수수료', '세목': '소프트웨어 구독료', '표시문': '지급수수료 > 소프트웨어 구독료', '품목': '디자인 소프트웨어'}
+    공통 = {'사업명': '예비창업패키지', '품목': '피그마', '금액': 100, '용도': '디자인', '웹조사': False,
+          '거래처': '피그마코리아', '판매URL': 'https://example.com/figma', '공개검색어': '피그마 무시'}
+    설정 = {'판매URL': 'https://example.com/figma', '거래처': '피그마코리아'}
+    with patch.object(routes_questions, 'MOCK', False), patch.object(routes_questions, '_기존_질문', 가짜질문), \
+         patch.object(routes_questions, '_분류', lambda body, 조사확인, *a, **k: {'분류': 분류, '노드결정': None, '안내': '안내'}), \
+         patch.object(routes_questions.ontology_readiness, '확인', lambda *a: None), \
+         patch.object(routes_questions.response_cache, '요청_해시', lambda: 'v1'):
+        for 이름, 추가 in (('별칭 일치', {}), ('재점검', {'확정비목': '여비', '확정세목': None})):
+            token = sse(client.post('/api/normalize', json=norm))['결과'][0]['조사ID']
+            q = client.post('/api/questions', json={**공통, **추가, '조사ID': token}).json()
+            assert q['상태'] == '없음' and 받은[-1] == 설정, (이름, q, 받은)
+            assert ('분류' in q) is (이름 == '별칭 일치'), (이름, q)
+        # 효과: 설정 함수가 None 이면(옛 동작: 공개 조사를 켠 흐름에서만) 같은 요청에 설정이 넘어가지 않는다
+        with patch.object(routes_questions, '_판정조사_설정', lambda body: None):
+            token = sse(client.post('/api/normalize', json=norm))['결과'][0]['조사ID']
+            client.post('/api/questions', json={**공통, '조사ID': token})
+            assert 받은[-1] is None, 받은
+    assert routes_questions._판정조사_설정(types.SimpleNamespace(판매URL=None, 거래처=None)) is None   # MOCK 은 고정 진행 줄만
+
+    # _live_질문: 조사 확인 없이 온 요청에도 판정조사설정을 질문 생성에 넘기고, 키에 거래처 · 판매URL 을 더한다
+    from server.models import 질문요청
+    body = 질문요청(사업명='예비창업패키지', 확정비목='여비', 품목='API', 금액=100, 용도='개발')
+    본키 = routes_questions.질문세트_키(None, None, body.사업명, body.확정비목, None, None, None, body.품목, body.금액, body.용도, None)
+    키들, 입력들 = [], []
+
+    def 조회(k, org, account):
+        키들.append(k)
+        return None
+
+    def 생성(입력, **kw):
+        입력들.append(입력)
+        return {'상태': '없음', '질문': [], '메타': {}}
+    with patch.object(routes_questions.response_cache, '질문세트_조회', 조회), \
+         patch.object(routes_questions.response_cache, '저장', lambda *a, **k: True), \
+         patch.object(routes_questions.제한, '통과', lambda ip: (True, None)), \
+         patch.object(question_generate, '질문생성', 생성):
+        for 설정값 in ({'판매URL': None, '거래처': 'A'}, {'판매URL': None, '거래처': 'B'}, None):
+            routes_questions._live_질문(body, None, None, '127.0.0.1', 0.0, None, None, None, 설정값)
+    assert 키들[2] == 본키 and len({*키들}) == 3, 키들
+    assert 입력들[0]['_판정조사설정'] == {'판매URL': None, '거래처': 'A'} and '_판정조사설정' not in 입력들[2], 입력들
 
 
 def 분류실패_검사(client, norm):

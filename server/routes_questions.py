@@ -99,9 +99,8 @@ def questions(req: Request, body: 질문요청):
                             # mock: 외부 호출 없이 고정 조사 결과(스펙 8-5). 검색어 없이도 돈다
                             if MOCK:
                                 세션.조사 = mock_flow.품목조사(body.품목, body.거래처)
-                            # 검색어나 공개 판매 URL 중 하나는 있어야 조사한다. URL만 있으면 그 페이지만 읽는다(web_research).
-                            elif not body.공개검색어 and not body.판매URL:
-                                세션.조사 = {'상태': '미확인', '후보': [], '출처': []}
+                            # v046: 공개 검색어 없이 늘 조사한다. 계획 LLM 이 지출 항목 · 사용 목적 낱말로 검색어를 만들고,
+                            # 판매URL 은 먼저 읽을 주소, 거래처는 판매자 · 업체 이용 조건 조사 목적이다(web_research.research)
                             else:
                                 # ② 품목 조사(재설계 11-11): 비목을 정하기 전이라 규범 요건 없이 지출 문맥만 준다
                                 준비 = {'요건': [], '문맥': {k: v for k, v in (('품목', body.품목), ('용도', body.용도),
@@ -118,7 +117,7 @@ def questions(req: Request, body: 질문요청):
                                          '용도': body.용도, '질문': body.질문원문},
                                         org_id=org, account_id=account)
                                 import web_research
-                                세션.조사 = web_research.research(body.공개검색어,
+                                세션.조사 = web_research.research(None,
                                     requirements=준비['요건'], context=준비['문맥'],
                                     public_url=body.판매URL, budget=요청예산, emit=emit, vendor=body.거래처)
                         except Exception as e:
@@ -175,9 +174,9 @@ def questions(req: Request, body: 질문요청):
                     body.확정비목, body.확정세목 = 분류결과['분류']['비목'], 분류결과['분류']['세목']
                 if MOCK:                        # ④-2 판정용 조사 고정 진행 줄(외부 호출 없음, 스펙 8-5)
                     mock_flow.판정조사(body.확정비목)
-                # ④-2 판정용 조사(재설계 11-13): 공개 조사를 켠 흐름에서만. 질문 생성이 ③ · ④ 뒤 ⑤ 앞에서 부른다
-                판정조사설정 = ({'공개검색어': body.공개검색어, '판매URL': body.판매URL, '거래처': body.거래처}
-                          if body.웹조사 and not MOCK and (body.공개검색어 or body.판매URL) else None)
+                # ④-2 판정용 조사(재설계 11-13, v046 부터 항상): 웹조사 값과 상관없이 분류가 있으면 돈다(별칭 일치 · 재점검 확정비목 포함).
+                # 질문 생성이 ③ · ④ 뒤 ⑤ 앞에서 부르고, 남은 시간이 모자라면 건너뛴다(question_generate.판정용_조사)
+                판정조사설정 = _판정조사_설정(body)
                 결과 = _기존_질문(req, body, 조사확인 if body.웹조사 or 조사확인.get('품목설명') else None, 답키, 준비확인=True,
                               노드결정=(분류결과 or {}).get('노드결정'), 판정조사설정=판정조사설정)
                 세션.판정조사 = 결과.get('_판정조사') if isinstance(결과, dict) else None
@@ -214,6 +213,12 @@ def questions(req: Request, body: 질문요청):
                 요청예산.cancel()
             ex.shutdown(wait=False, cancel_futures=True)
     return _sse응답(gen())
+
+
+def _판정조사_설정(body: 질문요청) -> dict | None:
+    """④-2 판정용 조사 설정 {판매URL, 거래처}. 공개 검색어는 넘기지 않는다(v046: 지출 항목 · 사용 목적 낱말로 검색).
+    MOCK 은 mock_flow.판정조사 가 고정 진행 줄을 내므로 None."""
+    return None if MOCK else {'판매URL': body.판매URL, '거래처': body.거래처}
 
 
 # 분류를 하지 못한 장애(DB · LLM 실패). 규정에 맞는 분류가 없다는 안내(item_classify.안내문(None))와 구분한다
@@ -305,14 +310,18 @@ def 질문경로_일치(저장값, 사업명):
 
 def _live_질문(body: 질문요청, org: str | None, account: str | None, ip: str, t0: float, 조사확인=None, 답키=None,
              노드결정=None, 판정조사설정=None) -> dict:
-    """`판정조사설정`({공개검색어, 판매URL, 거래처})이 있으면 질문 생성이 ④-2 판정용 조사를 하고, 결과를 저장값 「판정조사」 와
-    응답의 서버 전용 키 `_판정조사` 로 낸다(호출자 작업() 이 세션에 옮기고 화면 응답에서 뺀다)."""
+    """`판정조사설정`({판매URL, 거래처})이 있으면 질문 생성이 ④-2 판정용 조사를 하고, 결과를 저장값 「판정조사」 와
+    응답의 서버 전용 키 `_판정조사` 로 낸다(호출자 작업() 이 세션에 옮기고 화면 응답에서 뺀다).
+    조사 확인 없이 온 요청(별칭 일치 · 재점검)은 판정조사가 거래처 · 판매URL 에 따라 달라지므로 그 둘을 키에 더한다."""
     import question_generate
 
     k = 질문세트_키(org, account, body.사업명, body.확정비목, body.확정세목, body.부가세구분,
                 body.세부유형, body.품목, body.금액, body.용도, body.질문원문)
     if 조사확인 is not None:
         k = response_cache.캐시키('questions_research', org, account, k, body.조사ID, 답키)
+    elif 판정조사설정:
+        k = response_cache.캐시키('questions_judge_research', org, account, k,
+                               판정조사설정.get('거래처'), 판정조사설정.get('판매URL'))
 
     def 응답(저장값: dict) -> dict:
         return {"상태": 저장값["상태"], "질문세트": k,
@@ -337,7 +346,7 @@ def _live_질문(body: 질문요청, org: str | None, account: str | None, ip: s
          "용도": body.용도, "금액": body.금액, "질문": body.질문원문,
          "확정세목": body.확정세목, "부가세구분": body.부가세구분,
          **({'_조사확인': 조사확인} if 조사확인 is not None else {}),
-         **({'_판정조사설정': 판정조사설정} if 판정조사설정 and 조사확인 is not None else {}),
+         **({'_판정조사설정': 판정조사설정} if 판정조사설정 else {}),
          **({'_노드결정': 노드결정} if 노드결정 else {})},
         org_id=org, account_id=account)
     메타 = r.get("메타") or {}
