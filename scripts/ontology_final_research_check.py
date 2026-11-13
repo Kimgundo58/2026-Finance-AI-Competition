@@ -12,7 +12,7 @@ def 상태():
     s = O._판정상태(질문='결제', 사업명='사업', org_id=None, account_id=None,
                  plan_id=None, 기록=False, dry=False, 주입=None, 참조확장_사용=True)
     s.정규화결과 = {'품목': '품목', '용도': '용도'}
-    s.온톨로지 = {'근거행': [], '추가규범': []}
+    s.온톨로지 = {'대상': {'비목_id': '비목'}, '게이트': {'종류': None}, '근거행': [], '추가규범': []}
     s.cur = object()
     return s
 
@@ -27,7 +27,7 @@ def 실행(준비, 결과, 가능=True, 상태들=None):
          patch.object(O, '_판정준비_호출', **({'side_effect': 준비} if isinstance(준비, Exception) else {'return_value': 준비})) as 호출, \
          patch.object(O, '_새_검색단계', side_effect=lambda s, **kw: 재구성.append(kw)), \
          patch.object(O, '_새_프롬프트단계', side_effect=lambda s: 재구성.append('프롬프트')), \
-         patch.object(O, '_실패응답', return_value={'판정': '판단불가'}):
+         patch.object(O, '_실패응답', return_value={'판정': '확인 필요'}):
         응답 = O._새_판정준비단계(s)
     return 응답, 조회, 호출, 재구성, events
 
@@ -39,7 +39,7 @@ def main():
     응답, 조회, 호출, 재구성, _ = 실행(요청, 정상)
     assert 응답 is None and 조회.call_args.kwargs == {'요청': '별도 허용 근거', '최대조회': 1}
     assert 재구성 == [{'재구성': True}, '프롬프트']
-    # 조회 실패·예산 소진·결과 상한은 앞서 찾은 근거로 판정한다(판단불가로 끝내지 않음). 「가능」은 검증 단계에서 조건부로 낮춘다
+    # 조회 실패·예산 소진·결과 상한은 앞서 찾은 근거로 판정한다(실패로 끝내지 않음). 「가능」은 검증 단계에서 확인 필요로 낮춘다
     for 결과 in ({'추가조사상태': {'상태': '실패'}},
               {'추가조사상태': {'상태': '건너뜀'}},
               {'추가조사상태': {'상태': '부분', '추가규범수': 1, '추가근거수': 1},
@@ -71,6 +71,22 @@ def main():
     assert 응답 is None and not 조회.called and not 호출.called and not 재구성 and not events
     응답, 조회, _, 재구성, _ = 실행({'행동': '판정', '요청': ''}, 정상)
     assert 응답 is None and not 조회.called and not 재구성
+    # 추가 조회를 할 수 없는 조회(비목 없음 · 코드 게이트가 판정을 정함)면 준비 LLM 도 화면 문장도 없고 「가능」 하향 표시도 남기지 않는다
+    # (2026-11-12 실행기록 20261112_225525). 비목이 없으면 게이트(확정=False) 상한이 「가능」을 막는다
+    for 온톨로지 in ({'대상': None, '게이트': {'종류': None}}, {'대상': {'비목_id': '비목'}, '게이트': {'종류': '금지'}}):
+        s = 상태()
+        s.온톨로지 = {**s.온톨로지, **온톨로지}
+        events = []
+        with R.activate(R.Budget(), emit=events.append), \
+             patch.object(O.ontology_research_plan, '추가조회_가능', return_value=True), \
+             patch.object(O, '_판정준비_호출', side_effect=AssertionError('준비 LLM 호출')) as 호출:
+            assert O._새_판정준비단계(s) is None and not 호출.called and not events and not s.추가조회미완, 온톨로지
+        assert not O.ontology_research_plan.추가조회_대상(s.온톨로지)
+        with R.activate(R.Budget()):     # 추가_조회 도 같은 조건으로 건너뛴다
+            assert O.ontology_research_plan.추가_조회(None, s.온톨로지, {})['추가조사상태']['상태'] == '건너뜀'
+    import ontology_gate
+    무비목 = ontology_gate.게이트([], {'금액': 1}, 확정=False)
+    assert ontology_gate.합치기(무비목, '가능') == ('확인 필요', True)
     s = 상태()
     s.질문 = '\\"' * 5000
     s.제시원문 = {f'S{i:03}': '원문' * 3000 for i in range(100)}
@@ -86,10 +102,12 @@ def main():
     s.온톨로지['대상'] = None
     s.프로필읽음 = True
     s.검색결과 = {'참조관계': []}
+    # 추가 조회 주의는 판정 프롬프트 지시 칸(이번 판정의 주의)으로 넘긴다. 질문(B6) 뒤에 붙이지 않는다(2026-11-13 순서)
     with patch.object(O.ontology_context, '규범_요약', return_value='요약'), \
-         patch.object(O, '프롬프트_구성', return_value=('원래 프롬프트', {'S01': ('l1', 1, None)}, [])):
+         patch.object(O, '프롬프트_구성', return_value=('원래 프롬프트', {'S01': ('l1', 1, None)}, [])) as 구성:
         assert O._새_프롬프트단계(s) is None
-        assert '원래 프롬프트' in s.프롬프트 and '나타나지 않은 규정이나 예외가 없다고 추론하지 않는다' in s.프롬프트
+        assert s.프롬프트 == '원래 프롬프트'
+        assert any('나타나지 않은 규정이나 예외가 없다고 추론하지 않는다' in x for x in 구성.call_args.kwargs['추가지시'])
     for 상태값 in ({'상태': '실패'}, {'상태': '건너뜀'}, {'상태': '완료', '지도부분': True},
                {'상태': '완료', '입력잘림': True}, {'상태': '부분'}):
         s.초기조회상태 = 상태값

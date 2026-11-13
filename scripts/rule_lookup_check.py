@@ -445,7 +445,7 @@ def _effective_rule_검사(eq, 실패: list[str]) -> None:
     eq("모르는사업_None", rl.effective_rule(cur, "없는사업", "광고선전비", l3룰=l3불가), None)
     eq("모르는사업_룰조회없음", any("FROM corpus.rules" in s for s, _ in cur.기록), False)
 
-    # corpus.programs 조회 실패는 삼키지 않는다(판정 파이프라인이 판단불가로 반환한다)
+    # corpus.programs 조회 실패는 삼키지 않는다(판정 파이프라인이 확인 필요(실패)로 반환한다)
     for 이름, 호출 in (("effective_rule", lambda c: rl.effective_rule(c, "TIPS", "인건비")),
                      ("금지목록_일치", lambda c: rl.금지목록_일치(c, "기프티콘", None, "TIPS", None))):
         try:

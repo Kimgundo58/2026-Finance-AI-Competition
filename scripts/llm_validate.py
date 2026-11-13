@@ -42,10 +42,10 @@ _log = logging.getLogger(__name__)
 )
 
 # 하향으로 판정이 LLM 의 판정과 달라졌을 때 LLM 요약 대신 쓰는 문장. LLM 요약은 LLM 이 낸
-# 판정을 설명하므로, 판정 배지와 다른 결론을 말하게 된다. 하향은 불가를 만들지 않는다.
+# 판정을 설명하므로, 판정 배지와 다른 결론을 말하게 된다. 하향은 불가를 만들지 않고 언제나 확인 필요로 간다.
 _하향_요약 = {
-    "조건부": "확인이 필요한 조건이 있어 조건부로 판정했습니다. 아래 확인 항목과 근거 조항을 살펴봐 주세요.",
-    "판단불가": "근거를 확인하지 못해 판정을 내리지 않았습니다. 담당자 확인이 필요합니다.",
+    "확인 필요": "바로 써도 된다고 확인하지 못했습니다. 아래 확인 항목과 근거 조항을 살펴보고, "
+               "분명하지 않으면 주관기관 담당자에게 확인해 주세요.",
 }
 
 # 프로필 필드 경로는 tenant 의 실제 컬럼에서 만든다. 경로 표기는 "F1.정부지원.현금" 형식이고
@@ -263,6 +263,77 @@ def _메타_행(종류: str, 행: tuple, 항호: str | None) -> dict:
                 기관id=기관, domain=dom, layer=lay)
 
 
+# 단락 단위로 나뉜 문서(조번호 `단락NNN`)는 파서가 쪽·길이로 끊어 한 문장이 두 단락에 걸칠 수 있다.
+# 인용 원문이 문장 중간에서 끝나거나 시작하면 같은 문서의 바로 앞·뒤 단락에서 그 문장의 나머지를 이어 붙인다.
+_이웃_SQL = {
+    "article": """
+        SELECT a.article_id,
+               (SELECT p.본문 FROM corpus.doc_articles p WHERE p.doc_id = a.doc_id
+                   AND (COALESCE(p.조순번, 0), p.article_id) < (COALESCE(a.조순번, 0), a.article_id)
+                 ORDER BY COALESCE(p.조순번, 0) DESC, p.article_id DESC LIMIT 1),
+               (SELECT n.본문 FROM corpus.doc_articles n WHERE n.doc_id = a.doc_id
+                   AND (COALESCE(n.조순번, 0), n.article_id) > (COALESCE(a.조순번, 0), a.article_id)
+                 ORDER BY COALESCE(n.조순번, 0), n.article_id LIMIT 1)
+          FROM corpus.doc_articles a WHERE a.article_id = ANY(%s)""",
+    "l3": """
+        SELECT a.article_id,
+               (SELECT p.본문 FROM tenant.l3_articles p WHERE p.doc_id = a.doc_id AND p.org_id = a.org_id
+                   AND (COALESCE(p.조순번, 0), p.article_id) < (COALESCE(a.조순번, 0), a.article_id)
+                 ORDER BY COALESCE(p.조순번, 0) DESC, p.article_id DESC LIMIT 1),
+               (SELECT n.본문 FROM tenant.l3_articles n WHERE n.doc_id = a.doc_id AND n.org_id = a.org_id
+                   AND (COALESCE(n.조순번, 0), n.article_id) > (COALESCE(a.조순번, 0), a.article_id)
+                 ORDER BY COALESCE(n.조순번, 0), n.article_id LIMIT 1)
+          FROM tenant.l3_articles a WHERE a.article_id = ANY(%s) AND a.org_id = %s::uuid""",
+}
+_문장끝 = re.compile(r"[.!?。](?=[\s\"'”’)\]」』]|$)")
+_잇기_최대 = 400
+_목록기호 = re.compile(r"^\s*(?:[-※○●•·□■◦▪*]|\d+[.)]|[가-하][.)]|[①-⑳])")
+
+
+def _줄넘김_끊김(줄: str, 줄폭: int) -> bool:
+    """줄이 문장 끝 없이 쪽 너비까지 찬 줄인가. 짧은 줄(제목·표 머리)은 문장이 이어진다고 보지 않는다."""
+    줄 = 줄.rstrip()
+    if len(줄) < max(20, int(줄폭 * 0.75)):
+        return False
+    끝들 = list(_문장끝.finditer(줄))
+    return not 끝들 or bool(줄[끝들[-1].end():].strip())
+
+
+def 문장_잇기(원문: str, 본문: str, 앞본문: str | None, 뒤본문: str | None) -> str:
+    """단락 경계에서 잘린 문장을 앞·뒤 단락에서 이어 붙인다. 이을 것이 없으면 원문 그대로다.
+
+    원문이 단락 본문의 끝까지 가고 그 마지막 줄이 문장 끝으로 끝나지 않는 꽉 찬 줄이면 뒤 단락에서 첫 문장 끝까지,
+    원문이 단락 본문의 처음부터이고 앞 단락 마지막 줄이 그렇게 끊겼으면 앞 단락의 마지막 문장 끝 뒤를 붙인다.
+    붙이는 글은 모두 DB 원문의 부분 문자열이다. 문장 끝을 _잇기_최대 자 안에서 못 찾으면 붙이지 않는다.
+    """
+    if not 원문 or not 본문:
+        return 원문
+    줄들 = [x for t in (앞본문, 본문, 뒤본문) if t for x in t.splitlines() if x.strip()]
+    줄폭 = max((len(x.rstrip()) for x in 줄들), default=0)
+    결과 = 원문
+    if 뒤본문 and 본문.rstrip().endswith(원문.rstrip()) and _줄넘김_끊김(원문.rstrip().splitlines()[-1], 줄폭):
+        m = _문장끝.search(뒤본문[:_잇기_최대])
+        if m:
+            결과 = 결과.rstrip() + " " + 뒤본문[:m.end()].strip()
+    앞줄들 = (앞본문 or "").rstrip().splitlines()
+    if 앞줄들 and 본문.lstrip().startswith(원문.lstrip()) and _줄넘김_끊김(앞줄들[-1], 줄폭):
+        # 앞 단락 끝에서 거꾸로 올라가며 문장 시작을 찾는다. 문장 끝 뒤, 목록 기호로 시작하는 줄, 꽉 차지 않은 줄에서 멈춘다
+        조각: list[str] = []
+        for k in range(len(앞줄들) - 1, -1, -1):
+            줄 = 앞줄들[k].strip()
+            끝들 = list(_문장끝.finditer(줄))
+            if 끝들:
+                조각.insert(0, 줄[끝들[-1].end():].strip())
+                break
+            조각.insert(0, 줄)
+            if _목록기호.match(줄) or k == 0 or not _줄넘김_끊김(앞줄들[k - 1], 줄폭):
+                break
+        앞 = " ".join(x for x in 조각 if x)
+        if 앞 and len(앞) <= _잇기_최대:
+            결과 = 앞 + " " + 결과.lstrip()
+    return 결과
+
+
 def 문장ID_메타(문장맵: dict, *, conn=None, org_id=None) -> dict[str, dict]:
     """문장맵의 문장 ID 별로 인용 치환과 신뢰등급 산정에 쓰는 DB 사실을 읽는다. DB 에 없는 문장 ID 는 빠진다.
 
@@ -281,9 +352,15 @@ def 문장ID_메타(문장맵: dict, *, conn=None, org_id=None) -> dict[str, dic
             인자 = (list(ids.values()),) if 종류 != "l3" else (
                 list(ids.values()), str(org_id) if org_id else None)
             행들 = {r[0]: r for r in c.execute(sql, 인자).fetchall()}
+            # 단락 단위 문서의 인용만 앞뒤 단락을 읽어 잘린 문장을 잇는다(제N조 문서는 조 경계가 문장 경계다)
+            단락id = [i for i in set(ids.values()) if i in 행들 and _단락번호.match(str(행들[i][2] or "").strip())]
+            이웃 = ({r[0]: (r[1], r[2]) for r in c.execute(_이웃_SQL[종류], (단락id,) + 인자[1:]).fetchall()}
+                  if 단락id and 종류 in _이웃_SQL else {})
             for sid, i in ids.items():
                 if i in 행들:
                     out[sid] = _메타_행(종류, 행들[i], 문장맵[sid][2])
+                    if i in 이웃:
+                        out[sid]["원문"] = 문장_잇기(out[sid]["원문"], 행들[i][7] or "", *이웃[i])
         return out
 
 
@@ -450,17 +527,17 @@ def _판정_하향(판정: str, 신뢰등급: Optional[str], 인용목록: list[
     """
     # corpus.rules.verified=false 인 룰만으로는 '가능' 을 내지 않는다
     if 룰들 is not None and 판정 == "가능" and 룰들 and not any(r.get("verified") for r in 룰들):
-        검증기록("UNVERIFIED_RULE", "미검수(verified=false) 룰만으로 '가능' → 조건부로 하향")
-        판정 = "조건부"
+        검증기록("UNVERIFIED_RULE", "미검수(verified=false) 룰만으로 '가능' → 확인 필요로 하향")
+        판정 = "확인 필요"
     # 스캔 문서의 추출본(VLM·OCR)을 근거로 '가능' 을 내면 금액·조번호 오인식 하나가 곧 잘못된 '가능' 이 된다
     if 판정 == "가능" and 인용목록 and 신뢰등급 == "B" and "VLM_DOWNGRADE" in 검증기록.코드:
-        검증기록("B_GRADE_DOWNGRADE", "'가능' 인데 인용에 스캔본 추출본(VLM·OCR)이 있음 → 조건부로 하향")
-        판정 = "조건부"
+        검증기록("B_GRADE_DOWNGRADE", "'가능' 인데 인용에 스캔본 추출본(VLM·OCR)이 있음 → 확인 필요로 하향")
+        판정 = "확인 필요"
     # 기관 자체규정(L3)은 국가 지침 위에 추가되는 문서라 단독으로 '가능' 의 근거가 되지 못한다.
     # 상위 지침의 제약을 놓칠 수 있기 때문이다. L3 단독 '불가' 는 안전한 방향이라 건드리지 않는다
     if 판정 == "가능" and 인용계층 and all(x == "L3" for x in 인용계층):
-        검증기록("L3_ONLY_DOWNGRADE", "'가능' 인데 인용이 L3(기관 규정) 단독 → 조건부로 하향")
-        판정 = "조건부"
+        검증기록("L3_ONLY_DOWNGRADE", "'가능' 인데 인용이 L3(기관 규정) 단독 → 확인 필요로 하향")
+        판정 = "확인 필요"
         if 신뢰등급 == "A":
             신뢰등급 = "B"
     # 요건을 충족하는 답이 아니거나(「아니오」·「모름」) 답변을 읽지 못했으면 '가능' 을 내지 않는다.
@@ -468,8 +545,8 @@ def _판정_하향(판정: str, 신뢰등급: Optional[str], 인용목록: list[
     미확인 = sum(a.get("답") != a.get("충족답") for a in 사용자답변 or [])
     if 판정 == "가능" and (미확인 or 답변유실):
         검증기록("ANSWER_UNCONFIRMED",
-            f"'가능' 인데 요건 미확인 답변 {미확인}건·답변 유실 {답변유실} → 조건부로 하향")
-        판정 = "조건부"
+            f"'가능' 인데 요건 미확인 답변 {미확인}건·답변 유실 {답변유실} → 확인 필요로 하향")
+        판정 = "확인 필요"
     return 판정, 신뢰등급
 
 
@@ -524,7 +601,7 @@ def 검증(llm출력: dict, 문장맵: dict, *,
     바뀐다. `메타`·`프로필경로`·`체크항목` 을 주지 않으면 `conn`(없으면 새 커넥션)으로 DB 에서 읽는다.
     `룰들` 은 B4 에 들어간 effective_rule 결과, `체크코드` 는 해야할일 code 허용 목록이다.
     `현재기관` 과 다른 기관id 를 가진 인용은 버리고 tenant.incidents 에 기록한다(부수 효과).
-    `사용자답변`·`답변유실` 은 확인 질문 결과다. 요건을 충족하는 답이 아니면 '가능' 을 조건부로 낮춘다.
+    `사용자답변`·`답변유실` 은 확인 질문 결과다. 요건을 충족하는 답이 아니면 '가능' 을 확인 필요로 낮춘다.
     """
     검증기록 = _검증기록()
     메타 = 메타 if 메타 is not None else 문장ID_메타(문장맵, conn=conn, org_id=org_id)
@@ -532,11 +609,11 @@ def 검증(llm출력: dict, 문장맵: dict, *,
     체크항목 = (체크항목 if 체크항목 is not None
              else (체크항목_본문(set(체크코드), conn=conn) if 체크코드 else {}))
 
-    # 판정이 enum 밖이면 고쳐 맞추지 않고 판단불가로 둔다
+    # 판정이 enum 밖이면 고쳐 맞추지 않고 확인 필요로 둔다
     판정 = llm출력.get("판정")
     if 판정 not in 판정_ENUM:
-        검증기록("INVALID_JUDGMENT", f"판정 '{판정}' 이 판정 enum(4종) 밖 → 판단불가")
-        판정 = "판단불가"
+        검증기록("INVALID_JUDGMENT", f"판정 '{판정}' 이 판정 enum(3종) 밖 → 확인 필요")
+        판정 = "확인 필요"
 
     인용목록, 인용계층, 유출 = _인용_검증(llm출력, 문장맵, 메타, 현재기관, 검증기록)
     if 유출:
@@ -544,9 +621,10 @@ def 검증(llm출력: dict, 문장맵: dict, *,
                  conn=conn, org_id=org_id)
     전제목록, 미매핑 = _전제_검증(llm출력, 문장맵, 메타, 허용경로, 검증기록)
 
-    if not 인용목록 and 판정 != "판단불가":
-        검증기록("NO_CITATION", "인용 0건인데 판정이 판단불가가 아니다 → 판단불가")
-        판정 = "판단불가"
+    # 근거 없는 가능·불가는 내지 않는다. 확인 필요는 근거가 모자란 경우도 포함하므로 그대로 둔다
+    if not 인용목록 and 판정 != "확인 필요":
+        검증기록("NO_CITATION", "인용 0건인데 판정이 확인 필요가 아니다 → 확인 필요")
+        판정 = "확인 필요"
     신뢰등급 = _신뢰등급(인용목록, 미해결참조, 검증기록)
     판정, 신뢰등급 = _판정_하향(판정, 신뢰등급, 인용목록, 인용계층, 룰들, 검증기록,
                          사용자답변=사용자답변, 답변유실=답변유실)

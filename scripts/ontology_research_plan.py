@@ -28,6 +28,14 @@ def 추가조회_가능(budget) -> bool:
             and budget.remaining_seconds() > 15)
 
 
+def 추가조회_대상(조회: dict) -> bool:
+    """이 조회 결과로 추가 조회를 할 수 있는가. 확정한 비목이 있고 코드 게이트(금지 · 한도초과 · 부가세기준미정)가 판정을 정하지 않았을 때만.
+
+    `추가_조회` 가 건너뛰는 조건과 같은 함수다. 판정 준비(orchestrate._새_판정준비단계)도 이 값이 거짓이면 LLM 을 부르지 않는다.
+    """
+    return bool((조회.get('대상') or {}).get('비목_id')) and not (조회.get('게이트') or {}).get('종류')
+
+
 def 조사_준비(입력: dict, *, org_id=None, account_id=None) -> dict:
     """공개 조사의 필요 정보 판단용 재료. APICK 요청에는 전달하지 않는다.
 
@@ -84,7 +92,7 @@ def 추가_조회(cur, 조회: dict, 입력: dict, *, 요청: str | None = None,
 
     budget = research_runtime.current_budget()
     대상 = 조회.get('대상') or {}
-    if budget is None or not 대상.get('비목_id') or 조회.get('게이트', {}).get('종류'):
+    if budget is None or not 추가조회_대상(조회):
         return 마침('건너뜀')
     if not isinstance(최대조회, int) or isinstance(최대조회, bool) or not 0 <= 최대조회 <= 1:
         raise ValueError('추가 조회 횟수 오류')
@@ -169,7 +177,7 @@ def 추가_조회(cur, 조회: dict, 입력: dict, *, 요청: str | None = None,
             상태['결과'][캐시키] = 결과
         except (ValueError, RuntimeError, LLM실패, psycopg.Error):
             # psycopg.Error = statement_timeout(QueryCanceled) 같은 DB 오류. 읽기 전용 트랜잭션은 이미 되돌렸다.
-            # 선택 조회라 전체 판정을 판단불가로 만들지 않고 이 조회만 실패로 둔다(리뷰 28-9)
+            # 선택 조회라 전체 판정을 실패(확인 필요)로 만들지 않고 이 조회만 실패로 둔다(리뷰 28-9)
             상태['결과'][캐시키] = {'완료': False, '상태': '실패', '지도부분': 지도부분, '입력잘림': 입력잘림, '규범': [], '근거행': []}
             research_runtime.emit('규정추가조회', '추가 규정의 확인을 마치지 못했어요.', '실패')
             return 마침('실패')
@@ -194,14 +202,19 @@ def 확인정보_문맥(조사: dict | None) -> str:
     if not 조사:
         return ""
     사실 = []
+    if isinstance(조사.get("품목설명"), str) and 조사["품목설명"].strip():
+        # 조사 결과가 없어 사용자가 [직접 입력하기] 로 적은 품목 설명(research_sessions.설명_붙이기)
+        사실.append({"유형": "제품성격", "내용": 이스케이프(조사["품목설명"].strip()), "출처": "사용자 품목 설명(진술)"})
     for x in 조사.get("확인한정보") or []:
         if not isinstance(x, dict) or x.get("유형") == "업체이용조건":
             continue
-        if x.get("답") == "아니에요" and x.get("정정"):
-            # 거부된 판매처 발췌를 확인된 사실과 나란히 넣지 않는다.
+        if x.get("답") == "직접입력" and x.get("정정"):
+            # 사용자가 [직접 입력하기] 로 고쳐 쓴 설명. 발췌는 넣지 않는다(재설계 11-11 ②).
             사실.append({"유형": x.get("유형"), "내용": 이스케이프(x["정정"]), "출처": "사용자 정정(진술)"})
         elif x.get("답") == "맞아요":
-            사실.append({"유형": x.get("유형"), "내용": 이스케이프(x.get("내용")), "출처": "공개 안내에 대한 사용자 확인(진술)"})
+            # 사용자가 [맞아요] 한 것은 화면의 확인문장이다(2026-11-12, 조사 후보 하나 · 한 번 확인). 옛 세션은 발췌만 있다
+            사실.append({"유형": x.get("유형"), "내용": 이스케이프(x.get("확인문장") or x.get("내용")),
+                       "출처": "공개 안내에 대한 사용자 확인(진술)"})
     if not 사실:
         return ""
     return ("\n\n[공개 정보에 대한 사용자 확인 — 진술이며 증빙이나 지원금 규정이 아님]\n"

@@ -18,6 +18,9 @@ _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT / "scripts"))
 
 
+_정답_3값 = {"조건부": "확인 필요", "판단불가": "확인 필요"}    # eval.golden_set.정답판정(4값) → 판정 3값
+
+
 def 자체점검() -> int:
     # question_generate 는 DB·LLM 없이 import 되어야 CI 에서 돈다
     from question_generate import 근거_발췌, 답변_구성, 숫자집합, 질문_검증, 질문_공개
@@ -224,8 +227,9 @@ def 판정비교(표본수: int, 반복: int, 동시: int, 출력파일: str | N
         판정수 = sum(len(x["없음"]) for x in 묶음)
         print(f"{이름} {len(묶음)}문항 조건별 판정 {판정수}회")
         for 조건 in ("없음", "충족답", "모름"):
-            분포 = {v: sum(y == v for x in 묶음 for y in x[조건]) for v in ("가능", "조건부", "불가", "판단불가")}
-            일치 = sum(y == x["정답"] for x in 묶음 for y in x[조건])
+            분포 = {v: sum(y == v for x in 묶음 for y in x[조건]) for v in ("가능", "확인 필요", "불가")}
+            # 정답셋 라벨은 4값이다. 판정 3값과 견줄 때 옛 조건부 · 판단불가를 확인 필요로 본다(2026-11-11)
+            일치 = sum(y == _정답_3값.get(x["정답"], x["정답"]) for x in 묶음 for y in x[조건])
             print(f"  {조건}: {분포} 정답 일치 {일치}")
     return 0
 

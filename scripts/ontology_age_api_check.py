@@ -57,7 +57,7 @@ def main() -> int:
             cur.execute(retrieve.DENSE.format(사업=''), {'v': vector, 'k': 1}).fetchall()
     print('통과 AGE 준비 후 기존 search_path·고정 벡터 DENSE SQL')
 
-    calls = {'cypher': 0, 'llm': 0}
+    calls = {'cypher': 0, 'llm': 0, '보조': 0}
     original_query = G._조회
 
     def cypher(*a, **kw):
@@ -69,11 +69,18 @@ def main() -> int:
     O.판정 = lambda q, **kw: original_judge(q, **{**kw, '기록': False})
 
     def fixed_llm(prompt, schema, **kw):
+        # 판정과 따로 도는 짧은 호출(재설계 v043: 할 일 다듬기 · 금지 재확인)은 준비 · 판정 호출 수와 따로 센다
+        if '할일다듬기' in schema.get('properties', {}):
+            calls['보조'] += 1
+            return {'할일다듬기': []}, {'모델': '고정', '입력토큰': 0, '출력토큰': 0}
+        if schema is O._금지재확인_스키마:
+            calls['보조'] += 1
+            return {'이유': '', '결과': '해당없음'}, {'모델': '고정', '입력토큰': 0, '출력토큰': 0}
         calls['llm'] += 1
         if '행동' in schema.get('properties', {}):
             return {'행동': '판정', '요청': ''}, {'모델': '고정', '입력토큰': 0, '출력토큰': 0}
         ids = (schema['properties']['인용']['items'].get('enum') or [])[:1]
-        return {'판정': '조건부', '요약': '고정 출력 시험', '해야할일': [], '인용': ids, '전제': []}, {'모델': '고정', '입력토큰': 0, '출력토큰': 0}
+        return {'판정': '확인 필요', '요약': '고정 출력 시험', '해야할일': [], '인용': ids, '전제': []}, {'모델': '고정', '입력토큰': 0, '출력토큰': 0}
 
     O.llm_호출 = fixed_llm
     retrieve.검색 = lambda *a, **kw: O._빈_검색결과()
@@ -101,11 +108,11 @@ def main() -> int:
     response_cache._메모리.clear()
     response_cache.데이터버전_해시_무효화()
     outcome, done = request()
-    assert outcome.get('판정') == '조건부' and done.get('캐시') is False
+    assert outcome.get('판정') == '확인 필요' and done.get('캐시') is False
     assert calls['cypher'] > 0 and calls['llm'] == 2
     before = dict(calls)
     outcome, done = request()
-    assert outcome.get('판정') == '조건부' and done.get('캐시') is True and calls == before
+    assert outcome.get('판정') == '확인 필요' and done.get('캐시') is True and calls == before
 
     original_version = SA.준비_버전
 
@@ -135,10 +142,10 @@ def main() -> int:
         A.준비_확인 = lambda cur, m=mode: original_version(Proxy(cur, m))
         outcome, done = request()
         # 사전 준비 확인에서 중단하면 완료 이벤트에는 실패만 있고 캐시 키가 없다.
-        assert outcome.get('판정') == '판단불가' and done.get('캐시') is not True and calls == before, mode
+        assert outcome.get('판정') == '확인 필요' and done.get('캐시') is not True and calls == before, mode
         cache_key = next(iter(response_cache._메모리), 'not-found')
         assert response_cache.조회(cache_key, None) is None, mode
-        print(f'통과 {mode}: 캐시 우회·판단불가')
+        print(f'통과 {mode}: 캐시 우회·확인 필요')
     print('통과 정상 AGE 조회·캐시 적중; 실제 LLM·검색·DB 기록 없음')
     return 0
 

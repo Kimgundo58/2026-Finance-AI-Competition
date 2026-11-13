@@ -48,7 +48,7 @@ def public_url(url: str) -> bool:
             pairs = parse_qsl(p.query, keep_blank_values=True, strict_parsing=True, max_num_fields=8)
             numeric = {"id", "article", "article_id", "articleid", "doc", "doc_id", "document_id",
                        "page", "p", "post", "post_id", "postid", "no", "seq", "idx"}
-            languages = {"lang", "language", "locale"}
+            languages = {"lang", "language", "locale", "hl"}   # hl: 구글 계열 표시 언어(2026-11-12 로컬: ?hl=ko 하나로 결과 1건이 빠짐)
             # 사이트별 공개 글 식별자. 다른 사이트에서는 받지 않는다. 영상 페이지는 본문이 없어 받지 않는다.
             naver_blog = host in {"blog.naver.com", "m.blog.naver.com"}
             for key, value in pairs:

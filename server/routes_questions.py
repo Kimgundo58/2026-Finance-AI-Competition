@@ -57,9 +57,10 @@ def questions(req: Request, body: 질문요청):
     if not 세션.lock.acquire(blocking=False):
         raise HTTPException(409, '조사가 진행 중입니다')
     try:
-        body.확정비목 = _비목_표준화(body.확정비목)
-        if body.확정비목 not in 비목_ENUM:
-            raise HTTPException(422, f"비목은 다음 10종 중 하나여야 합니다: {비목_ENUM}")
+        if body.확정비목:                     # 비우면 ③ 에서 서버가 정한다(재설계 11-11)
+            body.확정비목 = _비목_표준화(body.확정비목)
+            if body.확정비목 not in 비목_ENUM:
+                raise HTTPException(422, f"비목은 다음 10종 중 하나여야 합니다: {비목_ENUM}")
         body.사업명 = _사업명_표준화(body.사업명)
         if not MOCK:
             try:
@@ -72,7 +73,7 @@ def questions(req: Request, body: 질문요청):
         if not MOCK and (규정버전 in ('unknown', '', None) or (org and not 기관버전)):
             raise HTTPException(503, '규정 버전을 확인할 수 없습니다')
         버전 = json.dumps([규정버전, 기관버전, 온톨로지_사업(body.사업명)], ensure_ascii=False)
-        요청키 = json.dumps([입력, body.질문원문, body.웹조사, body.공개검색어, body.판매URL], ensure_ascii=False)
+        요청키 = json.dumps([입력, body.질문원문, body.웹조사, body.공개검색어, body.판매URL, body.거래처], ensure_ascii=False)
         if 세션.입력 is not None and (세션.입력 != 입력 or 세션.버전 != 버전 or getattr(세션, '요청키', None) != 요청키):
             raise HTTPException(409, '입력이 변경되어 새 조사가 필요합니다')
     except BaseException:
@@ -97,11 +98,14 @@ def questions(req: Request, body: 질문요청):
                             if not body.공개검색어 and not body.판매URL:
                                 세션.조사 = {'상태': '미확인', '후보': [], '출처': []}
                             else:
-                                준비 = {'요건': [], '문맥': {}}
+                                # ② 품목 조사(재설계 11-11): 비목을 정하기 전이라 규범 요건 없이 지출 문맥만 준다
+                                준비 = {'요건': [], '문맥': {k: v for k, v in (('품목', body.품목), ('용도', body.용도),
+                                                                             ('금액', body.금액)) if v not in (None, '')}}
                                 if not MOCK:
                                     ok, 사유 = 제한.통과(클라이언트_ip(req))
                                     if not ok:
                                         raise RuntimeError(사유)
+                                if not MOCK and body.확정비목:      # 옛 화면: 비목을 먼저 고른 경우만 규범 요건을 조사 자료로
                                     import ontology_research_plan
                                     준비 = ontology_research_plan.조사_준비(
                                         {'사업명': body.사업명, '비목': body.확정비목,
@@ -111,7 +115,7 @@ def questions(req: Request, body: 질문요청):
                                 import web_research
                                 세션.조사 = web_research.research(body.공개검색어,
                                     requirements=준비['요건'], context=준비['문맥'],
-                                    public_url=body.판매URL, budget=요청예산, emit=emit)
+                                    public_url=body.판매URL, budget=요청예산, emit=emit, vendor=body.거래처)
                         except Exception as e:
                             _log.warning('공개 정보 조사 실패: %s', type(e).__name__)
                             세션.조사 = {'상태': '실패', '후보': [], '출처': []}
@@ -126,16 +130,40 @@ def questions(req: Request, body: 질문요청):
                     조사확인 = research_sessions.후보_답변(세션, [a.model_dump() for a in (body.조사답변 or [])])
                 except ValueError as e:
                     raise HTTPException(400, '조사 답변을 확인해 주세요') from e
+                # [직접 입력하기] 품목 설명은 확인 결과에 넣어 질문 · 판정 프롬프트까지 간다. 답키에도 들어가
+                # 설명이 바뀌면 ③ 분류를 다시 하고, 판정(답변_검증)은 세션에 저장한 설명으로 같은 키를 다시 만든다
+                조사확인 = research_sessions.설명_붙이기(조사확인, body.품목설명)
                 답키 = research_sessions.답변키(조사확인)
-                if 세션.질문결과 is not None and 세션.확인답키 == 답키:
+                if 세션.질문결과 is not None and 세션.확인답키 == 답키 and not 세션.분류실패:
                     if emit:
                         emit({'id': '저장결과', '단계': '확인질문', '상태': '완료', '문장': '저장된 확인 질문을 불러왔어요.'})
                     return 세션.질문결과
-                결과 = _기존_질문(req, body, 조사확인 if body.웹조사 else None, 답키, 준비확인=True)
-                결과 = {**결과, '조사ID': 조사ID, '조사': 세션.조사}
+                분류결과 = None
+                if not body.확정비목:
+                    분류결과 = _분류(body, 조사확인)
+                    세션.분류, 세션.노드결정 = 분류결과['분류'], 분류결과['노드결정']
+                    if not 분류결과['분류']:
+                        결과 = {**_실패_응답, '상태': '분류없음', '조사ID': 조사ID, '조사': 세션.조사,
+                              '분류': None, '분류안내': 분류결과['안내']}
+                        # 장애로 분류하지 못한 결과(분류실패)는 같은 답으로 다시 불러도 내주지 않고 분류를 다시 한다.
+                        # 판정 요청의 답변 검증(research_sessions.답변_검증)은 맞는 분류가 없을 때처럼 이 결과로 한다
+                        세션.입력, 세션.버전, 세션.요청키, 세션.확인답키, 세션.질문결과 = 입력, 버전, 요청키, 답키, 결과
+                        세션.분류실패 = bool(분류결과.get('실패'))
+                        세션.질문세트, 세션.판정결과, 세션.품목설명 = None, None, 조사확인.get('품목설명')
+                        return 결과
+                    body.확정비목, body.확정세목 = 분류결과['분류']['비목'], 분류결과['분류']['세목']
+                # ④-2 판정용 조사(재설계 11-13): 공개 조사를 켠 흐름에서만. 질문 생성이 ③ · ④ 뒤 ⑤ 앞에서 부른다
+                판정조사설정 = ({'공개검색어': body.공개검색어, '판매URL': body.판매URL, '거래처': body.거래처}
+                          if body.웹조사 and not MOCK and (body.공개검색어 or body.판매URL) else None)
+                결과 = _기존_질문(req, body, 조사확인 if body.웹조사 or 조사확인.get('품목설명') else None, 답키, 준비확인=True,
+                              노드결정=(분류결과 or {}).get('노드결정'), 판정조사설정=판정조사설정)
+                세션.판정조사 = 결과.get('_판정조사') if isinstance(결과, dict) else None
+                결과 = {**{k: v for k, v in 결과.items() if k != '_판정조사'}, '조사ID': 조사ID, '조사': 세션.조사}
+                if 분류결과:
+                    결과 = {**결과, '분류': 분류결과['분류'], '분류안내': 분류결과['안내']}
                 세션.입력, 세션.버전, 세션.질문세트 = 입력, 버전, 결과.get('질문세트')
                 세션.요청키, 세션.확인답키, 세션.질문결과 = 요청키, 답키, 결과
-                세션.판정결과 = None
+                세션.판정결과, 세션.품목설명, 세션.분류실패 = None, 조사확인.get('품목설명'), False
                 return 결과
         finally:
             세션.lock.release()
@@ -165,7 +193,41 @@ def questions(req: Request, body: 질문요청):
     return _sse응답(gen())
 
 
-def _기존_질문(req: Request, body: 질문요청, 조사확인=None, 답키=None, 준비확인=False) -> dict:
+# 분류를 하지 못한 장애(DB · LLM 실패). 규정에 맞는 분류가 없다는 안내(item_classify.안내문(None))와 구분한다
+_분류실패_안내 = "지금은 분류를 확인하지 못했어요. 잠시 후 다시 시도해 주세요."
+
+
+def _분류(body: 질문요청, 조사확인: dict | None) -> dict:
+    """③ 품목 → 세목 → 비목(재설계 11-11). {분류 | None, 노드결정 | None, 안내, 실패}. 화면에는 분류 이름과 안내만 나간다.
+
+    분류 = {비목, 세목, 표시문, 품목}. 맞는 분류가 없으면 분류 None 이고 화면은 [직접 입력하기] 로 품목 설명을 받아 다시 부른다.
+    장애(DB 예외 · 분류 LLM 실패)도 분류 None 이지만 실패=True 와 _분류실패_안내 로 구분한다(호출자는 이 결과를 같은 답에 다시 내주지 않는다).
+    디버그(버린 후보 · 다른 경로 · LLM 이유)는 로그에 개수만 남긴다.
+    """
+    import item_classify
+    import ontology_lookup
+    from _lib import db
+    if MOCK:
+        return {"분류": None, "노드결정": None, "안내": item_classify.안내문(None)}
+    try:
+        with db.connect(connect_timeout=5, autocommit=True) as c:
+            cur = c.cursor()
+            레이블 = [x for x in ontology_lookup.레이블_목록(cur, body.사업명) if x["비목"] in 비목_ENUM]
+            r = item_classify.분류(cur, body.사업명, {"품목": body.품목, "용도": body.용도, "금액": body.금액, "거래처": body.거래처},
+                                  레이블, item_classify.확인정보_글(조사확인, body.품목설명))
+    except Exception as e:                                    # noqa: BLE001
+        _log.warning("분류 실패: %s", type(e).__name__)
+        return {"분류": None, "노드결정": None, "안내": _분류실패_안내, "실패": True}
+    d = r["디버그"]
+    _log.info("분류 방법=%s 후보=%s 버림=%s 다른경로=%s ms=%s", r["방법"], d.get("후보수"), len(d.get("버린후보") or []),
+              len(d.get("다른경로") or []), d.get("ms"))
+    if not r["분류"] and d.get("LLM실패"):                    # 분류 LLM 이 실패했다. 맞는 분류가 없다는 뜻이 아니다
+        return {"분류": None, "노드결정": None, "안내": _분류실패_안내, "실패": True, "_디버그": d}
+    return {"분류": r["분류"], "노드결정": r["노드결정"], "안내": item_classify.안내문(r["분류"]), "_디버그": d}
+
+
+def _기존_질문(req: Request, body: 질문요청, 조사확인=None, 답키=None, 준비확인=False, 노드결정=None,
+              판정조사설정=None) -> dict:
     """응답: {상태: 있음|없음|바로판정|실패, 질문세트, 질문: [{id, 질문문, 이유, 선택지, 근거}], 추가입력, 용어풀이}."""
     t0 = time.time()
     body.확정비목 = _비목_표준화(body.확정비목)
@@ -191,7 +253,7 @@ def _기존_질문(req: Request, body: 질문요청, 조사확인=None, 답키=N
 
     org, account = auth.검증된_org(req), auth.검증된_account(req)
     try:
-        return _live_질문(body, org, account, 클라이언트_ip(req), t0, 조사확인, 답키)
+        return _live_질문(body, org, account, 클라이언트_ip(req), t0, 조사확인, 답키, 노드결정, 판정조사설정)
     except Exception as e:                                    # noqa: BLE001
         _log.warning("확인 질문 실패: %s", type(e).__name__)
         _로그("실패", 0, ["예외"], False, t0)
@@ -217,7 +279,10 @@ def 질문경로_일치(저장값, 사업명):
     return (not 현재) if 기록 is None else type(기록) is bool and 기록 == 현재
 
 
-def _live_질문(body: 질문요청, org: str | None, account: str | None, ip: str, t0: float, 조사확인=None, 답키=None) -> dict:
+def _live_질문(body: 질문요청, org: str | None, account: str | None, ip: str, t0: float, 조사확인=None, 답키=None,
+             노드결정=None, 판정조사설정=None) -> dict:
+    """`판정조사설정`({공개검색어, 판매URL, 거래처})이 있으면 질문 생성이 ④-2 판정용 조사를 하고, 결과를 저장값 「판정조사」 와
+    응답의 서버 전용 키 `_판정조사` 로 낸다(호출자 작업() 이 세션에 옮기고 화면 응답에서 뺀다)."""
     import question_generate
 
     k = 질문세트_키(org, account, body.사업명, body.확정비목, body.확정세목, body.부가세구분,
@@ -228,7 +293,8 @@ def _live_질문(body: 질문요청, org: str | None, account: str | None, ip: s
     def 응답(저장값: dict) -> dict:
         return {"상태": 저장값["상태"], "질문세트": k,
                 "질문": [question_generate.질문_공개(q) for q in 저장값["질문"]],
-                "추가입력": 저장값.get("추가입력") or [], "용어풀이": 저장값.get("용어풀이") or []}
+                "추가입력": 저장값.get("추가입력") or [], "용어풀이": 저장값.get("용어풀이") or [],
+                **({"_판정조사": 저장값["판정조사"]} if 저장값.get("판정조사") else {})}
 
     # 조회() 를 쓰지 않는다. 아직 카운트를 올리지 않았으므로 적중해도 되돌릴 것이 없다.
     저장값 = response_cache.질문세트_조회(k, org, account)
@@ -246,7 +312,9 @@ def _live_질문(body: 질문요청, org: str | None, account: str | None, ip: s
         {"사업명": body.사업명, "비목": body.확정비목, "세부유형": body.확정세목 or body.세부유형, "품목": body.품목,
          "용도": body.용도, "금액": body.금액, "질문": body.질문원문,
          "확정세목": body.확정세목, "부가세구분": body.부가세구분,
-         **({'_조사확인': 조사확인} if 조사확인 is not None else {})},
+         **({'_조사확인': 조사확인} if 조사확인 is not None else {}),
+         **({'_판정조사설정': 판정조사설정} if 판정조사설정 and 조사확인 is not None else {}),
+         **({'_노드결정': 노드결정} if 노드결정 else {})},
         org_id=org, account_id=account)
     메타 = r.get("메타") or {}
     if not 메타.get("LLM호출"):                         # LLM 을 부르지 않았으면 일일 카운트를 되돌린다
@@ -255,12 +323,14 @@ def _live_질문(body: 질문요청, org: str | None, account: str | None, ip: s
     버린사유 = sorted({사유 for 항목 in (메타.get("버린질문") or {}).values() for 사유 in 항목["사유"]})
     _로그(r["상태"], len(r["질문"]), 버린사유 or ([메타["사유"]] if 메타.get("사유") else []), False, t0)
     if r["상태"] == "실패":                             # 일시적 장애를 24시간 고정하지 않는다
-        return dict(_실패_응답)
+        # 질문 LLM 이 실패해도 ④-2 판정용 조사 결과는 판정에 넘긴다(세션에만, 화면 응답에서는 작업() 이 뺀다)
+        return {**_실패_응답, **({"_판정조사": r["판정조사"]} if r.get("판정조사") else {})}
     # 노드결정(5-13) · 상황노드(5-14 C)는 서버에만 둔다. 응답() 은 내보내지 않고 판정 라우트가 읽는다
     저장값 = {"상태": r["상태"], "질문": r["질문"], "추가입력": r.get("추가입력") or [], "용어풀이": r.get("용어풀이") or [],
              "_온톨로지경로": 온톨로지_사업(body.사업명),
              **({"노드결정": r["노드결정"]} if r.get("노드결정") else {}), **({"상황노드": r["상황노드"]} if r.get("상황노드") else {}),
-             **({"L3숫자라벨": r["L3숫자라벨"]} if r.get("L3숫자라벨") else {})}
+             **({"L3숫자라벨": r["L3숫자라벨"]} if r.get("L3숫자라벨") else {}),
+             **({"판정조사": r["판정조사"]} if r.get("판정조사") else {})}
     저장됨 = response_cache.저장(k, 저장값, 종류="questions", org=org, account=account, 데이터버전_해시=데이터버전해시,
                               ttl초=_임시_TTL초 if 메타.get("사유") == "LLM실패" else _질문세트_TTL초)
     if not 저장됨 and 저장값["질문"]:                    # 답을 받아도 판정에서 질문을 찾지 못하니 묻지 않는다

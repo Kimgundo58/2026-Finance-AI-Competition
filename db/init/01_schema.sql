@@ -396,7 +396,7 @@ CREATE TABLE tenant.decisions (
     정규화      JSONB,           -- 정규화 단계 출력
     비목        TEXT,
     금액        NUMERIC,
-    판정        TEXT CHECK (판정 IN ('가능','조건부','불가','판단불가') OR 판정 IS NULL),
+    판정        TEXT CONSTRAINT "decisions_판정_check" CHECK (판정 IN ('가능','확인 필요','불가') OR 판정 IS NULL),   -- 3값(2026-11-12_판정_3값.sql)
     신뢰등급    TEXT CHECK (신뢰등급 IN ('A','B') OR 신뢰등급 IS NULL),
     인용        JSONB,
     해야할일    JSONB,
