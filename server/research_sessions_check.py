@@ -2,7 +2,6 @@
 """DB·외부 호출 없이 조사 세션과 실제 HTTP/SSE 경로를 확인한다."""
 import json
 import os
-import sys
 import types
 from unittest.mock import patch
 
@@ -30,13 +29,15 @@ def main():
     candidate = {'id': 'a', '유형': '공개정보', '내용': '공개 정보',
                  '출처': [{'제목': '안내', 'url': 'https://example.com', '발췌': '공개 정보'}], '상태': '확인필요'}
     calls = []
-    def research(product_name, *, public_url, budget, emit, requirements=None, context=None, vendor=None):
-        calls.append(product_name)
-        if emit:
-            emit({'id': 'e', '단계': '판매처', '상태': '진행중', '문장': '확인 중'})
+    # MOCK 의 ② 품목 조사는 web_research 대신 mock_flow.품목조사 를 부른다(스펙 8-5). 그 자리를 가짜로 바꿔 세션 경로만 본다
+    import research_runtime
+    from server import mock_flow
+    def research(품목, 거래처):
+        calls.append(품목)
+        research_runtime.emit('판매처', '확인 중', id='e')
         return {'상태': '확인필요', '후보': [candidate], '출처': ['https://example.com']}
-    original = sys.modules.get('web_research')
-    sys.modules['web_research'] = types.SimpleNamespace(research=research)
+    original = mock_flow.품목조사
+    mock_flow.품목조사 = research
     try:
         with TestClient(app) as client:
             norm = {'품목': 'API', '금액': 100, '용도': '개발', '사업명': '예비창업패키지'}
@@ -77,16 +78,18 @@ def main():
             assert client.post('/api/questions', json={**request, '조사ID': token + 'x'}).status_code == 400
             assert research_sessions.조회(token, 'other', None) is None
             token_empty = sse(client.post('/api/normalize', json=norm))['결과'][0]['조사ID']
+            # MOCK 은 공개 검색어가 없어도 품목 조사를 한다(새 흐름에는 검색어 칸이 없다, 스펙 8-2 · 8-5)
             empty_req = {**request, '조사ID': token_empty, '공개검색어': None}
             empty_first = client.post('/api/questions', json=empty_req).json()
-            assert empty_first['상태'] == '조사확인' and not empty_first['조사']['후보']
-            empty_final = client.post('/api/questions', json={**empty_req, '조사답변': []}).json()
-            assert empty_final['질문세트'] and calls == ['API']
+            assert empty_first['상태'] == '조사확인' and empty_first['조사']['후보'][0]['id'] == 'a'
+            empty_final = client.post('/api/questions', json={**empty_req, '조사답변': [{'id': 'a', '답': '맞아요'}]}).json()
+            assert empty_final['질문세트'] and calls == ['API', 'API']
             session = research_sessions.조회(token, None, None)
             session.expires = 0
             assert client.post('/api/questions', json=request).status_code == 400
             분류실패_검사(client, norm)
             판정조사_검사(client, norm)
+            실제_품목조사_검사(client)
         # 응답 객체만 만들고 스트림을 전혀 읽지 않는 요청도 세션 잠금을 남기지 않는다.
         from server import routes_judge, routes_questions
         from server.models import 질문요청, 판정요청
@@ -109,10 +112,7 @@ def main():
             routes_judge.judge(fake_req, jb, mock=None, 목=None)
             assert not s.lock.locked()
     finally:
-        if original is None:
-            del sys.modules['web_research']
-        else:
-            sys.modules['web_research'] = original
+        mock_flow.품목조사 = original
     print('조사 세션 HTTP/SSE 검사 통과')
 
 
@@ -143,6 +143,33 @@ def 판정조사_검사(client, norm):
     assert answer.status_code == 200 and '판정조사' not in answer.text, answer.text[:300]
 
 
+def 실제_품목조사_검사(client):
+    """실제(비 MOCK) 경로의 ② 품목 조사 호출부(routes_questions 의 web_research.research)를 합성으로 지난다.
+
+    web_research 를 가짜 모듈로 바꿔 불렸는지 · 받은 인자만 본다. 외부 호출 · DB 없음. 검색어 · 주소가 둘 다 없으면 부르지 않고 미확인.
+    """
+    import sys
+    from server import routes_questions
+    불림 = []
+    def research(공개검색어, **k):
+        불림.append((공개검색어, k))
+        return {'상태': '확인필요', '후보': [{'id': 'w', '유형': '제품성격', '내용': '합성', '출처': [], '상태': '확인필요'}], '출처': []}
+    가짜 = types.ModuleType('web_research')
+    가짜.research = research
+    본문 = {'사업명': '예비창업패키지', '품목': 'API', '금액': 100, '용도': '개발', '웹조사': True,
+          '공개검색어': 'API 크레딧', '판매URL': 'https://example.com/p', '거래처': '판매사'}
+    with patch.dict(sys.modules, {'web_research': 가짜}), patch.object(routes_questions, 'MOCK', False),          patch.object(routes_questions.ontology_readiness, '확인', lambda *a: None),          patch.object(routes_questions.response_cache, '요청_해시', lambda: 'v-합성'),          patch.object(routes_questions.제한, '통과', lambda ip: (True, None)),          patch.object(routes_questions.mock_flow, '품목조사', lambda *a: (_ for _ in ()).throw(AssertionError('mock 경로'))):
+        r = sse(client.post('/api/questions', json=본문, headers={'Accept': 'text/event-stream'}))['완료'][0]
+        assert r['상태'] == '조사확인' and r['조사']['후보'][0]['id'] == 'w', r
+        assert len(불림) == 1 and 불림[0][0] == 'API 크레딧', 불림
+        k = 불림[0][1]
+        assert k['public_url'] == 'https://example.com/p' and k['vendor'] == '판매사' and k['budget'] is not None, k
+        assert k['context'] == {'품목': 'API', '용도': '개발', '금액': 100} and k['requirements'] == [], k
+        빈 = sse(client.post('/api/questions', json={**본문, '공개검색어': None, '판매URL': None},
+                            headers={'Accept': 'text/event-stream'}))['완료'][0]
+        assert 빈['조사']['상태'] == '미확인' and len(불림) == 1, (빈, 불림)
+
+
 def 분류실패_검사(client, norm):
     """③ 분류가 장애(DB · LLM)로 끝나면 화면 안내는 「확인하지 못했어요 · 다시 시도」이고, 같은 답으로 다시 부르면 저장된 결과를 내지 않고
     분류를 다시 한다. 맞는 분류가 없다는 결과는 예전처럼 안내문(None)이고 저장해 다시 쓴다(2026-11-12 실행기록 20261112_225525)."""
@@ -156,7 +183,7 @@ def 분류실패_검사(client, norm):
     결과들 = [{'분류': None, '노드결정': None, '안내': routes_questions._분류실패_안내, '실패': True},
             {'분류': None, '노드결정': None, '안내': item_classify.안내문(None)}]
     불림 = []
-    def 가짜분류(body, 조사확인):
+    def 가짜분류(body, 조사확인, 조사ID=None, 재조사함=False):
         불림.append(1)
         return 결과들[min(len(불림), 2) - 1]
     with patch.object(routes_questions, '_분류', 가짜분류):

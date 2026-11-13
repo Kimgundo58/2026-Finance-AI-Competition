@@ -15,7 +15,7 @@ from server._common import MOCK, _sse, _sse응답, 비목_ENUM, 온톨로지_사
 from server.catalog import _사업_비목, _사업명_표준화
 from server.models import 정규화요청
 from server.rate_limit import 제한
-from server.selftest import mock_정규화
+from server import mock_flow
 
 router = APIRouter()
 
@@ -58,23 +58,25 @@ def normalize(req: Request, body: 정규화요청):
             return
         if 캐시 is not None:
             yield _sse("진행", {"단계": "정규화", "상태": "완료", "문장": "저장된 입력 분석 결과를 불러왔어요.", "설명": "저장된 분석 결과 사용"})
-            yield _sse("결과", {**캐시, "조사ID": 조사ID})
+            yield _sse("결과", {"거래처": None, **캐시, "조사ID": 조사ID})   # 거래처 칸 전에 저장한 값
             yield _sse("완료", {"캐시": True})
             return
         yield _sse("진행", {"단계": "정규화", "상태": "진행중", "문장": "입력에서 지출 정보를 추출하고 있어요." if not MOCK else "연결 확인용 분석 결과를 준비하고 있어요.", "설명": "입력 분석"})
         try:
             import research_runtime
             with research_runtime.activate(조사세션.budget if 조사세션 else research_runtime.Budget()):
-                out, 실패 = (dict(mock_정규화), False) if MOCK else _live_정규화(body)
+                out, 실패 = (mock_flow.정규화(body), False) if MOCK else _live_정규화(body)
         except Exception as e:                                # noqa: BLE001
             # 500 을 내지 않고 오류 이벤트로 끝낸다.
             yield _sse("오류", {"메시지": "정규화에 실패했습니다", "종류": type(e).__name__})
             yield _sse("완료", {"실패": True})
             return
         out.setdefault("질문원문", _합성_질문(body))
+        # 거래처: 한 문장에 적혀 있을 때만 값(스펙 8-1). live 문장 정리는 아직 뽑지 않아 null 이다. 폼 값은 화면이 이미 갖고 있다
+        out.setdefault("거래처", None)
         if not 실패:                  # 일시적 LLM 오류로 빈 비목후보가 캐시에 남지 않게 한다
             response_cache.저장(k, out, 종류="normalize", org=org, account=account)
-        for 필드 in ("품목", "금액", "금액_추정여부", "용도", "비목후보", "분류후보", "수치", "품목확인"):
+        for 필드 in ("품목", "금액", "금액_추정여부", "용도", "거래처", "비목후보", "분류후보", "수치", "품목확인"):
             if 필드 in out:
                 yield _sse("필드", {필드: out[필드]})
         yield _sse("결과", {**out, "조사ID": 조사ID})

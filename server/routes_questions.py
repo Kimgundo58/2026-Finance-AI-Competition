@@ -18,12 +18,11 @@ import queue
 
 from fastapi import APIRouter, HTTPException, Request
 
-from server import auth, response_cache, research_sessions, ontology_readiness
+from server import auth, mock_flow, response_cache, research_sessions, ontology_readiness
 from server._common import MOCK, 답변_반영, 비목_ENUM, 클라이언트_ip, _sse, _sse응답, _워커_대기, 온톨로지_사업
 from server.catalog import _비목_표준화, _사업명_표준화
 from server.models import 질문요청
 from server.rate_limit import 제한
-from server.selftest import mock_질문
 
 _log = logging.getLogger("uvicorn.error")
 
@@ -94,8 +93,11 @@ def questions(req: Request, body: 질문요청):
                 if body.웹조사 and body.조사답변 is None:
                     if not 세션.조사완료:
                         try:
+                            # mock: 외부 호출 없이 고정 조사 결과(스펙 8-5). 검색어 없이도 돈다
+                            if MOCK:
+                                세션.조사 = mock_flow.품목조사(body.품목, body.거래처)
                             # 검색어나 공개 판매 URL 중 하나는 있어야 조사한다. URL만 있으면 그 페이지만 읽는다(web_research).
-                            if not body.공개검색어 and not body.판매URL:
+                            elif not body.공개검색어 and not body.판매URL:
                                 세션.조사 = {'상태': '미확인', '후보': [], '출처': []}
                             else:
                                 # ② 품목 조사(재설계 11-11): 비목을 정하기 전이라 규범 요건 없이 지출 문맥만 준다
@@ -130,9 +132,20 @@ def questions(req: Request, body: 질문요청):
                     조사확인 = research_sessions.후보_답변(세션, [a.model_dump() for a in (body.조사답변 or [])])
                 except ValueError as e:
                     raise HTTPException(400, '조사 답변을 확인해 주세요') from e
-                # [직접 입력하기] 품목 설명은 확인 결과에 넣어 질문 · 판정 프롬프트까지 간다. 답키에도 들어가
-                # 설명이 바뀌면 ③ 분류를 다시 하고, 판정(답변_검증)은 세션에 저장한 설명으로 같은 키를 다시 만든다
-                조사확인 = research_sessions.설명_붙이기(조사확인, body.품목설명)
+                # ③-R 재조사 답은 세션.재조사 후보에만 붙인다(스펙 8-2 ③)
+                try:
+                    재조사확인 = research_sessions.재조사_답변(세션, [a.model_dump() for a in (body.재조사답변 or [])])
+                except ValueError as e:
+                    raise HTTPException(400, '조사 답변을 확인해 주세요') from e
+                # 재조사 답 · [직접 입력하기] 품목 설명은 한 번 받으면 세션에 남긴다(스펙 8-2 ③). 다음 요청이 빼고 보내도
+                # 세션 값을 쓰고, 같은 값을 다시 보내도 된다. 확인 결과에 넣어 분류 · 질문 · 판정 프롬프트까지 가고 답키에도 들어가
+                # 바뀌면 ③ 분류를 다시 한다. 판정(답변_검증)은 세션 값으로 같은 키를 다시 만든다
+                if 재조사확인:
+                    세션.재조사확인 = 재조사확인
+                if isinstance(body.품목설명, str) and body.품목설명.strip():
+                    세션.품목설명 = body.품목설명.strip()
+                조사확인 = research_sessions.재조사_붙이기(
+                    research_sessions.설명_붙이기(조사확인, 세션.품목설명), 세션.재조사확인)
                 답키 = research_sessions.답변키(조사확인)
                 if 세션.질문결과 is not None and 세션.확인답키 == 답키 and not 세션.분류실패:
                     if emit:
@@ -140,18 +153,25 @@ def questions(req: Request, body: 질문요청):
                     return 세션.질문결과
                 분류결과 = None
                 if not body.확정비목:
-                    분류결과 = _분류(body, 조사확인)
+                    분류결과 = _분류(body, 조사확인, 조사ID, 재조사함=세션.재조사 is not None)
                     세션.분류, 세션.노드결정 = 분류결과['분류'], 분류결과['노드결정']
+                    if 분류결과.get('재조사') and 세션.재조사 is None:     # 재조사는 세션마다 한 번(스펙 8-2 서버 순서)
+                        세션.재조사 = 분류결과['재조사']
                     if not 분류결과['분류']:
+                        # 다음행동(재조사확인 | 설명입력 | 다시시도 | 판정)과 재조사 후보는 화면이 다음 단계를 고르는 값이다(스펙 8-2 ②).
+                        # live 의 _분류 는 아직 이 값을 내지 않는다(v048). mock 은 mock_flow.분류 가 낸다
                         결과 = {**_실패_응답, '상태': '분류없음', '조사ID': 조사ID, '조사': 세션.조사,
-                              '분류': None, '분류안내': 분류결과['안내']}
+                              '분류': None, '분류안내': 분류결과['안내'],
+                              **{k: 분류결과[k] for k in ('다음행동', '재조사') if 분류결과.get(k)}}
                         # 장애로 분류하지 못한 결과(분류실패)는 같은 답으로 다시 불러도 내주지 않고 분류를 다시 한다.
                         # 판정 요청의 답변 검증(research_sessions.답변_검증)은 맞는 분류가 없을 때처럼 이 결과로 한다
                         세션.입력, 세션.버전, 세션.요청키, 세션.확인답키, 세션.질문결과 = 입력, 버전, 요청키, 답키, 결과
                         세션.분류실패 = bool(분류결과.get('실패'))
-                        세션.질문세트, 세션.판정결과, 세션.품목설명 = None, None, 조사확인.get('품목설명')
+                        세션.질문세트, 세션.판정결과 = None, None
                         return 결과
                     body.확정비목, body.확정세목 = 분류결과['분류']['비목'], 분류결과['분류']['세목']
+                if MOCK:                        # ④-2 판정용 조사 고정 진행 줄(외부 호출 없음, 스펙 8-5)
+                    mock_flow.판정조사(body.확정비목)
                 # ④-2 판정용 조사(재설계 11-13): 공개 조사를 켠 흐름에서만. 질문 생성이 ③ · ④ 뒤 ⑤ 앞에서 부른다
                 판정조사설정 = ({'공개검색어': body.공개검색어, '판매URL': body.판매URL, '거래처': body.거래처}
                           if body.웹조사 and not MOCK and (body.공개검색어 or body.판매URL) else None)
@@ -163,7 +183,7 @@ def questions(req: Request, body: 질문요청):
                     결과 = {**결과, '분류': 분류결과['분류'], '분류안내': 분류결과['안내']}
                 세션.입력, 세션.버전, 세션.질문세트 = 입력, 버전, 결과.get('질문세트')
                 세션.요청키, 세션.확인답키, 세션.질문결과 = 요청키, 답키, 결과
-                세션.판정결과, 세션.품목설명, 세션.분류실패 = None, 조사확인.get('품목설명'), False
+                세션.판정결과, 세션.분류실패 = None, False
                 return 결과
         finally:
             세션.lock.release()
@@ -197,24 +217,25 @@ def questions(req: Request, body: 질문요청):
 _분류실패_안내 = "지금은 분류를 확인하지 못했어요. 잠시 후 다시 시도해 주세요."
 
 
-def _분류(body: 질문요청, 조사확인: dict | None) -> dict:
+def _분류(body: 질문요청, 조사확인: dict | None, 조사ID: str | None = None, 재조사함: bool = False) -> dict:
     """③ 품목 → 세목 → 비목(재설계 11-11). {분류 | None, 노드결정 | None, 안내, 실패}. 화면에는 분류 이름과 안내만 나간다.
 
     분류 = {비목, 세목, 표시문, 품목}. 맞는 분류가 없으면 분류 None 이고 화면은 [직접 입력하기] 로 품목 설명을 받아 다시 부른다.
     장애(DB 예외 · 분류 LLM 실패)도 분류 None 이지만 실패=True 와 _분류실패_안내 로 구분한다(호출자는 이 결과를 같은 답에 다시 내주지 않는다).
     디버그(버린 후보 · 다른 경로 · LLM 이유)는 로그에 개수만 남긴다.
+    조사ID · 재조사함(세션.재조사 가 있음)은 mock 가지가 읽는다. live 재조사(③-R)는 v048 에서 재조사함 을 읽는다.
     """
+    if MOCK:                    # 외부 호출 없는 고정 분류(스펙 8-5). 낱말별 가지는 mock_flow.분류
+        return mock_flow.분류(body, 조사확인, 조사ID, 재조사함)
     import item_classify
     import ontology_lookup
     from _lib import db
-    if MOCK:
-        return {"분류": None, "노드결정": None, "안내": item_classify.안내문(None)}
     try:
         with db.connect(connect_timeout=5, autocommit=True) as c:
             cur = c.cursor()
             레이블 = [x for x in ontology_lookup.레이블_목록(cur, body.사업명) if x["비목"] in 비목_ENUM]
             r = item_classify.분류(cur, body.사업명, {"품목": body.품목, "용도": body.용도, "금액": body.금액, "거래처": body.거래처},
-                                  레이블, item_classify.확인정보_글(조사확인, body.품목설명))
+                                  레이블, item_classify.확인정보_글(조사확인, (조사확인 or {}).get('품목설명') or body.품목설명))
     except Exception as e:                                    # noqa: BLE001
         _log.warning("분류 실패: %s", type(e).__name__)
         return {"분류": None, "노드결정": None, "안내": _분류실패_안내, "실패": True}
@@ -247,7 +268,7 @@ def _기존_질문(req: Request, body: 질문요청, 조사확인=None, 답키=N
             _로그("실패", 0, ["규정확인"], False, t0)
             return dict(_실패_응답)
     if MOCK:
-        return mock_질문
+        return mock_flow.질문(body.품목)
     if not 답변_반영():                                    # 답을 쓰지 않을 때는 묻지 않는다
         return {"상태": "없음", "질문세트": None, "질문": [], "추가입력": [], "용어풀이": []}
 
