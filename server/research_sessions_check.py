@@ -93,6 +93,12 @@ def main():
             판정조사_항상_검사(client, norm)
             설명정리_검사(client, norm)
             설명정리_이스케이프_검사()
+            재조사_실제경로_검사(client, norm)
+            분류없이_판정_검사()
+            필요정보_검사()
+            재조사_시간_검사()
+            재조사_검색어_검사()
+            재조사_사용자글_검사()
         # 응답 객체만 만들고 스트림을 전혀 읽지 않는 요청도 세션 잠금을 남기지 않는다.
         from server import routes_judge, routes_questions
         from server.models import 질문요청, 판정요청
@@ -365,7 +371,7 @@ def 설명정리_검사(client, norm):
     req = {'조사ID': token, '사업명': '예비창업패키지', '품목': 'API', '금액': 100, '용도': '개발', '웹조사': True}
     client.post('/api/questions', json=req)
     받은 = []
-    def 가짜분류(body, 조사확인, 조사ID=None, 재조사함=False, 설명캐시=None):
+    def 가짜분류(body, 조사확인, 조사ID=None, 재조사함=False, 설명캐시=None, **k):
         받은.append(설명캐시)
         return {'분류': None, '노드결정': None, '안내': routes_questions._분류실패_안내, '실패': True}
     with patch.object(routes_questions, '_분류', 가짜분류):
@@ -432,6 +438,399 @@ def 설명정리_이스케이프_검사():
     받은.clear()
     item_classify.설명_정리('필라멘트 {설명} {후보}', 변환llm)
     assert '필라멘트 {설명} {후보}' in 받은[0] and 받은[0].count('{') == 2, 받은[0]
+
+
+def 재조사_실제경로_검사(client, norm):
+    """v048 실제(비 MOCK) 경로의 ③-R 재조사 · 다음행동(스펙 5-1 · 8-2). DB · 분류 LLM · web_research 자리만 가짜로 바꾸고
+    /api/questions HTTP 경로를 그대로 지난다. 가지: 재조사 찾음 → 재조사확인 → 재조사답변 → 분류됨 / 재조사 못 찾음 → 설명입력 →
+    품목설명 → 분류됨 · 또 없음 → 판정 / 장애 → 다시시도(재조사 없음) / 시간 부족 → 재조사 건너뜀 → 설명입력 /
+    재조사 후보에 답하지 않고 품목설명만 → 400(조율 결정). 외부 호출 없음."""
+    import sys
+    import item_classify
+    import ontology_lookup
+    from _lib import db
+    from server import routes_questions
+    분류값 = {'비목': '재료비', '세목': None, '표시문': '재료비', '품목': '시제품 재료'}
+    필요 = ['사서 갖는 물건인지 기간마다 내는 서비스인지']
+    상태 = {'재조사후보': True, '분류': [], 'db장애': False, '필요정보': True}
+    조사호출, 분류호출 = [], []
+
+    def research(공개검색어, **k):
+        조사호출.append(k)
+        if (k.get('context') or {}).get('필요정보'):             # ③-R 재조사
+            후보 = [{'id': 'r1', '유형': '제품성격', '내용': '팀 구독형 디자인 도구', '확인문장': '팀이 함께 쓰는 구독형 디자인 도구예요',
+                   '질문': '팀이 함께 쓰는 구독형 디자인 도구예요. 맞나요?', '질문종류': '문장',
+                   '출처': [{'제목': 'example.com', 'url': 'https://example.com/more', '발췌': '팀 구독형 디자인 도구'}],
+                   '상태': '확인필요'}] if 상태['재조사후보'] else []
+            return {'상태': '확인필요' if 후보 else '미확인', '후보': 후보, '출처': []}
+        return {'상태': '확인필요', '후보': [{'id': 'p1', '유형': '제품성격', '내용': '디자인 도구', '확인문장': '디자인 도구예요',
+                                         '질문': '디자인 도구예요. 맞나요?', '질문종류': '문장', '출처': [], '상태': '확인필요'}],
+                '출처': ['https://example.com/p']}
+    가짜웹 = types.ModuleType('web_research')
+    가짜웹.research = research
+
+    def 가짜분류(cur, 사업명, 입력, 레이블, 확인정보=None, 설명캐시=None, **k):
+        분류호출.append([str(x) for x in 확인정보 or []])
+        값 = 상태['분류'].pop(0) if 상태['분류'] else None
+        return {'분류': 값, '노드결정': None, '방법': 'LLM' if 값 else '없음', '디버그': {},
+                '필요정보': [] if 값 or not 상태['필요정보'] else 필요}
+
+    class 연결:
+        def __enter__(self):
+            if 상태['db장애']:
+                raise ConnectionError('synthetic')
+            return types.SimpleNamespace(cursor=lambda: None)
+
+        def __exit__(self, *a):
+            return False
+
+    def 가짜질문(req, body, 조사확인=None, 답키=None, 준비확인=False, 노드결정=None, 판정조사설정=None):
+        return {'상태': '없음', '질문세트': None, '질문': [], '추가입력': [], '용어풀이': []}
+    공통 = {'사업명': '예비창업패키지', '품목': '피그마', '금액': 100, '용도': '디자인', '웹조사': True,
+          '거래처': '판매사', '판매URL': 'https://example.com/p'}
+    SSE = {'Accept': 'text/event-stream'}
+
+    def 시작():
+        token = sse(client.post('/api/normalize', json=norm))['결과'][0]['조사ID']
+        첫 = client.post('/api/questions', json={**공통, '조사ID': token}).json()
+        assert 첫['상태'] == '조사확인' and 첫['조사']['후보'][0]['id'] == 'p1', 첫
+        return token, {**공통, '조사ID': token, '조사답변': [{'id': 'p1', '답': '맞아요'}]}
+
+    with patch.dict(sys.modules, {'web_research': 가짜웹}), patch.object(routes_questions, 'MOCK', False), \
+         patch.object(routes_questions.ontology_readiness, '확인', lambda *a: None), \
+         patch.object(routes_questions.response_cache, '요청_해시', lambda: 'v-합성'), \
+         patch.object(routes_questions.제한, '통과', lambda ip: (True, None)), \
+         patch.object(routes_questions, '_기존_질문', 가짜질문), \
+         patch.object(db, 'connect', lambda **k: 연결()), patch.object(ontology_lookup, '레이블_목록', lambda *a: []), \
+         patch.object(item_classify, '분류', 가짜분류):
+        # 가지 1. 재조사 찾음 → 재조사확인(진행 줄 「품목을 더 알아보고 있어요.」) → 재조사답변 → 분류됨
+        token, 둘째 = 시작()
+        ev = sse(client.post('/api/questions', json=둘째, headers=SSE))
+        r = ev['완료'][0]
+        assert r['상태'] == '분류없음' and r['다음행동'] == '재조사확인' and r['분류'] is None, r
+        assert r['분류안내'] == routes_questions.재조사확인_안내 and r['재조사']['후보'][0]['id'] == 'r1', r
+        assert r['조사']['후보'][0]['id'] == 'p1', r                       # 세션.조사 는 덮어쓰지 않는다
+        assert any(e['문장'] == routes_questions.재조사_시작문장 for e in ev['진행']), ev['진행']
+        k = 조사호출[-1]
+        assert len(조사호출) == 2 and k['context'] == {'품목': '피그마', '용도': '디자인', '금액': 100, '필요정보': 필요}, k
+        assert k['vendor'] == '판매사' and k['public_url'] == 'https://example.com/p' and k['requirements'] == [], k
+        assert 15 <= k['제한초'] <= 60 and k['budget'] is not None, k
+        assert k['읽은주소'] == ['https://example.com/p'], k          # ② 가 읽은 주소를 재조사가 다시 읽지 않게 넘긴다
+        세션 = research_sessions.조회(token, None, None)
+        assert 세션.재조사 == r['재조사'] and 세션.재조사확인 is None
+        # 같은 요청을 다시 보내면(다시 보내기) 재조사하지 않고 저장된 결과
+        again = client.post('/api/questions', json=둘째).json()
+        assert again == r and len(조사호출) == 2, again
+        # 재조사 후보에 답하지 않고 품목설명만 보내면 400(조사답변 과 같은 규칙, 조율 결정)
+        거절 = client.post('/api/questions', json={**둘째, '품목설명': '팀 디자인 도구 구독'})
+        assert 거절.status_code == 400 and 거절.json()['오류'] == '조사 답변을 확인해 주세요', 거절.text
+        assert 세션.품목설명 is None
+        # 답 일부 · 틀린 id 도 400
+        assert client.post('/api/questions', json={**둘째, '재조사답변': [{'id': 'zz', '답': '맞아요'}]}).status_code == 400
+        상태['분류'] = [분류값]
+        셋 = client.post('/api/questions', json={**둘째, '재조사답변': [{'id': 'r1', '답': '맞아요'}]}).json()
+        assert 셋['상태'] == '없음' and 셋['분류'] == 분류값 and len(조사호출) == 2, 셋
+        assert '팀이 함께 쓰는 구독형 디자인 도구예요' in 분류호출[-1], 분류호출[-1]   # 재조사 확인 문장이 분류 자료로
+        assert 세션.재조사확인 and 세션.재조사확인[0]['id'] == 'r1'
+
+        # 가지 2. 재조사 못 찾음 → 설명입력 → 품목설명 → 또 없음 → 판정(재조사는 다시 안 함)
+        상태['재조사후보'] = False
+        token, 둘째 = 시작()
+        n = len(조사호출)
+        r = client.post('/api/questions', json=둘째).json()
+        assert r['상태'] == '분류없음' and r['다음행동'] == '설명입력' and '재조사' not in r, r
+        assert r['분류안내'] == item_classify.안내문(None) and len(조사호출) == n + 1, r
+        세션 = research_sessions.조회(token, None, None)
+        assert 세션.재조사 == {'후보': []}
+        r = client.post('/api/questions', json={**둘째, '품목설명': '모니터 받침대를 사요'}).json()   # 후보 0개라 품목설명만 받는다
+        assert r['상태'] == '분류없음' and r['다음행동'] == '판정' and r['분류안내'] == routes_questions.분류없이판정_안내, r
+        assert len(조사호출) == n + 1, 조사호출
+        # 같은 가지에서 설명 뒤 분류됨
+        token, 둘째 = 시작()
+        client.post('/api/questions', json=둘째)
+        상태['분류'] = [분류값]
+        r = client.post('/api/questions', json={**둘째, '품목설명': '모니터 받침대를 사요'}).json()
+        assert r['상태'] == '없음' and r['분류'] == 분류값, r
+
+        # 가지 3. [직접 입력하기] 로 이미 설명을 받았으면 재조사 못 찾음 → 바로 판정
+        token, 둘째 = 시작()
+        r = client.post('/api/questions', json={**둘째, '조사답변': [{'id': 'p1', '답': '직접입력', '정정': '팀 협업 도구 구독'}]}).json()
+        assert r['다음행동'] == '판정', r
+
+        # 가지 4. 재조사 찾음 → 맞아요 → 또 없음 → 설명입력 → 품목설명 → 또 없음 → 판정
+        상태['재조사후보'] = True
+        token, 둘째 = 시작()
+        assert client.post('/api/questions', json=둘째).json()['다음행동'] == '재조사확인'
+        n = len(조사호출)
+        셋 = {**둘째, '재조사답변': [{'id': 'r1', '답': '맞아요'}]}
+        r = client.post('/api/questions', json=셋).json()
+        assert r['다음행동'] == '설명입력' and len(조사호출) == n, r
+        r = client.post('/api/questions', json={**셋, '품목설명': '팀 협업용 디자인 도구'}).json()
+        assert r['다음행동'] == '판정' and len(조사호출) == n, r
+        # 재조사 답을 [직접 입력하기] 로 했으면 또 없음 → 판정
+        token, 둘째 = 시작()
+        client.post('/api/questions', json=둘째)
+        r = client.post('/api/questions', json={**둘째, '재조사답변': [{'id': 'r1', '답': '직접입력', '정정': '팀 협업 도구'}]}).json()
+        assert r['다음행동'] == '판정', r
+
+        # 가지 5. 장애(DB) → 다시시도, 재조사하지 않는다. 다시 보내면 분류를 다시 한다
+        token, 둘째 = 시작()
+        n = len(조사호출)
+        상태['db장애'] = True
+        r = client.post('/api/questions', json=둘째).json()
+        assert r['상태'] == '분류없음' and r['다음행동'] == '다시시도' and r['분류안내'] == routes_questions._분류실패_안내, r
+        assert len(조사호출) == n and research_sessions.조회(token, None, None).재조사 is None
+        상태['db장애'] = False
+        r = client.post('/api/questions', json=둘째).json()
+        assert r['다음행동'] == '재조사확인' and len(조사호출) == n + 1, r
+
+        # 가지 6. 시간 부족(④-2 몫을 남길 수 없음) → 재조사 없이 설명입력, 재조사는 「했음」 으로 남는다
+        token, 둘째 = 시작()
+        n = len(조사호출)
+        with patch.object(routes_questions, '재조사_남길초', 290):
+            ev = sse(client.post('/api/questions', json=둘째, headers=SSE))
+        r = ev['완료'][0]
+        assert r['다음행동'] == '설명입력' and len(조사호출) == n, r
+        assert not any(e['문장'] == routes_questions.재조사_시작문장 for e in ev.get('진행', [])), ev
+        assert research_sessions.조회(token, None, None).재조사 == {'후보': []}
+
+        # 가지 7(v048 검토 지적 1). 재조사 후보에 답하지 않은 채 ② 답을 바꿔 보내면(다시 분류 → 또 없음) 설명입력 이 아니라
+        # 저장된 후보로 재조사확인 을 다시 낸다. 재조사는 다시 돌지 않는다. 설명입력 을 낸 뒤 품목설명이 400 이 되는 길이 없다
+        token, 둘째 = 시작()
+        정정 = {**둘째, '조사답변': [{'id': 'p1', '답': '직접입력', '정정': '3D 프린터 부품이에요'}]}
+        a = client.post('/api/questions', json=정정).json()
+        assert a['다음행동'] == '재조사확인', a
+        n = len(조사호출)
+        ev = sse(client.post('/api/questions', json=둘째, headers=SSE))
+        b = ev['완료'][0]
+        assert b['다음행동'] == '재조사확인' and b['재조사'] == a['재조사'] and len(조사호출) == n, b
+        assert not any(e['문장'] == routes_questions.재조사_시작문장 for e in ev.get('진행', [])), ev
+        # 화면이 따르는 다음 요청은 재조사 답이다. 그 뒤 설명입력 → 품목설명은 200
+        c3 = client.post('/api/questions', json={**둘째, '재조사답변': [{'id': 'r1', '답': '맞아요'}]}).json()
+        assert c3['다음행동'] == '설명입력', c3
+        d = client.post('/api/questions', json={**둘째, '품목설명': '노즐 부품'})
+        assert d.status_code == 200 and d.json()['다음행동'] == '판정', d.text
+        # 설명입력 을 내는 세션은 재조사 답 대기가 아니다(그래서 그 뒤 품목설명 요청은 400 이 아니다)
+        assert not research_sessions.재조사_답_대기(research_sessions.조회(token, None, None))
+
+        # 가지 8(v048 검토 지적 4). 분류 LLM 이 필요정보를 적지 않았으면 재조사하지 않는다(② 와 같은 조사가 된다).
+        # 못 찾음과 같이 「했음」 으로 남기고 설명입력, 재조사 진행 줄 없음
+        상태['필요정보'] = False
+        token, 둘째 = 시작()
+        n = len(조사호출)
+        ev = sse(client.post('/api/questions', json=둘째, headers=SSE))
+        r = ev['완료'][0]
+        assert r['다음행동'] == '설명입력' and '재조사' not in r and len(조사호출) == n, r
+        assert not any(e['문장'] == routes_questions.재조사_시작문장 for e in ev.get('진행', [])), ev
+        assert research_sessions.조회(token, None, None).재조사 == {'후보': []}
+        r = client.post('/api/questions', json={**둘째, '품목설명': '노즐 부품'}).json()
+        assert r['다음행동'] == '판정' and len(조사호출) == n, r
+        상태['필요정보'] = True
+
+
+def 재조사_시간_검사():
+    """v048 검토 지적 2: ③-R 재조사는 ④-2 몫(question_generate 판정조사_예비초 + 판정조사_최소초)에 다시 분류할 분류 LLM 제한 시간
+    (item_classify.분류_제한초, SUDDOE_CLASSIFY_TIMEOUT 기본 40)까지 남긴다. 재조사가 제한초를 다 쓰고 분류 LLM 이 제한 시간을
+    다 써도 ④-2 시작 때 남은 시간이 ④-2 조건(120초 이상) 이상이다. 외부 호출 없음(web_research 자리를 가짜로)."""
+    import os
+    import sys
+    import item_classify
+    import question_generate
+    import research_runtime
+    from server import routes_questions
+    from server.models import 질문요청
+    assert routes_questions.재조사_남길초 == question_generate.판정조사_예비초 + question_generate.판정조사_최소초
+    body = 질문요청(사업명='예비창업패키지', 품목='피그마', 금액=100, 용도='디자인', 웹조사=True)
+    받음 = {}
+    가짜웹 = types.ModuleType('web_research')
+    가짜웹.research = lambda q, **k: (받음.update(k), {'후보': []})[1]
+    with patch.dict(sys.modules, {'web_research': 가짜웹}), patch.dict(os.environ, {'SUDDOE_CLASSIFY_TIMEOUT': ''}):
+        assert item_classify.분류_제한초() == 40
+        # 경계 바로 위는 176 으로 둔다: 175 는 남은 시간이 174.99… 로 읽혀 시계 해상도(리눅스 CI)에 따라 15 미만이 된다
+        for 남은, 기대 in ((300, 60), (220, 60), (200, 40), (176, 16), (174, None), (165, None)):
+            받음.clear()
+            with research_runtime.activate(research_runtime.Budget(seconds=남은)):
+                routes_questions._재조사(body, ['구입인지 구독인지'])
+            got = round(받음['제한초']) if 받음 else None
+            assert got == 기대, (남은, got)
+            if got is not None:      # 재조사 · 분류 LLM 이 제한을 다 써도 ④-2 조건(남은 >= 예비 + 최소)을 지킨다
+                assert 남은 - got - item_classify.분류_제한초() >= routes_questions.재조사_남길초, 남은
+    with patch.dict(sys.modules, {'web_research': 가짜웹}), patch.dict(os.environ, {'SUDDOE_CLASSIFY_TIMEOUT': '10'}):
+        받음.clear()
+        with research_runtime.activate(research_runtime.Budget(seconds=165)):
+            routes_questions._재조사(body, ['구입인지 구독인지'])
+        assert round(받음['제한초']) == 35, 받음.get('제한초')      # 165 - 120 - 10
+
+
+def 재조사_검색어_검사():
+    """v048 검토 지적 3: 재조사(지출문맥에 필요정보)는 필요정보 낱말을 검색어에 쓸 수 있다(개인 정보 · 거래처 거르기는 그대로).
+    ② (필요정보 없음)는 지금처럼 못 쓴다. 읽은주소(② 가 읽은 페이지)는 다시 읽지 않는다. 외부 호출 없음(가짜 검색 · LLM)."""
+    import web_research
+
+    class 예산:
+        def remaining_seconds(self):
+            return 300
+
+        def remaining_tools(self):
+            return 10
+
+        def reserve_tool(self):
+            return True
+
+        def add_evidence(self, body):
+            return True
+
+    class 검색기:
+        def __init__(self):
+            self.보냄 = []
+
+        def call(self, name, args, timeout):
+            self.보냄.append((name, args))
+            return {'items': []}
+
+    def 돌리기(문맥, 검색어들, vendor=None, public_url=None, 읽은주소=None):
+        계획 = [{'행동': '검색', '유형': '제품성격', '검색어': q, 'URL': []} for q in 검색어들]
+        받은 = []
+
+        def llm(prompt, schema, timeout):
+            받은.append(prompt)
+            return 계획.pop(0) if 계획 else {'행동': '완료', '유형': '제품성격', '검색어': '', 'URL': []}
+        c = 검색기()
+        web_research.research(None, context=문맥, budget=예산(), llm_call=llm, client=c, vendor=vendor,
+                              public_url=public_url, 읽은주소=읽은주소, 제한초=60)
+        return [a.get('keyword') or a.get('url') for _, a in c.보냄], 받은
+    필요 = ['사서 갖는 물건인지 기간마다 내는 구독 서비스인지']
+    보냄, 받은 = 돌리기({'품목': '피그마', '용도': '디자인', '필요정보': 필요}, ['피그마 구독 서비스'])
+    assert 보냄 == ['피그마 구독 서비스'], 보냄
+    assert '필요정보의 명사도 검색어에 더할 수 있다' in 받은[0]
+    보냄, _ = 돌리기({'품목': '피그마', '용도': '디자인'}, ['피그마 구독 서비스'])
+    assert 보냄 == [], 보냄                                   # ② 는 지금처럼 품목 · 용도 · 제목 낱말만
+    # 필요정보에 개인 정보가 든 항목은 허용글에서 빠진다. 거래처 이름은 필요정보에 있어도 검색어로 나가지 않는다
+    보냄, _ = 돌리기({'품목': '피그마', '용도': '디자인', '필요정보': ['전화번호 확인 구독']}, ['피그마 구독'])
+    assert 보냄 == [], 보냄
+    보냄, _ = 돌리기({'품목': '피그마', '용도': '디자인', '필요정보': ['판매사 구독']}, ['피그마 판매사'], vendor='판매사')
+    assert 보냄 == [], 보냄
+    # 사용자가 준 판매 주소는 ② 가 읽었어도 재조사가 먼저 다시 읽는다(v048 재검토: 필요정보를 담고 있을 가장 좋은 자료).
+    # 읽은주소 에 다른 주소가 같이 있어도, 어느 것이 판매 주소이든 그 주소만 예외다
+    보냄, _ = 돌리기({'품목': '피그마', '용도': '디자인', '필요정보': 필요}, ['피그마 구독'],
+                    public_url='https://example.com/p', 읽은주소=['https://example.com/p', 'https://example.com/q'])
+    assert 보냄[0] == 'https://example.com/p', 보냄
+    보냄, _ = 돌리기({'품목': '피그마', '용도': '디자인', '필요정보': 필요}, ['피그마 구독'], public_url='https://example.com/p')
+    assert 보냄[0] == 'https://example.com/p', 보냄
+    보냄, _ = 돌리기({'품목': '피그마', '용도': '디자인', '필요정보': 필요}, ['피그마 구독'],
+                    public_url='https://example.com/q', 읽은주소=['https://example.com/p', 'https://example.com/q'])
+    assert 보냄[0] == 'https://example.com/q', 보냄
+
+
+def 재조사_사용자글_검사():
+    """v048 재검토 새 문제 1: [직접 입력하기] 정정 · 품목설명에 쓴 사람 이름이 분류 LLM 의 필요정보에 옮겨져도 재조사 검색어로 나가지
+    않는다. 지출 항목 · 사용 목적 낱말은 필요정보에 있어도 검색어에 쓸 수 있다. routes_questions._분류없음_다음 → _재조사 →
+    web_research.research 를 그대로 지나고 계획 LLM · 검색기만 가짜(외부 호출 없음). 판매URL 은 ② 가 읽었어도 다시 읽는다."""
+    import sys
+    import research_runtime
+    import web_research
+    from server import routes_questions
+    from server.models import 질문요청
+    필요 = ['김민수 디자이너에게 맡기는 용역인지 로고를 사서 갖는지']
+    # 낱말 거르기 자체: 정정 · 품목설명에만 나온 낱말(조사가 붙어도)은 빠지고, 품목 · 용도 낱말은 조사가 붙어도 남는다
+    assert routes_questions._필요정보_거르기(필요, '김민수 디자이너가 만들어요', '로고 디자인 홍보') ==         ['맡기는 용역인지 로고를 사서 갖는지']
+    assert routes_questions._필요정보_거르기(['민수님 작업인지'], '민수님께 맡겨요', '로고') == ['작업인지']
+    assert routes_questions._필요정보_거르기(['김민수'], '김민수', '로고') == []
+    assert routes_questions._필요정보_거르기(['로고 구독인지'], '로고 구독이에요', '로고 디자인 구독') == ['로고 구독인지']
+
+    class 검색기:
+        def __init__(self):
+            self.보냄 = []
+
+        def call(self, name, args, timeout):
+            self.보냄.append(args.get('keyword') or args.get('url'))
+            return {'items': []}
+    body = 질문요청(사업명='예비창업패키지', 품목='로고 디자인', 금액=100, 용도='홍보', 웹조사=True,
+                 판매URL='https://example.com/p', 품목설명='김민수 디자이너에게 맡겨요')
+    조사확인 = {'확인한정보': [{'id': 'p1', '내용': '로고 디자인', '답': '직접입력', '정정': '김민수 디자이너가 만드는 로고예요'}]}
+    계획 = [{'행동': '검색', '유형': '제품성격', '검색어': q, 'URL': []}
+          for q in ('김민수 디자이너 용역', '김민수 로고', '로고 디자인 용역')]
+    받은 = []
+
+    def llm(prompt, schema, timeout=None, **k):
+        if web_research._후보역할(schema):
+            return {'후보': []}
+        받은.append(prompt)
+        return 계획.pop(0) if 계획 else {'행동': '완료', '유형': '제품성격', '검색어': '', 'URL': []}
+    c = 검색기()
+    with patch.object(web_research, '_기본_계획호출', lambda: llm), patch.object(web_research, 'ApickClient', lambda: c),          patch.dict(sys.modules, {'web_research': web_research}),          research_runtime.activate(research_runtime.Budget(seconds=300)):
+        r = routes_questions._분류없음_다음(body, 조사확인, False, 필요, None, None, ['https://example.com/p'])
+    assert r['다음행동'] == '판정' and r['재조사'] == {'후보': []}, r
+    assert c.보냄[0] == 'https://example.com/p', c.보냄              # 판매URL 은 ② 가 읽었어도 다시 읽는다
+    assert '김민수 디자이너 용역' not in c.보냄 and '김민수 로고' not in c.보냄, c.보냄
+    assert '로고 디자인 용역' in c.보냄, c.보냄                       # 필요정보의 「용역」 · 품목 낱말은 쓴다
+    assert not any('김민수' in p or '디자이너에게' in p for p in 받은), '계획 LLM 지출문맥에 사용자 낱말'
+    assert any('용역인지' in p for p in 받은), 받은[:1]
+
+
+def 분류없이_판정_검사():
+    """스펙 8-3 「분류 없이 온 요청」(v048): 새 경로 판정에 비목이 없으면 처리단계 「분류없음」 · 게이트 조건 문장 교체 →
+    판정 LLM 이 가능을 내도 확인 필요 + 문의 초안, 불가는 불가 그대로(초안 없음). orchestrate._온톨로지단계 를 DB 없이 부른다
+    (프로필 읽기만 가짜). 판정 LLM · 인용 검증까지 도는 판정() 전체는 DB · LLM 이 필요해 여기서 돌리지 않는다."""
+    import orchestrate
+    import ontology_gate
+    from server import inquiry
+    상태 = orchestrate._판정상태(질문='', 사업명='예비창업패키지', org_id=None, plan_id=None, 기록=False, dry=True, 주입=None,
+                           참조확장_사용=False, 새경로=True)
+    상태.정규화결과 = {'품목': '알 수 없는 부품', '금액': 100000, '용도': '시제품'}
+    with patch.object(orchestrate, '_프로필값_읽기', lambda *a, **k: (None, None)):
+        assert orchestrate._온톨로지단계(상태) is None
+    g = 상태.게이트결과
+    assert '분류없음' in 상태.처리단계, 상태.처리단계
+    assert [c['문장'] for c in g['조건'] if c.get('구분') == '미확정'] == [
+        '규정에서 맞는 분류를 찾지 못했어요. 집행 전에 주관기관에 확인해 주세요.'], g['조건']
+    assert not any('비목을 확정하면' in c['문장'] for c in g['조건'])
+    단계 = '+'.join(상태.처리단계 + ['판정생성', '검증'])
+    for llm판정, 기대, 초안 in (('가능', '확인 필요', True), ('확인 필요', '확인 필요', True), ('불가', '불가', False)):
+        최종, _ = ontology_gate.합치기(g, llm판정)
+        결과 = {'판정': 최종, '인용': [{'문장ID': 'S01'}], '처리단계': 단계}
+        assert 최종 == 기대 and inquiry.근거부족(결과) is 초안, (llm판정, 최종)
+        assert (inquiry.문의초안({'품목': '알 수 없는 부품', '금액': 100000}, 결과, '예비창업패키지') is not None) is 초안
+    # 비목이 있는 판정은 「분류없음」 을 남기지 않는다(인용 있는 확인 필요에 초안을 붙이지 않는 지금 규칙 그대로)
+    assert not inquiry.근거부족({'판정': '확인 필요', '인용': [{}], '처리단계': '정규화+온톨로지+판정생성+검증'})
+
+
+def 필요정보_검사():
+    """③ 분류 LLM 출력의 필요정보(v048): 스키마 칸 · 코드 정리(최대 2개 · 100자) · 분류가 있으면 빈 목록, 그리고 web_research 가
+    지출문맥에 필요정보가 있을 때만 계획 · 후보 지시에 재조사 목적 문장을 더하고(② 프롬프트는 그대로) 제한초를 지킨다."""
+    import item_classify
+    import ontology_lookup
+    import web_research
+    s = item_classify._스키마(2)
+    assert s['required'][-1] == '필요정보' and s['properties']['필요정보'] == {'type': 'array', 'items': {'type': 'string'}}
+    assert item_classify._필요정보(['  가 \n 나 ', '가 나', 'x' * 300, 3, '셋째']) == ['가 나', 'x' * 100]
+    assert '필요정보' in item_classify._규칙
+    후보 = [{'id': 'n1', '정식명': '시제품 재료', '별칭': [], '비목': ['재료비']}]
+    출력 = {'성격': '구입', '성격이같은후보': [], '번호': None, '확신': '유사', '이유': 'x', '필요정보': ['구입인지 구독인지']}
+    with patch.object(ontology_lookup, '후보_정리', lambda *a: (후보, [])), patch.object(ontology_lookup, '노드_결정', lambda *a: []), \
+         patch.object(ontology_lookup, '분류_경로', lambda *a: {'비목': '재료비', '세목': None, '표시문': '재료비', '다른경로': []}):
+        r = item_classify.분류(None, '예비창업패키지', {'품목': '부품'}, [], [], llm=lambda *a, **k: (dict(출력), {}))
+        assert r['분류'] is None and r['필요정보'] == ['구입인지 구독인지'], r
+        r = item_classify.분류(None, '예비창업패키지', {'품목': '부품'}, [], [],
+                             llm=lambda *a, **k: ({**출력, '번호': 'N1', '성격이같은후보': ['N1']}, {}))
+        assert r['분류'] and r['필요정보'] == [], r
+    # web_research: 필요정보가 있으면 계획 · 후보 지시 끝에 재조사 목적 문장, 없으면 ② 프롬프트 그대로
+    class 예산:
+        def remaining_seconds(self):
+            return 300
+
+        def remaining_tools(self):
+            return 10
+    for 문맥, 있음 in (({'품목': '피그마', '필요정보': ['구입인지 구독인지']}, True), ({'품목': '피그마'}, False)):
+        받은 = []
+
+        def llm(prompt, schema, timeout):
+            받은.append((prompt, timeout))
+            return {'행동': '완료', '유형': '제품성격', '검색어': '', 'URL': []}
+        web_research.research(None, context=문맥, budget=예산(), llm_call=llm, client=object(), 제한초=30)
+        assert len(받은) == 1 and (web_research._재조사_계획_지시 in 받은[0][0]) is 있음, 받은
+        assert 받은[0][0].startswith(web_research._계획_지시) and 받은[0][1] <= 30, 받은[0][1]
+        assert ('구입인지 구독인지' in 받은[0][0]) is 있음
 
 
 if __name__ == '__main__':

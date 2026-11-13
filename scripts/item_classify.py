@@ -40,6 +40,9 @@ _규칙 = """너는 정부 창업지원사업 비용 규정의 분류 담당이�
 5. 이유는 한 문장. 후보 번호와 정식명만 쓰고 내부 ID 는 쓰지 않는다.
 6. 답은 성격 → 성격이같은후보 → 번호 순서로 채운다. 성격은 규칙 1 의 돈을 내고 받는 것, 성격이같은후보는 그 성격이 같은 후보 번호 전부다.
    번호는 성격이같은후보 안에서 고른다.
+7. 번호가 null 이면 필요정보에 무엇을 더 알면 후보 중 하나를 고를 수 있는지 1~2개를 짧은 명사구로 쓴다
+   (예: 「사서 갖는 물건인지 기간마다 내는 서비스인지」, 「어떤 기능을 하는 장비인지」). 번호를 골랐으면 빈 목록이다.
+   <지출> · <확인한정보> 에 없는 이름 · 숫자 · 개인 정보를 쓰지 않는다.
 
 <지출>
 {지출}
@@ -77,12 +80,24 @@ def _프롬프트(입력: dict, 확인정보: list[str], 후보: list[dict]) -> 
 
 def _스키마(후보수: int) -> dict:
     번호들 = [f"N{i + 1}" for i in range(후보수)]
-    return {"type": "object", "additionalProperties": False, "required": ["성격", "성격이같은후보", "번호", "확신", "이유"], "properties": {
+    return {"type": "object", "additionalProperties": False, "required": ["성격", "성격이같은후보", "번호", "확신", "이유", "필요정보"],
+            "properties": {
         "성격": {"type": "string", "enum": list(성격_ENUM)},
         "성격이같은후보": {"type": "array", "items": {"type": "string", "enum": 번호들}},
         "번호": {"type": ["string", "null"], "enum": [*번호들, None]},
         "확신": {"type": "string", "enum": ["동일", "유사"]},
-        "이유": {"type": "string"}}}
+        "이유": {"type": "string"},
+        "필요정보": {"type": "array", "items": {"type": "string"}}}}
+
+
+필요정보_최대 = 2
+필요정보_글자 = 100
+
+
+def _필요정보(값) -> list[str]:
+    """분류 LLM 의 필요정보(규칙 7) → 문자열 최대 2개 · 각 100자. 맞는 후보가 없을 때 ③-R 재조사의 조사 목적이다(routes_questions._재조사)."""
+    out = [" ".join(x.split())[:필요정보_글자] for x in (값 if isinstance(값, list) else []) if isinstance(x, str) and x.strip()]
+    return list(dict.fromkeys(out))[:필요정보_최대]
 
 
 def _확신_검사(확신: str, 번호: str, 같은후보) -> str:
@@ -141,13 +156,19 @@ _설명_스키마 = {"type": "object", "additionalProperties": False, "required"
     "용도": {"type": "string"}}}
 
 
+def 분류_제한초() -> int:
+    """분류 LLM · 설명 정리 LLM 한 번의 제한 시간(초). `SUDDOE_CLASSIFY_TIMEOUT`, 비어 있으면 40.
+    routes_questions._재조사 가 재조사 뒤 다시 분류할 시간을 남기는 데도 쓴다."""
+    return int(os.environ.get("SUDDOE_CLASSIFY_TIMEOUT") or 40)
+
+
 def 설명_정리(문장: str, llm=llm_호출) -> dict | None:
     """사용자 한 문장 → {품목, 성격, 설명, 용도}. LLM 1회. 실패 · 시간 초과 · 형식 오류는 None(호출자가 문장을 그대로 쓴다).
     예산: 호출한 요청의 research_runtime.Budget 을 llm_호출 이 그대로 쓴다(횟수 · 남은 시간).
     문장은 이스케이프(꺾쇠 → 전각)해 넣는다. 문장 안의 `</설명>` 이 자료 태그를 닫지 못한다."""
     try:
         출력, _ = llm(_자리채우기(_설명_규칙, {"설명": 이스케이프(문장)}), _설명_스키마, 온도=0.0, 추론=False, 최대토큰=300,
-                    타임아웃=int(os.environ.get("SUDDOE_CLASSIFY_TIMEOUT") or 40),
+                    타임아웃=분류_제한초(),
                     모델=os.environ.get("SUDDOE_CLASSIFY_MODEL") or None)
     except (LLM실패, AttributeError, TypeError, ValueError) as e:
         _log.warning("설명 정리 LLM 실패: %s", type(e).__name__)
@@ -185,9 +206,10 @@ def 설명_반영(확인정보: list[str], llm=llm_호출, 캐시: dict | None =
 
 def 분류(cur, 사업명: str | None, 입력: dict, 레이블: list[dict], 확인정보: list[str] | None = None,
        llm=llm_호출, 설명캐시: dict | None = None) -> dict:
-    """입력 {품목, 용도, 금액, 거래처} → {분류 | None, 노드결정 | None, 방법, 디버그}. LLM 실패는 분류 None(판정이 확인 필요로 간다).
+    """입력 {품목, 용도, 금액, 거래처} → {분류 | None, 노드결정 | None, 방법, 디버그, 필요정보}. LLM 실패는 분류 None(판정이 확인 필요로 간다).
 
     분류 = {비목, 세목, 표시문, 품목(고른 노드 정식명)}. 방법 = 별칭 | LLM | 없음.
+    필요정보 = 분류 LLM 이 번호 null 일 때 적은 「무엇을 알면 고를 수 있는가」(최대 2개). 분류가 있으면 빈 목록.
     `llm=None` 이면 별칭 일치만 본다(LLM 0회). 분류 LLM 을 부를 때만 확인정보의 사용자설명 을 먼저 JSON 칸으로 바꾼다
     (설명_반영. 별칭 일치면 바꾸지 않는다). `설명캐시` 는 조사 세션의 설명정리(같은 문장은 세션 안에서 한 번만 바꾼다).
     """
@@ -200,6 +222,7 @@ def 분류(cur, 사업명: str | None, 입력: dict, 레이블: list[dict], 확�
     품목 = (입력.get("품목") or "").strip()
     노드 = 확신 = None
     방법 = "없음"
+    필요정보: list[str] = []
     for r in ontology_lookup.노드_결정(cur, 품목, 사업명):        # ③-1 별칭 정확 일치(사업 한정 먼저)
         i = r["concept_id"] if r["concept_id"] in 표 else 대신.get(r["concept_id"])
         if i in 표:
@@ -209,11 +232,12 @@ def 분류(cur, 사업명: str | None, 입력: dict, 레이블: list[dict], 확�
         자료, 디버그["설명정리"] = 설명_반영(확인정보 or [], llm, 설명캐시)   # 실패한 문장은 글자 그대로 넘긴다
         try:
             출력, 메타 = llm(_프롬프트(입력, 자료, 남김), _스키마(len(남김)), 온도=0.0, 추론=False,
-                         최대토큰=400, 타임아웃=int(os.environ.get("SUDDOE_CLASSIFY_TIMEOUT") or 40),
+                         최대토큰=400, 타임아웃=분류_제한초(),
                          모델=os.environ.get("SUDDOE_CLASSIFY_MODEL") or None)
             디버그.update(LLM이유=출력.get("이유"), LLM번호=출력.get("번호"), LLM확신=출력.get("확신"), LLM지연ms=메타.get("지연ms"),
                         LLM성격=출력.get("성격"), LLM성격이같은후보=출력.get("성격이같은후보"))
             번호 = 출력.get("번호")
+            필요정보 = _필요정보(출력.get("필요정보")) if 번호 is None else []
             if isinstance(번호, str) and 번호[1:].isdigit() and 1 <= int(번호[1:]) <= len(남김) and 출력.get("확신") in ("동일", "유사"):
                 노드, 확신, 방법 = 남김[int(번호[1:]) - 1]["id"], 출력["확신"], "LLM"
                 확신 = _확신_검사(확신, 번호, 출력.get("성격이같은후보"))
@@ -230,7 +254,7 @@ def 분류(cur, 사업명: str | None, 입력: dict, 레이블: list[dict], 확�
             디버그["분류없음"] = f'{표[노드]["정식명"]} 위로 이 사업의 비목이 없음'
     디버그["ms"] = int((time.time() - t0) * 1000)
     return {"분류": 분류값, "노드결정": {"id": 노드, "확신": 확신, "품목": 품목} if 노드 and 분류값 else None,
-            "방법": 방법, "디버그": 디버그}
+            "방법": 방법, "디버그": 디버그, "필요정보": 필요정보 if not 분류값 else []}
 
 
 def 안내문(분류값: dict | None) -> str:

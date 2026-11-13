@@ -396,6 +396,17 @@ _계획_지시 = (
     "넣지 않는다. 자료에 없는 이름 · 식별자 · 주소를 만들지 마라.\n")
 
 
+# ③-R 재조사(5-1, v048): 분류 LLM 이 맞는 후보를 못 찾고 적은 필요정보가 지출문맥에 있을 때만 계획 · 후보 지시 끝에 붙인다.
+# 프롬프트 구조 · 검색어 안전장치는 ② 와 같고 조사 목적만 필요정보로 바꾼다. 필요정보가 없는 ② 프롬프트는 그대로다.
+# 검색어 허용글에 필요정보 낱말을 더한다(v048 검토: 품목 · 용도 낱말만으로는 ② 와 같은 검색어가 됐다). 개인 정보 거르기는 그대로 건다
+_재조사_계획_지시 = (
+    "이번 조사는 규정의 분류를 정하지 못해 한 번 더 하는 조사다. 지출문맥의 필요정보는 분류 담당이 무엇을 더 알면 분류를 고를 수 "
+    "있는지 적은 것이다. 품목이 무엇인지에 더해 그 필요정보를 드러내는 공개 본문을 찾는다. 검색어 규칙은 위와 같고, "
+    "필요정보의 명사도 검색어에 더할 수 있다.\n")
+_재조사_후보_지시 = (
+    "이번 후보는 지출문맥의 필요정보에 답하는 사실을 중심으로 쓴다. 본문에 그런 사실이 없으면 위 규칙대로 품목이 무엇인지 쓴다.\n")
+
+
 # 후보 작성 LLM 지시. 본문을 읽은 뒤마다 부른다. 자료(공개검색어 · 지출문맥 · 본문 JSON)는 이 뒤에 붙는다.
 # 문구는 2026-11-12 운영 분리 실험(flash, 후보 6/6, 발췌 글자 그대로)과 같다. 그 실험 프롬프트 끝의 부족정보 문장만 뺐다(스키마에 없는 칸)
 _후보_지시 = (
@@ -606,7 +617,8 @@ def research(public_query: str | None = None, *, product_name: str | None = None
              requirements: list[dict] | None = None,
              context: dict | None = None, public_url: str | None = None, budget,
              client=None, llm_call=None, emit=None, vendor: str | None = None,
-             사실확인: list[dict] | None = None, 제한초: float | None = None) -> dict:
+             사실확인: list[dict] | None = None, 제한초: float | None = None,
+             읽은주소: list[str] | None = None) -> dict:
     """LLM(`_기본_계획호출`: `SUDDOE_RESEARCH_MODEL`, 비어 있으면 기본 모델) 두 역할이 조사를 이끈다. 둘 다 `llm_call(prompt, schema, timeout)` 로 부르고
     스키마로 역할을 가른다(`_후보역할`).
 
@@ -622,7 +634,8 @@ def research(public_query: str | None = None, *, product_name: str | None = None
     요건 모드(④-2 판정용 조사, `사실확인` = [{번호, 조건, 원문, 시점}]): 같은 루프 · 같은 안전장치(검색어 낱말 출처 · 읽지 못함 · 같은 본문)로
     계획 최대 `_요건_계획_최대` · 도구 최대 `_요건_도구_최대` 회, 웹 `_요건_웹_제한초` 초(`제한초` 가 더 짧으면 그 값)까지 조사한다. 후보 작성 대신
     정리 LLM 이 조건마다 확인됨 | 못찾음을 내고 코드가 발췌를 본문과 맞춰 본다(`_요건_고르기`). 모든 조건이 확인되면 끝낸다.
-    조건 글(공개 규정 문장)은 검색어에 더해도 되는 말이다. 반환 {상태: 완료 | 일부 | 못찾음 | 실패 | 미확인, 요건결과: {번호: …}, 출처}."""
+    조건 글(공개 규정 문장)은 검색어에 더해도 되는 말이다.
+    ③-R 재조사(지출문맥에 필요정보): 필요정보 낱말도 검색어에 더해도 되는 말이다(호출자가 사용자 정정 · 설명에만 나온 낱말을 뺀다). `읽은주소`(② 가 읽은 페이지)는 판매 주소(public_url) 말고는 다시 읽지 않는다. 반환 {상태: 완료 | 일부 | 못찾음 | 실패 | 미확인, 요건결과: {번호: …}, 출처}."""
     요건모드 = bool(사실확인)
     유형들 = tuple(KINDS) if 요건모드 else 조사_유형 + (거래처_유형 if vendor and vendor.strip() else ())
     계획최대, 도구최대 = (_요건_계획_최대, _요건_도구_최대) if 요건모드 else (_계획_최대, _도구_최대)
@@ -660,7 +673,9 @@ def research(public_query: str | None = None, *, product_name: str | None = None
         llm_call = _기본_계획호출()
     client = client or ApickClient()
     started = time.monotonic()
-    deadline = started + (min(_요건_웹_제한초, 제한초) if 요건모드 and 제한초 is not None else _요건_웹_제한초 if 요건모드 else _전체_제한초)
+    # 제한초: ④-2 판정용 조사(남은 예산에서) · ③-R 재조사(최대 60초, routes_questions._재조사)가 더 짧게 준다
+    기본초 = _요건_웹_제한초 if 요건모드 else _전체_제한초
+    deadline = started + (min(기본초, 제한초) if 제한초 is not None else 기본초)
     web_deadline = min(deadline, started + (_요건_웹_제한초 if 요건모드 else _웹_제한초))
     urls = [public_url] if public_url else []
     제목 = {}         # 주소 → 검색 결과 제목
@@ -678,13 +693,22 @@ def research(public_query: str | None = None, *, product_name: str | None = None
     # 보내지 않는다(품목 · 용도에 직접 적은 낱말은 예외, _검색어 공개글). 금액도 넣지 않는다
     문맥글 = " ".join(v for k, v in 계획자료["지출문맥"].items() if k in ("품목", "용도") and isinstance(v, str))
     거래처글 = " ".join(v for v in (vendor, (context or {}).get("거래처")) if isinstance(v, str))
+    재조사중 = not 요건모드 and bool(계획자료["지출문맥"].get("필요정보"))
+    # 재조사: 필요정보(분류 LLM 글) 낱말도 검색어에 더해도 된다. 개인 정보가 든 항목은 뺀다(보낼 검색어에도 _검색어 가 다시 건다).
+    # 거래처 예외(공개글)에는 넣지 않는다: 필요정보에 거래처 이름이 들어도 검색어로 나가지 않는다
+    필요정보글 = " ".join(x for x in 계획자료["지출문맥"].get("필요정보") or []
+                     if isinstance(x, str) and _개인정보_없음(x)) if 재조사중 else ""
+    # 사용자가 준 판매 주소는 ② 가 읽었어도 다시 읽는다: ② 는 품목이 무엇인지만 보고 본문을 버렸고, 필요정보(구입 · 구독 · 기간 등)를
+    # 담고 있을 가장 좋은 자료다(v048 재검토). 그 밖의 ② 주소(검색 결과)만 다시 읽지 않는다
+    앞조사주소 = {u for u in 읽은주소 or [] if isinstance(u, str)} - {public_url}
+    재조사_계획, 재조사_후보 = (_재조사_계획_지시, _재조사_후보_지시) if 재조사중 else ("", "")
     계획받음 = False   # 첫 계획을 받기 전에 끝나면 조사를 못 한 것이다(URL만 받은 조사는 첫 읽기가 계획을 대신한다)
     오류끝 = False     # 계획·후보 작성·도구 처리 중 예상 밖 오류로 끝남
     계획수 = 0        # 계획 LLM 횟수(최대 계획최대). 후보 작성 호출과 URL만 받은 조사의 첫 읽기는 세지 않는다
 
     def 고를_수_있음(u: str) -> bool:
         """아직 안 읽었고, 그 사이트에서 「읽지 못함」이 `_사이트_읽지못함_상한` 번 나오지 않은 주소."""
-        return (u not in bodies and u not in 읽기실패
+        return (u not in bodies and u not in 읽기실패 and u not in 앞조사주소
                 and sum(_사이트(x) == _사이트(u) for x in 읽기실패) < _사이트_읽지못함_상한)
 
     def 못읽음_처리(주소들) -> None:
@@ -711,7 +735,7 @@ def research(public_query: str | None = None, *, product_name: str | None = None
         if t <= 1:
             return False, None
         자료 = {"공개검색어": public_query or "", "지출문맥": 계획자료["지출문맥"], "본문": bodies}
-        out = llm_call(_후보_지시 + json.dumps(자료, ensure_ascii=False), 후보스키마, t)
+        out = llm_call(_후보_지시 + 재조사_후보 + json.dumps(자료, ensure_ascii=False), 후보스키마, t)
         if isinstance(out, tuple):
             out = out[0]
         if not isinstance(out, dict):
@@ -757,7 +781,7 @@ def research(public_query: str | None = None, *, product_name: str | None = None
         # URL만 받은 경우 할 수 있는 행동은 그 페이지 읽기 하나뿐이라 계획 없이 읽고, 후보 작성을 한 번 부른 뒤 끝낸다.
         # v046: 공개 검색어 없이 판매 URL 을 받으면 검색 전에 그 페이지를 먼저 읽고, 후보가 없으면 계획(검색)으로 이어 간다
         본문먼저 = (bool(url_only or (public_url and not public_query)) and tool_count == 0
-                and public_url not in bodies and public_url not in 읽기실패)
+                and public_url not in bodies and public_url not in 읽기실패 and public_url not in 앞조사주소)
         if url_only and not 본문먼저:
             break
         if not 본문먼저:
@@ -770,7 +794,7 @@ def research(public_query: str | None = None, *, product_name: str | None = None
             if 본문먼저:
                 plan = {"행동": "본문", "URL": [public_url]}
             else:
-                plan = llm_call((_요건_계획_지시 if 요건모드 else _계획_지시) + json.dumps({
+                plan = llm_call((_요건_계획_지시 if 요건모드 else _계획_지시 + 재조사_계획) + json.dumps({
                     "공개검색어": public_query or "", **계획자료,
                     **({"요건상태": [{"조건": k, "결과": v["결과"], "이유": v["이유"]} for k, v in 요건결과.items()]} if 요건모드 else {}),
                     "검색용어": {k: _한국어검색[k] + " / " + _검색용어[k] for k in 유형들},
@@ -800,7 +824,7 @@ def research(public_query: str | None = None, *, product_name: str | None = None
                 kind = plan.get("유형") if plan.get("유형") in 유형들 else 유형들[0]
                 # 검색어가 안전장치(_검색어)에 안 맞으면 사용자가 적은 공개 검색어만 쓴다. 이미 보냈으면 아래에서 끝난다.
                 # v046: 공개 검색어가 없으면 대신 보낼 값이 없어 이 검색은 건너뛰고 다음 계획에 알린다(계획 횟수는 셌다)
-                허용글 = " ".join([문맥글, *제목.values(), *([요건글] if 요건모드 else [])])
+                허용글 = " ".join([문맥글, 필요정보글, *제목.values(), *([요건글] if 요건모드 else [])])
                 검색어 = _검색어(public_query, kind, proposed, 허용글, 거래처글, 문맥글) or public_query
                 if not 검색어:
                     검색기록.append({"알림": _검색어_알림})
