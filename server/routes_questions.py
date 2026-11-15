@@ -5,7 +5,10 @@
 화면은 그 비목 · 세목을 /api/judge 의 확정비목 · 확정세목 으로 보낸다(판정 결과 `분류.표시문` 이 결과 화면 분류 줄, 저장은 persist.판정_저장).
 question_generate.질문생성() 을 부르고 질문_공개() 로 화면 값만 내보낸다. 충족답·할일·근거조문은 서버에 남긴다.
 응답의 질문세트는 응답 캐시 키다. 화면이 이 값을 /api/judge 로 보내면 판정이 저장해 둔 질문으로 답을 맞춘다(24시간 보관).
-어떤 실패도 오류로 보이지 않는다. DB·LLM 오류와 요청 한도는 200 과 상태 '실패' 로 답하고 화면은 바로 결과로 넘어간다.
+시스템 오류(v053, LLM 연결 끊김 · 403 · 429 · 5xx · 무응답 · JSON 깨짐 · DB 연결 끊김 · 쿼리 시간 초과)는 ② 품목 조사 · ③ 분류 ·
+④-2 판정용 조사 · ⑤ 확인 질문 단계가 조사 세션 예산이 끝날 때까지 다시 한다. 그래도 안 되면 질문 없이 판정으로 넘기지 않고
+상태 분류없음 · 다음행동 다시시도 · 단계별 안내로 답한다(_다시시도_응답). 다시 시도 요청은 예산을 새로 받는다(_다시시도_예산).
+요청 한도 · 질문 LLM 의 형식 오류는 지금처럼 200 과 상태 '실패' 로 답한다.
 비목이 10종 밖이거나 등록되지 않은 사업명만 422 다. 설계: docs/LLM_판정아키텍쳐/05_API.md.
 로그에는 상태·질문 수·버린 사유·지연만 남긴다. 사용자 입력과 질문 문장은 남기지 않는다.
 """
@@ -26,6 +29,7 @@ from server._common import MOCK, 답변_반영, 비목_ENUM, 클라이언트_ip,
 from server.catalog import _비목_표준화, _사업명_표준화
 from server.models import 질문요청
 from server.rate_limit import 제한
+from research_runtime import 시스템오류
 
 _log = logging.getLogger("uvicorn.error")
 
@@ -51,7 +55,12 @@ def questions(req: Request, body: 질문요청):
     # 비목 없이 온 요청은 JSON 이어도 조사 세션 경로로 보내 ③ 서버 분류(응답 분류 · 분류안내)를 받게 한다(v045)
     if (body.확정비목 and not body.조사ID and not body.웹조사 and body.조사답변 is None
             and 'text/event-stream' not in req.headers.get('accept', '')):
-        return _기존_질문(req, body)
+        try:
+            return _기존_질문(req, body)
+        except 시스템오류 as e:
+            _log.warning('확인 질문 시스템 오류: 단계=%s 시도=%s', e.단계, e.시도)
+            # 상태 실패 는 「질문 없이 판정」 으로 읽히므로 새 화면과 같은 분류없음 · 다시시도로 답한다(조사 세션 없음)
+            return _다시시도_응답(None, None, 질문실패_안내)
     org, account = auth.검증된_org(req), auth.검증된_account(req)
     조사ID = body.조사ID or research_sessions.생성(org, account)
     세션 = research_sessions.조회(조사ID, org, account)
@@ -93,6 +102,9 @@ def questions(req: Request, body: 질문요청):
         try:
             if 세션.입력 is not None and (세션.입력 != 입력 or 세션.버전 != 버전 or getattr(세션, '요청키', None) != 요청키):
                 raise HTTPException(409, '입력이 변경되어 새 조사가 필요합니다')
+            if 세션.시스템오류:
+                # 앞 요청이 시스템 오류로 끝났다(예산 소진 포함). 다시 시도하는 이 요청이 예산을 새로 받게 늘린다(줄이지 않는다)
+                세션.budget.ensure_remaining(**_다시시도_예산)
             with research_runtime.activate(요청예산, emit=emit):
                 if body.웹조사 and body.조사답변 is None:
                     if not 세션.조사완료:
@@ -121,11 +133,18 @@ def questions(req: Request, body: 질문요청):
                                 세션.조사 = web_research.research(None,
                                     requirements=준비['요건'], context=준비['문맥'],
                                     public_url=body.판매URL, budget=요청예산, emit=emit, vendor=body.거래처)
+                        except 시스템오류 as e:
+                            # 계획 · 후보 LLM(또는 DB)이 조사 마감까지 실패해 얻은 것이 없다. 「공개 정보 없음」 으로 넘기지 않고
+                            # 다시 시도 안내를 낸다. 조사완료 를 남기지 않아 다시 시도 요청이 ② 를 다시 한다(v053)
+                            _log.warning('공개 정보 조사 시스템 오류: 단계=%s 시도=%s', e.단계, e.시도)
+                            세션.입력, 세션.버전, 세션.요청키 = 입력, 버전, 요청키
+                            세션.시스템오류 = True
+                            return _다시시도_응답(조사ID, 세션.조사, 품목조사실패_안내)
                         except Exception as e:
                             _log.warning('공개 정보 조사 실패: %s', type(e).__name__)
                             세션.조사 = {'상태': '실패', '후보': [], '출처': []}
                             research_runtime.emit('공개 조사', research_runtime.공개조사_실패문장, 상태='실패')
-                        세션.조사완료 = True
+                        세션.조사완료, 세션.시스템오류 = True, False
                         세션.입력, 세션.버전, 세션.요청키 = 입력, 버전, 요청키
                     return {'상태': '조사확인', '질문세트': None, '질문': [], '추가입력': [],
                             '용어풀이': [], '조사ID': 조사ID, '조사': 세션.조사}
@@ -155,51 +174,63 @@ def questions(req: Request, body: 질문요청):
                 조사확인 = research_sessions.재조사_붙이기(
                     research_sessions.설명_붙이기(조사확인, 세션.품목설명), 세션.재조사확인)
                 답키 = research_sessions.답변키(조사확인)
-                if 세션.질문결과 is not None and 세션.확인답키 == 답키 and not 세션.분류실패:
+                if 세션.질문결과 is not None and 세션.확인답키 == 답키 and not 세션.시스템오류:
                     if emit:
                         emit({'id': '저장결과', '단계': '확인질문', '상태': '완료', '문장': '저장된 확인 질문을 불러왔어요.'})
                     return 세션.질문결과
-                분류결과 = None
-                if not body.확정비목:
-                    # 대기재조사: 재조사 후보를 보여 주고 아직 답을 받지 않았다. 분류가 없으면 설명입력 · 판정 대신 이 후보로 재조사확인 을
-                    # 다시 낸다(위 400 규칙과 어긋나지 않게, v048 검토). 읽은주소: ② 가 읽은 주소(세션.조사 출처)를 재조사가 다시 읽지 않게 넘긴다
-                    분류결과 = _분류(body, 조사확인, 조사ID, 재조사함=세션.재조사 is not None, 설명캐시=세션.설명정리,
-                                   ip=클라이언트_ip(req),
-                                   대기재조사=세션.재조사 if research_sessions.재조사_답_대기(세션) else None,
-                                   읽은주소=_출처_주소(세션.조사))
-                    세션.분류, 세션.노드결정 = 분류결과['분류'], 분류결과['노드결정']
-                    # 재조사는 세션마다 한 번(스펙 8-2 서버 순서). 못 찾음 · 시간 부족({후보: []})도 「했음」 으로 남겨 다시 하지 않는다
-                    if isinstance(분류결과.get('재조사'), dict) and 세션.재조사 is None:
-                        세션.재조사 = 분류결과['재조사']
-                    if not 분류결과['분류']:
-                        # 다음행동(재조사확인 | 설명입력 | 다시시도 | 판정)과 재조사 후보는 화면이 다음 단계를 고르는 값이다(스펙 8-2 ②).
-                        # 실제 경로는 _분류없음_다음, mock 은 mock_flow.분류 가 같은 모양으로 낸다. 재조사 후보는 재조사확인 일 때만 낸다
-                        결과 = {**_실패_응답, '상태': '분류없음', '조사ID': 조사ID, '조사': 세션.조사,
-                              '분류': None, '분류안내': 분류결과['안내'],
-                              **({'다음행동': 분류결과['다음행동']} if 분류결과.get('다음행동') else {}),
-                              **({'재조사': 분류결과['재조사']} if 분류결과.get('다음행동') == '재조사확인' else {})}
-                        # 장애로 분류하지 못한 결과(분류실패)는 같은 답으로 다시 불러도 내주지 않고 분류를 다시 한다.
-                        # 판정 요청의 답변 검증(research_sessions.답변_검증)은 맞는 분류가 없을 때처럼 이 결과로 한다
-                        세션.입력, 세션.버전, 세션.요청키, 세션.확인답키, 세션.질문결과 = 입력, 버전, 요청키, 답키, 결과
-                        세션.분류실패 = bool(분류결과.get('실패'))
-                        세션.질문세트, 세션.판정결과 = None, None
-                        return 결과
-                    body.확정비목, body.확정세목 = 분류결과['분류']['비목'], 분류결과['분류']['세목']
-                if MOCK:                        # ④-2 판정용 조사 고정 진행 줄(외부 호출 없음, 스펙 8-5)
-                    mock_flow.판정조사(body.확정비목)
-                # ④-2 판정용 조사(재설계 11-13, v046 부터 항상): 웹조사 값과 상관없이 분류가 있으면 돈다(별칭 일치 · 재점검 확정비목 포함).
-                # 질문 생성이 ③ · ④ 뒤 ⑤ 앞에서 부르고, 남은 시간이 모자라면 건너뛴다(question_generate.판정용_조사)
-                판정조사설정 = _판정조사_설정(body)
-                결과 = _기존_질문(req, body, 조사확인 if body.웹조사 or 조사확인.get('품목설명') else None, 답키, 준비확인=True,
-                              노드결정=(분류결과 or {}).get('노드결정'), 판정조사설정=판정조사설정)
-                세션.판정조사 = 결과.get('_판정조사') if isinstance(결과, dict) else None
-                결과 = {**{k: v for k, v in 결과.items() if k != '_판정조사'}, '조사ID': 조사ID, '조사': 세션.조사}
-                if 분류결과:
-                    결과 = {**결과, '분류': 분류결과['분류'], '분류안내': 분류결과['안내']}
-                세션.입력, 세션.버전, 세션.질문세트 = 입력, 버전, 결과.get('질문세트')
-                세션.요청키, 세션.확인답키, 세션.질문결과 = 요청키, 답키, 결과
-                세션.판정결과, 세션.분류실패 = None, False
-                return 결과
+                단계 = '분류'          # 시스템 오류 안내를 고른다: ③ 분류(③-R 재조사 포함) → 질문(④ · ④-2 · ⑤)
+                try:
+                    분류결과 = None
+                    if not body.확정비목:
+                        # 대기재조사: 재조사 후보를 보여 주고 아직 답을 받지 않았다. 분류가 없으면 설명입력 · 판정 대신 이 후보로 재조사확인 을
+                        # 다시 낸다(위 400 규칙과 어긋나지 않게, v048 검토). 읽은주소: ② 가 읽은 주소(세션.조사 출처)를 재조사가 다시 읽지 않게 넘긴다
+                        분류결과 = _분류(body, 조사확인, 조사ID, 재조사함=세션.재조사 is not None, 설명캐시=세션.설명정리,
+                                       ip=클라이언트_ip(req),
+                                       대기재조사=세션.재조사 if research_sessions.재조사_답_대기(세션) else None,
+                                       읽은주소=_출처_주소(세션.조사))
+                        세션.분류, 세션.노드결정 = 분류결과['분류'], 분류결과['노드결정']
+                        # 재조사는 세션마다 한 번(스펙 8-2 서버 순서). 못 찾음 · 시간 부족({후보: []})도 「했음」 으로 남겨 다시 하지 않는다
+                        if isinstance(분류결과.get('재조사'), dict) and 세션.재조사 is None:
+                            세션.재조사 = 분류결과['재조사']
+                        if not 분류결과['분류']:
+                            # 다음행동(재조사확인 | 설명입력 | 다시시도 | 판정)과 재조사 후보는 화면이 다음 단계를 고르는 값이다(스펙 8-2 ②).
+                            # 실제 경로는 _분류없음_다음, mock 은 mock_flow.분류 가 같은 모양으로 낸다. 재조사 후보는 재조사확인 일 때만 낸다
+                            결과 = {**_실패_응답, '상태': '분류없음', '조사ID': 조사ID, '조사': 세션.조사,
+                                  '분류': None, '분류안내': 분류결과['안내'],
+                                  **({'다음행동': 분류결과['다음행동']} if 분류결과.get('다음행동') else {}),
+                                  **({'재조사': 분류결과['재조사']} if 분류결과.get('다음행동') == '재조사확인' else {})}
+                            # 장애로 분류하지 못한 결과(세션.시스템오류)는 같은 답으로 다시 불러도 내주지 않고 분류를 다시 한다.
+                            # 판정 요청의 답변 검증(research_sessions.답변_검증)은 맞는 분류가 없을 때처럼 이 결과로 한다
+                            세션.입력, 세션.버전, 세션.요청키, 세션.확인답키, 세션.질문결과 = 입력, 버전, 요청키, 답키, 결과
+                            세션.시스템오류 = bool(분류결과.get('실패'))
+                            세션.질문세트, 세션.판정결과 = None, None
+                            return 결과
+                        body.확정비목, body.확정세목 = 분류결과['분류']['비목'], 분류결과['분류']['세목']
+                    단계 = '질문'
+                    if MOCK:                        # ④-2 판정용 조사 고정 진행 줄(외부 호출 없음, 스펙 8-5)
+                        mock_flow.판정조사(body.확정비목)
+                    # ④-2 판정용 조사(재설계 11-13, v046 부터 항상): 웹조사 값과 상관없이 분류가 있으면 돈다(별칭 일치 · 재점검 확정비목 포함).
+                    # 질문 생성이 ③ · ④ 뒤 ⑤ 앞에서 부르고, 남은 시간이 모자라면 건너뛴다(question_generate.판정용_조사)
+                    판정조사설정 = _판정조사_설정(body)
+                    결과 = _기존_질문(req, body, 조사확인 if body.웹조사 or 조사확인.get('품목설명') else None, 답키, 준비확인=True,
+                                  노드결정=(분류결과 or {}).get('노드결정'), 판정조사설정=판정조사설정)
+                    세션.판정조사 = 결과.get('_판정조사') if isinstance(결과, dict) else None
+                    결과 = {**{k: v for k, v in 결과.items() if k != '_판정조사'}, '조사ID': 조사ID, '조사': 세션.조사}
+                    if 분류결과:
+                        결과 = {**결과, '분류': 분류결과['분류'], '분류안내': 분류결과['안내']}
+                    세션.입력, 세션.버전, 세션.질문세트 = 입력, 버전, 결과.get('질문세트')
+                    세션.요청키, 세션.확인답키, 세션.질문결과 = 요청키, 답키, 결과
+                    세션.판정결과, 세션.시스템오류 = None, False
+                    return 결과
+                except 시스템오류 as e:
+                    # ③ · ④-2 · ⑤ 가 예산이 끝날 때까지 시스템 오류였다. 질문 없이 판정으로 넘기지 않고 다시 시도 안내를 낸다(v053).
+                    # 같은 답으로 다시 불러도 이 결과를 내주지 않고(세션.시스템오류) 다시 하고, 판정 요청의 답변 검증은 이 결과로 한다
+                    _log.warning('확인 질문 시스템 오류: 단계=%s 시도=%s', e.단계, e.시도)
+                    결과 = _다시시도_응답(조사ID, 세션.조사, _분류실패_안내 if 단계 == '분류' else 질문실패_안내)
+                    세션.입력, 세션.버전, 세션.요청키, 세션.확인답키, 세션.질문결과 = 입력, 버전, 요청키, 답키, 결과
+                    세션.시스템오류 = True
+                    세션.질문세트, 세션.판정결과 = None, None
+                    return 결과
         finally:
             세션.lock.release()
 
@@ -215,6 +246,9 @@ def questions(req: Request, body: 질문요청):
             yield from _워커_대기(future, 이벤트, 12)
             try:
                 결과 = future.result()
+            except 시스템오류 as e:              # 작업() 이 단계별로 잡지 못한 시스템 오류도 다시 시도 안내로 낸다
+                _log.warning('확인 질문 시스템 오류: 단계=%s 시도=%s', e.단계, e.시도)
+                결과 = _다시시도_응답(조사ID, None, 질문실패_안내)
             except Exception as e:
                 _log.warning('조사 실패: %s', type(e).__name__)
                 결과 = {**_실패_응답, '조사ID': 조사ID,
@@ -236,6 +270,18 @@ def _판정조사_설정(body: 질문요청) -> dict | None:
 
 # 분류를 하지 못한 장애(DB · LLM 실패). 규정에 맞는 분류가 없다는 안내(item_classify.안내문(None))와 구분한다
 _분류실패_안내 = "지금은 분류를 확인하지 못했어요. 잠시 후 다시 시도해 주세요."
+# v053: ② 품목 조사 · ④-2 · ⑤ 확인 질문이 시스템 오류로 끝났을 때의 안내(다음행동 다시시도와 함께 분류안내 칸에 낸다)
+품목조사실패_안내 = "지금은 품목 정보를 확인하지 못했어요. 잠시 후 다시 시도해 주세요."
+질문실패_안내 = "지금은 확인할 내용을 정리하지 못했어요. 잠시 후 다시 시도해 주세요."
+# 시스템 오류로 끝난 세션의 다시 시도 요청이 새로 받는 예산(research_runtime.Budget 기본값과 같은 몫: 300초 · LLM 100 · 도구 60).
+# 앞 요청이 예산을 다 써서 끝났으면 늘리지 않으면 다시 시도도 바로 같은 실패로 끝난다
+_다시시도_예산 = {"seconds": 300, "llm": 100, "tools": 60}
+
+
+def _다시시도_응답(조사ID: str | None, 조사: dict | None, 안내: str) -> dict:
+    """시스템 오류로 단계를 마치지 못한 응답(v053). 화면(v048)은 상태 분류없음 · 다음행동 다시시도를 보고 안내 문장과 [다시 시도] 를 보인다.
+    질문 · 분류를 내지 않아 질문 없이 판정으로 넘어가지 않는다."""
+    return {**_실패_응답, '상태': '분류없음', '조사ID': 조사ID, '조사': 조사, '분류': None, '분류안내': 안내, '다음행동': '다시시도'}
 # 분류없음 의 다음행동별 안내(설명입력 은 item_classify.안내문(None), 다시시도 는 _분류실패_안내). mock_flow.분류 도 이 문장을 쓴다
 재조사확인_안내 = "규정에서 맞는 분류를 찾지 못해 품목을 더 알아봤어요. 찾은 내용을 확인해 주세요."
 분류없이판정_안내 = "규정에서 맞는 분류를 찾지 못했어요. 분류 없이 점검하고 집행 전에 확인할 곳을 알려 드릴게요."
@@ -284,13 +330,20 @@ def _분류(body: 질문요청, 조사확인: dict | None, 조사ID: str | None 
     import item_classify
     import ontology_lookup
     from _lib import db
+
+    def 분류하기(연):
+        cur = 연.cur()
+        레이블 = [x for x in ontology_lookup.레이블_목록(cur, body.사업명) if x["비목"] in 비목_ENUM]
+        return item_classify.분류(cur, body.사업명, {"품목": body.품목, "용도": body.용도, "금액": body.금액, "거래처": body.거래처},
+                                레이블, item_classify.확인정보_글(조사확인, (조사확인 or {}).get('품목설명') or body.품목설명),
+                                설명캐시=설명캐시)
     try:
-        with db.connect(connect_timeout=5, autocommit=True) as c:
-            cur = c.cursor()
-            레이블 = [x for x in ontology_lookup.레이블_목록(cur, body.사업명) if x["비목"] in 비목_ENUM]
-            r = item_classify.분류(cur, body.사업명, {"품목": body.품목, "용도": body.용도, "금액": body.금액, "거래처": body.거래처},
-                                  레이블, item_classify.확인정보_글(조사확인, (조사확인 or {}).get('품목설명') or body.품목설명),
-                                  설명캐시=설명캐시)
+        # DB 연결 끊김 · 시간 초과는 새 연결로 다시 하고(db.재시도), 분류 · 설명 정리 LLM 은 예산까지 다시 보낸다(item_classify._운영_llm, v053)
+        with db.연결() as 연:
+            r = db.재시도(lambda: 분류하기(연), 단계="분류", 연결=연)
+    except 시스템오류 as e:
+        _log.warning("분류 시스템 오류: 단계=%s 시도=%s", e.단계, e.시도)
+        return {"분류": None, "노드결정": None, "안내": _분류실패_안내, "실패": True, "다음행동": "다시시도"}
     except Exception as e:                                    # noqa: BLE001
         _log.warning("분류 실패: %s", type(e).__name__)
         return {"분류": None, "노드결정": None, "안내": _분류실패_안내, "실패": True, "다음행동": "다시시도"}
@@ -404,6 +457,10 @@ def _재조사(body: 질문요청, 필요정보: list[str], ip: str | None = Non
         import web_research
         r = web_research.research(None, requirements=[], context=문맥, public_url=body.판매URL, vendor=body.거래처,
                                   budget=예산, emit=알림, 제한초=제한초, 읽은주소=읽은주소)
+    except 시스템오류:
+        # 계획 · 후보 LLM 이 재조사 마감까지 실패해 얻은 것이 없다. 「못 찾음」 으로 넘기지 않고 올려 다시시도로 응답한다(v053)
+        research_runtime.emit("재조사", 재조사_없음문장, "실패", id=event_id)
+        raise
     except Exception as e:                                    # noqa: BLE001
         _log.warning("재조사 실패: %s", type(e).__name__)
         r = {}
@@ -440,6 +497,9 @@ def _기존_질문(req: Request, body: 질문요청, 조사확인=None, 답키=N
     org, account = auth.검증된_org(req), auth.검증된_account(req)
     try:
         return _live_질문(body, org, account, 클라이언트_ip(req), t0, 조사확인, 답키, 노드결정, 판정조사설정)
+    except 시스템오류:
+        _로그("실패", 0, ["시스템오류"], False, t0)
+        raise                   # 질문 없이 판정으로 넘기지 않는다. 호출자가 다시시도로 응답한다(v053)
     except Exception as e:                                    # noqa: BLE001
         _log.warning("확인 질문 실패: %s", type(e).__name__)
         _로그("실패", 0, ["예외"], False, t0)
@@ -498,7 +558,19 @@ def _live_질문(body: 질문요청, org: str | None, account: str | None, ip: s
         return dict(_실패_응답)
 
     데이터버전해시 = response_cache.요청_해시()
-    r = question_generate.질문생성(
+    try:
+        r = _질문생성(question_generate, body, org, account, 조사확인, 판정조사설정, 노드결정)
+    except 시스템오류:
+        제한.카운트_복원()        # 결과를 내지 못했다. 다시 시도가 일일 한도를 두 번 쓰지 않게 되돌린다
+        raise
+    메타 = r.get("메타") or {}
+    if not 메타.get("LLM호출"):                         # LLM 을 부르지 않았으면 일일 카운트를 되돌린다
+        제한.카운트_복원()
+    return _질문_결과(r, 메타, body, org, account, k, t0, 데이터버전해시, 조사확인, 응답)
+
+
+def _질문생성(question_generate, body: 질문요청, org, account, 조사확인, 판정조사설정, 노드결정) -> dict:
+    return question_generate.질문생성(
         {"사업명": body.사업명, "비목": body.확정비목, "세부유형": body.확정세목 or body.세부유형, "품목": body.품목,
          "용도": body.용도, "금액": body.금액, "질문": body.질문원문,
          "확정세목": body.확정세목, "부가세구분": body.부가세구분,
@@ -506,9 +578,11 @@ def _live_질문(body: 질문요청, org: str | None, account: str | None, ip: s
          **({'_판정조사설정': 판정조사설정} if 판정조사설정 else {}),
          **({'_노드결정': 노드결정} if 노드결정 else {})},
         org_id=org, account_id=account)
-    메타 = r.get("메타") or {}
-    if not 메타.get("LLM호출"):                         # LLM 을 부르지 않았으면 일일 카운트를 되돌린다
-        제한.카운트_복원()
+
+
+def _질문_결과(r: dict, 메타: dict, body: 질문요청, org, account, k: str, t0: float, 데이터버전해시, 조사확인, 응답) -> dict:
+    """질문생성 결과를 로그 · 캐시에 남기고 화면 응답으로 바꾼다(_live_질문 의 뒷부분)."""
+    from _lib import db
     # 버린질문의 키는 질문 문장이라 사유 코드만 남긴다
     버린사유 = sorted({사유 for 항목 in (메타.get("버린질문") or {}).values() for 사유 in 항목["사유"]})
     _로그(r["상태"], len(r["질문"]), 버린사유 or ([메타["사유"]] if 메타.get("사유") else []), False, t0)
@@ -521,18 +595,35 @@ def _live_질문(body: 질문요청, org: str | None, account: str | None, ip: s
              **({"노드결정": r["노드결정"]} if r.get("노드결정") else {}), **({"상황노드": r["상황노드"]} if r.get("상황노드") else {}),
              **({"L3숫자라벨": r["L3숫자라벨"]} if r.get("L3숫자라벨") else {}),
              **({"판정조사": r["판정조사"]} if r.get("판정조사") else {})}
-    저장됨 = response_cache.저장(k, 저장값, 종류="questions", org=org, account=account, 데이터버전_해시=데이터버전해시,
-                              ttl초=_임시_TTL초 if 메타.get("사유") == "LLM실패" else _질문세트_TTL초)
-    if not 저장됨 and 저장값["질문"]:                    # 답을 받아도 판정에서 질문을 찾지 못하니 묻지 않는다
-        _로그("실패", 0, ["저장실패"], False, t0)
-        return dict(_실패_응답)
     # 다시 점검처럼 질문 키가 안 맞는 판정이 읽는 보조 키. 노드결정만 둔다: 품목에서 고르니 키(품목)와 맞는다.
     # 상황노드는 질문 글에서 고르는데 보조 키에 질문 글이 없어 같은 품목의 다른 계획이 덮어쓰고, 다시 점검 판정은 질문 글 없이 돌아 상황을 확인할 수 없다.
     # L3숫자라벨(5-15 ⑤)은 기관 조문과 분류 노드에서 고르지 질문 글에서 고르지 않아 보조 키에도 둔다(판정이 지금 조문과 다시 맞춰 보고 안 맞으면 버린다)
-    if 조사확인 is None and 저장됨 and (저장값.get("노드결정") or 저장값.get("L3숫자라벨")):
-        response_cache.저장(노드결정_키(org, account, body.사업명, body.확정비목, body.확정세목, body.품목),
-                          {k: 저장값[k] for k in ("노드결정", "L3숫자라벨", "_온톨로지경로") if k in 저장값}, 종류="questions", org=org, account=account,
-                          데이터버전_해시=데이터버전해시, ttl초=_질문세트_TTL초)
+    # v053(Codex 검토): 보조 키를 질문세트보다 먼저 쓴다. 연결 끊김 · 시간 초과는 다시 쓰고(UPSERT), 끝내 안 되면 시스템오류로
+    # 다시 시도 안내를 낸다. 질문세트가 아직 없으니 다시 시도는 캐시에 걸리지 않고 둘 다 다시 쓴다(질문세트만 남아 보조 키가 빠지는 일이 없다).
+    # 재시도 대상이 아닌 오류(RLS 등)는 지금처럼 로그만 남긴다. 질문세트 저장이 뒤에서 실패해도 보조 키는 같은 품목의 노드결정이라 그대로 둬도 된다
+    if 조사확인 is None and (저장값.get("노드결정") or 저장값.get("L3숫자라벨")):
+        보조 = {k: 저장값[k] for k in ("노드결정", "L3숫자라벨", "_온톨로지경로") if k in 저장값}
+        try:
+            db.재시도(lambda: response_cache.저장(노드결정_키(org, account, body.사업명, body.확정비목, body.확정세목, body.품목),
+                                               보조, 종류="questions", org=org, account=account, 데이터버전_해시=데이터버전해시,
+                                               ttl초=_질문세트_TTL초, 예외전파=True), 단계="확인 질문 저장")
+        except 시스템오류:
+            raise
+        except Exception as e:                                # noqa: BLE001
+            _log.warning("노드결정 보조 저장 실패: %s", type(e).__name__)
+    # 판정이 이 저장값으로 답을 맞추므로 DB 연결 끊김 · 시간 초과는 다시 쓴다(UPSERT, 연결마다 GUC 다시 설정). 끝내 안 되면 시스템오류(v053)
+    try:
+        저장됨 = db.재시도(lambda: response_cache.저장(k, 저장값, 종류="questions", org=org, account=account, 데이터버전_해시=데이터버전해시,
+                                                    ttl초=_임시_TTL초 if 메타.get("사유") == "LLM실패" else _질문세트_TTL초,
+                                                    예외전파=True), 단계="확인 질문 저장")
+    except 시스템오류:
+        raise
+    except Exception as e:                                    # noqa: BLE001  재시도 대상이 아닌 오류(RLS 등)는 지금처럼 저장 실패
+        _log.warning("질문세트 저장 실패: %s", type(e).__name__)
+        저장됨 = False
+    if not 저장됨 and 저장값["질문"]:                    # 답을 받아도 판정에서 질문을 찾지 못하니 묻지 않는다
+        _로그("실패", 0, ["저장실패"], False, t0)
+        return dict(_실패_응답)
     return 응답(저장값)
 
 

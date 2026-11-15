@@ -44,6 +44,9 @@ def _사업명_표() -> dict[str, str]:
     return 표
 
 
+_사업목록_재시도초 = 30.0      # 요청 처리 전(SSE 시작 전)이라 짧게 둔다(기본값으로 정함, v053)
+
+
 def _사업명_표준화(값: str | None) -> str | None:
     """표준 사업명을 돌려준다. 등록되지 않은 표기는 422, 사업 목록을 못 읽으면 503.
 
@@ -56,7 +59,20 @@ def _사업명_표준화(값: str | None) -> str | None:
         return 값
     표 = _사업명_표()
     if not 표:
-        raise HTTPException(503, "사업 목록을 읽지 못했습니다. 잠시 후 다시 시도해 주세요.")
+        # 빈 표는 DB 장애다. 연결 끊김 · 시간 초과가 잠깐이면 다시 읽고(빈 표는 캐시하지 않는다), 30초 안에 못 읽으면 503(v053).
+        # 결과를 만들지 않는 응답이라 판정 · 질문이 저장되지 않는다
+        import psycopg
+        from _lib import db
+
+        def 읽기():
+            다시 = _사업명_표()
+            if not 다시:
+                raise psycopg.OperationalError("사업 목록을 읽지 못함")
+            return 다시
+        try:
+            표 = db.재시도(읽기, 단계="사업 목록", 마감초=_사업목록_재시도초)
+        except db.DB시스템오류:
+            raise HTTPException(503, "사업 목록을 읽지 못했습니다. 잠시 후 다시 시도해 주세요.") from None
     표준 = 표.get(_사업명_키(값))
     if 표준 is None:
         raise HTTPException(422, f"등록되지 않은 사업명입니다: {값!r}. "

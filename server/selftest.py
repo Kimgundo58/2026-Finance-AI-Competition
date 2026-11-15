@@ -298,7 +298,7 @@ def main() -> int:
     from server.judge_response import 파이프라인결과_매핑
     from server.models import 판정요청
     실패본문 = 판정요청(정규화={"품목": "노트북", "금액": 2500000, "용도": "디자인"}, 확정비목="기계장치", 사업명="예비창업패키지")
-    for 단계, 기대 in (("판정호출", True), ("LLM", True), ("검색", False)):
+    for 단계, 기대 in (("판정호출", True), ("LLM", True), ("DB", True), ("시스템오류", True), ("검색", False)):
         매핑 = 파이프라인결과_매핑({"판정": "확인 필요", "요약": "판정 모델 호출에 실패해 결론을 내리지 않았습니다.",
                               "실패경로": True, "실패단계": 단계, "인용목록": []}, 실패본문)
         확인(f"실패단계 {단계} → 판정실패 {기대}, 문의 초안 {'없음' if 기대 else '있음'}",
@@ -318,6 +318,7 @@ def main() -> int:
     확인("판정 요청 예산: 이미 상한을 넘긴 세션도 지금부터 600초가 남는다",
          지남.remaining_seconds() >= 599, f"{지남.remaining_seconds():.0f}초")
     _판정_재시도_검사(확인)
+    _판정_시스템오류_검사(확인, sse)
 
     # mock_판정 은 인용 키를 직접 갖고 있어 위 검사로는 live 경로가 판정 파이프라인의 키 이름
     # (인용목록·전제목록)을 읽는지 알 수 없다. 가짜 orchestrate 로 교체해 _live_판정 을 직접 부른다.
@@ -619,13 +620,14 @@ def main() -> int:
              _O._금지_재확인(s, LLM(RuntimeError("timeout"))) == [] and _O._금지_재확인(상태(해당없음), LLM({"결과": "?"})) == [])
     _재설계_1113()
 
-    print("\n[판정 도중 연결 · 모델 실패 → 실패 경로(확인 필요), 그 밖의 예외는 내부 오류]")
-    import psycopg
+    print("\n[판정 도중 모델 실패 → 판정실패, 그 밖의 예외는 내부 오류(확인 필요)]")
     import orchestrate
     import ontology_lookup as _조회
     from llm_qwen import LLM실패
 
     class _가짜연결:
+        closed = False
+
         def execute(self, *a, **k):
             return self
 
@@ -643,9 +645,7 @@ def main() -> int:
              patch.object(orchestrate, "_정규화단계", 터짐), \
              patch.object(orchestrate.l3_load, "기준문서_상태", return_value=None):
             return orchestrate.판정("노션 플러스 1개월", 사업명="모두의 창업 프로젝트", 기록=False)
-    끊김 = 실패판정(psycopg.OperationalError("consuming input failed: could not receive data from server"))
-    확인("DB 연결 끊김 → 확인 필요 · 실패단계 DB · 연결 문장",
-         끊김["판정"] == "확인 필요" and 끊김.get("실패단계") == "DB" and "연결이 끊겨" in 끊김["요약"] and 끊김.get("실패경로"))
+    # DB 연결 끊김은 _판정_시스템오류_검사 가 본다(v053: 예산까지 다시 하고 끝나면 판정실패)
     모델 = 실패판정(LLM실패("APIConnectionError"))
     확인("모델 호출 실패 → 확인 필요 · 실패단계 LLM", 모델["판정"] == "확인 필요" and 모델.get("실패단계") == "LLM"
          and "모델 호출에 실패" in 모델["요약"])
@@ -948,12 +948,230 @@ def _판정_재시도_검사(확인) -> None:
         try:
             llm_qwen.llm_호출("p", {"type": "object"}, 타임아웃=2, **인자)
             끝내실패 = False
-        except llm_qwen.LLM실패 as e:
-            끝내실패 = "회 시도" in str(e)
-        확인("판정 LLM 재시도: 마감까지 403 이면 LLM실패(시도 횟수 포함), 폴백 모델로 보내지 않는다",
+        except llm_qwen.LLM시스템오류 as e:
+            끝내실패 = e.시도 >= 2 and not isinstance(e, llm_qwen.LLM실패)
+        확인("판정 LLM 재시도: 마감까지 403 이면 LLM시스템오류(시도 횟수 포함, LLM실패 아님), 폴백 모델로 보내지 않는다",
              끝내실패 and len(가짜.모델들) >= 2 and set(가짜.모델들) == {llm_qwen.기본_모델}, f"{len(가짜.모델들)}회")
     finally:
         llm_qwen._client_얻기, llm_qwen._마감재시도_백오프초 = 원래
+
+
+def _판정_시스템오류_검사(확인, sse) -> None:
+    """v053 판정 쪽 시스템 오류 재시도(지시서 2 · 4절)를 가짜 DB 연결 · 가짜 LLM 으로 본다. 네트워크 · DB · API 키는 쓰지 않는다.
+
+    ① 단계 중 DB 연결 끊김 → 새 연결(RLS GUC 다시 설정)로 그 단계만 다시 하고 상태 · 진행 줄이 겹치지 않는다
+    ② 끊김이 예산 끝까지 이어지면 실패단계 DB → 판정실패(문의 초안 · 캐시 · 계획 연결 없음), 재시도 기록이 남는다
+    ③ 판정 행 저장 중 끊김(INSERT 는 커밋됨) → 멱등 키로 찾고 다시 넣지 않는다. 화면이 「다시 점검」 에서 같은 키를 보내면 새 행 없이 그 행을 바꾼다
+    ④ 판정 LLM 출력의 인용이 문장 목록 밖 → 고칠 점을 알려 다시 받는다(최대 2번)
+    ⑤ 판정 전 DB 읽기(질문세트) 장애 → 답변유실이 아니라 판정실패 SSE"""
+    from unittest.mock import patch
+
+    import psycopg
+
+    import inspect
+
+    import ontology_lookup as _조회
+    import orchestrate
+    import research_runtime
+    from llm_qwen import LLM시스템오류
+    from server import routes_judge
+    from server.judge_response import 파이프라인결과_매핑, 판정실패_요약_DB
+    from server.models import 판정요청
+
+    print("\n[v053 판정 시스템 오류 — DB 재연결 · 판정실패 · 멱등 저장 · 인용 재요청]")
+    db = orchestrate.db
+    열린: list = []
+    행들: list[dict] = []          # 가짜 tenant.decisions
+    갱신: list = []                # 가짜 UPDATE tenant.decisions 의 decision_id
+
+    class 가짜연결:
+        def __init__(self, *a, **k):
+            self.closed, self.실행, self._마지막 = False, [], None
+            self.INSERT_끊김 = 가짜연결.INSERT_끊김
+            열린.append(self)
+
+        def execute(self, sql, 인자=None):
+            self.실행.append(sql)
+            self._마지막 = (sql, 인자)
+            if sql.startswith("INSERT INTO tenant.decisions"):
+                모델 = json.loads(인자[[*행키].index("모델")]) if (행키 := 가짜연결.행키) else {}
+                행들.append({"decision_id": len(행들) + 1, "모델": 모델})
+                if self.INSERT_끊김:           # 서버는 커밋했는데 응답 전에 연결이 끊겼다
+                    가짜연결.INSERT_끊김 = False
+                    self.closed = True
+                    raise psycopg.OperationalError("server closed the connection unexpectedly")
+            if sql.startswith("UPDATE tenant.decisions"):
+                갱신.append(인자[-1])
+            return self
+
+        def fetchone(self):
+            sql, 인자 = self._마지막
+            if sql.startswith("INSERT INTO tenant.decisions"):
+                return (행들[-1]["decision_id"],)
+            if "멱등키" in sql:
+                r = next((x for x in 행들 if x["모델"].get("멱등키") == 인자[0]), None)
+                return (r["decision_id"],) if r else None
+            return None
+
+        def cursor(self):
+            return self
+
+        def close(self):
+            self.closed = True
+    가짜연결.INSERT_끊김, 가짜연결.행키 = False, None
+
+    def 상태_만들기():
+        return orchestrate._판정상태(질문="노션 플러스 1개월", 사업명="모두의 창업 프로젝트", org_id="00000000-0000-0000-0000-000000000001",
+                                  account_id=None, plan_id=None, 기록=False, dry=False, 주입=None, 참조확장_사용=True)
+
+    # ① 단계 재실행
+    시도: list = []
+    events: list = []
+
+    def 끊기는_단계(상태, _정규화):
+        시도.append(1)
+        상태.처리단계.append("정규화")
+        research_runtime.emit("규정원문", "원문을 확인하고 있어요.", id=f"id{len(시도)}")
+        if len(시도) == 1:
+            raise psycopg.OperationalError("consuming input failed: could not receive data from server")
+        return orchestrate._기본응답("확인 필요", "셀프테스트", 처리단계="+".join(상태.처리단계))
+    열린.clear()
+    with patch.object(db, "connect", side_effect=가짜연결), patch.object(db, "_재시도_백오프초", (0.01,)), \
+         patch.object(_조회, "새경로_대상", return_value=True), patch.object(orchestrate, "_정규화단계", 끊기는_단계), \
+         research_runtime.activate(research_runtime.Budget(seconds=30), emit=events.append) as 예산:
+        r = orchestrate.판정("노션 플러스 1개월", 사업명="모두의 창업 프로젝트", org_id="00000000-0000-0000-0000-000000000001", 기록=False)
+        재시도 = list(예산.재시도)
+    guc = [sum("set_config('app.org_id'" in q for q in c.실행) for c in 열린]
+    원문줄 = {e["id"] for e in events if e.get("단계") == "규정원문"}
+    확인("DB 재연결: 끊긴 단계만 새 연결로 다시 해 결과를 낸다(새 연결에도 RLS GUC 를 다시 건다)",
+         r.get("요약") == "셀프테스트" and len(시도) == 2 and len(열린) == 2 and 열린[0].closed and guc == [1, 1], f"연결 {len(열린)} · GUC {guc}")
+    확인("DB 재연결: 다시 한 단계의 상태 변경이 겹치지 않고(처리단계 1번) 화면 진행 줄도 같은 줄을 이어 쓴다",
+         r.get("처리단계") == "정규화" and len(원문줄) == 1, f"{r.get('처리단계')} · 줄 {원문줄}")
+    확인("DB 재연결: 재시도 기록에 단계 · 원인 · 시도 · 대기초가 남는다(원인은 예외 종류)",
+         len(재시도) == 1 and 재시도[0]["단계"] == "입력확인 DB" and 재시도[0]["원인"].startswith("OperationalError")
+         and set(재시도[0]) == {"단계", "원인", "시도", "대기초"}, str(재시도))
+
+    # ② 예산 소진 → 판정실패
+    def 늘_끊김(상태, _정규화):
+        raise psycopg.OperationalError("server closed the connection unexpectedly")
+    본문 = 판정요청(정규화={"품목": "노션", "금액": 10000, "용도": "협업"}, 확정비목="지급수수료", 사업명="모두의 창업 프로젝트")
+    with patch.object(db, "connect", side_effect=가짜연결), patch.object(db, "_재시도_백오프초", (0.2,)), \
+         patch.object(_조회, "새경로_대상", return_value=True), patch.object(orchestrate, "_정규화단계", 늘_끊김), \
+         research_runtime.activate(research_runtime.Budget(seconds=1)) as 예산:
+        끝 = orchestrate.판정("노션 플러스 1개월", 사업명="모두의 창업 프로젝트", 기록=True)
+        재시도 = list(예산.재시도)
+    매핑 = 파이프라인결과_매핑(끝, 본문)
+    확인("예산 끝까지 DB 끊김 → 실패단계 DB · 판정실패 true · 문의 초안 없음 · _실패(캐시 · 계획 연결 안 함) · 판정 행 없음",
+         끝.get("실패단계") == "DB" and 매핑.get("판정실패") is True and "문의초안" not in 매핑 and 매핑["_실패"] is True
+         and 매핑["판정"] == "확인 필요" and 매핑["요약"] == 판정실패_요약_DB and "decision_id" not in 끝 and len(재시도) >= 2,
+         f"재시도 {len(재시도)}번")
+    with patch.object(db, "connect", side_effect=가짜연결), patch.object(_조회, "새경로_대상", return_value=True), \
+         patch.object(orchestrate, "_정규화단계", side_effect=LLM시스템오류("정규화 LLM", "마감(403)", 4)):
+        llm끝 = orchestrate.판정("노션 플러스 1개월", 사업명="모두의 창업 프로젝트", 기록=False)
+    확인("LLM 이 예산까지 실패(LLM시스템오류) → 실패단계 LLM · 판정실패",
+         llm끝.get("실패단계") == "LLM" and 파이프라인결과_매핑(llm끝, 본문).get("판정실패") is True)
+
+    # ③ 멱등 저장
+    행들.clear()
+    가짜연결.INSERT_끊김, 가짜연결.행키 = True, None
+    상태 = 상태_만들기()
+    상태.db연결 = db.연결(상태.org_id, None)
+    응답 = {"판정": "가능", "요약": "셀프테스트", "모델": {"호출수": 1}}
+    with patch.object(db, "connect", side_effect=가짜연결), patch.object(db, "_재시도_백오프초", (0.01,)), \
+         patch.object(orchestrate, "_코퍼스버전_캐시", "docs1/chunks1"), \
+         research_runtime.activate(research_runtime.Budget(seconds=30)):
+        가짜연결.행키 = [k for k in orchestrate._decisions_행(상태, 응답) if k in orchestrate._decisions_컬럼]
+        decision_id = orchestrate._판정행_저장(상태, 응답)
+    확인("판정 행 저장: INSERT 가 커밋된 뒤 연결이 끊기면 멱등 키로 그 행을 찾고 다시 넣지 않는다",
+         len(행들) == 1 and decision_id == 1 and 행들[0]["모델"].get("멱등키") == 상태.멱등키
+         and isinstance(행들[0]["모델"].get("재시도"), list), f"행 {len(행들)}개")
+    가짜연결.INSERT_끊김 = False
+    갱신.clear()                   # 위 같은 요청 안의 다시 시도도 찾은 행을 같은 값으로 바꾼다
+    # 앞 요청은 행을 커밋한 뒤 판정실패로 끝났다 → 사용자가 「다시 점검」(화면이 같은 멱등 키를 보냄) → 새 요청 상태
+    다음 = 상태_만들기()
+    다음.멱등키 = 상태.멱등키
+    다음.db연결 = db.연결(다음.org_id, None)
+    with patch.object(db, "connect", side_effect=가짜연결), patch.object(orchestrate, "_코퍼스버전_캐시", "docs1/chunks1"),          research_runtime.activate(research_runtime.Budget(seconds=30)):
+        두번째 = orchestrate._판정행_저장(다음, {"판정": "확인 필요", "요약": "다시 점검", "모델": {}})
+    확인("판정 행 저장: 「다시 점검」 이 같은 멱등 키를 보내면 새 행을 넣지 않고 앞 행(같은 decision_id)을 이번 결과로 바꾼다",
+         len(행들) == 1 and 두번째 == 1 and 갱신 == [1], f"행 {len(행들)}개 · 갱신 {갱신}")
+    다른 = 상태_만들기()
+    다른.db연결 = db.연결(다른.org_id, None)
+    with patch.object(db, "connect", side_effect=가짜연결), patch.object(orchestrate, "_코퍼스버전_캐시", "docs1/chunks1"),          research_runtime.activate(research_runtime.Budget(seconds=30)):
+        세번째 = orchestrate._판정행_저장(다른, {"판정": "가능", "요약": "새 점검", "모델": {}})
+    확인("판정 행 저장: 키가 다른 새 점검은 새 행을 넣는다", len(행들) == 2 and 세번째 == 2 and 갱신 == [1], f"행 {len(행들)}개")
+    받은키: list = []
+
+    def 키_보기(상태, _정규화):
+        받은키.append(상태.멱등키)
+        return orchestrate._기본응답("확인 필요", "셀프테스트")
+    with patch.object(db, "connect", side_effect=가짜연결), patch.object(_조회, "새경로_대상", return_value=True),          patch.object(orchestrate, "_정규화단계", 키_보기):
+        orchestrate.판정("노션", 사업명="모두의 창업 프로젝트", 기록=False, 멱등키="a" * 32)
+        orchestrate.판정("노션", 사업명="모두의 창업 프로젝트", 기록=False, 멱등키="'; DROP")
+        orchestrate.판정("노션", 사업명="모두의 창업 프로젝트", 기록=False)
+    확인("판정(): 화면이 보낸 멱등 키(32자리 16진수)를 쓰고, 형식이 다르거나 없으면 새로 만든다",
+         받은키[0] == "a" * 32 and len(받은키) == 3 and all(len(k) == 32 and k != "a" * 32 for k in 받은키[1:])
+         and 받은키[1] != 받은키[2], str(받은키))
+    확인("판정요청: 멱등키 필드를 받고 판정 라우트가 orchestrate.판정() 에 넘긴다",
+         판정요청(정규화={}, 멱등키="b" * 32).멱등키 == "b" * 32
+         and "멱등키=body.멱등키" in inspect.getsource(routes_judge._live_판정))
+
+    # ④ 인용 재요청
+    호출: list = []
+
+    def 판정llm(출력들):
+        def f(프롬프트, 스키마, **k):
+            호출.append(프롬프트)
+            return 출력들[min(len(호출), len(출력들)) - 1], {"모델": "가짜", "시도": 1}
+        return f
+    잘못 = {"판정": "가능", "요약": "쓸 수 있어요.", "인용": ["S99"], "전제": [], "해야할일": []}
+    맞음 = {"판정": "가능", "요약": "쓸 수 있어요.", "인용": ["S01"], "전제": [], "해야할일": []}
+    for 이름, 출력들, 기대호출, 기대인용 in (("문장 목록 밖 인용 뒤 바른 인용", [잘못, 맞음], 2, ["S01"]),
+                                       ("계속 틀리면 2번까지만 다시 받는다", [잘못], 3, ["S99"])):
+        호출.clear()
+        상태 = 상태_만들기()
+        상태.문장맵, 상태.프롬프트 = {"S01": ("article", 1, None)}, "판정 프롬프트"
+        with patch.object(orchestrate, "llm_호출", 판정llm(출력들)):
+            결과 = orchestrate._판정호출(상태)
+        확인(f"인용 재요청: {이름}(판정 LLM {기대호출}번, 고칠 점을 알린다)",
+             결과 is None and len(호출) == 기대호출 and 상태.출력.get("인용") == 기대인용
+             and "S99" in 호출[1] and "형식 문제" in 호출[1] and len(상태.판정_메타.get("재요청") or []) == 기대호출 - 1
+             and f"판정재요청:{기대호출 - 1}" in 상태.처리단계, f"{len(호출)}번")
+    상태 = 상태_만들기()
+    상태.문장맵, 상태.프롬프트 = {"S01": ("article", 1, None)}, "판정 프롬프트"
+    with patch.object(orchestrate, "llm_호출", side_effect=LLM시스템오류("판정 LLM", "마감(403)", 7)):
+        결과 = orchestrate._판정호출(상태)
+    확인("판정 LLM 이 예산까지 실패 → 실패단계 판정호출(판정실패)",
+         isinstance(결과, dict) and 결과.get("실패단계") == "판정호출" and 결과.get("실패경로"))
+
+    # ⑤ 판정 전 DB 읽기
+    def 끊긴_조회(*a, **k):
+        raise db.DB시스템오류("질문세트 읽기 DB", "OperationalError", 3)
+    답본문 = 판정요청(정규화={"품목": "노션", "금액": 10000}, 확정비목="지급수수료", 사업명="모두의 창업 프로젝트", 질문세트="q1")
+    with patch.object(routes_judge, "_질문세트_엄격조회", 끊긴_조회):
+        try:
+            routes_judge._사용자답변_읽기(답본문, None)
+            올림 = False
+        except db.DB시스템오류:
+            올림 = True
+    확인("판정 전 질문세트 읽기가 DB 장애로 끝나면 답변유실(가능 → 확인 필요)로 두지 않고 올린다", 올림)
+    import time as _시간
+    토큰 = routes_judge._판정전_마감.set(_시간.monotonic() + 0.3)
+    with patch.object(db, "_재시도_백오프초", (0.05,)):
+        try:
+            routes_judge._판정전_DB(lambda: (_ for _ in ()).throw(psycopg.OperationalError("down")), "셀프테스트")
+            올림 = False
+        except db.DB시스템오류 as e:
+            올림 = e.시도 >= 2
+        finally:
+            routes_judge._판정전_마감.reset(토큰)
+    확인("판정 전 DB 읽기: 연결 끊김은 판정 전 마감까지 다시 하고 DB시스템오류 로 끝난다", 올림)
+    with patch.object(routes_judge, "_judge_본체", side_effect=db.DB시스템오류("지출 기록 읽기 DB", "OperationalError", 2)):
+        _, e = sse("/api/judge", {"정규화": {"품목": "노션", "금액": 10000}, "확정비목": "기계장치", "사업명": "예비창업패키지"})
+    판정이벤트 = (e.get("판정") or [{}])[0]
+    확인("판정 전 DB 읽기 장애 → SSE 판정실패 · 문의초안 없음 · 계획 연결 안 함",
+         판정이벤트.get("판정실패") is True and 판정이벤트.get("판정") == "확인 필요" and not e.get("문의초안")
+         and (e.get("저장") or [{}])[0].get("저장") is False and (e.get("완료") or [{}])[0].get("실패") is True)
 
 
 def _새흐름_검사(c, sse, 확인) -> None:

@@ -90,17 +90,21 @@ def 조회(k: str, org: str | None, account: str | None = None) -> Any | None:
     return 값
 
 
-def 질문세트_조회(k: str, org: str | None, account: str | None = None) -> Any | None:
+def 질문세트_조회(k: str, org: str | None, account: str | None = None, *, 예외전파: bool = False) -> Any | None:
     """저장된 질문세트 또는 None. 조회() 와 같은 기준으로 읽되 일일 판정 카운트를 되돌리지 않는다.
 
     판정 요청 안에서 읽을 때 되돌리면 LLM 을 부른 그 판정이 카운트에서 빠진다. 다른 계정이 저장한 행은 읽지 않는다.
+    `예외전파=True` 면 DB 오류(데이터 버전 해시를 못 읽음 포함)를 None 으로 삼키지 않고 올린다: 없음과 장애를 갈라
+    판정 라우트가 db.재시도 로 다시 읽게 한다(v053 routes_judge._질문세트_엄격조회).
     """
-    return _메모리_조회(k) if org is None else _db_조회(k, org, account)
+    return _메모리_조회(k) if org is None else _db_조회(k, org, account, 예외전파=예외전파)
 
 
 def 저장(k: str, 값: Any, *, 종류: str, org: str | None, account: str | None = None,
-         데이터버전_해시: str | None = None, ttl초: int | None = None) -> bool:
+         데이터버전_해시: str | None = None, ttl초: int | None = None, 예외전파: bool = False) -> bool:
     """응답을 저장하고 저장 여부를 돌려준다. DB 쓰기 실패는 삼킨다(캐시는 판정 결과에 영향을 주지 않는다).
+    `예외전파=True` 면 DB 예외를 올린다: 판정이 읽어야 하는 질문세트처럼 저장이 결과에 영향을 주는 호출자가
+    db.재시도 로 다시 쓰게 한다(UPSERT 라 다시 써도 같은 행, v053 routes_questions).
 
     데이터버전_해시 는 요청 시작 때 요청_해시() 로 계산한 값을 넘긴다. 저장 시점에 다시 계산하면, 규정
     활성화 전에 시작해 옛 규정으로 판정한 결과가 새 해시로 저장되어 이후 요청에 적중한다.
@@ -126,7 +130,7 @@ def 저장(k: str, 값: Any, *, 종류: str, org: str | None, account: str | Non
         'ON CONFLICT (key) DO UPDATE SET '
         '  value = EXCLUDED.value, 데이터버전_해시 = EXCLUDED.데이터버전_해시, '
         '  expires_at = EXCLUDED.expires_at, created_at = now()',
-        (k, org, account, 종류, _jsonb(값), 데이터버전_해시, ttl초)) >= 0
+        (k, org, account, 종류, _jsonb(값), 데이터버전_해시, ttl초), 예외전파=예외전파) >= 0
 
 
 def 요청_해시() -> str:
@@ -166,16 +170,19 @@ def _메모리_조회(k: str) -> Any | None:
         return 값
 
 
-def _db_조회(k: str, org: str, account: str | None) -> Any | None:
+def _db_조회(k: str, org: str, account: str | None, 예외전파: bool = False) -> Any | None:
     # 게스트는 여기 오지 않는다. RLS 정책은 org_id = current_org() 라 org 가 NULL 이면 통과하지 못한다.
     해시 = _데이터버전_해시()
     if 해시 == "unknown":
+        if 예외전파:                           # 해시 조회가 DB 장애로 실패했다. 연결 오류로 올려 다시 읽게 한다
+            import psycopg
+            raise psycopg.OperationalError("데이터 버전 해시를 읽지 못함")
         return None
     조건, 인자 = _계정조건(org, "c", account)
     행 = _질의(
         'SELECT value FROM tenant.judge_cache c '
         f'WHERE c.key=%s AND {조건} AND c.expires_at > now() AND c.데이터버전_해시=%s',
-        (k, *인자, 해시))
+        (k, *인자, 해시), 예외전파=예외전파)
     return 행[0][0] if 행 else None
 
 

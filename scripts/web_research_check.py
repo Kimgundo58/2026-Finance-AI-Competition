@@ -466,6 +466,7 @@ def main():
     조사모델_검사()
     apick_분류_검사()
     요건조사_검사()
+    시스템오류_검사(body)
     print("웹 조사 모의 검사 통과")
 
 
@@ -798,7 +799,9 @@ def 조사모델_검사():
         import llm_qwen
         import web_research
         보낸 = []
-        def 가짜(prompt, schema, *, 모델, 재시도, 타임아웃, 추론):
+        def 가짜(prompt, schema, *, 모델, 재시도, 타임아웃, 추론, 마감까지_재시도=False, 마감초=None, 단계=None):
+            # v053: 조사 LLM 은 조사 마감(timeout)까지 시스템 오류를 다시 보낸다(마감까지_재시도)
+            assert 마감까지_재시도 and 마감초 == float(타임아웃) and 단계 == "공개 조사", (마감까지_재시도, 마감초, 단계)
             보낸.append((모델, 재시도, 타임아웃, 추론))
             if 실패.pop(0):
                 raise llm_qwen.LLM실패("synthetic")
@@ -820,7 +823,7 @@ def 조사모델_검사():
         # 기본 모델이면 llm_호출 이 폴백 모델로 한 번 더 보낸다(web_research 가 넘기는 인자 그대로).
         # 즉시 오류는 같은 모델로 한 번 더 보낸 뒤 폴백한다(llm_호출 규칙)
         모델들 = []
-        def 한번(client, 모델, *a):
+        def 한번(client, 모델, *a, **k):
             모델들.append(모델)
             if len(모델들) <= 2:
                 raise RuntimeError("synthetic failure")
@@ -830,6 +833,24 @@ def 조사모델_검사():
                 patch.dict(os.environ, {"SUDDOE_RESEARCH_MODEL": ""}):
             assert web_research._기본_계획호출()("p", {}, 30) == {"행동": "완료"}
         assert 모델들 == [llm_qwen.기본_모델, llm_qwen.기본_모델, llm_qwen.폴백_모델], 모델들
+
+
+def 시스템오류_검사(body):
+    """v053: 계획 · 후보 작성 LLM 이 조사 마감까지 시스템 오류면 쓸 수 있는 결과(후보)가 없을 때 research() 가 시스템오류를 올린다.
+    「공개 정보에서 찾지 못함」 으로 넘기지 않는다(호출자 routes_questions 가 다시시도로 응답). 형식 오류 같은 그 밖의 실패는 지금처럼 조사 못함."""
+    from research_runtime import 시스템오류
+    url = "https://example.com/product"
+    for 실패역할 in ("계획", "후보"):
+        def llm(p, s, t, _실패역할=실패역할, _계획=iter([검색("Example"), 본문(url)])):
+            if ("후보" if _후보역할(s) else "계획") == _실패역할:
+                raise 시스템오류("공개 조사 LLM", "synthetic", 4)
+            return next(_계획, 완료())
+        try:
+            research("Example", budget=Budget(), client=Client(body), llm_call=llm)
+            raise AssertionError(f"{실패역할} 시스템 오류를 삼킴")
+        except 시스템오류 as e:
+            assert e.단계 == "공개 조사 LLM", e
+    # 후보가 나오면 조사를 끝내므로(research) 후보 뒤 시스템 오류는 없다. 요건 모드에서 이미 확인한 요건이 있으면 얻은 만큼으로 끝낸다
 
 
 def 느린검색_검사(body):

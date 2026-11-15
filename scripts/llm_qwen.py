@@ -8,7 +8,8 @@ normalize_run(정규화 호출, 폼 경로 비목후보 추출)과 orchestrate(�
 SUDDOE_QWEN_MODEL, SUDDOE_QWEN_FALLBACK_MODEL. 다른 OpenAI 호환 라우터(예: Runyour AI)를 쓰면 BASE_URL 과
 모델 ID(예: qwen/qwen3.7-plus)를 그 라우터 기준으로 넣는다.
 스키마를 주면 response_format(json_schema, strict)으로 JSON 출력을 강제한다.
-모든 실패는 LLM실패 로 올린다. 호출자는 이를 확인 필요(실패)로 반환한다.
+마감까지_재시도=False 의 실패는 LLM실패 로 올린다. 마감까지_재시도=True(운영 경로)의 실패는 LLM시스템오류 로 올린다:
+호출자는 이를 확인 필요로 바꾸지 않고 판정실패 · 다시시도로 응답한다(v053).
 """
 from __future__ import annotations
 
@@ -20,7 +21,7 @@ from typing import Any
 
 import httpx
 from openai import OpenAI
-from research_runtime import current_budget, is_final_call
+from research_runtime import current_budget, is_final_call, 시스템오류, 재시도_기록
 
 
 class LLM실패(Exception):
@@ -249,6 +250,9 @@ def _시간초과(e: Exception) -> bool:
 # 시간 · 호출 수는 상관없고 판정이 오류로 끝나지 않게). 2026-11-15 전체 실행 두 번: LLM 호출 35회 중 8회 · 28회 중 5회가 403,
 # 모두 다음 시도에 통과했다.
 _마감재시도_백오프초 = (2.0, 4.0, 8.0, 15.0)
+# 마감까지_재시도 의 비스트리밍 시도 하나의 대기 하한(초). 호출자의 `타임아웃`(질문 20 · 분류 40초 등)이 더 짧아도 이만큼은 기다린다:
+# 짧게 끊으면 느린 정상 응답이 매번 시간 초과로 끝나 마감까지 같은 실패만 되풀이한다. 게이트웨이가 응답 없는 연결을 약 60초에 끊는다(_스트림_받기)
+_시도_최소초 = 60.0
 
 
 def _스트림끊김(e: Exception) -> bool:
@@ -256,78 +260,131 @@ def _스트림끊김(e: Exception) -> bool:
     return isinstance(e, httpx.TransportError) and not isinstance(e, httpx.TimeoutException)
 
 
-def _마감까지_호출(client: OpenAI, 모델: str, 프롬프트: str, 스키마: dict | None, 온도: float, 최대토큰: int,
-              타임아웃: int, 추론: bool | None, 스트림: bool, 청크_대기초: float | None) -> tuple[Any, dict]:
-    """판정 호출 전용(`llm_호출(마감까지_재시도=True)`). 서버 예산의 남은 시간이 마감이다(예산이 없으면 `타임아웃` 초).
+class LLM시스템오류(시스템오류):
+    """마감까지_재시도 호출이 마감(서버 예산의 남은 시간, `마감초` 가 더 짧으면 그 값)까지 받을 수 있는 출력을 받지 못했다(v053).
+    LLM실패 를 잇지 않는다: `except LLM실패` 로 확인 필요 · 질문 없음으로 넘기던 곳에 걸리지 않고 라우트까지 올라가
+    판정실패 · 다시시도가 된다(research_runtime.시스템오류)."""
 
+
+def _재시도_대상_아님(e: Exception) -> bool:
+    """다시 보내도 같은 결과인 요청 오류(400 · 401 · 404 · 422). 한 번 더 · 폴백 한 번 뒤에는 마감까지 기다리지 않는다."""
+    import openai
+    종류 = tuple(c for c in (getattr(openai, n, None) for n in ("BadRequestError", "AuthenticationError", "NotFoundError",
+                                                              "UnprocessableEntityError")) if isinstance(c, type))
+    return bool(종류) and isinstance(e, 종류)
+
+
+def _마감까지_호출(client: OpenAI, 모델: str, 프롬프트: str, 스키마: dict | None, 온도: float, 최대토큰: int,
+              타임아웃: int, 추론: bool | None, 스트림: bool, 청크_대기초: float | None, *,
+              폴백: bool = False, 마감초: float | None = None, 단계: str = "판정") -> tuple[Any, dict]:
+    """운영 경로의 LLM 호출(`llm_호출(마감까지_재시도=True)`, 판정 v052 · 나머지 단계 v053). 마감까지 다시 보낸다.
+
+    마감 = 서버 예산의 남은 시간과 `마감초`(그 단계의 상한, 예: ② 품목 조사의 남은 조사 시간) 중 짧은 쪽.
+    예산도 `마감초` 도 없으면(CLI · 검사) `타임아웃` 초.
     - 일시 오류(403 · 429 · 5xx · 연결 끊김)는 `_마감재시도_백오프초`(2 · 4 · 8 · 15 · 15 …초) 만큼 기다리며(지수 백오프) 마감까지 다시 보낸다.
     - 청크 무응답(`_청크무응답`)과 그 밖의 시간 초과는 기다리지 않고 바로 다시 보낸다.
-    - 추론을 끄고 다시 보내지 않는다. 출력 잘림은 max_tokens 를 두 배로 늘려 추론을 켠 채 한 번 더 보낸다.
-    - 시도마다 대기 상한은 남은 시간 전체다. JSON 깨짐 · 그 밖의 즉시 오류는 한 번 더 보낸다.
-    - 실패한 시도는 모두 경고 로그, 끝내 실패하면 오류 로그를 남긴다(운영 docker logs 로 셀 수 있게).
-    메타에 `시도`(보낸 횟수)를 넣는다.
+    - 추론을 끄고 다시 보내지 않는다. 출력 잘림은 max_tokens 를 두 배로 늘려 한 번 더 보낸다.
+    - JSON 깨짐 · 출력 잘림 반복은 한 번은 바로, 그다음부터는 지수 백오프로 마감까지 다시 보낸다.
+      요청 오류(400 · 401 · 404 · 422, `_재시도_대상_아님`)는 한 번 더 보낸 뒤 마감을 기다리지 않고 실패로 끝낸다.
+    - 폴백: `폴백=True` 이고 기본 모델이면 즉시 오류가 두 번 나거나 일시 오류가 `_일시오류_추가` 번 나면 폴백 모델로 한 번 보낸다
+      (기존 llm_호출 폴백 규칙). 그 뒤에도 실패하면 기본 모델로 마감까지 다시 보낸다. 판정 LLM 은 폴백=False(사용자 2026-11-15).
+    - 한 시도의 대기 상한: 스트리밍 + 청크_대기초(판정)는 마감까지 전체(청크 무응답이 멈춤을 잡는다), 그 밖은 max(`타임아웃`, `_시도_최소초`) 와 마감 중 짧은 쪽.
+    - 실패한 시도는 모두 경고 로그 · 재시도 기록(research_runtime.재시도_기록), 끝내 실패하면 오류 로그를 남긴다.
+    메타에 `시도`(보낸 횟수)를 넣는다. 끝내 실패하면 LLM시스템오류(단계 · 원인 · 시도).
     """
     budget = current_budget()
-    마감 = None if budget is not None else time.monotonic() + 타임아웃
+    지금 = time.monotonic()
+    로컬마감 = 지금 + 마감초 if 마감초 is not None else (지금 + 타임아웃 if budget is None else None)
 
     def 남은초() -> float:
-        return budget.remaining_seconds() if budget is not None else max(0.0, 마감 - time.monotonic())
+        남 = [budget.remaining_seconds()] if budget is not None else []
+        if 로컬마감 is not None:
+            남.append(max(0.0, 로컬마감 - time.monotonic()))
+        return min(남)
 
-    n = 일시 = 0
-    잘림재시도 = 즉시재시도 = False
+    def 기록(원인: str, 대기: float = 0.0) -> None:
+        재시도_기록(f"{단계} LLM", 원인, n, 대기)
+
+    n = 백오프 = 일시 = 즉시 = 0
+    잘림재시도 = 폴백함 = False
     마지막 = None
+    쓸모델 = 모델
     while True:
         남은 = 남은초()
         if 남은 <= 0:
-            _log.error("[판정 LLM] 실패 — 시간 예산 끝남, %d회 시도, 마지막 오류: %s", n, 마지막)
-            raise _예산초과(f"LLM 호출 시간 초과({n}회 시도, 마지막 오류: {마지막})")
+            _log.error("[%s LLM] 실패 — 마감, %d회 시도, 마지막 오류: %s", 단계, n, 마지막)
+            raise LLM시스템오류(f"{단계} LLM", f"마감({마지막 or '시도 전'})", n)
         n += 1
+        이번모델 = 쓸모델
+        한도 = 남은 if (스트림 and 청크_대기초 is not None) else min(max(float(타임아웃), _시도_최소초), 남은)
         try:
-            출력, 메타 = _호출_1회(client, 모델, 프롬프트, 스키마, 온도, 최대토큰, 남은, 추론, 스트림,
+            출력, 메타 = _호출_1회(client, 이번모델, 프롬프트, 스키마, 온도, 최대토큰, 한도, 추론, 스트림,
                               청크_대기초=청크_대기초)
             메타["시도"] = n
             if n > 1:
-                _log.warning("[판정 LLM] %d번째 시도에 받음(앞선 실패: %s)", n, 마지막)
+                _log.warning("[%s LLM] %d번째 시도에 받음(앞선 실패: %s)", 단계, n, 마지막)
             return 출력, 메타
         except _예산초과 as e:
             보낸 = n - 1 if str(e).startswith("LLM 호출") else n    # 「LLM 호출 …」 은 보내기 전에 예약 · 시간에서 막힌 것
-            _log.error("[판정 LLM] 실패 — 예산 끝남(%s), %d회 시도, 마지막 오류: %s", e, 보낸, 마지막)
-            raise _예산초과(f"{e}({보낸}회 시도, 마지막 오류: {마지막})") from e
+            _log.error("[%s LLM] 실패 — 예산 끝남(%s), %d회 시도, 마지막 오류: %s", 단계, e, 보낸, 마지막)
+            raise LLM시스템오류(f"{단계} LLM", f"예산 끝남({마지막 or e})", 보낸) from e
         except _출력잘림 as e:
             마지막 = str(e)
             if not 잘림재시도:
                 잘림재시도, 최대토큰 = True, 최대토큰 * 2
-                _log.warning("[판정 LLM] %d번째 시도 출력 잘림 — max_tokens %d 로 재시도: %s", n, 최대토큰, e)
+                _log.warning("[%s LLM] %d번째 시도 출력 잘림 — max_tokens %d 로 재시도: %s", 단계, n, 최대토큰, e)
+                기록("출력 잘림")
                 continue
+            종류 = "즉시"
         except _청크무응답 as e:
             마지막 = str(e)
-            _log.warning("[판정 LLM] %d번째 시도 청크 무응답 — 바로 재시도: %s", n, e)
+            _log.warning("[%s LLM] %d번째 시도 청크 무응답 — 바로 재시도: %s", 단계, n, e)
+            기록("청크 무응답")
             continue
         except json.JSONDecodeError as e:
             마지막 = f"JSON 파싱 실패: {e}"
-            if not 즉시재시도:
-                즉시재시도 = True
-                _log.warning("[판정 LLM] %d번째 시도 %s — 한 번 더 재시도", n, 마지막)
-                continue
-        except Exception as e:  # noqa: BLE001 — SDK·HTTP·타임아웃 오류를 모두 LLM실패 로 바꾼다
+            종류 = "즉시"
+        except Exception as e:  # noqa: BLE001 — SDK·HTTP·타임아웃 오류를 모두 시스템 오류로 다룬다
             마지막 = f"{type(e).__name__}: {str(e)[:200]}"
             if _일시오류(e) or _스트림끊김(e):
-                대기 = _마감재시도_백오프초[min(일시, len(_마감재시도_백오프초) - 1)]
-                if 남은초() > 대기 + 1:
-                    일시 += 1
-                    _log.warning("[판정 LLM] %d번째 시도 일시 오류 — %.0f초 뒤 재시도: %s", n, 대기, 마지막)
-                    time.sleep(대기)
-                    continue
+                종류 = "일시"
             elif _시간초과(e):
-                _log.warning("[판정 LLM] %d번째 시도 시간 초과 — 바로 재시도: %s", n, 마지막)
+                _log.warning("[%s LLM] %d번째 시도 시간 초과 — 바로 재시도: %s", 단계, n, 마지막)
+                기록("시간 초과")
                 continue
-            elif not 즉시재시도:
-                즉시재시도 = True
-                _log.warning("[판정 LLM] %d번째 시도 %s — 한 번 더 재시도", n, 마지막)
-                continue
-        break
-    _log.error("[판정 LLM] 실패 — %d회 시도, 마지막 오류: %s", n, 마지막)
-    raise LLM실패(f"{마지막 or '알 수 없는 실패'}({n}회 시도)")
+            elif _재시도_대상_아님(e):
+                종류 = "요청"
+            else:
+                종류 = "즉시"
+        if 종류 == "일시":
+            일시 += 1
+        else:
+            즉시 += 1
+        # 폴백 모델로 한 번(기존 규칙: 즉시 오류 두 번 · 일시 오류 _일시오류_추가 번). 그 뒤는 기본 모델로 돌아간다
+        if (폴백 and not 폴백함 and 모델 == 기본_모델 and 폴백_모델 != 모델 and _모델_이름(폴백_모델) not in _금지_모델
+                and (즉시 >= 2 or 일시 > _일시오류_추가)):
+            폴백함 = True
+            쓸모델 = 폴백_모델
+            _log.warning("[%s LLM] %d번째 시도 실패 — 폴백 모델(%s)로 한 번 보냄: %s", 단계, n, 폴백_모델, 마지막)
+            기록(f"폴백 전환: {마지막}")
+            continue
+        쓸모델 = 모델
+        if 종류 == "요청" and 즉시 >= 2:
+            break
+        if 종류 != "일시" and 즉시 == 1:
+            _log.warning("[%s LLM] %d번째 시도 %s — 한 번 더 재시도", 단계, n, 마지막)
+            기록(마지막)
+            continue
+        대기 = _마감재시도_백오프초[min(백오프, len(_마감재시도_백오프초) - 1)]
+        if 남은초() <= 대기 + 1:
+            _log.error("[%s LLM] 실패 — 마감 전에 다시 보낼 시간 없음, %d회 시도, 마지막 오류: %s", 단계, n, 마지막)
+            raise LLM시스템오류(f"{단계} LLM", f"마감({마지막})", n)
+        백오프 += 1
+        _log.warning("[%s LLM] %d번째 시도 %s 오류 — %.0f초 뒤 재시도: %s", 단계, n, 종류, 대기, 마지막)
+        기록(마지막, 대기)
+        time.sleep(대기)
+    _log.error("[%s LLM] 실패 — 요청 오류, %d회 시도, 마지막 오류: %s", 단계, n, 마지막)
+    raise LLM시스템오류(f"{단계} LLM", f"요청 오류({마지막})", n)
 
 
 def llm_호출(프롬프트: str, 스키마: dict | None, *,
@@ -341,7 +398,9 @@ def llm_호출(프롬프트: str, 스키마: dict | None, *,
             스트림: bool = False,
             폴백: bool = True,
             마감까지_재시도: bool = False,
-            청크_대기초: float | None = None) -> tuple[Any, dict]:
+            청크_대기초: float | None = None,
+            마감초: float | None = None,
+            단계: str = "판정") -> tuple[Any, dict]:
     """프롬프트 하나를 보내고 (출력, 메타) 를 돌려준다.
 
     출력은 스키마를 주면 파싱한 JSON, 아니면 문자열이다. 메타에는 지연ms·토큰·종료이유·모델·
@@ -356,8 +415,10 @@ def llm_호출(프롬프트: str, 스키마: dict | None, *,
     `_추론_최소초` 보다 짧으면 처음부터 추론을 끈다. 추론이 길어져도 추론 없는 답을 받을 시간이 남는다.
     `스트림=True` 는 응답을 청크로 받는다(`_스트림_받기`, 60초 넘게 걸리는 호출이 게이트웨이 경로에서 끊기지 않게).
     `폴백=False` 면 폴백 모델로 보내지 않고 기본 모델의 마지막 실패를 올린다(판정 호출, 사용자 2026-11-15: 3.8 flash 말고 3.7-plus).
-    `마감까지_재시도=True`(판정 호출, 사용자 2026-11-15)는 위 횟수 · 추론 끄기 · 폴백 규칙 대신 `_마감까지_호출` 규칙을 쓴다:
-    서버 예산이 끝날 때까지 다시 보내고 추론을 끈 답은 받지 않는다. `재시도` · `추론끔_여유초` · `폴백` 은 보지 않는다.
+    `마감까지_재시도=True`(운영 경로의 모든 LLM 호출: 판정 v052, 나머지 단계 v053)는 위 횟수 · 추론 끄기 규칙 대신 `_마감까지_호출` 규칙을 쓴다:
+    마감(서버 예산의 남은 시간, `마감초` 가 더 짧으면 그 값)까지 다시 보내고 추론을 끈 답은 받지 않는다. `재시도` · `추론끔_여유초` 는 보지 않고,
+    `폴백` 은 같은 규칙(즉시 오류 두 번 · 일시 오류 네 번이면 폴백 모델로 한 번)으로 쓴다. 끝내 실패하면 LLM실패 가 아니라 LLM시스템오류 다.
+    `단계` 는 로그 · 재시도 기록의 단계 이름이다.
     `청크_대기초` 는 스트리밍에서 다음 청크를 기다리는 상한이다(넘으면 그 시도를 멈춘다, `_스트림_받기`).
     모든 실패는 LLM실패 로 올린다.
     """
@@ -368,7 +429,8 @@ def llm_호출(프롬프트: str, 스키마: dict | None, *,
 
     client = _client_얻기()
     if 마감까지_재시도:
-        return _마감까지_호출(client, 쓸_모델, 프롬프트, 스키마, 온도, 최대토큰, 타임아웃, 추론, 스트림, 청크_대기초)
+        return _마감까지_호출(client, 쓸_모델, 프롬프트, 스키마, 온도, 최대토큰, 타임아웃, 추론, 스트림, 청크_대기초,
+                          폴백=폴백 and 모델 in (None, 기본_모델), 마감초=마감초, 단계=단계)
     마지막 = None
     시도, 더보냄, n, 일시 = 재시도 + 1, False, 0, 0
     추론켬 = 추론 is not False and not _추론_비활성_대상(쓸_모델)

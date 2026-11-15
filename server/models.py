@@ -134,6 +134,9 @@ class 판정요청(BaseModel):
     사용일자: str | None = None
     조사ID: str | None = Field(default=None, max_length=200)
     조사답변: list[조사답변항목] = Field(default_factory=list, max_length=30)
+    # 판정 행 멱등 키(32자리 16진수). 화면이 점검을 시작할 때 한 번 만들고 「다시 점검」 에서 같은 값을 보낸다.
+    # 앞 요청이 판정 행을 저장한 뒤 연결이 끊겨 판정실패로 끝났어도 같은 계획의 행을 새로 넣지 않고 바꾼다(orchestrate._판정행_저장)
+    멱등키: str | None = Field(default=None, max_length=64)
 
 
 # --- 할일 (plan_tasks) ---

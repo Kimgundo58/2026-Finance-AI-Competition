@@ -6,17 +6,30 @@
 옛 경로(온톨로지 밖 사업): 자연어는 normalize_run.정규화(), 폼은 비목후보_추출() 이 비목후보를 채운다(LLM 1회).
 고정 심층질문은 없앴다(빈 목록). 결과는 response_cache 에 캐시하되 LLM 오류로 나온 결과는 캐시하지 않는다.
 이벤트 순서: 진행 → 필드* → 결과 → 완료 (실패 시 진행 → 오류 → 완료). 이벤트 이름과 순서는 프론트 계약이다.
+시스템 오류(v053, LLM 연결 끊김 · 403 · 429 · 5xx · JSON 깨짐 · DB 연결 끊김 · 쿼리 시간 초과)는 예산이 끝날 때까지 다시 하고,
+그래도 안 되면 오류 이벤트에 다시 시도 안내(정리실패_안내)와 다음행동 다시시도를 싣는다. 화면은 그 단계에 머물러 같은 버튼으로 다시 보낸다.
 """
 from __future__ import annotations
+
+import concurrent.futures
+import contextvars
+import logging
+import queue
 
 from fastapi import APIRouter, HTTPException, Request
 
 from server import auth, response_cache, research_sessions, ontology_readiness
-from server._common import MOCK, _sse, _sse응답, 비목_ENUM, 온톨로지_사업, 클라이언트_ip
+from server._common import MOCK, _sse, _sse응답, _워커_대기, 비목_ENUM, 온톨로지_사업, 클라이언트_ip
 from server.catalog import _사업_비목, _사업명_표준화
 from server.models import 정규화요청
 from server.rate_limit import 제한
 from server import mock_flow
+from research_runtime import 시스템오류
+
+# 시스템 오류로 입력 정리를 마치지 못했을 때의 화면 안내(v053). 화면은 칸을 비우거나 다음 단계로 넘기지 않는다
+정리실패_안내 = "지금은 입력을 정리하지 못했어요. 잠시 후 다시 시도해 주세요."
+
+_log = logging.getLogger("uvicorn.error")
 
 router = APIRouter()
 
@@ -63,15 +76,31 @@ def normalize(req: Request, body: 정규화요청):
             yield _sse("완료", {"캐시": True})
             return
         yield _sse("진행", {"단계": "정규화", "상태": "진행중", "문장": "입력에서 지출 정보를 추출하고 있어요." if not MOCK else "연결 확인용 분석 결과를 준비하고 있어요.", "설명": "입력 분석"})
-        try:
-            import research_runtime
+        import research_runtime
+
+        def 정리():
             with research_runtime.activate(조사세션.budget if 조사세션 else research_runtime.Budget()):
-                out, 실패 = (mock_flow.정규화(body), False) if MOCK else _live_정규화(body)
+                return (mock_flow.정규화(body), False) if MOCK else _live_정규화(body)
+        # v053: 시스템 오류 재시도로 정리가 길어질 수 있다(예산 300초). 워커 스레드에서 돌리고 12초마다 keep-alive 를 보내
+        # 프록시 · 브라우저가 무응답 연결을 끊지 않게 한다(질문 · 판정과 같은 방식)
+        ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        try:
+            future = ex.submit(contextvars.copy_context().run, 정리)
+            yield from _워커_대기(future, queue.Queue(), 12)
+            out, 실패 = future.result()
+        except 시스템오류 as e:
+            # 예산이 끝날 때까지 시스템 오류였다. 저장하지 않고 다시 시도 안내를 낸다
+            _log.warning("입력 정리 시스템 오류: 단계=%s 시도=%s", e.단계, e.시도)
+            yield _sse("오류", {"메시지": 정리실패_안내, "다음행동": "다시시도"})
+            yield _sse("완료", {"실패": True})
+            return
         except Exception as e:                                # noqa: BLE001
             # 500 을 내지 않고 오류 이벤트로 끝낸다.
             yield _sse("오류", {"메시지": "정규화에 실패했습니다", "종류": type(e).__name__})
             yield _sse("완료", {"실패": True})
             return
+        finally:
+            ex.shutdown(wait=False)
         out.setdefault("질문원문", _합성_질문(body))
         # 거래처: 한 문장에 적혀 있을 때만 값(스펙 8-1). live 는 질의변환 LLM 이 뽑고 입력 글에 그대로 있는 이름만 남긴다
         # (normalize_run._입력에_적힌_이름). 폼 요청 · 옛 경로 사업은 null 이다(폼 값은 화면이 이미 갖고 있다). 화면은 이 값을 거래처 칸에 채운다
@@ -141,11 +170,16 @@ def _온톨로지_정규화(body: 정규화요청) -> tuple[dict, bool] | None:
     from _lib import db
     from normalize_run import 질의변환
 
-    with db.connect(connect_timeout=5, autocommit=True) as c:
-        cur = c.cursor()
-        if not ontology_lookup.새경로_대상(cur, body.사업명):
+    # DB 연결 끊김 · 시간 초과는 새 연결로 다시 하고(db.재시도), 질의변환 LLM 은 예산까지 다시 보낸다(v053)
+    with db.연결() as 연:
+        def 레이블_읽기():
+            cur = 연.cur()
+            if not ontology_lookup.새경로_대상(cur, body.사업명):
+                return None
+            return [x for x in ontology_lookup.레이블_목록(cur, body.사업명) if x["비목"] in 비목_ENUM]
+        레이블 = db.재시도(레이블_읽기, 단계="입력 정리", 연결=연)
+        if 레이블 is None:
             return None
-        레이블 = [x for x in ontology_lookup.레이블_목록(cur, body.사업명) if x["비목"] in 비목_ENUM]
         폼 = not (body.질문 and body.질문.strip())
         용도 = body.용도 or ""
         if 폼 and body.추가설명:
@@ -158,7 +192,8 @@ def _온톨로지_정규화(body: 정규화요청) -> tuple[dict, bool] | None:
         else:
             out, _메타 = 질의변환({"질문": body.질문, "부가세구분": body.부가세구분, "사업명": body.사업명}, 레이블)
         # 별칭 정확 일치만(LLM 없음). 같으면 ② · ③-1 을 건너뛴다
-        별칭 = item_classify.분류(cur, body.사업명, {"품목": out.get("품목")}, 레이블, llm=None)
+        별칭 = db.재시도(lambda: item_classify.분류(연.cur(), body.사업명, {"품목": out.get("품목")}, 레이블, llm=None),
+                       단계="입력 정리", 연결=연)
     수치 = {k: v for k, v in (out.get("수치") or {}).items() if v not in (None, "")}
     수치["부가세구분"] = body.부가세구분 or 수치.get("부가세구분") or "모름"
     out.update(분류후보=[], 비목후보=[], 수치=수치, 심층질문=[],

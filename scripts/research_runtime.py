@@ -15,6 +15,28 @@ _emitter: ContextVar[object] = ContextVar("research_emitter", default=None)
 공개조사_실패문장 = "공개 정보를 확인하지 못했어요. 입력한 내용으로 계속 점검할 수 있어요."
 
 
+class 시스템오류(Exception):
+    """시스템 오류(LLM 연결 끊김 · 403 · 429 · 5xx · 응답 무응답 · JSON/스키마 깨짐 · DB 연결 끊김 · 쿼리 시간 초과)가
+    서버 예산(또는 그 단계의 마감)이 끝날 때까지 이어졌다(v053, 지시서 2절). 근거 부족이 아니므로 확인 필요로 바꾸지 않는다:
+    판정은 판정실패(「다시 점검」), 질문 · 정리 단계는 다음행동 다시시도로 응답하고 결과를 저장하지 않는다.
+    llm_qwen.LLM시스템오류 · _lib.db.DB시스템오류 가 이 클래스를 잇는다."""
+
+    def __init__(self, 단계: str, 원인: str, 시도: int = 0):
+        super().__init__(f"{단계}: {원인}({시도}회 시도)")
+        self.단계, self.원인, self.시도 = 단계, 원인, 시도
+
+
+def 재시도_기록(단계: str, 원인: str, 시도: int, 대기초: float = 0.0) -> None:
+    """시스템 오류로 다시 시도한 한 번을 현재 요청 예산에 남긴다(디버그 추적 · 판정 행 모델 칸 `재시도`).
+    예산이 없는 호출(CLI · 검사)은 남기지 않는다. 원인은 예외 종류와 앞 120자만(사용자 입력 · 접속 정보를 남기지 않게)."""
+    budget = _current.get()
+    if budget is None:
+        return
+    기록 = getattr(budget, "재시도", None)
+    if isinstance(기록, list):
+        기록.append({"단계": 단계, "원인": 원인[:120], "시도": 시도, "대기초": round(대기초, 1)})
+
+
 class Budget:
     # 횟수 상한(2026-11-12 사용자: 비용 · 호출 횟수는 상관없다, 막지 말 것). 실제로 묶는 건 시간(전체 300초)이다.
     # 300초 · LLM 100 · 도구 60(2026-11-13): ② 품목 조사(계획 6 · 도구 10 · 120초)에 ④-2 판정용 조사(계획 15 · 도구 30)가 더해졌다.
@@ -36,6 +58,7 @@ class Budget:
         self.llm_used = 0
         self.evidence_used = 0
         self.emit = emit
+        self.재시도: list[dict] = []     # 시스템 오류 재시도 기록(재시도_기록). 요청 예산(RequestBudget)은 따로 갖는다
 
     def _remaining(self) -> float:
         elapsed = self._elapsed + (time.monotonic() - self._started if self._started is not None else 0)
@@ -96,14 +119,16 @@ class Budget:
             self.evidence_used += len(text)
             return True
 
-    def ensure_remaining(self, *, seconds: float, llm: int) -> None:
-        """남은 시간 · LLM 호출 수가 적어도 이만큼 되게 상한을 늘린다(줄이지 않는다). 쓴 값과 세션 상태(ontology_state 등)는 그대로다.
-        /api/judge 가 시작할 때 부른다(routes_judge, 사용자 2026-11-15: 판정이 시간 때문에 실패하지 않게 충분히 늘린다)."""
+    def ensure_remaining(self, *, seconds: float, llm: int, tools: int = 0) -> None:
+        """남은 시간 · LLM 호출 수(· 도구 수)가 적어도 이만큼 되게 상한을 늘린다(줄이지 않는다). 쓴 값과 세션 상태(ontology_state 등)는 그대로다.
+        /api/judge 가 시작할 때 부른다(routes_judge, 사용자 2026-11-15: 판정이 시간 때문에 실패하지 않게 충분히 늘린다).
+        /api/questions 는 앞 요청이 시스템 오류로 끝난 세션의 다시 시도 요청에서 부른다(routes_questions, v053)."""
         with self._lock:
             # 이미 상한을 넘긴 세션도 지금부터 `seconds` 가 남게 한다(_remaining 은 0 에서 잘리므로 경과 시간으로 잰다)
             elapsed = self._elapsed + (time.monotonic() - self._started if self._started is not None else 0)
             self._seconds = max(self._seconds, elapsed + max(0.0, seconds))
             self._llm_limit = max(self._llm_limit, self.llm_used + max(0, llm))
+            self._tools_limit = max(self._tools_limit, self.tools_used + max(0, tools))
 
     def request(self) -> "RequestBudget":
         """이 예산(시간 · 호출 수 · 근거 글자)을 함께 쓰고 취소만 따로 갖는 요청 하나의 예산.
@@ -118,6 +143,7 @@ class RequestBudget:
         self._parent = parent
         self._cancelled = False
         self.emit = parent.emit
+        self.재시도: list[dict] = []     # 이 요청의 시스템 오류 재시도 기록(재시도_기록). 세션 예산과 섞지 않는다
 
     def __getattr__(self, name):                 # tools_used · llm_used · evidence_used 같은 관측값은 세션 예산 값
         return getattr(self._parent, name)
