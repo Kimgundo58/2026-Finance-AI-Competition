@@ -28,6 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from assemble_context import 이스케이프  # noqa: E402
 from llm_qwen import LLM실패, llm_호출, 폴백_모델  # noqa: E402
+from ontology_norm import 기관_사업비_노드  # noqa: E402  주관기관 · 운영사 사업비 노드(v054)는 창업기업 화면의 연결 대상이 아니다
 
 _log = logging.getLogger("suddoe.l3_link")
 
@@ -42,19 +43,11 @@ _공통_설명 = "특정 비목이 아니라 모든 사업비 집행에 적용�
 
 # ── 고를 분류 · 조문 ────────────────────────────────────────────────
 
-기관_비목체계 = ("주관기관", "운영사")   # 주관기관 · 운영사 사업비 노드(v054). 창업기업 화면의 연결 대상이 아니다
-
-
-def 기관_사업비_노드(concept_id: str) -> bool:
-    """`비목:주관기관/…` · `세목:운영사/…@초기` 처럼 비목체계가 주관기관 · 운영사인 노드(docs/5_룰/5-8b 「키와 ID」)."""
-    return concept_id.partition(":")[2].split("/", 1)[0] in 기관_비목체계
-
-
 def 선택지(cur) -> list[dict]:
     """새 경로 사업(SUDDOE_ONTOLOGY_PROGRAMS 중 규범이 적재된 사업)의 비목 · 세목 [{concept_id, 표시문}]. 없으면 [].
 
     화면의 고르기 목록과 PATCH 검사가 같은 목록을 쓴다. 표시문은 분류 확인 화면과 같다(ontology_lookup.레이블_목록).
-    주관기관 · 운영사 사업비 노드는 뺀다. 분류 확인 화면도 `비목_ENUM` 으로 거르고(server/routes_questions.py), 사업마다 같은 표시문이 겹친다.
+    주관기관 · 운영사 사업비 노드(ontology_norm.기관_사업비_노드)는 뺀다. 기관 규정 조문은 창업기업 비목 · 세목에 잇고, 사업마다 같은 표시문이 겹친다.
     """
     import ontology_lookup
     out: list[dict] = []

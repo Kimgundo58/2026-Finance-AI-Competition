@@ -1175,7 +1175,7 @@ def 앙상블_분류_검사():
             with research_runtime.activate(research_runtime.Budget(seconds=남음, llm=10)):
                 assert abs(item_classify.조정_시간() - 기대) < 2, (남음, item_classify.조정_시간())
         assert '발췌-n1-위' in p and '[허용] 규범-n2' in p and '변형 C' in p and '[사용자 확인] 공개 확인문장' in p, p
-        assert None not in (스키마['properties']['번호'].get('enum') or [None]) and '9. 어느 후보' not in p, 스키마
+        assert None not in (스키마['properties']['번호'].get('enum') or [None]) and '10. 어느 후보' not in p, 스키마
         assert r['디버그']['조정']['후보'] == ['외주가공비', '시제품 재료'], r['디버그']['조정']
         # 다. 거래 유형이 다르고 확인된 거래 유형이 없으면 거래 유형 확인 질문(조정 없음)
         계획.update(C=('시제품 재료', '구매'))
