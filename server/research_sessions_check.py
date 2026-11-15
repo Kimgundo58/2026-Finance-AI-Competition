@@ -1016,12 +1016,8 @@ def 거래유형_전달_검사(client, norm):
         프롬프트.append(prompt)
         return {'거래유형': '용역', '거래유형이같은후보': ['N1'], '번호': 'N1', '확신': '유사', '이유': 'x', '필요정보': []}, {}
 
-    class 연결:
-        def __enter__(self):
-            return types.SimpleNamespace(cursor=lambda: None)
-
-        def __exit__(self, *a):
-            return False
+    def 연결():                     # db.연결 이 여는 autocommit 연결 자리(v053)
+        return types.SimpleNamespace(cursor=lambda: None, closed=False, close=lambda: None)
     후보 = [{'id': 'n1', '정식명': '외주가공비', '별칭': [], '비목': ['외주용역비']}]
     경로 = {'비목': '외주용역비', '세목': None, '표시문': '외주용역비', '다른경로': []}
 
