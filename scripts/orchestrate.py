@@ -1082,12 +1082,17 @@ def 온톨로지_조회(cur, 사업명: str | None, 비목: str, 세목: str | N
     기관 = ontology_norm.기관_비목체계_of(대상["비목_id"])
     자금 = None if 기관 else ontology_fund.경로_자금(사업명, 대상["비목_id"])
     모든비목_포함 = 자금 != ontology_fund.창업활동자금 and not 기관
-    품목_id = 별칭_품목 = ontology_lookup.품목_노드(cur, 사업명, 품목, 대상["대상_id"]) if 확정 else None
+    # 모든 비목 공통 대상인데 자금이 창업활동자금(모두의 창업, ontology_fund.경로_자금)이면 모든 비목 아래 품목을 시작 노드로 쓰지 않고
+    # 경로밖 품목으로 둔다: 그 규범이 창업활동자금에 미치는지 결정 대기라 게이트에 넣지 않는다(공통_품목규범, v058 Codex 리뷰)
+    자금미정_대상 = 대상["대상_id"] == ontology_lookup.모든비목 and not 모든비목_포함
+    품목_id = 별칭_품목 = ontology_lookup.품목_노드(cur, 사업명, 품목, 대상["대상_id"]) if 확정 and not 자금미정_대상 else None
     밖품목 = ontology_lookup.경로밖_품목(cur, 사업명, 품목, 대상["비목_id"]) if 확정 and not 품목_id else []
     별칭일치 = bool(품목_id or 밖품목)
     품목노드 = {"출처": "별칭", "확신": "동일" if 품목_id else "유사"} if 별칭일치 else None
     if 확정 and 품목 and not 별칭일치 and 노드결정:
         품목_id, 밖품목, 확신 = ontology_lookup.노드결정_적용(cur, 사업명, 대상, 노드결정, 모든비목_포함)
+        if 자금미정_대상 and 품목_id:
+            품목_id, 밖품목 = None, [품목_id]
         if 확신:
             품목노드 = {"출처": "노드결정", "확신": 확신}
     세목채움 = (ontology_lookup.상위_세목(cur, 사업명, 노드결정["id"], 대상["비목_id"])
