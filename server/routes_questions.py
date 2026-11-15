@@ -88,6 +88,10 @@ def questions(req: Request, body: 질문요청):
         요청키 = json.dumps([입력, body.질문원문, body.웹조사, body.공개검색어, body.판매URL, body.거래처], ensure_ascii=False)
         if 세션.입력 is not None and (세션.입력 != 입력 or 세션.버전 != 버전 or getattr(세션, '요청키', None) != 요청키):
             raise HTTPException(409, '입력이 변경되어 새 조사가 필요합니다')
+        # v057: 조사가 끝난 세션의 첫 요청(조사 답 없음)에 다른 품목설명이 오면 SSE 를 열기 전에 409 로 알린다(화면은 새 조사로 다시 연다)
+        if (body.웹조사 and body.조사답변 is None and 세션.조사완료 and isinstance(body.품목설명, str)
+                and body.품목설명.strip() and body.품목설명.strip() != 세션.품목설명):
+            raise HTTPException(409, '입력이 변경되어 새 조사가 필요합니다')
     except BaseException:
         세션.lock.release()
         raise
@@ -107,6 +111,14 @@ def questions(req: Request, body: 질문요청):
                 세션.budget.ensure_remaining(**_다시시도_예산)
             with research_runtime.activate(요청예산, emit=emit):
                 if body.웹조사 and body.조사답변 is None:
+                    # v057: 지출 항목이 두 번 지출 아님이면 화면이 받은 한 문장 설명을 첫 요청에 싣는다. 세션에 남겨 ③ 분류 자료가 되고
+                    # (아래 설명_붙이기), ② 품목 조사의 지출문맥 · 검색어 낱말에도 쓴다(web_research.research 의 품목설명 칸)
+                    # 조사가 끝난 세션에 다른 설명이 오면 옛 설명으로 한 조사와 새 설명이 섞이므로 받지 않는다(화면은 409 면 새 조사로 다시 연다)
+                    첫설명 = body.품목설명.strip() if isinstance(body.품목설명, str) else ''
+                    if 첫설명 and 세션.조사완료 and 첫설명 != 세션.품목설명:
+                        raise HTTPException(409, '입력이 변경되어 새 조사가 필요합니다')
+                    if 첫설명 and not 세션.조사완료:
+                        세션.품목설명 = 첫설명
                     if not 세션.조사완료:
                         try:
                             # mock: 외부 호출 없이 고정 조사 결과(스펙 8-5). 검색어 없이도 돈다
@@ -117,7 +129,8 @@ def questions(req: Request, body: 질문요청):
                             else:
                                 # ② 품목 조사(재설계 11-11): 비목을 정하기 전이라 규범 요건 없이 지출 문맥만 준다
                                 준비 = {'요건': [], '문맥': {k: v for k, v in (('품목', body.품목), ('용도', body.용도),
-                                                                             ('금액', body.금액)) if v not in (None, '')}}
+                                                                             ('금액', body.금액), ('품목설명', 세션.품목설명))
+                                                           if v not in (None, '')}}
                                 if not MOCK:
                                     ok, 사유 = 제한.통과(클라이언트_ip(req))
                                     if not ok:
@@ -129,6 +142,8 @@ def questions(req: Request, body: 질문요청):
                                          '확정세목': body.확정세목, '품목': body.품목,
                                          '용도': body.용도, '질문': body.질문원문},
                                         org_id=org, account_id=account)
+                                    if 세션.품목설명:        # v057 설명입력: 확정비목 경로도 설명을 조사 문맥에 넣는다
+                                        준비 = {**준비, '문맥': {**(준비.get('문맥') or {}), '품목설명': 세션.품목설명}}
                                 import web_research
                                 세션.조사 = web_research.research(None,
                                     requirements=준비['요건'], context=준비['문맥'],

@@ -57,6 +57,9 @@ class 정규화요청(BaseModel):
     부가세구분: 부가세구분타입 | None = None
     특수관계: _특수관계 = Field(default_factory=_특수관계,
                              validation_alias=AliasChoices("특수관계", "f5"))  # 구 이름 호환(제거 예정: 다음 릴리스)
+    # 지출 항목 입력 검증(v057) 몇 번째 입력인가. 1 = 처음, 2 이상 = 「지출 항목이 아님」 안내 뒤 [고쳐 쓰기] 한 입력.
+    # 지출 아님이면 1 은 다음행동 품목재입력, 2 이상은 설명입력(routes_normalize._입력검증_붙이기)
+    입력검증_시도: int = Field(default=1, ge=1, le=20)
 
     @model_validator(mode="after")
     def _질문_XOR_폼(self):
