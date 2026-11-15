@@ -7,8 +7,10 @@ persist.판정_저장() 으로 계획에 연결한다. 응답은 response_cache 
 이벤트 순서: 진행*3 → 판정 → 해야할일 → 인용 → 전제 → 참조관계 → (문의초안) → 결과 → 저장 → 완료.
 이벤트 이름과 순서는 프론트 계약이다. 참조관계 이벤트 바로 뒤에 같은 내용을 이전 이벤트 이름으로 한 번
 더 보낸다(한 릴리스 동안, judge_response 호환 블록). 예외·타임아웃·파이프라인 실패는 모두 확인 필요로
-반환하고, 그 결과는 캐시하지 않으며 계획에도 연결하지 않는다.
-환경변수: SUDDOE_JUDGE_HEARTBEAT_SEC(12), SUDDOE_JUDGE_DEADLINE_SEC(180), SUDDOE_JUDGE_ANSWERS(1, 0 이면 확인 질문·답변 미반영).
+반환하고, 그 결과는 캐시하지 않으며 계획에도 연결하지 않는다. 그중 AI 모델 호출 실패 · 마감 초과는 `판정` · `결과`
+이벤트에 `판정실패: true` 를 붙이고 문의 초안을 보내지 않는다(화면은 판정 대신 「다시 점검」, judge_response.판정실패_단계).
+환경변수: SUDDOE_JUDGE_HEARTBEAT_SEC(12), SUDDOE_JUDGE_DEADLINE_SEC(660), SUDDOE_JUDGE_MIN_BUDGET_SEC(600),
+SUDDOE_JUDGE_MIN_LLM_CALLS(40), SUDDOE_JUDGE_ANSWERS(1, 0 이면 확인 질문·답변 미반영).
 """
 from __future__ import annotations
 
@@ -26,7 +28,7 @@ from server._common import (MOCK, _정수_환경변수, _sse, _sse응답, _워�
                             온톨로지_사업)
 from server.catalog import _비목_표준화, _사업명_표준화
 from server.judge_response import (_사용자프로필값_구성, 구_참조관계_이벤트, 구_판정키_포함,
-                                   파이프라인결과_매핑, 할일_공개)
+                                   파이프라인결과_매핑, 판정실패_요약, 할일_공개)
 from server.models import 판정요청
 from server.persist import 판정_저장
 from server.rate_limit import 제한
@@ -39,14 +41,21 @@ router = APIRouter()
 
 # 판정을 기다리는 동안 SSE 주석(: keep-alive)을 보내는 주기(초). 프록시 idle timeout 에 끊기지 않게 한다.
 _하트비트_주기초 = _정수_환경변수("SUDDOE_JUDGE_HEARTBEAT_SEC", 12)
-# 판정 한 건의 전체 타임아웃(초). 넘기면 워커를 기다리지 않고 확인 필요(실패)로 반환한다.
-_판정_타임아웃초 = _정수_환경변수("SUDDOE_JUDGE_DEADLINE_SEC", 180)
+# 판정 한 건의 전체 타임아웃(초). 넘기면 워커를 기다리지 않고 판정실패로 반환한다.
+# 판정이 시간 때문에 실패하지 않게 충분히 늘린다(사용자 2026-11-15). 11-14 운영 판정 한 건이 180초에 걸렸고,
+# 판정 LLM 한 번이 76 · 80 · 111초였다. 아래 예산(600초)이 먼저 끝나 LLM 쪽이 실패를 알리도록 예산보다 길게 둔다
+_판정_타임아웃초 = _정수_환경변수("SUDDOE_JUDGE_DEADLINE_SEC", 660)
+# 판정 요청이 시작할 때 조사 세션 예산(정규화 · 질문과 함께 쓰는 300초)에 남아 있게 하는 최소 시간 · LLM 호출 수.
+# 늘리기만 하고 세션 상태는 그대로 둔다(research_runtime.Budget.ensure_remaining). 운영 상한 실행 두 번에서 판정 뒤 37 · 49초가 남았다
+_판정_최소초 = _정수_환경변수("SUDDOE_JUDGE_MIN_BUDGET_SEC", 600)
+_판정_최소LLM = _정수_환경변수("SUDDOE_JUDGE_MIN_LLM_CALLS", 40)
 
 
 @router.post("/api/judge")
 def judge(req: Request, body: 판정요청, mock: str | None = None,
           목: str | None = Query(None, include_in_schema=False)):  # 구 이름 호환(제거 예정: 다음 릴리스)
-    """mock 모드에서는 ?mock=가능|확인 필요|불가|근거부족 으로 고정 응답을 받는다(근거부족 = 문의 초안이 붙는 확인 필요).
+    """mock 모드에서는 ?mock=가능|확인 필요|불가|근거부족|판정실패 로 고정 응답을 받는다(근거부족 = 문의 초안이 붙는 확인 필요,
+    판정실패 = AI 모델 호출 실패로 판정을 내지 못한 응답).
 
     확인 필요는 오류가 아니라 정상 응답이다. 저장은 부수 효과라 실패해도 스트림은 완료까지 간다.
     """
@@ -224,8 +233,10 @@ def judge(req: Request, body: 판정요청, mock: str | None = None,
                     out["분류"] = {"비목": body.확정비목, "세목": body.확정세목,
                                  "표시문": f"{body.확정비목} > {body.확정세목}" if body.확정세목 else body.확정비목}
             decision_id = None
-            response_cache.저장(k, out, 종류="judge", org=body.org_id, account=account_id,
-                               데이터버전_해시=데이터버전해시)
+            실패 = bool(out.get("판정실패"))           # ?mock=판정실패 는 live 판정실패처럼 캐시 · 계획 연결을 하지 않는다
+            if not 실패:
+                response_cache.저장(k, out, 종류="judge", org=body.org_id, account=account_id,
+                                   데이터버전_해시=데이터버전해시)
         else:
             워커실행 = True
             out, 실패 = yield from _판정_실행(body, account_id, 사용자답변, 답변유실, 노드결정, 조건답, 상황노드, 기록누적, L3라벨, 조사세션, 조사,
@@ -385,6 +396,8 @@ def _판정_이벤트(out: dict):
     out["해야할일"] = 할일_공개(out.get("해야할일"))
     판정값 = {키: out.get(키) for 키 in ("판정", "요약", "신뢰등급", "규정버전")}
     판정값["버전스탬프"] = out.get("규정버전")  # 구 이름 호환(제거 예정: 다음 릴리스)
+    if out.get("판정실패"):
+        판정값["판정실패"] = True     # 화면은 이 값을 보면 판정 대신 「다시 점검」 을 보인다
     yield _sse("판정", 판정값)
     yield _sse("해야할일", out.get("해야할일", []))
     yield _sse("인용", out.get("인용", []))
@@ -410,7 +423,10 @@ def _판정_실행(body: 판정요청, account_id: str | None, 사용자답변: 
     판정키 = 세션에 판정을 둘 때 함께 적는 메인 캐시 키. None 이면 세션에 두지 않는다.
     """
     import research_runtime
-    요청예산 = 조사세션.budget.request() if 조사세션 else research_runtime.Budget()
+    # 조사 세션 예산은 바꾸지 않고 늘린다(쓴 값 · ontology_state 유지). 세션이 없으면 새 예산을 같은 몫으로 연다
+    예산 = 조사세션.budget if 조사세션 else research_runtime.Budget()
+    예산.ensure_remaining(seconds=_판정_최소초, llm=_판정_최소LLM)
+    요청예산 = 예산.request() if 조사세션 else 예산
     ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     # submit 은 컨텍스트 변수를 복사하지 않는다. 미들웨어가 설정한 현재_org 를 워커에 넘긴다.
     이벤트 = queue.Queue()
@@ -438,11 +454,10 @@ def _판정_실행(body: 판정요청, account_id: str | None, 사용자답변: 
     try:
         끝남 = yield from _워커_대기(future, 이벤트, _하트비트_주기초, time.monotonic() + _판정_타임아웃초)
         if not 끝남:
-            _log.error("judge 타임아웃(%s초) — 확인 필요로 반환 (plan_id=%s)",
-                       _판정_타임아웃초, body.plan_id)
+            _log.error("판정 실패 — 단계=마감초과(%s초) plan_id=%s", _판정_타임아웃초, body.plan_id)
             ex.shutdown(wait=False, cancel_futures=True)
             요청예산.cancel()
-            return _실패_결과(body), True
+            return _실패_결과(body, 판정실패=True), True
         try:
             out = future.result()
         except Exception:                                 # noqa: BLE001
@@ -456,12 +471,16 @@ def _판정_실행(body: 판정요청, account_id: str | None, 사용자답변: 
         ex.shutdown(wait=False)
 
 
-def _실패_결과(body: 판정요청) -> dict:
-    """예외·타임아웃 때의 확인 필요 결과. 이 요청의 정규화 값으로만 문의 초안을 만든다."""
+def _실패_결과(body: 판정요청, *, 판정실패: bool = False) -> dict:
+    """예외·타임아웃 때의 확인 필요 결과. 이 요청의 정규화 값으로만 문의 초안을 만든다.
+
+    `판정실패`(마감 초과)면 문의 초안 없이 `판정실패: true` 를 붙인다. 화면은 판정 대신 「다시 점검」 을 보인다."""
     out = {"판정": "확인 필요",
            "요약": "일시적인 오류로 판정하지 못했습니다. 잠시 후 다시 시도해 주세요.",
            "해야할일": [], "인용": [], "전제": [], "신뢰등급": None, "규정버전": None,
            "참조관계": [], "사용자답변": []}
+    if 판정실패:
+        return {**out, "요약": 판정실패_요약, "판정실패": True}
     try:
         초안 = inquiry.문의초안(body.정규화, {"판정": "확인 필요", "실패경로": True}, body.사업명, body.확정비목)
     except Exception:                                         # noqa: BLE001

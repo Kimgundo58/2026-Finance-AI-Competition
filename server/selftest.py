@@ -164,6 +164,13 @@ mock_판정: dict[str, dict] = {
                     "통합관리지침 제39조(기계장치)의 '1인 1대' 기준에서 참여인력의 범위를 "
                     "어떻게 보아야 하는지 확인이 필요합니다.\n\n확인 부탁드립니다. 감사합니다."),
     },
+    # 판정실패 = AI 모델 호출이 끝내 실패해 판정을 내지 못한 응답(judge_response.판정실패_단계). 문의 초안이 없고 화면은 「다시 점검」 을 보인다
+    "판정실패": {
+        "판정": "확인 필요",
+        "요약": "AI 연결이 불안정해 점검을 마치지 못했어요. 다시 점검해 주세요.",
+        "해야할일": [], "인용": [], "전제": [], "신뢰등급": None, "규정버전": None, "참조관계": [],
+        "판정실패": True,
+    },
 }
 
 
@@ -279,6 +286,38 @@ def main() -> int:
                      for x in ("()", "None", "미상", "약 원")))
     확인("확률·점수 필드가 없다",
          not any(k in j for k in ("확률", "점수", "confidence", "score")))
+
+    print("\n[판정실패 — AI 모델 호출 실패 · 마감 초과]")
+    r, e = sse("/api/judge?mock=판정실패", {"정규화": mock_정규화, "확정비목": "기계장치", "사업명": "예비창업패키지"})
+    판정이벤트 = (e.get("판정") or [{}])[0]
+    확인("?mock=판정실패 → 판정 이벤트에 판정실패 true, 판정 값은 확인 필요(가능이 아니다)",
+         판정이벤트.get("판정실패") is True and 판정이벤트.get("판정") == "확인 필요")
+    확인("판정실패에는 문의초안 이벤트가 없고 계획에 연결하지 않는다",
+         not e.get("문의초안") and (e.get("저장") or [{}])[0].get("저장") is False
+         and (e.get("결과") or [{}])[0].get("판정실패") is True)
+    from server.judge_response import 파이프라인결과_매핑
+    from server.models import 판정요청
+    실패본문 = 판정요청(정규화={"품목": "노트북", "금액": 2500000, "용도": "디자인"}, 확정비목="기계장치", 사업명="예비창업패키지")
+    for 단계, 기대 in (("판정호출", True), ("LLM", True), ("검색", False)):
+        매핑 = 파이프라인결과_매핑({"판정": "확인 필요", "요약": "판정 모델 호출에 실패해 결론을 내리지 않았습니다.",
+                              "실패경로": True, "실패단계": 단계, "인용목록": []}, 실패본문)
+        확인(f"실패단계 {단계} → 판정실패 {기대}, 문의 초안 {'없음' if 기대 else '있음'}",
+             bool(매핑.get("판정실패")) is 기대 and bool(매핑.get("문의초안")) is not 기대 and 매핑["판정"] == "확인 필요")
+    마감 = routes_judge._실패_결과(실패본문, 판정실패=True)
+    확인("판정 마감 초과 결과 → 판정실패 true, 문의 초안 없음, 확인 필요",
+         마감.get("판정실패") is True and "문의초안" not in 마감 and 마감["판정"] == "확인 필요")
+    import research_runtime as _예산모듈
+    늘림 = _예산모듈.Budget(seconds=10, llm=3)
+    늘림.llm_used = 2
+    늘림.ensure_remaining(seconds=600, llm=40)
+    확인("판정 요청 예산: 남은 시간 · LLM 횟수를 600초 · 40회 이상으로 늘린다(줄이지 않는다)",
+         늘림.remaining_seconds() >= 599 and sum(늘림.reserve_llm(final=True) for _ in range(41)) == 40)
+    지남 = _예산모듈.Budget(seconds=300, llm=3)
+    지남._elapsed = 500.0          # 앞 단계가 상한(300초)을 넘겨 끝난 세션
+    지남.ensure_remaining(seconds=600, llm=40)
+    확인("판정 요청 예산: 이미 상한을 넘긴 세션도 지금부터 600초가 남는다",
+         지남.remaining_seconds() >= 599, f"{지남.remaining_seconds():.0f}초")
+    _판정_재시도_검사(확인)
 
     # mock_판정 은 인용 키를 직접 갖고 있어 위 검사로는 live 경로가 판정 파이프라인의 키 이름
     # (인용목록·전제목록)을 읽는지 알 수 없다. 가짜 orchestrate 로 교체해 _live_판정 을 직접 부른다.
@@ -845,6 +884,76 @@ def main() -> int:
 
     print(f"\n{'PASS 전부 통과' if not 실패 else f'FAIL {실패}건'}")
     return 1 if 실패 else 0
+
+
+def _판정_재시도_검사(확인) -> None:
+    """판정 호출 경로(llm_호출 마감까지_재시도=True, orchestrate._판정호출 과 같은 인자)를 가짜 LLM 클라이언트로 돌린다.
+
+    403 뒤 성공 · 스트림 청크 무응답 뒤 성공 · 끝내 실패(폴백 모델로 가지 않는다)를 본다. 네트워크 · API 키는 쓰지 않는다."""
+    from types import SimpleNamespace as NS
+
+    import httpx
+    import openai
+
+    import llm_qwen
+
+    class 가짜스트림:
+        def __init__(self, 조각들, 끊김=None):
+            self._조각들, self._끊김 = 조각들, 끊김
+
+        def __iter__(self):
+            yield from self._조각들
+            if self._끊김 is not None:
+                raise self._끊김
+
+        def close(self):
+            pass
+
+    def 청크(내용, 종료=None):
+        return NS(usage=None, choices=[NS(delta=NS(content=내용, reasoning_content=None, model_extra={}),
+                                          finish_reason=종료)])
+
+    def _403():
+        응답 = httpx.Response(403, request=httpx.Request("POST", "http://gateway.invalid/v1/chat/completions"))
+        return openai.PermissionDeniedError("Workspace endpoint access denied", response=응답, body=None)
+
+    class 가짜클라이언트:
+        def __init__(self, 차례):
+            self.차례, self.모델들 = list(차례), []
+            self.chat = NS(completions=NS(create=self._create))
+
+        def _create(self, **kw):
+            self.모델들.append(kw["model"])
+            다음 = self.차례.pop(0) if self.차례 else "403"
+            if 다음 == "403":
+                raise _403()
+            if 다음 == "무응답":
+                return 가짜스트림([청크('{"판정"')], 끊김=httpx.ReadTimeout("read timeout"))
+            return 가짜스트림([청크('{"판정": "불가"}', "stop")])
+
+    원래 = llm_qwen._client_얻기, llm_qwen._마감재시도_백오프초
+    try:
+        llm_qwen._마감재시도_백오프초 = (0.2,)
+        인자 = dict(온도=0.0, 최대토큰=8192, 스트림=True, 폴백=False, 마감까지_재시도=True, 청크_대기초=30.0)
+        for 이름, 차례, 시도수 in (("403 뒤 2번째 시도", ["403", "성공"], 2),
+                               ("스트림 청크 무응답 뒤 2번째 시도", ["무응답", "성공"], 2)):
+            가짜 = 가짜클라이언트(차례)
+            llm_qwen._client_얻기 = lambda c=가짜: c
+            출력, 메타 = llm_qwen.llm_호출("p", {"type": "object"}, 타임아웃=5, **인자)
+            확인(f"판정 LLM 재시도: {이름}에 받는다(시도 {시도수}, 폴백 모델 안 씀)",
+                 출력 == {"판정": "불가"} and 메타.get("시도") == 시도수 and 메타.get("스트림") is True
+                 and set(가짜.모델들) == {llm_qwen.기본_모델}, str(메타.get("시도")))
+        가짜 = 가짜클라이언트([])
+        llm_qwen._client_얻기 = lambda c=가짜: c
+        try:
+            llm_qwen.llm_호출("p", {"type": "object"}, 타임아웃=2, **인자)
+            끝내실패 = False
+        except llm_qwen.LLM실패 as e:
+            끝내실패 = "회 시도" in str(e)
+        확인("판정 LLM 재시도: 마감까지 403 이면 LLM실패(시도 횟수 포함), 폴백 모델로 보내지 않는다",
+             끝내실패 and len(가짜.모델들) >= 2 and set(가짜.모델들) == {llm_qwen.기본_모델}, f"{len(가짜.모델들)}회")
+    finally:
+        llm_qwen._client_얻기, llm_qwen._마감재시도_백오프초 = 원래
 
 
 def _새흐름_검사(c, sse, 확인) -> None:
