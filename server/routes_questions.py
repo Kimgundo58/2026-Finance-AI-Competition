@@ -25,7 +25,8 @@ import re
 from fastapi import APIRouter, HTTPException, Request
 
 from server import auth, mock_flow, response_cache, research_sessions, ontology_readiness
-from server._common import MOCK, 답변_반영, 비목_ENUM, 클라이언트_ip, _sse, _sse응답, _워커_대기, 온톨로지_사업
+from server._common import (MOCK, 답변_반영, 비목_ENUM, 클라이언트_ip, _sse, _sse응답, _워커_대기, 온톨로지_사업, 기관_비목_머리,
+                            확정비목_허용)
 from server.catalog import _비목_표준화, _사업명_표준화
 from server.models import 질문요청
 from server.rate_limit import 제한
@@ -69,11 +70,11 @@ def questions(req: Request, body: 질문요청):
     if not 세션.lock.acquire(blocking=False):
         raise HTTPException(409, '조사가 진행 중입니다')
     try:
+        body.사업명 = _사업명_표준화(body.사업명)
         if body.확정비목:                     # 비우면 ③ 에서 서버가 정한다(재설계 11-11)
             body.확정비목 = _비목_표준화(body.확정비목)
-            if body.확정비목 not in 비목_ENUM:
+            if not 확정비목_허용(body.사업명, body.확정비목):     # 재점검: 저장한 분류가 주관기관 · 운영사 사업비 비목일 수 있다(v054)
                 raise HTTPException(422, f"비목은 다음 10종 중 하나여야 합니다: {비목_ENUM}")
-        body.사업명 = _사업명_표준화(body.사업명)
         if not MOCK:
             try:
                 ontology_readiness.확인(body.사업명)
@@ -347,11 +348,12 @@ def _분류(body: 질문요청, 조사확인: dict | None, 조사ID: str | None 
     import item_classify
     import ontology_lookup
     from _lib import db
+    from ontology_norm import 기관_사업비_노드     # 주관기관 · 운영사 사업비 노드도 분류 후보다(v054, 지시서 1115 3절)
 
     # 거래 유형 확인 카드는 ③-R 재조사와 같은 자리(세션에서 한 번)다. 재조사를 했거나 답을 기다리면 묻지 않고 조정한다
     def 분류하기(연):
         cur = 연.cur()
-        레이블 = [x for x in ontology_lookup.레이블_목록(cur, body.사업명) if x["비목"] in 비목_ENUM]
+        레이블 = [x for x in ontology_lookup.레이블_목록(cur, body.사업명) if x["비목"] in 비목_ENUM or 기관_사업비_노드(x["노드"])]
         return item_classify.분류(cur, body.사업명, {"품목": body.품목, "용도": body.용도, "금액": body.금액, "거래처": body.거래처},
                                 레이블, item_classify.확인정보_글(조사확인, (조사확인 or {}).get('품목설명') or body.품목설명),
                                 설명캐시=설명캐시, 확인거래유형=research_sessions.확인_거래유형(조사확인),
@@ -498,7 +500,7 @@ def _기존_질문(req: Request, body: 질문요청, 조사확인=None, 답키=N
     """응답: {상태: 있음|없음|바로판정|실패, 질문세트, 질문: [{id, 질문문, 이유, 선택지, 근거}], 추가입력, 용어풀이}."""
     t0 = time.time()
     body.확정비목 = _비목_표준화(body.확정비목)
-    if body.확정비목 not in 비목_ENUM:
+    if body.확정비목 not in 비목_ENUM and not str(body.확정비목 or "").startswith(기관_비목_머리):
         raise HTTPException(422, f"비목은 다음 10종 중 하나여야 합니다: {비목_ENUM}")
     try:
         body.사업명 = _사업명_표준화(body.사업명)
@@ -507,6 +509,8 @@ def _기존_질문(req: Request, body: 질문요청, 조사확인=None, 답키=N
             raise
         _로그("실패", 0, ["사업목록"], False, t0)      # 사업 목록을 못 읽었다(DB 장애)
         return dict(_실패_응답)
+    if not 확정비목_허용(body.사업명, body.확정비목):        # 주관기관 · 운영사 사업비 비목은 온톨로지 사업에서만(v054)
+        raise HTTPException(422, f"비목은 다음 10종 중 하나여야 합니다: {비목_ENUM}")
     if not MOCK and not 준비확인:
         try:
             ontology_readiness.확인(body.사업명)

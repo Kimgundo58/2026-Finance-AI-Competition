@@ -106,6 +106,7 @@ def main():
             재조사_사용자글_검사()
             거래유형_전달_검사(client, norm)
             앙상블_분류_검사()
+            기관후보_검사()
             거래유형_질문_검사(client, norm)
         # 응답 객체만 만들고 스트림을 전혀 읽지 않는 요청도 세션 잠금을 남기지 않는다.
         from server import routes_judge, routes_questions
@@ -1106,6 +1107,61 @@ def 필요정보_검사():
         assert ('구입인지 구독인지' in 받은[0][0]) is 있음
 
 
+def 기관후보_검사():
+    """v054: 주관기관 · 운영사 사업비 노드는 후보 줄에 표시가 붙고, 창업기업 노드를 고른 변형이 있거나 그 노드를 「동일」 로 고른 변형이
+    없으면 코드가 고르지 않은 것으로 바꾼다(item_classify._기관후보_거르기). 가짜 LLM · 가짜 온톨로지 조회만 쓴다."""
+    import re
+    import item_classify
+    import ontology_lookup
+    창업 = {'id': '세목:창업/창업활동비/인건비@모두의창업', '정식명': '인건비·활동비', '별칭': [], '비목': ['창업활동비']}
+    기관 = {'id': '비목:주관기관/인건비', '정식명': '주관기관 인건비', '별칭': [], '비목': ['주관기관 인건비'], '비목노드': True}
+    경로 = {창업['id']: {'비목': '창업활동비', '세목': '인건비·활동비', '표시문': '창업활동비 > 인건비·활동비', '다른경로': []},
+          기관['id']: {'비목': '주관기관 인건비', '세목': None, '표시문': '주관기관 인건비', '다른경로': []}}
+    계획 = {}
+    기록 = []
+
+    def 가짜llm(prompt, schema, **k):
+        v = '조정' if '<분류기록>' in prompt else 'B' if re.search(r'N1 [|] 주관기관 인건비', prompt) else \
+            'A' if '공개 확인문장' in prompt else 'C'
+        기록.append((v, prompt))
+        이름, 확신 = 계획[v]
+        번호 = 'N' + re.search(r'N(\d+) [|] ' + re.escape(이름), prompt).group(1) if 이름 else None
+        return ({'거래유형': '기타', '거래유형이같은후보': [번호] if 확신 == '동일' else [], '번호': 번호, '확신': 확신, '이유': 'x',
+                 '필요정보': [] if 번호 else ['무엇']}, {'지연ms': 5})
+
+    def 분류():
+        기록.clear()
+        return item_classify.분류(None, '모두의 창업 프로젝트', {'품목': '인건비'}, [],
+                                [item_classify.조사문장('공개 확인문장')], llm=가짜llm)
+    with patch.object(ontology_lookup, '후보_정리', lambda *a: ([창업, 기관], [])), \
+         patch.object(ontology_lookup, '노드_결정', lambda *a: []), \
+         patch.object(ontology_lookup, '분류_경로', lambda cur, 사업, n, 레이블: 경로[n]), \
+         patch.object(ontology_lookup, '규정_발췌', lambda cur, 사업, 노드들, **k: {}), \
+         patch.object(ontology_lookup, '분류_규범문장', lambda cur, 사업, 노드들, **k: {}), \
+         patch.object(ontology_lookup, '상위_노드', lambda cur, 사업, n: []):
+        # 가. 한 변형이라도 창업기업 노드를 고르면 기관 노드는 빠지고 조정은 창업기업 후보만 본다(모두의 창업 「인건비」)
+        계획.update(A=('주관기관 인건비', '동일'), B=('인건비·활동비', '동일'), C=('주관기관 인건비', '유사'), 조정=('인건비·활동비', '동일'))
+        r = 분류()
+        조정 = [p for v, p in 기록 if v == '조정']
+        assert r['분류']['비목'] == '창업활동비' and r['디버그']['기관후보_제외'] == ['주관기관 인건비'], r
+        assert len(조정) == 1 and not re.search(r'N\d [|] 주관기관 인건비', 조정[0]) and r['디버그']['조정']['후보'] == ['인건비·활동비'], r
+        assert '주관기관 인건비 | - | 주관기관 인건비 (비목 전체) (주관기관 사업비) |' in 기록[0][1]      # 변형 후보 줄 표시
+        # 코드가 뺀 표는 null 표가 아니다: 남은 변형이 모두 후보를 골랐으면 조정은 null 없이 고른다 · 분류 기록에 뺀 이유
+        assert r['디버그']['조정']['null허용'] is False and '(주관기관 · 운영사 사업비 후보라 코드가 뺌)' in 조정[0], r['디버그']['조정']
+        # 나. 기관 노드를 「유사」 로만 고르고 나머지가 null 이면 분류 없음(조정 없음)
+        계획.update(A=('주관기관 인건비', '유사'), B=(None, None), C=(None, None))
+        r = 분류()
+        assert r['분류'] is None and r['방법'] == '없음' and not any(v == '조정' for v, _ in 기록), r
+        # 다. 「동일」 로 고른 변형이 있고 창업기업 노드를 고른 변형이 없으면 그대로 조정 → 기관 노드
+        계획.update(A=('주관기관 인건비', '동일'), B=(None, None), C=('주관기관 인건비', '동일'), 조정=('주관기관 인건비', '동일'))
+        r = 분류()
+        assert r['분류']['비목'] == '주관기관 인건비' and r['방법'] == '조정' and '기관후보_제외' not in r['디버그'], r
+        # 라. 세 변형 모두 「동일」 이면 일치로 확정
+        계획.update(B=('주관기관 인건비', '동일'))
+        r = 분류()
+        assert r['방법'] == '일치' and r['분류']['비목'] == '주관기관 인건비' and len(기록) == 3, r
+
+
 def 앙상블_분류_검사():
     """v056 ③ 앙상블: 프롬프트 변형 A · B(후보 역순) · C(조사 문장 · 확인된 거래 유형 없이) → 세 경로가 같으면 확정, 거래 유형만 다르면
     확인된 거래 유형으로 고르거나 거래 유형 확인 질문, 그 밖의 불일치는 조정 LLM(추론 켬 · 스트리밍 · 규정 발췌 · 규범 문장 · 분류 기록).
@@ -1175,7 +1231,7 @@ def 앙상블_분류_검사():
             with research_runtime.activate(research_runtime.Budget(seconds=남음, llm=10)):
                 assert abs(item_classify.조정_시간() - 기대) < 2, (남음, item_classify.조정_시간())
         assert '발췌-n1-위' in p and '[허용] 규범-n2' in p and '변형 C' in p and '[사용자 확인] 공개 확인문장' in p, p
-        assert None not in (스키마['properties']['번호'].get('enum') or [None]) and '9. 어느 후보' not in p, 스키마
+        assert None not in (스키마['properties']['번호'].get('enum') or [None]) and '10. 어느 후보' not in p, 스키마
         assert r['디버그']['조정']['후보'] == ['외주가공비', '시제품 재료'], r['디버그']['조정']
         # 다. 거래 유형이 다르고 확인된 거래 유형이 없으면 거래 유형 확인 질문(조정 없음)
         계획.update(C=('시제품 재료', '구매'))

@@ -12,6 +12,30 @@ import unicodedata
 
 # 모든 비목에 걸리는 노드. ontology_fund · ontology_context · ontology_lookup · ontology_load · ontology_check 가 쓴다
 모든비목 = "비목:창업/*"
+# 주관기관 · 운영사 사업비 노드(v054): ID 의 비목체계가 주관기관 · 운영사다(docs/5_룰/5-8b 「키와 ID」). 창업기업이 아니라 기관이 집행하는 사업비라
+# ③ 분류 후보에는 넣되 표시를 붙이고(item_classify), ④ 는 이 노드의 규범과 「이 항목은 주관기관이 쓰는 사업비」 조건 줄을 판정에 넘긴다(orchestrate.온톨로지_조회).
+# L3 조문 연결 고르기에서는 뺀다(l3_link.선택지)
+기관_비목체계 = ("주관기관", "운영사")
+# 주관기관 사업비 전체에 걸리는 노드. 운영사 쪽 전체 노드는 원천에 없다
+기관_모든비목 = {"주관기관": "비목:주관기관/*"}
+
+
+def 기관_비목체계_of(concept_id: str | None) -> str | None:
+    """`비목:주관기관/회의비` · `세목:운영사/여비/국내여비@초기` → 「주관기관」 · 「운영사」. 창업기업 노드 · 주체 노드 등은 None."""
+    체계 = str(concept_id or "").partition(":")[2].split("/", 1)[0]
+    return 체계 if 체계 in 기관_비목체계 else None
+
+
+def 기관_사업비_노드(concept_id: str | None) -> bool:
+    """비목체계가 주관기관 · 운영사인 비목 · 세목 · 품목 노드."""
+    return 기관_비목체계_of(concept_id) is not None
+
+
+def 공통_비목노드(concept_id: str | None) -> str | None:
+    """이 노드에 걸리는 「모든 비목」 노드: 창업기업 노드는 `비목:창업/*`, 주관기관 노드는 `비목:주관기관/*`, 운영사 노드는 없음(None).
+    ontology_lookup.적용_규범 이 대상 · 상위 노드와 함께 규범을 찾는 노드다."""
+    체계 = 기관_비목체계_of(concept_id)
+    return 기관_모든비목.get(체계) if 체계 else 모든비목
 # 판정에 쓰는 규범의 검수단계(2026-11-13 사용자: AI대조 도 확정으로 본다. AI초안 · 재검토 만 미확정).
 # DB 의 생성 칼럼 verified(AI검증 · 사람확정)는 그대로 두고 판정 쪽은 이 값과 확정_규범() 으로 고른다
 확정_검수단계 = ("AI대조", "AI검증", "사람확정")

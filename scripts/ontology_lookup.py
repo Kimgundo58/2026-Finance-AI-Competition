@@ -28,7 +28,7 @@ from _lib import paths  # noqa: E402
 
 ROOT = paths.ensure_on_path()
 
-from ontology_norm import 모든비목, 조문ID_풀이, 조번호_표시, 확정_검수단계, 확정_규범  # noqa: E402
+from ontology_norm import 공통_비목노드, 기관_모든비목, 모든비목, 조문ID_풀이, 조번호_표시, 확정_검수단계, 확정_규범  # noqa: E402
 from rule_lookup import _norm  # noqa: E402
 import ontology_graph  # noqa: E402
 import ontology_age  # noqa: E402
@@ -148,14 +148,16 @@ def _우선순위_적용(규범들: list[dict]) -> tuple[list[dict], list[dict]]
 
 
 def 적용_규범(cur, 사업: str | None, 대상_id: str) -> dict:
-    """대상 + 상위 노드 규범(상속) + `비목:창업/*` 공통 규범. 적용사업이 NULL 이거나 그 사업인 것만.
+    """대상 + 상위 노드 규범(상속) + 모든 비목 공통 규범. 적용사업이 NULL 이거나 그 사업인 것만.
+    모든 비목 노드는 대상의 비목체계를 따른다(ontology_norm.공통_비목노드): 창업기업 노드는 `비목:창업/*`,
+    주관기관 사업비 노드는 `비목:주관기관/*`(v054), 운영사 사업비 노드는 없다.
 
     반환 {규범: [...], 경로: [(하위, 상위)...], 우선순위_적용: [{채택, 제외, 조건}...]}. L3 는 다루지 않는다.
     """
     _노드_확인(cur, 대상_id)
     사업들 = [사업] if 사업 else []
     경로 = _상위_경로(cur, 대상_id, 사업들)
-    노드들 = [대상_id, *{p for _, p in 경로}, 모든비목]
+    노드들 = [대상_id, *{p for _, p in 경로}, *filter(None, [공통_비목노드(대상_id)])]
     컬럼 = ", ".join(_규범_컬럼)
     행들 = cur.execute(
         f"""SELECT {컬럼} FROM corpus.age_norms
@@ -250,7 +252,8 @@ def 근거_조문(cur, 규범들: list[dict], 깊이: int = 3, 대상_id: str | 
         가까움 = [노드순위[v] for v in 대상들 if v in 노드순위]
         if 가까움:
             return min(가까움)
-        return None if 모든비목 in 대상들 else len(사슬노드)     # 사슬 밖 대상(경로 밖 품목 규범)은 확정 노드 뒤, 공통 앞
+        # 사슬 밖 대상(경로 밖 품목 규범)은 확정 노드 뒤, 공통(`비목:창업/*` · 주관기관 사업비 `비목:주관기관/*`) 앞
+        return None if {모든비목, *기관_모든비목.values()} & set(대상들) else len(사슬노드)
 
     우선순위_근거: dict[str, None] = {}             # 우선순위 규범의 근거 조문. 문맥 후보로만 넣고 사슬 시작점으로 쓰지 않는다
     for n in 규범들:
@@ -465,13 +468,14 @@ def 품목_노드(cur, 사업명: str | None, 표현: str | None, 확정_id: str
 
 def 경로밖_품목(cur, 사업명: str | None, 표현: str | None, 비목_id: str) -> list[str]:
     """품목 표현이 별칭과 정확히 일치하는데 확정 경로 밖인 품목 · 세목 노드. 확정 세목과 같은 비목 또는 모든 비목(`비목:창업/*`) 아래만.
+    확정 비목이 주관기관 · 운영사 사업비 노드면 그 비목체계의 모든 비목만 본다(ontology_norm.공통_비목노드, v054).
 
     `품목_노드` 가 None 일 때 부른다. 이 노드의 규범은 코드 불가를 내지 않고(5-6 ③ 확정 노드) 판정 문맥과 조건 문장에만 쓴다.
     다른 비목 아래 노드는 다른 자금의 기준일 수 있어 넣지 않는다. 세목 이름을 품목으로 적은 경우(여비 + 「식비」)도 같은 비목 아래면 닿는다.
     """
     사업들 = [사업명] if 사업명 else []
     return [행["concept_id"] for 행 in 노드_결정(cur, 표현 or "", 사업명)
-            if 행["종류"] in ("품목", "세목") and {비목_id, 모든비목} & {p for _, p in _상위_경로(cur, 행["concept_id"], 사업들)}]
+            if 행["종류"] in ("품목", "세목") and {비목_id, 공통_비목노드(비목_id)} & {p for _, p in _상위_경로(cur, 행["concept_id"], 사업들)}]
 
 
 def 품목_후보(cur, 사업명: str | None, 비목_id: str, 모든비목_포함: bool = True) -> list[dict]:

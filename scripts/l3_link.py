@@ -28,6 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from assemble_context import 이스케이프  # noqa: E402
 from llm_qwen import LLM실패, llm_호출, 폴백_모델  # noqa: E402
+from ontology_norm import 기관_사업비_노드  # noqa: E402  주관기관 · 운영사 사업비 노드(v054)는 창업기업 화면의 연결 대상이 아니다
 
 _log = logging.getLogger("suddoe.l3_link")
 
@@ -46,6 +47,7 @@ def 선택지(cur) -> list[dict]:
     """새 경로 사업(SUDDOE_ONTOLOGY_PROGRAMS 중 규범이 적재된 사업)의 비목 · 세목 [{concept_id, 표시문}]. 없으면 [].
 
     화면의 고르기 목록과 PATCH 검사가 같은 목록을 쓴다. 표시문은 분류 확인 화면과 같다(ontology_lookup.레이블_목록).
+    주관기관 · 운영사 사업비 노드(ontology_norm.기관_사업비_노드)는 뺀다. 기관 규정 조문은 창업기업 비목 · 세목에 잇고, 사업마다 같은 표시문이 겹친다.
     """
     import ontology_lookup
     out: list[dict] = []
@@ -54,6 +56,8 @@ def 선택지(cur) -> list[dict]:
         if not ontology_lookup.새경로_대상(cur, 사업):
             continue
         for x in ontology_lookup.레이블_목록(cur, 사업):
+            if 기관_사업비_노드(x["노드"]):
+                continue
             if x["노드"] not in 본:
                 본.add(x["노드"])
                 out.append({"concept_id": x["노드"], "표시문": x["표시문"]})
@@ -393,6 +397,27 @@ def _자체시험() -> int:
     옛3 = 옛판_찾기([{"article_id": 8, "본문": "재료비는 1회 500만원 이내로 집행할 수 있다."}], 옛글, "")
     t.append(("옛 판 문구: 띄어쓰기 · 기호가 달라도 같은 문장", 옛3.get(8, [{}])[0].get("문서") == "예비창업패키지 세부 관리기준(2024년)"))
     t.append(("문서 표시명: 층 접두 · 밑줄 · 날짜", 문서_표시명("L1_중소기업창업지원사업운영요령_20241206") == "중소기업창업지원사업운영요령 (2024.12.06)"))
+
+    import types
+    가짜 = types.SimpleNamespace(새경로_대상=lambda cur, 사업: True, 레이블_목록=lambda cur, 사업: [
+        {"노드": "비목:창업/여비", "표시문": "여비"}, {"노드": "비목:창업활동자금/*@모두의창업", "표시문": "창업활동자금"},
+        {"노드": "비목:주관기관/여비", "표시문": "주관기관 여비"}, {"노드": "세목:주관기관/여비/교통비", "표시문": "주관기관 여비 > 주관기관 교통비"},
+        {"노드": "세목:운영사/여비/국내여비@초기", "표시문": "운영사 여비 > 운영사 국내 여비"}])
+    원모듈, 원설정 = sys.modules.get("ontology_lookup"), os.environ.get("SUDDOE_ONTOLOGY_PROGRAMS")
+    sys.modules["ontology_lookup"], os.environ["SUDDOE_ONTOLOGY_PROGRAMS"] = 가짜, "사업가,사업나"
+    try:
+        고르기 = [x["concept_id"] for x in 선택지(None)]
+    finally:
+        if 원모듈 is None:
+            sys.modules.pop("ontology_lookup", None)
+        else:
+            sys.modules["ontology_lookup"] = 원모듈
+        if 원설정 is None:
+            os.environ.pop("SUDDOE_ONTOLOGY_PROGRAMS", None)
+        else:
+            os.environ["SUDDOE_ONTOLOGY_PROGRAMS"] = 원설정
+    t.append(("선택지: 주관기관 · 운영사 사업비 노드는 빼고 창업 · 창업활동자금 노드는 사업이 여럿이어도 한 번",
+              고르기 == ["비목:창업/여비", "비목:창업활동자금/*@모두의창업"]))
 
     실패 = [이름 for 이름, ok in t if not ok]
     for 이름, ok in t:

@@ -28,7 +28,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 
 from server import auth, inquiry, response_cache, research_sessions, ontology_readiness
 from server._common import (MOCK, _정수_환경변수, _sse, _sse응답, _워커_대기, 답변_반영, 클라이언트_ip, 비목_ENUM,
-                            온톨로지_사업)
+                            온톨로지_사업, 확정비목_허용)
 from server.catalog import _비목_표준화, _사업명_표준화
 from server.judge_response import (_사용자프로필값_구성, 구_참조관계_이벤트, 구_판정키_포함,
                                    파이프라인결과_매핑, 판정실패_요약, 판정실패_요약_DB, 할일_공개)
@@ -97,10 +97,11 @@ def judge(req: Request, body: 판정요청, mock: str | None = None,
         raise HTTPException(429, 사유)
     # 별칭을 먼저 표준 표기로 바꾼다 — 프론트 표기가 표준 표기와 다른 비목이 있다.
     body.확정비목 = _비목_표준화(body.확정비목)
-    if body.확정비목 and body.확정비목 not in 비목_ENUM:
-        raise HTTPException(422, f"비목은 다음 10종 중 하나여야 합니다: {비목_ENUM}")
     # 등록되지 않은 사업명을 통과시키면 rule_lookup 이 사업의 비목체계를 알 수 없어 룰 없이 판정한다.
     body.사업명 = _사업명_표준화(body.사업명)
+    # ③ 분류가 고른 주관기관 · 운영사 사업비 비목(v054)은 온톨로지 사업에서만 받는다
+    if body.확정비목 and not 확정비목_허용(body.사업명, body.확정비목):
+        raise HTTPException(422, f"비목은 다음 10종 중 하나여야 합니다: {비목_ENUM}")
     # 본문의 org_id 는 클라이언트가 보낸 검증되지 않은 값이라 버리고, 토큰으로 검증된 org 만
     # 쓴다(게스트는 None). 본문 값을 믿으면 남의 기관 L3·기업 프로필을 읽고 그 기관에 판정 행을 쓴다.
     body.org_id = auth.검증된_org(req)

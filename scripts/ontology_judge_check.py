@@ -45,7 +45,7 @@ from _lib import db  # noqa: E402
 from server import routes_judge, routes_normalize  # noqa: E402
 from server._common import 비목_ENUM  # noqa: E402
 from server.models import 정규화요청, 판정요청  # noqa: E402
-from ontology_norm import 확정_검수단계  # noqa: E402
+from ontology_norm import 기관_사업비_노드, 확정_검수단계  # noqa: E402
 
 
 def _소유자_연결(*, autocommit: bool = False):
@@ -500,7 +500,7 @@ def _라벨_스윕(cur, 사업명: str = 사업) -> list[tuple[str, bool]]:
     L.적용_규범, L.비목_품목금지, L.세목_한도_있음 = _원_적용, _원_품목금지, _원_세목한도
     try:
         for x in L.레이블_목록(cur, 사업명):
-            if x["비목"] not in 비목_ENUM:
+            if x["비목"] not in 비목_ENUM and not 기관_사업비_노드(x["노드"]):     # ③ 분류 후보와 같은 범위(v054)
                 continue
             for 금액 in (10_000, 1_000_000):
                 수 += 1
@@ -771,11 +771,46 @@ def _시험() -> list[tuple[str, bool]]:
     t.extend(_조건답_시험())
     t.extend(_시점_시험())
     t.extend(_협약경고_시험())
+    t.extend(_기관사업비_시험())
     with db.connect(autocommit=True) as c:
         cur = c.cursor()
         for (사업명,) in cur.execute("SELECT DISTINCT 적용사업 FROM corpus.norms WHERE 적용사업 IS NOT NULL ORDER BY 1").fetchall():
             t.extend(_라벨_스윕(cur, 사업명))           # 원천에 든 사업 전부
         t.extend(_문턱_시험(c.cursor()))
+    return t
+
+
+def _기관사업비_시험() -> list[tuple[str, bool]]:
+    """v054: ③ 분류가 주관기관 · 운영사 사업비 비목을 고른 판정. 규범은 실제 적재값, 화면 경로(routes_judge._live_판정), 판정 LLM 은 고정 출력."""
+    from server._common import 확정비목_허용
+    t: list[tuple[str, bool]] = []
+    줄 = G.기관사업비_문장("주관기관")
+    고정 = L.적용_규범, L.비목_품목금지, L.세목_한도_있음
+    L.적용_규범, L.비목_품목금지, L.세목_한도_있음 = _원_적용, _원_품목금지, _원_세목한도
+    try:
+        with db.connect(autocommit=True) as c:
+            조회 = O.온톨로지_조회(c.cursor(), 사업, "주관기관 회의비", None, O.게이트_입력(300_000, "포함", {}), 확정=True, 품목="회의 다과")
+        규범, g = 조회["적용"]["규범"], 조회["게이트"]
+        t.append(("v054 기관 사업비 조회: 비목:주관기관/* 규범이 닿고 비목:창업/* 는 빠진다 · 코드 불가 없음 · 조건 줄 · 상한",
+                  조회["기관사업비"] == "주관기관" and any("비목:주관기관/*" in (n.get("대상") or []) for n in 규범)
+                  and not any(L.모든비목 in (n.get("대상") or []) for n in 규범) and g["종류"] is None and g["상한"] == "확인 필요"
+                  and [x["문장"] for x in g["조건"] if x["구분"] == "기관사업비"] == [줄]))
+        가능 = 판정("주관기관 회의비", 300_000, {"판정": "가능", "요약": 정상요약})
+        가능_프롬프트 = _고정.프롬프트
+        불가 = 판정("주관기관 회의비", 300_000, {"판정": "불가", "요약": "규정상 쓸 수 없습니다."})
+        여비 = 판정("여비", 300_000, {"판정": "가능", "요약": 정상요약})
+        여비_프롬프트 = _고정.프롬프트
+        t.append(("v054 기관 사업비 화면 경로: LLM 가능 → 확인 필요 · 조건 칸에 줄 · 분류 표시문 · 판정 문맥에 분류 결과 줄",
+                  가능["판정"] == "확인 필요" and 줄 in (가능.get("조건") or []) and (가능.get("분류") or {}).get("표시문") == "주관기관 회의비"
+                  and "분류 결과(코드가 확인 필요로 둔다)" in 가능_프롬프트))
+        t.append(("v054 기관 사업비: LLM 불가 → 불가 그대로(코드는 올리지 않는다)", 불가["판정"] == "불가"))
+        t.append(("v054 효과: 창업기업 비목(여비)에는 그 줄 · 문맥이 없다",
+                  줄 not in _화면글(여비) and "분류 결과(코드가 확인 필요로 둔다)" not in 여비_프롬프트))
+    finally:
+        L.적용_규범, L.비목_품목금지, L.세목_한도_있음 = 고정
+    t.append(("v054 확정비목 허용: 온톨로지 사업에서만 주관기관 · 운영사 사업비 비목 이름을 받는다",
+              확정비목_허용(사업, "주관기관 회의비") and 확정비목_허용(사업, "운영사 회의비") and 확정비목_허용(사업, "여비")
+              and not 확정비목_허용("온톨로지 아닌 사업", "주관기관 회의비") and not 확정비목_허용(사업, "회의비")))
     return t
 
 
