@@ -109,8 +109,12 @@ def questions(req: Request, body: 질문요청):
                 if body.웹조사 and body.조사답변 is None:
                     # v057: 지출 항목이 두 번 지출 아님이면 화면이 받은 한 문장 설명을 첫 요청에 싣는다. 세션에 남겨 ③ 분류 자료가 되고
                     # (아래 설명_붙이기), ② 품목 조사의 지출문맥 · 검색어 낱말에도 쓴다(web_research.research 의 품목설명 칸)
-                    if isinstance(body.품목설명, str) and body.품목설명.strip():
-                        세션.품목설명 = body.품목설명.strip()
+                    # 조사가 끝난 세션에 다른 설명이 오면 옛 설명으로 한 조사와 새 설명이 섞이므로 받지 않는다(화면은 409 면 새 조사로 다시 연다)
+                    첫설명 = body.품목설명.strip() if isinstance(body.품목설명, str) else ''
+                    if 첫설명 and 세션.조사완료 and 첫설명 != 세션.품목설명:
+                        raise HTTPException(409, '입력이 변경되어 새 조사가 필요합니다')
+                    if 첫설명 and not 세션.조사완료:
+                        세션.품목설명 = 첫설명
                     if not 세션.조사완료:
                         try:
                             # mock: 외부 호출 없이 고정 조사 결과(스펙 8-5). 검색어 없이도 돈다
