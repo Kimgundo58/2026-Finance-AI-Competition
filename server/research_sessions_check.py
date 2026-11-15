@@ -344,6 +344,26 @@ def 시스템오류_검사(client, norm):
             except 시스템오류 as e:
                 assert e.단계 == '확인 질문 저장 DB' and e.시도 == 1, e
 
+    # 사업 목록(요청 처리 전): 잠깐 못 읽으면 다시 읽어 표준 이름을 내고, 마감까지 못 읽으면 503(결과를 만들지 않는다)
+    from fastapi import HTTPException
+    from server import catalog
+    읽음 = []
+
+    def 표(늘빔=False):
+        def f():
+            읽음.append(1)
+            return {} if 늘빔 or len(읽음) == 1 else {catalog._사업명_키('예비창업패키지'): '예비창업패키지'}
+        return f
+    with patch.object(catalog, 'MOCK', False), patch('time.sleep', lambda s: None):
+        with patch.object(catalog, '_사업명_표', 표()):
+            assert catalog._사업명_표준화('2026 예비창업패키지') == '예비창업패키지' and len(읽음) == 2, 읽음
+        with patch.object(catalog, '_사업명_표', 표(늘빔=True)), patch.object(catalog, '_사업목록_재시도초', 0.5):
+            try:
+                catalog._사업명_표준화('예비창업패키지')
+                raise AssertionError('빈 사업 목록을 통과시킴')
+            except HTTPException as e:
+                assert e.status_code == 503, e
+
     # db.재시도 · db.연결: 끊기면 닫고 새 연결을 열어 GUC 를 다시 건다, 재시도 기록은 요청 예산에 남는다, 마감이면 DB시스템오류
     열림 = []
 

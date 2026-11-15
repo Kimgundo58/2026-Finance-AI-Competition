@@ -611,10 +611,18 @@ def _질문_결과(r: dict, 메타: dict, body: 질문요청, org, account, k: s
     # 다시 점검처럼 질문 키가 안 맞는 판정이 읽는 보조 키. 노드결정만 둔다: 품목에서 고르니 키(품목)와 맞는다.
     # 상황노드는 질문 글에서 고르는데 보조 키에 질문 글이 없어 같은 품목의 다른 계획이 덮어쓰고, 다시 점검 판정은 질문 글 없이 돌아 상황을 확인할 수 없다.
     # L3숫자라벨(5-15 ⑤)은 기관 조문과 분류 노드에서 고르지 질문 글에서 고르지 않아 보조 키에도 둔다(판정이 지금 조문과 다시 맞춰 보고 안 맞으면 버린다)
+    # 이 보조 저장도 연결 끊김 · 시간 초과면 다시 쓰고(UPSERT), 끝내 안 되면 시스템오류로 다시 시도 안내를 낸다(v053, Codex 검토):
+    # 조용히 빠지면 다시 점검 판정이 노드결정 없이 돈다. 재시도 대상이 아닌 오류(RLS 등)는 지금처럼 로그만 남긴다
     if 조사확인 is None and 저장됨 and (저장값.get("노드결정") or 저장값.get("L3숫자라벨")):
-        response_cache.저장(노드결정_키(org, account, body.사업명, body.확정비목, body.확정세목, body.품목),
-                          {k: 저장값[k] for k in ("노드결정", "L3숫자라벨", "_온톨로지경로") if k in 저장값}, 종류="questions", org=org, account=account,
-                          데이터버전_해시=데이터버전해시, ttl초=_질문세트_TTL초)
+        보조 = {k: 저장값[k] for k in ("노드결정", "L3숫자라벨", "_온톨로지경로") if k in 저장값}
+        try:
+            db.재시도(lambda: response_cache.저장(노드결정_키(org, account, body.사업명, body.확정비목, body.확정세목, body.품목),
+                                               보조, 종류="questions", org=org, account=account, 데이터버전_해시=데이터버전해시,
+                                               ttl초=_질문세트_TTL초, 예외전파=True), 단계="확인 질문 저장")
+        except 시스템오류:
+            raise
+        except Exception as e:                                # noqa: BLE001
+            _log.warning("노드결정 보조 저장 실패: %s", type(e).__name__)
     return 응답(저장값)
 
 
