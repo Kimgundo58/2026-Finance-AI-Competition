@@ -28,7 +28,8 @@ from _lib import paths  # noqa: E402
 
 ROOT = paths.ensure_on_path()
 
-from ontology_norm import 공통_비목노드, 기관_모든비목, 모든비목, 조문ID_풀이, 조번호_표시, 확정_검수단계, 확정_규범  # noqa: E402
+from ontology_norm import (공통_비목노드, 기관_모든비목, 모든비목, 모든비목_정식명, 모든비목_표시문, 조문ID_풀이, 조번호_표시,  # noqa: E402
+                           확정_검수단계, 확정_규범)
 from rule_lookup import _norm  # noqa: E402
 import ontology_graph  # noqa: E402
 import ontology_age  # noqa: E402
@@ -270,10 +271,14 @@ def 근거_조문(cur, 규범들: list[dict], 깊이: int = 3, 대상_id: str | 
         for g in n.get("근거") or []:
             시작_넣기(g["doc_id"], g["조번호"], g["항호"], "규범근거", 순위)
     if 대상_id:
+        # 모든 비목 노드(`비목:창업/*`)의 개념 근거(지침 제2조 정의 · 표-10 머리 등)는 시작점으로 쓰지 않는다. 비목 · 세목 대상의 사슬에는
+        # 이 노드가 없고(비목 노드의 상위가 아니다) 그 조문의 규범은 공통 규범으로 규범근거에 이미 든다. 모든 비목 대상 · 그 아래 품목(v058)도
+        # 같게 둔다: 정의 조문에서 미적재 법령(중소기업기본법 제2조)까지 따라가 근거 확인이 실패했다(v058 Codex 리뷰)
+        개념노드 = [n for n in 사슬노드 if n != 모든비목]
         for r in cur.execute(
                 """SELECT DISTINCT doc_id, 조번호, 항호, owner_id FROM corpus.age_provenance
                     WHERE owner_kind = '개념' AND owner_id = ANY(%s) AND doc_id <> ALL(%s)
-                    ORDER BY doc_id, 조번호, 항호, owner_id""", (사슬노드, _다른사업_문서(사업들))).fetchall():
+                    ORDER BY doc_id, 조번호, 항호, owner_id""", (개념노드, _다른사업_문서(사업들))).fetchall():
             시작_넣기(r[0], r[1], r[2], "개념근거", 노드순위[r[3]])
 
     시작목록 = sorted(시작)
@@ -434,8 +439,13 @@ def 별칭_후보(cur, 표현: str | None, 사업명: str | None, 레이블: lis
 
 
 def 대상_노드(cur, 사업명: str | None, 비목: str, 세목: str | None = None) -> dict:
-    """화면에서 확정한 비목 · 세목 표기 → 노드 ID. 세목이 주어졌는데 그 비목 아래에 없으면 LookupError(확인 필요, 실패)."""
+    """화면에서 확정한 비목 · 세목 표기 → 노드 ID. 세목이 주어졌는데 그 비목 아래에 없으면 LookupError(확인 필요, 실패).
+    비목이 모든비목_정식명(③ 이 이 사업 비목을 찾지 못한 모든 비목 아래 품목, v058)이면 모든 비목 노드 자체다. 그 아래 세목은 없다."""
     사업들 = [사업명] if 사업명 else []
+    if 비목 == 모든비목_정식명:
+        if 세목:
+            raise LookupError(f"{비목} 아래에 없는 세목: {세목}")
+        return {"대상_id": 모든비목, "비목_id": 모든비목, "표시문": 모든비목_표시문, "비목": 비목, "세목": None}
     행 = cur.execute("""SELECT concept_id FROM corpus.age_concepts WHERE 종류 = '비목' AND pref_label = %s
                          AND (적용사업 IS NULL OR 적용사업 = ANY(%s)) ORDER BY 적용사업 NULLS LAST LIMIT 1""",
                      (비목, 사업들)).fetchone()
@@ -458,12 +468,27 @@ def 품목_노드(cur, 사업명: str | None, 표현: str | None, 확정_id: str
     """품목 표현이 별칭과 정확히 일치하고 사용자가 확정한 노드 아래에 있으면 그 품목 노드(5-6 ① 노드 결정).
 
     확정 노드 밖의 일치는 시작 노드로 쓰지 않는다(`경로밖_품목`). 금지 일치가 잘못된 불가가 되면 안 되므로 유사 일치도 하지 않는다.
+    예외(v058): 모든 비목 아래 품목을 이 사업 규정이 확정 비목 조항에서 다루면(`_규정위치_비목`) 그 품목이 시작 노드다.
     """
     사업들 = [사업명] if 사업명 else []
     for 행 in 노드_결정(cur, 표현 or "", 사업명):
-        if 행["종류"] == "품목" and 확정_id in {p for _, p in _상위_경로(cur, 행["concept_id"], 사업들)}:
+        if 행["종류"] == "품목" and (확정_id in (상위 := {p for _, p in _상위_경로(cur, 행["concept_id"], 사업들)})
+                                   or _규정위치_비목(cur, 사업명, 행["concept_id"], 상위, 확정_id)):
             return 행["concept_id"]
     return None
+
+
+def _규정위치_비목(cur, 사업명: str | None, 노드_id: str, 상위: set[str], 비목_id: str) -> bool:
+    """모든 비목 아래에만 있는 노드를 이 사업 규정이 `비목_id` 조항 안에서 다루는가(v058 `모든비목_경로` 의 「규정 위치」).
+    ③ 분류가 그 비목으로 안내한 노드는 확정 비목 아래가 아니어도 판정 시작 노드로 쓴다(노드 규범이 직접 적용된다, Codex 리뷰).
+    `비목_id` 가 비목 노드일 때만 본다(세목을 확정한 요청은 그 세목 아래 품목만 시작 노드다, v058 Codex 리뷰)."""
+    if 모든비목 not in 상위 or 비목_id == 모든비목:
+        return False
+    레이블 = 레이블_목록(cur, 사업명)
+    if 비목_id not in {x["노드"] for x in 레이블 if x.get("세목") is None}:
+        return False
+    p = 모든비목_경로(cur, 사업명, 노드_id, 레이블)
+    return p["모든비목"]["방법"] == "규정 위치" and p["비목_노드"] == 비목_id
 
 
 def 경로밖_품목(cur, 사업명: str | None, 표현: str | None, 비목_id: str) -> list[str]:
@@ -503,7 +528,7 @@ def 노드결정_적용(cur, 사업명: str | None, 대상: dict, 노드결정: 
     """확인 질문 LLM 이 고른 품목 노드(5-13) → (시작 품목 노드, 경로밖 노드들, 확신). 별칭 일치가 없을 때만 호출자가 부른다.
 
     ID 가 이번 범위의 후보(`품목_후보`)에 없거나 확신이 동일 · 유사가 아니면 쓰지 않는다(지금 길). 판정 때 다시 확인한다.
-    동일 + 품목 + 확정 대상 아래 → 시작 노드(`품목_노드` 와 같은 규칙, 게이트를 켠다).
+    동일 + 품목 + 확정 대상 아래(또는 모든 비목 아래 품목을 이 사업 규정이 확정 비목 조항에서 다룸, v058) → 시작 노드(`품목_노드` 와 같은 규칙, 게이트를 켠다).
     그 밖(유사, 동일인데 확정 세목 밖이거나 세목 노드) → 경로밖 길(`경로밖_품목` 과 같다. 문맥 · 조건 문장만, 코드 불가 없음).
     고른 노드가 확정 대상 자신이면 바뀌는 것이 없다.
     """
@@ -516,7 +541,9 @@ def 노드결정_적용(cur, 사업명: str | None, 대상: dict, 노드결정: 
         return None, [], None
     사업들 = [사업명] if 사업명 else []
     종류 = cur.execute("SELECT 종류 FROM corpus.age_concepts WHERE concept_id = %s", (nid,)).fetchone()[0]
-    if 확신 == "동일" and 종류 == "품목" and 대상["대상_id"] in {p for _, p in _상위_경로(cur, nid, 사업들)}:
+    상위 = {p for _, p in _상위_경로(cur, nid, 사업들)}
+    if 확신 == "동일" and 종류 == "품목" and (대상["대상_id"] in 상위 or (
+            대상["대상_id"] == 대상["비목_id"] and _규정위치_비목(cur, 사업명, nid, 상위, 대상["비목_id"]))):
         return nid, [], 확신
     return None, [nid], 확신
 
@@ -644,7 +671,8 @@ def 분류_경로(cur, 사업명: str | None, 노드_id: str, 레이블: list[di
 
     레이블 행이 세목이면 그 세목과 부모 비목, 비목이면 세목 없음. 가장 가까운 단계에 레이블이 둘 이상이면 이 사업 노드를 먼저,
     그다음 concept_id 순으로 하나를 고르고 나머지를 `다른경로`(표시문 목록, 디버그 전용)에 남긴다. 화면은 하나만 안내한다.
-    모든 비목(`비목:창업/*`) 아래에만 있는 노드처럼 닿는 레이블이 없으면 None.
+    닿는 레이블 없이 모든 비목(`비목:창업/*`)에만 닿는 노드(부채 상환 · 부가세 등, v058)는 `모든비목_경로` 로 정한다(키 `모든비목` 이 붙는다).
+    그 밖에 닿는 레이블이 없으면 None.
     """
     사업들 = [사업명] if 사업명 else []
     표 = {x["노드"]: x for x in 레이블}
@@ -654,7 +682,7 @@ def 분류_경로(cur, 사업명: str | None, 노드_id: str, 레이블: list[di
             깊이[상] = 깊이[하] + 1
     닿음 = sorted((i for i in 깊이 if i in 표), key=lambda i: (깊이[i], "@" not in i, i))
     if not 닿음:
-        return None
+        return 모든비목_경로(cur, 사업명, 노드_id, 레이블) if 모든비목 in 깊이 else None
     x = 표[닿음[0]]
     비목행 = next((r for r in 레이블 if r["세목"] is None and r["비목"] == x["비목"]), None)
     # 고른 분류의 부모 비목은 같은 경로다. 다른 비목이거나 같은 단계의 다른 분류만 다른 경로다
@@ -662,6 +690,43 @@ def 분류_경로(cur, 사업명: str | None, 노드_id: str, 레이블: list[di
                              if 표[i]["비목"] != x["비목"] or 깊이[i] == 깊이[닿음[0]]))
     return {"비목": x["비목"], "세목": x["세목"], "표시문": x["표시문"],
             "비목_노드": 비목행["노드"] if 비목행 else None, "세목_노드": x["노드"] if x["세목"] else None, "다른경로": 다른}
+
+
+def 모든비목_위치(cur, 사업명: str | None, 노드_id: str, 레이블: list[dict]) -> dict[str, list[str]]:
+    """모든 비목 아래 노드를 이 사업 규정이 어느 비목 조항 안에서 다루는지(v058) {비목 이름: [근거 「조번호항호 발췌」]}.
+    근거 = 그 노드의 개념 근거 발췌(corpus.age_provenance) 중 이 사업 문서 · L1 문서(`규정_발췌` 와 같은 문서 범위)의 것으로,
+    조번호 · 항호를 `/` 로 나눈 마디(괄호 앞)가 이 사업 비목 레이블 이름과 같은 것(예: 초격차 `참고2` `/재료비` → 재료비).
+    마디가 두 비목을 함께 적은 조항(`재료비·기계장치`)은 어느 쪽인지 정할 수 없어 넣지 않는다."""
+    비목들 = {x["비목"] for x in 레이블 if x.get("세목") is None}
+    순위 = _문서_순위(사업명)
+    out: dict[str, list[str]] = {}
+    for doc, layer, 조번호, 항호, 발췌 in cur.execute(
+            """SELECT p.doc_id, d.layer, p.조번호, p.항호, p.발췌 FROM corpus.age_provenance p
+                 LEFT JOIN corpus.documents d USING (doc_id)
+                WHERE p.owner_kind = '개념' AND p.칸 = '근거' AND p.owner_id = %s
+                ORDER BY p.doc_id, p.조번호, p.항호""", (노드_id,)).fetchall():
+        if 순위.get(doc, 1 if layer == "L1" else 9) >= 9:
+            continue
+        for 마디 in f"{조번호 or ''}/{항호 or ''}".split("/"):
+            이름 = 마디.split("(")[0].strip()
+            if 이름 in 비목들:
+                out.setdefault(이름, []).append(f"{조번호 or ''}{항호 or ''} {' '.join((발췌 or '').split())[:80]}".strip())
+    return out
+
+
+def 모든비목_경로(cur, 사업명: str | None, 노드_id: str, 레이블: list[dict]) -> dict:
+    """모든 비목 아래에만 있는 노드의 분류(v058). 비목을 지어내지 않는다.
+    이 사업 규정이 한 비목 조항 안에서 다루면(`모든비목_위치` 가 비목 하나) 그 비목, 아니면 모든 비목 자체
+    (비목 = 모든비목_정식명, 표시문 「모든 비목 공통」, 판정 대상 = 비목:창업/*). `모든비목` 키는 디버그용(방법 · 근거)."""
+    위치 = 모든비목_위치(cur, 사업명, 노드_id, 레이블)
+    if len(위치) == 1:
+        이름 = next(iter(위치))
+        행 = next(r for r in 레이블 if r.get("세목") is None and r["비목"] == 이름)
+        return {"비목": 이름, "세목": None, "표시문": 행["표시문"], "비목_노드": 행["노드"], "세목_노드": None, "다른경로": [],
+                "모든비목": {"방법": "규정 위치", "근거": 위치[이름]}}
+    return {"비목": 모든비목_정식명, "세목": None, "표시문": 모든비목_표시문, "비목_노드": 모든비목, "세목_노드": None, "다른경로": [],
+            "모든비목": {"방법": "공통", "근거": [f"{k}: {v}" for k, v in 위치.items()],
+                       "사유": "비목 조항이 둘 이상" if 위치 else "규정 위치 근거 없음"}}
 
 
 def 경로밖_규범(cur, 사업명: str | None, 품목들: list[str], 적용: dict) -> list[dict]:
