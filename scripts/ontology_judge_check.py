@@ -462,13 +462,34 @@ def _항호_시험() -> list[tuple[str, bool]]:
 def _폼_품목_시험() -> list[tuple[str, bool]]:
     """수정기록_2b F13: 화면의 입력은 폼 경로뿐이다. 질문 요청은 계획 이름을, 판정은 저장한 정규화 품목을 쓰므로 LLM 이 품목을 줄여도 정규화 품목이 입력 그대로여야 둘이 같다."""
     긴이름 = "시제품 설계 자문을 받기 위한 외부 전문가 멘토링 비용으로 쓸 금액입니다"
+    import expense_input_check
+    import llm_qwen
     원 = normalize_run.질의변환
+    원검증 = expense_input_check._llm_호출
     normalize_run.질의변환 = lambda *a, **k: ({"품목": "멘토링", "질의문": "멘토링", "분류후보": [], "수치": {}, "거래처유형": None}, {})
+    # v057 지출 항목 입력 검증 LLM 은 가짜로 바꾼다(CI 에 LLM 키가 없다). 판단을 바꾸면 결과 `입력검증` 이 바뀌는지 본다
+    판단 = {"값": "지출"}
+    expense_input_check._llm_호출 = lambda 프롬프트: ({"이유": "시험", "판단": 판단["값"]}, {})
     try:
         결과 = routes_normalize._온톨로지_정규화(정규화요청(품목=긴이름, 금액=300_000, 용도="자문", 사업명=사업))
+        판단["값"] = "지출아님"
+        아님 = routes_normalize._온톨로지_정규화(정규화요청(품목="결제", 금액=300_000, 용도="자문", 사업명=사업))
+
+        def 터짐(프롬프트):
+            raise llm_qwen.LLM실패("403")
+        expense_input_check._llm_호출 = 터짐
+        try:
+            routes_normalize._온톨로지_정규화(정규화요청(품목="결제", 금액=300_000, 용도="자문", 사업명=사업))
+            실패올림 = False
+        except llm_qwen.LLM실패:
+            실패올림 = True
     finally:
         normalize_run.질의변환 = 원
-    return [("F13: 폼 경로의 정규화 품목은 긴 이름도 입력 그대로다(질문과 판정의 품목 표현이 같다)", bool(결과) and 결과[0].get("품목") == 긴이름)]
+        expense_input_check._llm_호출 = 원검증
+    return [("F13: 폼 경로의 정규화 품목은 긴 이름도 입력 그대로다(질문과 판정의 품목 표현이 같다)", bool(결과) and 결과[0].get("품목") == 긴이름),
+            ("v057: 입력 검증 판단이 결과 입력검증 에 들어가고 판단을 바꾸면 값이 바뀐다(지출 → 지출아님)",
+             bool(결과) and 결과[0].get("입력검증") == {"판단": "지출"} and bool(아님) and 아님[0].get("입력검증") == {"판단": "지출아님"}),
+            ("v057: 입력 검증 LLM 실패는 지출 아님이 아니라 예외(입력 정리 실패)", 실패올림)]
 
 
 def _라벨_스윕(cur, 사업명: str = 사업) -> list[tuple[str, bool]]:
