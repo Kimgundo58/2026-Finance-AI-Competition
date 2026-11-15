@@ -737,6 +737,7 @@ def main() -> int:
     _새흐름_검사(c, sse, 확인)
     _입력검증_검사(확인, sse)
     _조사_단계상한_검사(c, 확인)
+    _조정_예산까지_검사(c, 확인)
 
     print("\n[요청 제한·캐시·관리 엔드포인트]")
     확인("관리 엔드포인트는 토큰 없이 403", c.get("/admin/status").status_code == 403)
@@ -1470,6 +1471,174 @@ def _조사_단계상한_검사(c, 확인) -> None:
     확인("v060 · /api/questions ② 서버 예산이 끝날 때까지 403 → 분류없음 · 다음행동 다시시도 · 품목 조사 안내",
          s == 200 and q.get("상태") == "분류없음" and q.get("다음행동") == "다시시도"
          and q.get("분류안내") == _RQ.품목조사실패_안내, f"{s} {str(q)[:160]}")
+
+
+def _조정_예산까지_검사(c, 확인) -> None:
+    """v061 ③ 조정 LLM 의 시스템 오류 재시도 · 스트리밍 대기는 ④-2 몫(120초)을 남긴 단계 시간 상한이 아니라 세션 예산까지 간다.
+
+    운영 23e63ec 11-16 사례를 가짜 시계로 재현한다: 세션 예산이 217초 남은 채 ③ 요청 → 세 변형 불일치 → 조정 LLM 403 두 번 →
+    추론 스트리밍 100초. 예전에는 조정 마감 = 남은 − 120 = 97초라 스트리밍 시간 초과 → 단계 시간 상한 → 「다시 시도」 였다.
+    ① 조정이 예전 상한을 넘겨 받음 → 분류 → ④-2 는 시간 부족으로 건너뜀(진행 줄) → ⑤ (다시시도 아님)
+    ② 세션 예산이 끝날 때까지 403 → 분류없음 · 다음행동 다시시도 · 분류 실패 안내. 예산을 다 쓴 뒤에만 낸다
+    ③ 그 다시 시도 요청은 예산을 새로(600초) 받아 조정 · ④-2 까지 한다
+    /api/questions(live 경로)의 실제 llm_qwen._마감까지_호출 · item_classify.분류 · routes_questions._분류 · question_generate.판정용_조사 를
+    쓰고, _호출_1회 · 시계(llm_qwen · research_runtime 의 time) · 온톨로지 조회 · DB 연결 · 공개 조사 · ⑤ 질문 생성만 가짜로 둔다."""
+    import contextlib
+    import re
+    import threading
+    import time as _진짜time
+    from unittest.mock import patch
+
+    import httpx
+    import openai
+
+    import llm_qwen
+    import ontology_lookup
+    import question_generate
+    import research_runtime
+    from _lib import db
+    from server import research_sessions
+    from server import routes_questions as _RQ
+
+    print("\n[v061 ③ 조정 LLM — 시스템 오류는 ④-2 몫을 남긴 상한이 아니라 세션 예산까지 다시 시도]")
+
+    class 가짜시계:
+        """monotonic · sleep 만 가짜(sleep 은 바로 시각을 민다). 나머지는 진짜 time."""
+        def __init__(self):
+            self.t, self._잠금 = 1000.0, threading.Lock()
+
+        def monotonic(self):
+            with self._잠금:
+                return self.t
+
+        def sleep(self, 초):
+            with self._잠금:
+                self.t += max(0.0, 초)
+
+        def __getattr__(self, 이름):
+            return getattr(_진짜time, 이름)
+    시계 = 가짜시계()
+
+    def _403():
+        응답 = httpx.Response(403, request=httpx.Request("POST", "http://gateway.invalid/v1/chat/completions"))
+        return openai.PermissionDeniedError("Workspace endpoint access denied", response=응답, body=None)
+
+    상태 = {"조정": "늦은성공", "조정시도": 0}
+    스트리밍초 = 100.0                 # 조정 추론 스트리밍이 끝나는 데 걸리는 시간(운영 첫 요청: 85초 안에 안 끝남, 다시 시도 요청 90.65초)
+
+    def 호출(client, 모델, 프롬프트, 스키마, 온도, 최대토큰, 한도, 추론, 스트림=False, *, 청크_대기초=None):
+        if "<분류기록>" in 프롬프트:
+            상태["조정시도"] += 1
+            if 상태["조정"] == "예산끝" or (상태["조정"] == "늦은성공" and 상태["조정시도"] <= 2):
+                시계.sleep(0.5)
+                raise _403()
+            if 상태["조정"] == "늦은성공":
+                if 한도 < 스트리밍초:
+                    시계.sleep(한도)
+                    raise TimeoutError(f"스트리밍 응답이 {한도:.0f}초 안에 끝나지 않음")
+                시계.sleep(스트리밍초)
+            번호 = "N" + re.search(r"N(\d+) [|] 외주가공비", 프롬프트).group(1)
+            return ({"거래유형": "용역", "거래유형이같은후보": [], "번호": 번호, "확신": "유사", "이유": "가공을 맡기는 용역",
+                     "필요정보": []}, {"지연ms": 1})
+        자료 = 프롬프트.split("<확인한정보>\n")[1].split("</확인한정보>")[0]
+        이름 = "외주가공비" if "가나정밀" in 자료 else "시제품 재료"       # 변형 C(조사 문장 없음)만 다른 경로 → 경로 불일치 → 조정
+        번호 = "N" + re.search(r"N(\d+) [|] " + 이름, 프롬프트).group(1)
+        return ({"거래유형": "용역", "거래유형이같은후보": [], "번호": 번호, "확신": "유사", "이유": "-", "필요정보": []}, {"지연ms": 1})
+
+    가짜웹 = types.ModuleType("web_research")
+    가짜웹._요건_웹_제한초 = 120
+    판정조사들: list[dict] = []
+
+    def 가짜조사(공개검색어, **k):
+        if k.get("사실확인"):
+            return {"상태": "미확인", "요건결과": {}, "출처": []}
+        return {"상태": "확인필요", "출처": ["https://example.com/cnc"], "후보": [{
+            "id": "p1", "유형": "제품성격", "내용": "CNC 가공 서비스", "확인문장": "가나정밀 CNC 가공은 가공을 맡기는 서비스예요",
+            "질문": "가나정밀 CNC 가공은 가공을 맡기는 서비스예요. 맞나요?", "질문종류": "문장", "거래유형": "용역", "출처": [],
+            "상태": "확인필요"}]}
+    가짜웹.research = 가짜조사
+
+    def 가짜질문(req, body, 조사확인=None, 답키=None, 준비확인=False, 노드결정=None, 판정조사설정=None):
+        # ④-2 는 실제 함수(남은 예산으로 줄이거나 건너뜀), ⑤ 질문 생성만 가짜
+        r = question_generate.판정용_조사({"품목": body.품목}, [{"번호": "C1", "문장": "가공을 외부에 맡기는가", "근거발췌": "",
+                                                          "시점": "", "조건키": "K1"}], 판정조사설정 or {})
+        판정조사들.append(r)
+        return {"상태": "없음", "질문세트": None, "질문": [], "추가입력": [], "용어풀이": [], "_판정조사": r}
+
+    후보 = [{"id": "n1", "정식명": "외주가공비", "별칭": [], "비목": ["외주용역비"]},
+          {"id": "n2", "정식명": "시제품 재료", "별칭": [], "비목": ["재료비"]}]
+    경로 = {"n1": {"비목": "외주용역비", "세목": None, "표시문": "외주용역비", "다른경로": []},
+          "n2": {"비목": "재료비", "세목": None, "표시문": "재료비", "다른경로": []}}
+    공통 = {"사업명": "예비창업패키지", "품목": "프로토랩 CNC 가공", "금액": 300000, "용도": "시제품 부품", "웹조사": True}
+
+    def 보내기(본문):
+        r = c.post("/api/questions", json=본문, headers={"Accept": "text/event-stream"})
+        진행, 완료, 이름 = [], None, None
+        for 줄 in r.text.splitlines():
+            if 줄.startswith("event: "):
+                이름 = 줄[7:]
+            elif 줄.startswith("data: "):
+                값 = json.loads(줄[6:])
+                if 이름 == "완료":
+                    완료 = 값
+                elif 이름 == "진행" and isinstance(값, dict):
+                    진행.append(값.get("문장") or "")
+        return 완료 or {}, 진행
+
+    def 세션_시작(남은초):
+        """② 요청까지 마치고 세션 예산을 남은초 로 둔다(운영 사례: 정리 · ② 에 약 83초를 써 217초 남음)."""
+        조사ID = research_sessions.생성(None, None)
+        보내기({**공통, "조사ID": 조사ID})
+        세션 = research_sessions.조회(조사ID, None, None)
+        세션.budget = research_runtime.Budget(seconds=남은초)
+        return 세션, {**공통, "조사ID": 조사ID, "조사답변": [{"id": "p1", "답": "맞아요"}]}
+
+    def 연결():                     # db.연결 이 여는 autocommit 연결 자리(v053)
+        return types.SimpleNamespace(cursor=lambda: None, closed=False, close=lambda: None)
+
+    가짜들 = [patch.dict(sys.modules, {"web_research": 가짜웹}), patch.object(_RQ, "MOCK", False),
+             patch.object(_RQ.ontology_readiness, "확인", lambda *a, **k: None),
+             patch.object(_RQ.response_cache, "요청_해시", lambda *a, **k: "v061"),
+             patch.object(_RQ.response_cache, "l3_해시", lambda *a, **k: ""),
+             patch.object(_RQ.제한, "통과", lambda *a, **k: (True, "")), patch.object(_RQ, "_사업명_표준화", lambda v: v),
+             patch.object(_RQ, "_기존_질문", 가짜질문), patch.object(db, "connect", lambda **k: 연결()),
+             patch.object(ontology_lookup, "레이블_목록", lambda *a: []), patch.object(ontology_lookup, "후보_정리", lambda *a: (후보, [])),
+             patch.object(ontology_lookup, "노드_결정", lambda *a: []),
+             patch.object(ontology_lookup, "분류_경로", lambda cur, 사업, n, 레이블: 경로[n]),
+             patch.object(ontology_lookup, "규정_발췌", lambda *a, **k: {}),
+             patch.object(ontology_lookup, "분류_규범문장", lambda *a, **k: {}), patch.object(ontology_lookup, "상위_노드", lambda *a: []),
+             patch.object(llm_qwen, "_client_얻기", return_value=None), patch.object(llm_qwen, "_호출_1회", 호출),
+             patch.object(llm_qwen, "time", 시계), patch.object(research_runtime, "time", 시계),
+             patch.dict(os.environ, {"SUDDOE_CLASSIFY_MODEL": ""})]
+    with contextlib.ExitStack() as 묶음:
+        for 가짜 in 가짜들:
+            묶음.enter_context(가짜)
+        # ① 예전 상한(217 − 120 = 97초)을 넘는 조정: 403 · 403 → 스트리밍 100초 → 받음
+        세션, 셋째 = 세션_시작(217.0)
+        q, 진행 = 보내기(셋째)
+        남음 = 세션.budget.remaining_seconds()
+        확인("v061 · ③ 조정 LLM 이 403 두 번 뒤 스트리밍 100초(예전 상한 97초 넘음) → 분류를 받는다(다시시도 아님)",
+             q.get("다음행동") != "다시시도" and (q.get("분류") or {}).get("비목") == "외주용역비" and 상태["조정시도"] == 3,
+             f"{str(q)[:160]} 조정시도={상태['조정시도']}")
+        확인("v061 · 그 뒤 ④-2 는 남은 시간(약 110초)으로 판단해 건너뛰고 화면에 알린다 → ⑤ 로 간다",
+             [r.get("상태") for r in 판정조사들] == ["시간없음"] and question_generate.판정조사_건너뜀문장 in 진행
+             and q.get("상태") == "없음" and 100 < 남음 < 120, f"{판정조사들} 남음={남음:.0f} {진행[-3:]}")
+        # ② 세션 예산이 끝날 때까지 403 → 다시시도. 단계 상한(남은 − 120)에서 멈추지 않는다
+        판정조사들.clear()
+        상태.update(조정="예산끝", 조정시도=0)
+        세션, 셋째 = 세션_시작(217.0)
+        q, 진행 = 보내기(셋째)
+        남음 = 세션.budget.remaining_seconds()
+        확인("v061 · ③ 조정 LLM 이 세션 예산이 끝날 때까지 403 → 분류없음 · 다음행동 다시시도 · 분류 실패 안내(예산을 다 쓴 뒤에만)",
+             q.get("상태") == "분류없음" and q.get("다음행동") == "다시시도" and q.get("분류안내") == _RQ._분류실패_안내
+             and 남음 < 20 and not 판정조사들 and 상태["조정시도"] > 5, f"{str(q)[:160]} 남음={남음:.0f} 조정시도={상태['조정시도']}")
+        # ③ 같은 요청을 다시 보내면 예산을 새로 받아(600초) 조정 · ④-2 까지 한다
+        상태.update(조정="바로", 조정시도=0)
+        q, 진행 = 보내기(셋째)
+        확인("v061 · 다시 시도 요청은 예산 600초를 새로 받아 분류 · ④-2 를 한다",
+             (q.get("분류") or {}).get("비목") == "외주용역비" and q.get("다음행동") != "다시시도"
+             and [r.get("상태") for r in 판정조사들] == ["미확인"] and research_runtime.세션_예산초 == 600,
+             f"{str(q)[:160]} {판정조사들}")
 
 
 def _새흐름_검사(c, sse, 확인) -> None:

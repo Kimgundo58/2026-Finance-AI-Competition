@@ -86,7 +86,7 @@ def normalize(req: Request, body: 정규화요청):
         def 정리():
             with research_runtime.activate(조사세션.budget if 조사세션 else research_runtime.Budget()):
                 return (mock_flow.정규화(body), False) if MOCK else _live_정규화(body)
-        # v053: 시스템 오류 재시도로 정리가 길어질 수 있다(예산 300초). 워커 스레드에서 돌리고 12초마다 keep-alive 를 보내
+        # v053: 시스템 오류 재시도로 정리가 길어질 수 있다(세션 예산 600초). 워커 스레드에서 돌리고 12초마다 keep-alive 를 보내
         # 프록시 · 브라우저가 무응답 연결을 끊지 않게 한다(질문 · 판정과 같은 방식)
         ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         try:
