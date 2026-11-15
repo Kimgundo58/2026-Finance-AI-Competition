@@ -243,7 +243,9 @@ def 분류(cur, 사업명: str | None, 입력: dict, 레이블: list[dict], 확�
     노드 = 확신 = None
     방법 = "없음"
     필요정보: list[str] = []
-    for r in ontology_lookup.노드_결정(cur, 품목, 사업명):        # ③-1 별칭 정확 일치(사업 한정 먼저)
+    # ③-1 별칭 정확 일치(사업 한정 먼저). 확인된 거래 유형이 있으면 건너뛴다: 별칭은 품목 이름만 맞춰 거래 유형을 보지 않는다
+    # (예: 구매 품목 별칭과 같은 이름을 빌려 쓰는 지출). 이때는 LLM 이 확인된 거래 유형과 함께 고른다(v055 Codex 리뷰)
+    for r in ([] if 확인거래유형 and llm is not None else ontology_lookup.노드_결정(cur, 품목, 사업명)):
         i = r["concept_id"] if r["concept_id"] in 표 else 대신.get(r["concept_id"])
         if i in 표:
             노드, 확신, 방법 = i, "동일", "별칭"

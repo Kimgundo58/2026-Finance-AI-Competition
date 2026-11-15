@@ -981,11 +981,24 @@ def 거래유형_전달_검사(client, norm):
     from server import routes_questions
     # 확인_거래유형 단위: 맞아요 + 문장 + 제품성격만, 값이 둘이면 None
     def 행(**k):
-        return {'id': 'x', '유형': '제품성격', '답': '맞아요', '질문종류': '문장', '거래유형': '용역', **k}
+        return {'id': 'x', '유형': '제품성격', '답': '맞아요', '질문종류': '문장', '거래유형': '용역',
+                '확인문장': '가나정밀 CNC 가공은 가공을 맡기는 서비스예요', **k}
     assert research_sessions.확인_거래유형({'확인한정보': [행()]}) == '용역'
-    for 다른 in (행(답='직접입력', 정정='부품 가공 외주'), 행(질문종류='기본'), 행(거래유형='기타'), 행(유형='판매자'), 행(거래유형='대여')):
+    for 다른 in (행(답='직접입력', 정정='부품 가공 외주'), 행(질문종류='기본'), 행(거래유형='기타'), 행(유형='판매자'), 행(거래유형='대여'),
+               행(확인문장='가나정밀 CNC 가공 서비스예요')):        # 마지막: 문장에 거래 유형이 드러나지 않음(v055 Codex 리뷰)
         assert research_sessions.확인_거래유형({'확인한정보': [다른]}) is None, 다른
-    assert research_sessions.확인_거래유형({'확인한정보': [행(), 행(id='y', 거래유형='구매')]}) is None
+    assert research_sessions.확인_거래유형({'확인한정보': [행(), 행(id='y', 거래유형='구매', 확인문장='부품을 사서 쓰는 거예요')]}) is None
+    # 확인된 거래 유형이 있으면 별칭 정확 일치로 끝내지 않고 LLM 이 거래 유형과 함께 고른다(v055 Codex 리뷰)
+    부름 = []
+    with patch.object(ontology_lookup, '후보_정리', lambda *a: ([{'id': 'n1', '정식명': '노트북', '별칭': [], '비목': ['재료비']}], [])), \
+         patch.object(ontology_lookup, '노드_결정', lambda *a: [{'concept_id': 'n1'}]), \
+         patch.object(ontology_lookup, '분류_경로', lambda *a: {'비목': '재료비', '세목': None, '표시문': '재료비', '다른경로': []}):
+        def 센llm(*a, **k):
+            부름.append(1)
+            return {'거래유형': '임차', '거래유형이같은후보': [], '번호': 'N1', '확신': '유사', '이유': 'x', '필요정보': []}, {}
+        assert item_classify.분류(None, '예비창업패키지', {'품목': '노트북'}, [], [], llm=센llm)['방법'] == '별칭' and not 부름
+        assert item_classify.분류(None, '예비창업패키지', {'품목': '노트북'}, [], [], llm=센llm, 확인거래유형='임차')['방법'] == 'LLM'
+        assert 부름 == [1], 부름
     assert research_sessions.확인_거래유형(None) is None
     상태 = {'질문종류': '문장'}
 
@@ -1023,7 +1036,15 @@ def 거래유형_전달_검사(client, norm):
         r = client.post('/api/questions', json={**공통, '조사ID': token, '조사답변': [{'id': 'p1', **답}]}).json()
         assert r['분류']['비목'] == '외주용역비', r
         return 프롬프트[-1].split('<확인된거래유형>\n')[1].split('\n</확인된거래유형>')[0]
-    with patch.dict(sys.modules, {'web_research': 가짜웹}), patch.object(routes_questions, 'MOCK', False),          patch.object(routes_questions.ontology_readiness, '확인', lambda *a: None),          patch.object(routes_questions.response_cache, '요청_해시', lambda: 'v-합성'),          patch.object(routes_questions.제한, '통과', lambda ip: (True, None)),          patch.object(routes_questions, '_기존_질문', 가짜질문),          patch.object(db, 'connect', lambda **k: 연결()), patch.object(ontology_lookup, '레이블_목록', lambda *a: []),          patch.object(ontology_lookup, '후보_정리', lambda *a: (후보, [])), patch.object(ontology_lookup, '노드_결정', lambda *a: []),          patch.object(ontology_lookup, '분류_경로', lambda *a: 경로),          patch.object(item_classify, '분류', functools.partial(item_classify.분류, llm=가짜llm)):
+    with patch.dict(sys.modules, {'web_research': 가짜웹}), patch.object(routes_questions, 'MOCK', False), \
+         patch.object(routes_questions.ontology_readiness, '확인', lambda *a: None), \
+         patch.object(routes_questions.response_cache, '요청_해시', lambda: 'v-합성'), \
+         patch.object(routes_questions.제한, '통과', lambda ip: (True, None)), \
+         patch.object(routes_questions, '_기존_질문', 가짜질문), \
+         patch.object(db, 'connect', lambda **k: 연결()), patch.object(ontology_lookup, '레이블_목록', lambda *a: []), \
+         patch.object(ontology_lookup, '후보_정리', lambda *a: (후보, [])), patch.object(ontology_lookup, '노드_결정', lambda *a: []), \
+         patch.object(ontology_lookup, '분류_경로', lambda *a: 경로), \
+         patch.object(item_classify, '분류', functools.partial(item_classify.분류, llm=가짜llm)):
         assert 확인된({'답': '맞아요'}) == '용역(사람 · 업체에 업무를 맡김)'
         assert 확인된({'답': '직접입력', '정정': '부품을 사는 거예요'}) == '(없음)'
         상태['질문종류'] = '기본'

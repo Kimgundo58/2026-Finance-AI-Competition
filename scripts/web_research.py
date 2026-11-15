@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
 from research_runtime import 공개조사_실패문장, 시스템오류
-from llm_schema import 거래유형_ENUM, 거래유형_뜻
+from llm_schema import 거래유형_ENUM, 거래유형_뜻, 거래유형_문장에_있음
 from apick_mcp import ApickClient, ApickError, public_url as url_ok, strip_tracking
 
 _log = logging.getLogger("uvicorn.error")
@@ -604,8 +604,11 @@ def _후보_고르기(plan: dict, bodies: dict, 유형들: tuple) -> dict | None
         source = {"제목": urlsplit(u).hostname, "url": u, "발췌": excerpt,
                   "수집시각": datetime.now(timezone.utc).isoformat()}
         확인문장 = re.sub(r"\s*맞나요\s*[?？]?\s*$", "", 질문).strip() if 질문종류 == "문장" else ""
-        # 거래유형(v055): 화면에 내지 않는 값. 확인 문장(질문종류 문장)에 드러나 사용자가 [맞아요] 하면 확인된 거래 유형이 된다
+        # 거래유형(v055): 화면에 내지 않는 값. 확인 문장(질문종류 문장)에 드러나 사용자가 [맞아요] 하면 확인된 거래 유형이 된다.
+        # 화면 문장에 그 유형의 낱말이 없으면(코드 검사에 걸린 기본 문장 포함) 사용자가 볼 수 없으므로 기타로 둔다
         거래유형 = c.get("거래유형") if c.get("거래유형") in 거래유형_ENUM else "기타"
+        if 거래유형 != "기타" and not (질문종류 == "문장" and 거래유형_문장에_있음(거래유형, 확인문장)):
+            거래유형 = "기타"
         return {"id": uuid.uuid4().hex, "유형": c["유형"], "내용": excerpt,
                 "확인문장": 확인문장 or excerpt, "질문": 질문, "질문종류": 질문종류, "거래유형": 거래유형,
                 "출처": [source], "상태": "확인필요"}

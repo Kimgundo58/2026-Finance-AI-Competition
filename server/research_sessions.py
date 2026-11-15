@@ -174,11 +174,13 @@ def 확인_거래유형(조사확인) -> str | None:
     """사용자가 확인한 거래 유형(v055). ② · ③-R 후보(세션.조사 · 세션.재조사 에 저장된 후보의 `거래유형`) 중 사용자가 [맞아요] 한 품목 설명
     후보(유형 제품성격)의 값이다. 화면에 거래 유형이 드러난 확인 문장(질문종류 문장)일 때만 센다: 코드 검사에 걸려 기본 문장
     (「제품·서비스 성격 정보가 맞나요?」)을 보였으면 사용자가 거래 유형을 본 적이 없다. 기타 · [직접 입력하기] 는 확인된 거래 유형이 아니다.
-    맞아요 한 후보끼리 값이 다르면 None. 소비처: routes_questions._분류 → item_classify.분류(확인거래유형=…)."""
-    from llm_schema import 거래유형_ENUM
+    확인 문장에 그 거래 유형의 낱말이 없으면 세지 않는다(llm_schema.거래유형_문장에_있음). 맞아요 한 후보끼리 값이 다르면 None.
+    소비처: routes_questions._분류 → item_classify.분류(확인거래유형=…)."""
+    from llm_schema import 거래유형_ENUM, 거래유형_문장에_있음
     값 = {x.get('거래유형') for x in (조사확인 or {}).get('확인한정보') or []
          if isinstance(x, dict) and x.get('답') == '맞아요' and x.get('유형') == '제품성격' and x.get('질문종류') == '문장'
-         and x.get('거래유형') in 거래유형_ENUM and x.get('거래유형') != '기타'}
+         and x.get('거래유형') in 거래유형_ENUM and x.get('거래유형') != '기타'
+         and 거래유형_문장에_있음(x.get('거래유형'), x.get('확인문장') or x.get('질문'))}
     return next(iter(값)) if len(값) == 1 else None
 
 
