@@ -37,6 +37,9 @@ def 내부_표_구간(본문: str, 조번호: str, 항호: str) -> tuple[int, in
         if len(첫호) == len(후보) == len(셋) == 1 and 후보[0].start() < 셋[0].start():
             경계들 = [re.compile(r'(?m)^2\.\s+\S').search(본문, 제목.end())]
             호경계 = True
+    if not 경계들 and not re.search(r'(?m)^\s*[③④⑤⑥⑦⑧⑨⑩]\s+', 본문[제목.end():]) \
+            and not 제목식.search(본문, 제목.end()):
+        return _조문끝_표_구간(본문, 제목)
     if len(경계들) != 1:
         raise ValueError('내부 표 끝 경계가 없거나 여러 개임')
     경계 = 경계들[0]
@@ -51,6 +54,17 @@ def 내부_표_구간(본문: str, 조번호: str, 항호: str) -> tuple[int, in
     if not all(re.search(r'(?m)^\s*' + x, 표본문) for x in ('①', '②', '③')):
         raise ValueError('내부 표 항목 구조 불명')
     return 제목.start(), 경계.start()
+
+
+def _조문끝_표_구간(본문: str, 제목: re.Match) -> tuple[int, int]:
+    """② 가 가리킨 표가 조문 끝에 있는 형식(예비 제14조 · 초기 제13조 <표-2> 주관기관 사업비 구성 내역, v054).
+    표제 뒤에 ③ 이후 항도 같은 표제도 없으면(호출자가 확인) 표제부터 조문 끝까지가 표다. 끝의 쪽 번호 줄(「- 4 -」)은 뺀다."""
+    뒤 = 본문[제목.end():]
+    꼬리 = re.search(r'(?:\s*\n\s*-\s*\d+\s*-)*\s*\Z', 뒤)
+    끝 = 제목.end() + 꼬리.start()
+    if not 본문[제목.end():끝].strip():
+        raise ValueError('내부 표 내용 없음')
+    return 제목.start(), 끝
 
 
 def _괄호_표제_구간(본문: str, 상위: int, 번호: str) -> tuple[int, int]:
