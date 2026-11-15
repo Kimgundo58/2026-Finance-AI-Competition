@@ -108,6 +108,7 @@ def main():
             앙상블_분류_검사()
             기관후보_검사()
             거래유형_질문_검사(client, norm)
+            모든비목_분류_검사(client, norm)
         # 응답 객체만 만들고 스트림을 전혀 읽지 않는 요청도 세션 잠금을 남기지 않는다.
         from server import routes_judge, routes_questions
         from server.models import 질문요청, 판정요청
@@ -1411,6 +1412,88 @@ def 거래유형_질문_검사(client, norm):
         assert 여섯['상태'] == '분류없음' and 여섯['다음행동'] == '다시시도' and 여섯.get('분류') is None, 여섯
         assert 여섯['질문'] == [] and len(기록) == 3, 여섯
         상태['조정실패'] = False
+
+
+def 모든비목_분류_검사(client, norm):
+    """v058 모든 비목 아래에만 있는 노드(부채 상환 · 관세 등): 이 사업 규정이 한 비목 조항 안에서 다루면 그 비목, 아니면 모든 비목 공통
+    (확정비목 = 모든비목_정식명 · 표시문 「모든 비목 공통」). 비목을 지어내지 않는다. 판정 · 질문 라우트가 그 값을 받는다. 외부 호출 없음."""
+    import functools
+    import re
+    import item_classify
+    import ontology_lookup
+    import ontology_norm
+    from server import _common
+    assert _common.모든비목_정식명 == ontology_norm.모든비목_정식명 and _common.모든비목_정식명 in _common.확정비목_ENUM
+    레이블 = [{'노드': '비목:창업/재료비', '비목': '재료비', '세목': None, '표시문': '재료비'},
+            {'노드': '비목:창업/여비', '비목': '여비', '세목': None, '표시문': '여비'},
+            {'노드': '세목:창업/여비/국내', '비목': '여비', '세목': '국내 여비', '표시문': '여비 > 국내 여비'}]
+
+    class 커서:
+        def __init__(self, 행):
+            self.행 = 행
+
+        def execute(self, sql, 인자=None):
+            return types.SimpleNamespace(fetchall=lambda: self.행)
+    문서 = {'초격차 세부': 0}
+    with patch.object(ontology_lookup, '_문서_순위', lambda 사업: 문서),          patch.object(ontology_lookup, '_상위_경로', lambda cur, n, 사업들: [(n, ontology_norm.모든비목)]):
+        # 가. 이 사업 문서의 비목 조항(참고2 /재료비) 하나 → 그 비목. 다른 사업 문서(순위 9)는 보지 않는다
+        행 = [('초격차 세부', 'L2', '참고2', '/재료비', '관세'), ('L1 지침', 'L1', '제49조', '②', '사후 환급금'),
+             ('다른 사업', 'L2', '참고3', '/여비/기준', '자부담')]
+        p = ontology_lookup.분류_경로(커서(행), '초격차 스타트업 프로젝트', '품목:창업/관세', 레이블)
+        assert p['비목'] == '재료비' and p['표시문'] == '재료비' and p['비목_노드'] == '비목:창업/재료비', p
+        assert p['모든비목']['방법'] == '규정 위치' and p['모든비목']['근거'] == ['참고2/재료비 관세'], p
+        # 나. 비목 조항이 없으면 모든 비목 공통(지어내지 않는다). 사유를 디버그에 남긴다
+        p = ontology_lookup.분류_경로(커서([('L1 지침', 'L1', '제47조', '④', '부채 상환')]), '예비창업패키지', '품목:창업/부채상환', 레이블)
+        assert (p['비목'], p['표시문'], p['비목_노드']) == (ontology_norm.모든비목_정식명, '모든 비목 공통', ontology_norm.모든비목), p
+        assert p['모든비목'] == {'방법': '공통', '근거': [], '사유': '규정 위치 근거 없음'}, p
+        # 다. 두 비목 조항에 걸리면 정하지 않고 공통. 두 비목을 함께 적은 마디(재료비·기계장치)는 근거로 쓰지 않는다
+        행 = [('초격차 세부', 'L2', '참고2', '/재료비', 'a'), ('초격차 세부', 'L2', '참고2', '/여비(국내)', 'b'),
+             ('초격차 세부', 'L2', '별지2', '/재료비·기계장치', 'c')]
+        p = ontology_lookup.분류_경로(커서(행), '초격차 스타트업 프로젝트', 'n', 레이블)
+        assert p['비목'] == ontology_norm.모든비목_정식명 and p['모든비목']['사유'] == '비목 조항이 둘 이상', p
+        assert ontology_lookup.모든비목_위치(커서(행[2:]), '초격차 스타트업 프로젝트', 'n', 레이블) == {}
+    # 판정 시작 노드: 규정 위치로 정한 비목이 확정 비목과 같을 때만 그 품목이 시작 노드(Codex 리뷰). 다른 비목 · 공통 · 모든 비목 아래가 아니면 아니다
+    위치표 = {'관세': {'비목_노드': '비목:창업/재료비', '모든비목': {'방법': '규정 위치'}},
+           '부채': {'비목_노드': ontology_norm.모든비목, '모든비목': {'방법': '공통'}}}
+    with patch.object(ontology_lookup, '레이블_목록', lambda *a: 레이블),          patch.object(ontology_lookup, '모든비목_경로', lambda cur, 사업, n, 레이블: 위치표[n]):
+        위 = {ontology_norm.모든비목}
+        assert ontology_lookup._규정위치_비목(None, '초격차 스타트업 프로젝트', '관세', 위, '비목:창업/재료비')
+        assert not ontology_lookup._규정위치_비목(None, '초격차 스타트업 프로젝트', '관세', 위, '비목:창업/여비')
+        assert not ontology_lookup._규정위치_비목(None, '예비창업패키지', '부채', 위, '비목:창업/재료비')
+        assert not ontology_lookup._규정위치_비목(None, '예비창업패키지', '관세', {'비목:창업/재료비'}, '비목:창업/재료비')
+    # 판정 대상: 모든비목_정식명은 모든 비목 노드 자체(DB 조회 없음), 세목은 없다
+    with patch.object(ontology_lookup.ontology_graph, '준비', lambda cur: None):
+        대상 = ontology_lookup.대상_노드(None, '예비창업패키지', ontology_norm.모든비목_정식명)
+        assert 대상['대상_id'] == 대상['비목_id'] == ontology_norm.모든비목 and 대상['표시문'] == '모든 비목 공통', 대상
+        try:
+            ontology_lookup.대상_노드(None, '예비창업패키지', ontology_norm.모든비목_정식명, '세목')
+            raise AssertionError('세목을 받으면 안 된다')
+        except LookupError:
+            pass
+    # ③ 분류: 세 변형이 모든 비목 노드를 고르면 그 경로로 확정, 화면 안내는 특정 비목이 아니라고 말한다(내부 ID 없음)
+    후보 = [{'id': '품목:창업/부채상환', '정식명': '부채 상환', '별칭': [], '비목': ['모든 비목']}]
+    공통경로 = {'비목': ontology_norm.모든비목_정식명, '세목': None, '표시문': '모든 비목 공통', '다른경로': [],
+            '모든비목': {'방법': '공통', '근거': [], '사유': '규정 위치 근거 없음'}}
+
+    def 가짜llm(prompt, schema, **k):
+        return {'거래유형': '기타', '거래유형이같은후보': ['N1'], '번호': 'N1', '확신': '동일', '이유': 'N1', '필요정보': []}, {}
+    with patch.object(ontology_lookup, '후보_정리', lambda *a: (후보, [])), patch.object(ontology_lookup, '노드_결정', lambda *a: []),          patch.object(ontology_lookup, '규정_발췌', lambda *a, **k: {}),          patch.object(ontology_lookup, '분류_경로', lambda *a: 공통경로):
+        r = item_classify.분류(None, '예비창업패키지', {'품목': '대출 이자 상환'}, [], [], llm=가짜llm)
+    assert r['방법'] == '일치' and r['분류']['비목'] == ontology_norm.모든비목_정식명 and r['노드결정']['id'] == '품목:창업/부채상환', r
+    assert r['디버그']['모든비목']['사유'] == '규정 위치 근거 없음', r['디버그']
+    안내 = item_classify.안내문(r['분류'])
+    assert 안내 == '부채 상환은 특정 비목이 아니라 모든 비목에 함께 적용되는 규정으로 확인할게요.' and not re.search(r'[:/*]', 안내), 안내
+    assert item_classify.안내문({'비목': '재료비', '세목': None, '표시문': '재료비', '품목': '관세'}) == '관세 · 재료비 기준으로 확인할게요.'
+    # 화면 경로(mock 「모든비목」): /api/questions 분류 → 그 비목으로 질문 · 판정 요청이 422 없이 간다
+    token = sse(client.post('/api/normalize', json=norm))['결과'][0]['조사ID']
+    req = {'조사ID': token, '사업명': '예비창업패키지', '품목': '모든비목 대출', '금액': 100, '용도': '개발', '웹조사': True}
+    client.post('/api/questions', json=req)
+    q = client.post('/api/questions', json={**req, '조사답변': [{'id': 'a', '답': '맞아요'}]}).json()
+    assert q['분류']['표시문'] == '모든 비목 공통' and q['분류안내'].endswith('모든 비목에 함께 적용되는 규정으로 확인할게요.'), q
+    judge = {'조사ID': token, '사업명': '예비창업패키지', '확정비목': q['분류']['비목'], '정규화': {'품목': '모든비목 대출', '금액': 100, '용도': '개발'},
+             '질문세트': q['질문세트'], '조사답변': [{'id': 'a', '답': '맞아요'}]}
+    assert client.post('/api/judge', json=judge).status_code == 200
+    assert client.post('/api/judge', json={**judge, '확정비목': '없는 비목'}).status_code == 422
 
 
 if __name__ == '__main__':
