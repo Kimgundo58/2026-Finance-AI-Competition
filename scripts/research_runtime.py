@@ -18,7 +18,8 @@ _emitter: ContextVar[object] = ContextVar("research_emitter", default=None)
 class Budget:
     # 횟수 상한(2026-11-12 사용자: 비용 · 호출 횟수는 상관없다, 막지 말 것). 실제로 묶는 건 시간(전체 300초)이다.
     # 300초 · LLM 100 · 도구 60(2026-11-13): ② 품목 조사(계획 6 · 도구 10 · 120초)에 ④-2 판정용 조사(계획 15 · 도구 30)가 더해졌다.
-    # LLM 횟수에는 게이트웨이 일시 오류 재시도(llm_qwen._일시오류_추가)도 HTTP 호출마다 예약된다
+    # 판정 요청은 시작할 때 남은 몫을 600초 · LLM 40회 이상으로 늘린다(ensure_remaining, routes_judge).
+    # LLM 횟수에는 게이트웨이 일시 오류 재시도(llm_qwen._일시오류_추가 · _마감재시도_쉼초)도 HTTP 호출마다 예약된다
     # 읽은 본문 글자 상한 150,000(2026-11-13): ④-2 가 본문을 최대 30번 더 읽는다
     def __init__(self, *, seconds: float = 300, tools: int = 60, llm: int = 100,
                  evidence_chars: int = 150000, emit=None):
@@ -94,6 +95,13 @@ class Budget:
                 return False
             self.evidence_used += len(text)
             return True
+
+    def ensure_remaining(self, *, seconds: float, llm: int) -> None:
+        """남은 시간 · LLM 호출 수가 적어도 이만큼 되게 상한을 늘린다(줄이지 않는다). 쓴 값과 세션 상태(ontology_state 등)는 그대로다.
+        /api/judge 가 시작할 때 부른다(routes_judge, 사용자 2026-11-15: 판정이 시간 때문에 실패하지 않게 충분히 늘린다)."""
+        with self._lock:
+            self._seconds += max(0.0, seconds - self._remaining())
+            self._llm_limit = max(self._llm_limit, self.llm_used + max(0, llm))
 
     def request(self) -> "RequestBudget":
         """이 예산(시간 · 호출 수 · 근거 글자)을 함께 쓰고 취소만 따로 갖는 요청 하나의 예산.
