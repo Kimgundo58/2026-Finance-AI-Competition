@@ -271,10 +271,14 @@ def 근거_조문(cur, 규범들: list[dict], 깊이: int = 3, 대상_id: str | 
         for g in n.get("근거") or []:
             시작_넣기(g["doc_id"], g["조번호"], g["항호"], "규범근거", 순위)
     if 대상_id:
+        # 모든 비목 노드(`비목:창업/*`)의 개념 근거(지침 제2조 정의 · 표-10 머리 등)는 시작점으로 쓰지 않는다. 비목 · 세목 대상의 사슬에는
+        # 이 노드가 없고(비목 노드의 상위가 아니다) 그 조문의 규범은 공통 규범으로 규범근거에 이미 든다. 모든 비목 대상 · 그 아래 품목(v058)도
+        # 같게 둔다: 정의 조문에서 미적재 법령(중소기업기본법 제2조)까지 따라가 근거 확인이 실패했다(v058 Codex 리뷰)
+        개념노드 = [n for n in 사슬노드 if n != 모든비목]
         for r in cur.execute(
                 """SELECT DISTINCT doc_id, 조번호, 항호, owner_id FROM corpus.age_provenance
                     WHERE owner_kind = '개념' AND owner_id = ANY(%s) AND doc_id <> ALL(%s)
-                    ORDER BY doc_id, 조번호, 항호, owner_id""", (사슬노드, _다른사업_문서(사업들))).fetchall():
+                    ORDER BY doc_id, 조번호, 항호, owner_id""", (개념노드, _다른사업_문서(사업들))).fetchall():
             시작_넣기(r[0], r[1], r[2], "개념근거", 노드순위[r[3]])
 
     시작목록 = sorted(시작)
@@ -476,10 +480,14 @@ def 품목_노드(cur, 사업명: str | None, 표현: str | None, 확정_id: str
 
 def _규정위치_비목(cur, 사업명: str | None, 노드_id: str, 상위: set[str], 비목_id: str) -> bool:
     """모든 비목 아래에만 있는 노드를 이 사업 규정이 `비목_id` 조항 안에서 다루는가(v058 `모든비목_경로` 의 「규정 위치」).
-    ③ 분류가 그 비목으로 안내한 노드는 확정 비목 아래가 아니어도 판정 시작 노드로 쓴다(노드 규범이 직접 적용된다, Codex 리뷰)."""
+    ③ 분류가 그 비목으로 안내한 노드는 확정 비목 아래가 아니어도 판정 시작 노드로 쓴다(노드 규범이 직접 적용된다, Codex 리뷰).
+    `비목_id` 가 비목 노드일 때만 본다(세목을 확정한 요청은 그 세목 아래 품목만 시작 노드다, v058 Codex 리뷰)."""
     if 모든비목 not in 상위 or 비목_id == 모든비목:
         return False
-    p = 모든비목_경로(cur, 사업명, 노드_id, 레이블_목록(cur, 사업명))
+    레이블 = 레이블_목록(cur, 사업명)
+    if 비목_id not in {x["노드"] for x in 레이블 if x.get("세목") is None}:
+        return False
+    p = 모든비목_경로(cur, 사업명, 노드_id, 레이블)
     return p["모든비목"]["방법"] == "규정 위치" and p["비목_노드"] == 비목_id
 
 
