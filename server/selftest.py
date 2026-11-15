@@ -735,6 +735,7 @@ def main() -> int:
          c.post("/api/normalize", json={"질문": ""}).status_code == 422)
 
     _새흐름_검사(c, sse, 확인)
+    _조사_단계상한_검사(c, 확인)
 
     print("\n[요청 제한·캐시·관리 엔드포인트]")
     확인("관리 엔드포인트는 토큰 없이 403", c.get("/admin/status").status_code == 403)
@@ -1172,6 +1173,160 @@ def _판정_시스템오류_검사(확인, sse) -> None:
     확인("판정 전 DB 읽기 장애 → SSE 판정실패 · 문의초안 없음 · 계획 연결 안 함",
          판정이벤트.get("판정실패") is True and 판정이벤트.get("판정") == "확인 필요" and not e.get("문의초안")
          and (e.get("저장") or [{}])[0].get("저장") is False and (e.get("완료") or [{}])[0].get("실패") is True)
+
+
+def _조사_단계상한_검사(c, 확인) -> None:
+    """v060 공개 조사(② 품목 조사 · ④-2 판정용 조사)의 LLM 시스템 오류 재시도는 조사 시간 상한이 아니라 서버 예산까지 간다.
+
+    실제 llm_qwen._마감까지_호출 · web_research._기본_계획호출 에 가짜 LLM(_호출_1회) · 가짜 검색 도구를 넣고, 조사 시간 상한을 1~1.5초로 줄여 본다.
+    ① 후보 작성 · 요건 정리가 상한 직전 403 → 상한 뒤 재시도로 받은 결과를 쓴다(다시시도 아님)
+    ② 계획 LLM 이 상한까지 403 · 예산 남음 → 시스템 오류가 아니라 조사 시간 끝남: ② 후보 없음 · ④-2 못찾음 → 확인 질문
+    ③ 서버 예산이 끝날 때까지 403 → 시스템오류 → /api/questions 다음행동 다시시도
+    /api/questions ② 요청(live 경로, DB 읽기 · 요청 제한만 가짜)으로도 같은 세 경우를 본다. 네트워크 · DB · API 키는 쓰지 않는다."""
+    from unittest.mock import patch
+
+    import httpx
+    import openai
+
+    import time
+
+    import llm_qwen
+    import question_generate
+    import research_runtime
+    import web_research
+    from server import research_sessions
+    from server import routes_questions as _RQ
+
+    print("\n[v060 공개 조사 — LLM 시스템 오류는 조사 시간 상한이 아니라 서버 예산까지 다시 시도]")
+    주소 = "https://example.com/product"
+    본문글 = "Example Pro 디자인 툴은 월 구독 요금제로 결제합니다. 연간 약정은 없고 사업자 계정으로 가입합니다."
+    발췌 = "월 구독 요금제로 결제합니다."
+
+    def _403():
+        응답 = httpx.Response(403, request=httpx.Request("POST", "http://gateway.invalid/v1/chat/completions"))
+        return openai.PermissionDeniedError("Workspace endpoint access denied", response=응답, body=None)
+
+    class 도구:
+        """가짜 APICK: 검색은 결과 주소 0개, 본문은 본문글."""
+        def __init__(self, *a, **k):
+            self.calls = []
+
+        def call(self, name, args, timeout):
+            self.calls.append(name)
+            if name == "google_search":
+                return {"content": [{"type": "text", "text": "{}"}]}
+            return {"content": [{"type": "text", "text": 본문글}]}
+
+    def 가짜LLM(계획들, 정리들):
+        """역할(계획 · 정리)마다 차례 목록을 낸다. "403" 이면 403, 목록이 떨어지면 계속 403. 받은 시각을 남긴다."""
+        차례 = {"계획": list(계획들), "정리": list(정리들)}
+        기록: list[tuple[str, str, float]] = []
+
+        def 호출(client, 모델, 프롬프트, 스키마, *a, **k):
+            역 = "정리" if web_research._후보역할(스키마) or web_research._요건역할(스키마) else "계획"
+            다음 = 차례[역].pop(0) if 차례[역] else "403"
+            기록.append((역, "403" if 다음 == "403" else "받음", time.monotonic()))
+            if 다음 == "403":
+                raise _403()
+            return 다음, {}
+        return 호출, 기록
+
+    def 조사(계획들, 정리들, *, 예산초=300.0, 웹초=2.0, 전체초=2.5, 백오프=(3.0,), 판정조사=None, **kw):
+        """research() 를 live 기본 호출(_기본_계획호출 → llm_호출 마감까지_재시도)로 돌린다. (결과 또는 예외, LLM 기록, 걸린 초)."""
+        호출, 기록 = 가짜LLM(계획들, 정리들)
+        예산 = research_runtime.Budget(seconds=예산초)
+        시작 = time.monotonic()
+        with patch.object(llm_qwen, "_client_얻기", return_value=None), patch.object(llm_qwen, "_호출_1회", 호출), \
+                patch.object(llm_qwen, "_마감재시도_백오프초", 백오프), patch.object(web_research, "ApickClient", 도구), \
+                patch.object(web_research, "_웹_제한초", 웹초), patch.object(web_research, "_전체_제한초", 전체초), \
+                patch.object(web_research, "_요건_웹_제한초", 웹초), patch.object(question_generate, "판정조사_최소초", 0.5), \
+                patch.object(web_research, "_추출여유초", 0.5), \
+                patch.dict(os.environ, {"SUDDOE_RESEARCH_MODEL": ""}), research_runtime.activate(예산):
+            try:
+                if 판정조사 is not None:
+                    결과 = question_generate.판정용_조사(*판정조사)
+                else:
+                    결과 = web_research.research(None, budget=예산, context={"품목": "디자인 툴 구독", "용도": "시안 작업"}, **kw)
+            except Exception as e:  # noqa: BLE001 — 시스템오류 를 결과로 돌려 본다
+                결과 = e
+        return 결과, 기록, time.monotonic() - 시작
+
+    # ① 후보 작성: 상한(2.5초) 직전 403 → 3초 뒤(상한 지남) 재시도에 받은 후보를 쓴다. 예전에는 남은 상한이 백오프보다 짧아 바로 시스템오류였다.
+    # 도구 · 정리 여유(_추출여유초 10초)도 0.5초로 줄인다(그대로면 짧은 상한에서는 본문 읽기를 시작하지 않는다)
+    후보출력 = {"후보": [{"유형": "제품성격", "내용": "월 구독 요금제 디자인 툴", "발췌": 발췌, "URL": 주소}], "읽지못함": []}
+    out, 기록, 초 = 조사([], ["403", 후보출력], public_url=주소)
+    확인("v060 · ② 후보 작성이 조사 시간 상한 직전 403 → 상한 뒤 재시도로 받은 후보를 쓴다(다시시도 아님)",
+         isinstance(out, dict) and out.get("상태") == "확인필요" and len(out.get("후보") or []) == 1
+         and [x[1] for x in 기록 if x[0] == "정리"] == ["403", "받음"] and 초 > 2.5, f"{out!r:.160} {기록} {초:.1f}초")
+    # ① 요건 정리(④-2): 상한(2초) 직전 403 → 상한 뒤 받은 확인됨을 쓴다
+    판단줄 = [{"번호": "C1", "문장": "구독 방식으로 결제하는가", "근거발췌": "", "시점": "", "조건키": "K1"}]
+    정리출력 = {"결과": [{"조건": "C1", "결과": "확인됨", "값": "월 구독", "발췌": 발췌, "URL": 주소, "이유": "요금 안내",
+                       "같은업체": "예", "같은업체이유": "같은 상품 페이지"}], "읽지못함": []}
+    out, 기록, 초 = 조사([], ["403", 정리출력], 판정조사=({"품목": "디자인 툴 구독"}, 판단줄, {"판매URL": 주소, "거래처": None}))
+    확인("v060 · ④-2 요건 정리가 조사 시간 상한 직전 403 → 상한 뒤 받은 확인됨을 쓴다(다시시도 아님)",
+         isinstance(out, dict) and out.get("상태") == "완료" and (out.get("요건결과") or {}).get("K1", {}).get("결과") == "확인됨"
+         and 초 > 2.0, f"{out!r:.160} {기록} {초:.1f}초")
+
+    # ② 계획 LLM: 첫 계획(검색)은 받고 다음 계획이 상한(3초)까지 403 → 조사 시간 끝남 · 후보 없음(부족정보, 화면은 [직접 입력하기])
+    검색계획 = {"행동": "검색", "유형": "제품성격", "검색어": "디자인 툴 구독", "URL": []}
+    out, 기록, 초 = 조사([검색계획], [], 웹초=3.0, 전체초=3.5, 백오프=(0.2,))
+    확인("v060 · ② 계획 LLM 이 조사 시간 상한까지 403 · 예산 남음 → 시스템 오류가 아니라 후보 없음(부족정보)",
+         isinstance(out, dict) and out.get("상태") == "확인필요" and not out.get("후보") and bool(out.get("부족정보"))
+         and [x[1] for x in 기록 if x[0] == "계획"][:2] == ["받음", "403"] and 초 < 6, f"{out!r:.160} {초:.1f}초")
+    out, 기록, 초 = 조사([], [], 웹초=3.0, 전체초=3.5, 백오프=(0.2,))
+    확인("v060 · ② 첫 계획부터 조사 시간 상한까지 403 → 조사 못함(공개 정보 확인 못함 안내) · 다시시도 아님",
+         isinstance(out, dict) and out.get("상태") == "실패" and not out.get("후보") and len(기록) >= 2 and 초 < 6,
+         f"{out!r:.160} {초:.1f}초")
+    out, 기록, 초 = 조사([], [], 웹초=3.0, 백오프=(0.2,), 판정조사=({"품목": "디자인 툴 구독"}, 판단줄, {"판매URL": None, "거래처": None}))
+    확인("v060 · ④-2 계획 LLM 이 조사 시간 상한까지 403 → 못찾음(확인 질문으로), 다시시도 아님",
+         isinstance(out, dict) and out.get("상태") == "못찾음" and len(기록) >= 2 and 초 < 6, f"{out!r:.160} {초:.1f}초")
+
+    # ③ 서버 예산(2초)이 조사 시간 상한(60초)보다 먼저 끝남 → 시스템오류(단계상한초과 아님) → 호출자가 다시시도
+    out, 기록, 초 = 조사([], [], 예산초=2.0, 웹초=60, 전체초=120, 백오프=(0.2,))
+    확인("v060 · 서버 예산이 끝날 때까지 403 → 시스템오류(조사 시간 끝남으로 바꾸지 않음)",
+         isinstance(out, research_runtime.시스템오류) and not isinstance(out, research_runtime.단계상한초과) and 초 < 5,
+         f"{out!r:.160} {초:.1f}초")
+    out, 기록, 초 = 조사([], ["403"] * 50, 예산초=2.5, 웹초=60, 전체초=120, 백오프=(0.2,), public_url=주소)
+    확인("v060 · 후보 작성이 서버 예산이 끝날 때까지 403 → 시스템오류(다시시도)",
+         isinstance(out, research_runtime.시스템오류) and 초 < 5, f"{out!r:.160} {초:.1f}초")
+
+    # /api/questions ② 요청(live 경로): 조사 세션 예산 · 조사 시간 상한만 줄이고 같은 세 경우
+    def 묻기(계획들, 정리들, 예산초, 웹초, 전체초, 백오프, **추가):
+        호출, _ = 가짜LLM(계획들, 정리들)
+        조사ID = research_sessions.생성(None, None)
+        research_sessions.조회(조사ID, None, None).budget = research_runtime.Budget(seconds=예산초)
+        본문 = {"사업명": "모두의 창업 프로젝트", "품목": "디자인 툴 구독", "금액": 30000, "용도": "시안 작업",
+              "조사ID": 조사ID, "웹조사": True, **추가}
+        with patch.object(_RQ, "MOCK", False), patch.object(_RQ, "_사업명_표준화", lambda v: v), \
+                patch.object(_RQ.ontology_readiness, "확인", lambda *a, **k: None), \
+                patch.object(_RQ.response_cache, "요청_해시", lambda *a, **k: "v060"), \
+                patch.object(_RQ.response_cache, "l3_해시", lambda *a, **k: ""), \
+                patch.object(_RQ.제한, "통과", lambda *a, **k: (True, "")), \
+                patch.object(llm_qwen, "_client_얻기", return_value=None), patch.object(llm_qwen, "_호출_1회", 호출), \
+                patch.object(llm_qwen, "_마감재시도_백오프초", 백오프), patch.object(web_research, "ApickClient", 도구), \
+                patch.object(web_research, "_웹_제한초", 웹초), patch.object(web_research, "_전체_제한초", 전체초), \
+                patch.object(web_research, "_추출여유초", 0.5), patch.dict(os.environ, {"SUDDOE_RESEARCH_MODEL": ""}):
+            r = c.post("/api/questions", json=본문, headers={"Accept": "text/event-stream"})
+        완료, 이름 = None, None
+        for 줄 in r.text.splitlines():
+            if 줄.startswith("event: "):
+                이름 = 줄[7:]
+            elif 줄.startswith("data: ") and 이름 == "완료":
+                완료 = json.loads(줄[6:])
+        return r.status_code, 완료 or {}
+
+    s, q = 묻기([], ["403", 후보출력], 300.0, 2.0, 2.5, (3.0,), 판매URL=주소)
+    확인("v060 · /api/questions ② 후보 작성 상한 직전 403 → 조사확인 · 후보 1개(다시시도 아님)",
+         s == 200 and q.get("상태") == "조사확인" and len((q.get("조사") or {}).get("후보") or []) == 1
+         and q.get("다음행동") != "다시시도", f"{s} {str(q)[:160]}")
+    s, q = 묻기([검색계획], [], 300.0, 3.0, 3.5, (0.2,))
+    확인("v060 · /api/questions ② 계획 LLM 상한까지 403 → 조사확인 · 후보 없음(화면 [직접 입력하기]), 다시시도 아님",
+         s == 200 and q.get("상태") == "조사확인" and not (q.get("조사") or {}).get("후보")
+         and q.get("다음행동") != "다시시도", f"{s} {str(q)[:160]}")
+    s, q = 묻기([], [], 2.0, 60, 120, (0.2,))
+    확인("v060 · /api/questions ② 서버 예산이 끝날 때까지 403 → 분류없음 · 다음행동 다시시도 · 품목 조사 안내",
+         s == 200 and q.get("상태") == "분류없음" and q.get("다음행동") == "다시시도"
+         and q.get("분류안내") == _RQ.품목조사실패_안내, f"{s} {str(q)[:160]}")
 
 
 def _새흐름_검사(c, sse, 확인) -> None:

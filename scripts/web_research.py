@@ -18,7 +18,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
-from research_runtime import 공개조사_실패문장, 시스템오류
+from research_runtime import 공개조사_실패문장, 단계상한초과, 시스템오류
 from llm_schema import 거래유형_ENUM, 거래유형_뜻, 거래유형_문장에_있음
 from apick_mcp import ApickClient, ApickError, public_url as url_ok, strip_tracking
 
@@ -557,15 +557,19 @@ def _기본_계획호출():
     """계획 · 후보 작성 LLM 호출(두 역할 같은 모델). 모델은 `SUDDOE_RESEARCH_MODEL`, 비어 있으면 기본 모델(`SUDDOE_QWEN_MODEL`).
     2026-11-12 사용자: 경량 모델 대신 기본 모델(qwen3.7-plus)을 쓴다(비용이 작다). 기본 모델이 실패하면 llm_호출 이
     폴백 모델로 한 번 더 보낸다. `SUDDOE_RESEARCH_MODEL` 로 다른 모델을 지정하면 폴백하지 않는다.
-    v053: 시스템 오류(403 · 429 · 5xx · 연결 끊김 · JSON 깨짐)는 이 조사의 남은 시간(`timeout`, 조사 마감 · 서버 예산 중 짧은 쪽)까지
-    재시도한다(마감까지_재시도). 끝내 실패하면 LLM시스템오류 — research() 가 얻은 것이 없을 때만 올린다."""
+    시스템 오류(403 · 429 · 5xx · 연결 끊김 · JSON 깨짐)는 마감까지 재시도한다(마감까지_재시도, v053). 마감은 역할마다 다르다(v060):
+    - 후보 작성 · 요건 정리: 서버 예산 끝까지. 이미 읽은 본문을 정리하는 호출이라 조사 시간 상한이 지나 받은 결과도 research() 가 쓴다.
+    - 계획: 조사 시간 상한(`timeout`, 조사 상한 · 서버 예산 중 짧은 쪽)까지. 상한 뒤에 받은 계획은 새 검색 · 읽기를 시작하지 않아 쓸 곳이 없다.
+      예산이 남았는데 상한에 닿으면 LLM단계상한초과 — research() 가 조사 시간이 끝난 것으로 받는다.
+    서버 예산이 끝나 실패하면 LLM시스템오류 — research() 가 얻은 것이 없을 때만 올린다."""
     import os
     from llm_qwen import 기본_모델, llm_호출
     조사_모델 = os.environ.get("SUDDOE_RESEARCH_MODEL") or 기본_모델
 
     def 호출(prompt, schema, timeout):
+        정리 = _후보역할(schema) or _요건역할(schema)
         return llm_호출(prompt, schema, 모델=조사_모델, 재시도=0, 타임아웃=max(1, int(timeout)), 추론=False,
-                        마감까지_재시도=True, 마감초=max(1.0, float(timeout)), 단계="공개 조사")[0]
+                        마감까지_재시도=True, 마감초=None if 정리 else max(1.0, float(timeout)), 단계="공개 조사")[0]
     return 호출
 
 
@@ -721,6 +725,7 @@ def research(public_query: str | None = None, *, product_name: str | None = None
     재조사_계획, 재조사_후보 = (_재조사_계획_지시, _재조사_후보_지시) if 재조사중 else ("", "")
     계획받음 = False   # 첫 계획을 받기 전에 끝나면 조사를 못 한 것이다(URL만 받은 조사는 첫 읽기가 계획을 대신한다)
     오류끝 = False     # 계획·후보 작성·도구 처리 중 예상 밖 오류로 끝남
+    계획호출중 = False  # 계획 LLM 을 기다리는 중(이때의 단계상한초과 만 조사 시간 끝남으로 받는다, v060)
     계획수 = 0        # 계획 LLM 횟수(최대 계획최대). 후보 작성 호출과 URL만 받은 조사의 첫 읽기는 세지 않는다
 
     def 고를_수_있음(u: str) -> bool:
@@ -757,8 +762,8 @@ def research(public_query: str | None = None, *, product_name: str | None = None
             out = out[0]
         if not isinstance(out, dict):
             raise ValueError("후보 작성 형식 오류")
-        if time.monotonic() >= deadline or budget.remaining_seconds() <= 0:
-            return True, None   # 늦은 결과는 쓰지 않는다
+        if budget.remaining_seconds() <= 0:
+            return True, None   # 서버 예산이 끝난 뒤의 결과는 쓰지 않는다. 조사 시간 상한 뒤에 받은 결과는 쓴다(v060)
         못읽음 = out.get("읽지못함")
         못읽음_처리([u for u in 못읽음 if isinstance(u, str)] if isinstance(못읽음, list) else [])
         return True, _후보_고르기(out, bodies, 유형들)
@@ -778,8 +783,8 @@ def research(public_query: str | None = None, *, product_name: str | None = None
             out = out[0]
         if not isinstance(out, dict):
             raise ValueError("요건 정리 형식 오류")
-        if time.monotonic() >= deadline or budget.remaining_seconds() <= 0:
-            return True, False
+        if budget.remaining_seconds() <= 0:
+            return True, False  # 조사 시간 상한 뒤에 받은 결과는 쓴다(v060). 서버 예산이 끝났으면 쓰지 않는다
         못읽음 = out.get("읽지못함")
         못읽음_처리([u for u in 못읽음 if isinstance(u, str)] if isinstance(못읽음, list) else [])
         고름 = _요건_고르기(out, {u: b for u, b in 새본문.items() if u in bodies}, 번호들)
@@ -811,6 +816,7 @@ def research(public_query: str | None = None, *, product_name: str | None = None
             if 본문먼저:
                 plan = {"행동": "본문", "URL": [public_url]}
             else:
+                계획호출중 = True
                 plan = llm_call((_요건_계획_지시 if 요건모드 else _계획_지시 + 재조사_계획) + json.dumps({
                     "공개검색어": public_query or "", **계획자료,
                     **({"요건상태": [{"조건": k, "결과": v["결과"], "이유": v["이유"]} for k, v in 요건결과.items()]} if 요건모드 else {}),
@@ -821,6 +827,7 @@ def research(public_query: str | None = None, *, product_name: str | None = None
                     "본문판단": [{"URL": u, "제목": 제목.get(u, ""),
                                 "결과": "읽지 못함" if u in 읽기실패 else 판단.get(u, "읽음")}
                                for u in urls if u in bodies or u in 읽기실패]}, ensure_ascii=False), 스키마, remaining)
+                계획호출중 = False
                 계획수 += 1
             if isinstance(plan, tuple):
                 plan = plan[0]
@@ -995,8 +1002,15 @@ def research(public_query: str | None = None, *, product_name: str | None = None
                         판단.setdefault(u, _맞지않음)
             if stop:
                 break
-        except 시스템오류:
-            # LLM · DB 시스템 오류가 이 조사의 마감까지 이어졌다(v053). 쓸 수 있는 결과(후보 · 확인된 요건)가 없으면 올려 호출자가
+        except 시스템오류 as e:
+            if 계획호출중 and isinstance(e, 단계상한초과):
+                # 계획 LLM 의 시스템 오류 재시도가 서버 예산보다 조사 시간 상한에 먼저 닿았다(v060). 상한 뒤에는 새 검색 · 읽기를
+                # 시작하지 않으므로 계획을 받았어도 쓸 곳이 없다: 시스템 오류가 아니라 조사 시간이 끝난 것으로 보고 얻은 만큼으로 끝낸다
+                # (②: 후보가 없으면 부족정보 · [직접 입력하기], ④-2: 못찾음 → 확인 질문). 계획을 한 번도 받지 못했으면 아래 _조사_못함 이다
+                _log.warning("공개 조사 계획 LLM 이 조사 시간 상한까지 시스템 오류 — 조사를 끝냄(서버 예산 남음 %.0f초)",
+                             budget.remaining_seconds())
+                break
+            # LLM · DB 시스템 오류가 서버 예산이 끝날 때까지 이어졌다(v053 · v060). 쓸 수 있는 결과(후보 · 확인된 요건)가 없으면 올려 호출자가
             # 다시시도로 응답한다: 읽은 본문을 정리하지 못한 채 「공개 정보에서 찾지 못함」 으로 넘기지 않는다.
             # 이미 후보 · 확인된 요건이 있으면 지금처럼 얻은 만큼으로 끝낸다(얻은 것을 버리지 않게, 기본값으로 정함)
             if not output.get("후보") and not any(v.get("결과") == "확인됨" for v in 요건결과.values()):
