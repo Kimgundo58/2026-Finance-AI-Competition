@@ -876,7 +876,7 @@ def 조사모델_검사():
 
 
 def 시스템오류_검사(body):
-    """v053: 계획 · 후보 작성 LLM 이 조사 마감까지 시스템 오류면 쓸 수 있는 결과(후보)가 없을 때 research() 가 시스템오류를 올린다.
+    """v053: 계획 · 후보 작성 LLM 이 서버 예산이 끝날 때까지 시스템 오류면 쓸 수 있는 결과(후보)가 없을 때 research() 가 시스템오류를 올린다.
     「공개 정보에서 찾지 못함」 으로 넘기지 않는다(호출자 routes_questions 가 다시시도로 응답). 형식 오류 같은 그 밖의 실패는 지금처럼 조사 못함."""
     from research_runtime import 시스템오류
     url = "https://example.com/product"
