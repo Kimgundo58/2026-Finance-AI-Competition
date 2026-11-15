@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Literal, Optional
@@ -47,9 +48,14 @@ ROOT = Path(__file__).resolve().parent.parent
 }
 
 
+# 부정 표현(아니라 · 아닌 · 아니에요 · 않고 · 대신 등). 그 앞은 「아닌 쪽」이라 낱말을 보지 않는다(「부품을 사는 게 아니라 가공을 맡기는 서비스」는 용역만, v055 Codex 리뷰 2차)
+_부정 = re.compile(r"아니|않|대신")
+
+
 def 거래유형_문장에_있음(유형: str | None, 문장: str | None) -> bool:
-    """확인 문장에 그 거래 유형의 낱말(거래유형_낱말)이 하나라도 있다. 기타 · 모르는 값은 False."""
-    return bool(문장) and any(w in 문장 for w in 거래유형_낱말.get(유형 or "", ()))
+    """확인 문장이 그 거래 유형이라고 말한다: 마지막 부정 표현 뒤에 그 유형의 낱말(거래유형_낱말)이 있다.
+    부정 표현 앞에만 있는 낱말(「사는 게 아니라」)은 세지 않는다. 기타 · 모르는 값은 False."""
+    return bool(문장) and any(w in _부정.split(문장)[-1] for w in 거래유형_낱말.get(유형 or "", ()))
 
 문장ID_PATTERN = r"^S\d{2,3}$"     # assemble_context 가 B1→B2→B3 통합 연번으로 부여한다
 
