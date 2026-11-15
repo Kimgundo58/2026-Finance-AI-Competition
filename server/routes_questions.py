@@ -26,7 +26,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from server import auth, mock_flow, response_cache, research_sessions, ontology_readiness
 from server._common import (MOCK, 답변_반영, 비목_ENUM, 클라이언트_ip, _sse, _sse응답, _워커_대기, 온톨로지_사업, 기관_비목_머리,
-                            확정비목_허용)
+                            확정비목_ENUM, 확정비목_허용)
 from server.catalog import _비목_표준화, _사업명_표준화
 from server.models import 질문요청
 from server.rate_limit import 제한
@@ -500,7 +500,7 @@ def _기존_질문(req: Request, body: 질문요청, 조사확인=None, 답키=N
     """응답: {상태: 있음|없음|바로판정|실패, 질문세트, 질문: [{id, 질문문, 이유, 선택지, 근거}], 추가입력, 용어풀이}."""
     t0 = time.time()
     body.확정비목 = _비목_표준화(body.확정비목)
-    if body.확정비목 not in 비목_ENUM and not str(body.확정비목 or "").startswith(기관_비목_머리):
+    if body.확정비목 not in 확정비목_ENUM and not str(body.확정비목 or "").startswith(기관_비목_머리):
         raise HTTPException(422, f"비목은 다음 10종 중 하나여야 합니다: {비목_ENUM}")
     try:
         body.사업명 = _사업명_표준화(body.사업명)
