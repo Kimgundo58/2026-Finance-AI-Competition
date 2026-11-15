@@ -367,8 +367,12 @@ def _조정(cur, 사업명, 입력: dict, 자료: list[str], 고름: list[dict],
         llm) -> tuple[str, str, dict]:
     """불일치 후보 중 하나를 고르는 조정 LLM 1회(추론 켬, 스트리밍). (노드, 확신, 디버그). 번호 없음 · 형식 오류는 LLM실패.
     근거: 후보와 상위 세목 · 비목(가까운 3단계)의 규정 발췌(220자 × 4) · 규범 문장(요건 · 허용 · 금지 · 한도, 후보마다 10개)
-    + 폼 원문 + 확인정보(출처 표시) + 세 변형의 결과와 이유. 번호 null 은 없다(v059)."""
-    후보2 = [표[n] for n in dict.fromkeys(g["노드"] for g in 고름 if g["노드"])]   # 코드가 뺀 기관 노드 표(v054)는 후보가 아니다
+    + 폼 원문 + 확인정보(출처 표시) + 세 변형의 결과와 이유. 번호 null 은 없다(v059).
+    후보 = 변형이 고른 노드 + 그 노드가 속한 비목 노드(「(비목 전체)」, 후보 목록에 있을 때). 고른 세목 · 품목이 모두 이 지출을
+    덮지 않을 때 고를 비목 자리를 늘 남긴다(v059 Codex 리뷰: null 이 없으니 맞지 않는 세목 · 품목을 억지로 고르지 않게)."""
+    고른 = list(dict.fromkeys(g["노드"] for g in 고름 if g["노드"]))     # 코드가 뺀 기관 노드 표(v054)는 후보가 아니다
+    비목들 = [n for n in dict.fromkeys((경로.get(x) or {}).get("비목_노드") for x in 고른) if n in 표 and n not in 고른]
+    후보2 = [표[n] for n in 고른 + 비목들]
     상위 = {c["id"]: [c["id"], *ontology_lookup.상위_노드(cur, 사업명, c["id"])][:3] for c in 후보2}
     모두 = sorted({x for v in 상위.values() for x in v})
     발췌 = ontology_lookup.규정_발췌(cur, 사업명, 모두, 최대=4, 글자=220)
@@ -540,8 +544,10 @@ def 분류(cur, 사업명: str | None, 입력: dict, 레이블: list[dict], 확�
                 디버그["거래유형질문"] = 거래유형질문
             else:
                 try:
-                    노드, 확신, 디버그["조정"] = _조정(cur, 사업명, 입력, 자료, 고름, 표, {n: 경로_찾기(n) for n in 표 if n in
-                                                                          {g["노드"] for g in 고름}}, 확인거래유형, llm)
+                    고른노드 = {g["노드"] for g in 고름 if g["노드"]}
+                    비목노드 = {(경로_찾기(n) or {}).get("비목_노드") for n in 고른노드} & set(표)
+                    노드, 확신, 디버그["조정"] = _조정(cur, 사업명, 입력, 자료, 고름, 표,
+                                                {n: 경로_찾기(n) for n in 고른노드 | 비목노드}, 확인거래유형, llm)
                     방법 = "조정"
                 except (LLM실패, AttributeError, TypeError, ValueError) as e:
                     _log.warning("분류 조정 LLM 실패: %s", type(e).__name__)
