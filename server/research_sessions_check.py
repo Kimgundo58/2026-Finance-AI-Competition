@@ -307,6 +307,13 @@ def 시스템오류_검사(client, norm):
                 assert not 세션.시스템오류
                 세션.질문결과 = None                   # 다음 가지가 저장된 결과를 받지 않고 다시 돌게 한다
 
+    # 옛 JSON 경로(확정비목 · 조사 세션 없음)도 상태 실패(= 질문 없이 판정)가 아니라 분류없음 · 다시시도
+    def 늘장애(*a, **k):
+        raise 장애('확인 질문 LLM')
+    with patch.object(routes_questions, '_기존_질문', 늘장애):
+        r = client.post('/api/questions', json={'사업명': '예비창업패키지', '확정비목': '여비', '품목': 'API', '금액': 100, '용도': '개발'}).json()
+    assert r['상태'] == '분류없음' and r['다음행동'] == '다시시도' and r['분류안내'] == routes_questions.질문실패_안내 and r['질문세트'] is None, r
+
     # ⑤ 질문세트 저장: 연결 끊김은 다시 써서(UPSERT) 질문을 낸다, 다시 써도 안 되면 다시 시도(질문 없이 판정으로 넘기지 않는다)
     from server.models import 질문요청
     import question_generate

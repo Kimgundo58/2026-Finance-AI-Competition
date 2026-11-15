@@ -59,7 +59,8 @@ def questions(req: Request, body: 질문요청):
             return _기존_질문(req, body)
         except 시스템오류 as e:
             _log.warning('확인 질문 시스템 오류: 단계=%s 시도=%s', e.단계, e.시도)
-            return {**_실패_응답, '분류안내': 질문실패_안내, '다음행동': '다시시도'}
+            # 상태 실패 는 「질문 없이 판정」 으로 읽히므로 새 화면과 같은 분류없음 · 다시시도로 답한다(조사 세션 없음)
+            return _다시시도_응답(None, None, 질문실패_안내)
     org, account = auth.검증된_org(req), auth.검증된_account(req)
     조사ID = body.조사ID or research_sessions.생성(org, account)
     세션 = research_sessions.조회(조사ID, org, account)
