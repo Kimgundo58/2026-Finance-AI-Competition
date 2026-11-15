@@ -1001,6 +1001,11 @@ def 거래유형_전달_검사(client, norm):
     assert research_sessions.확인_거래유형({'확인한정보': [행()], '품목설명': '사실은 장비를 한 달 빌리는 거예요'}) is None
     assert research_sessions.확인_거래유형({'확인한정보': [행(), 행(id='r1', 답='직접입력', 정정='한 달 대여예요')]}) is None
     assert research_sessions.확인_거래유형({'확인한정보': [행(), 행(id='s1', 유형='판매자', 답='직접입력', 정정='나라정밀')]}) == '용역'
+    # 거래 유형 확인 카드(v056)의 답은 앞의 정정보다 먼저다. 카드 문장은 코드가 써 품목 이름 낱말을 보지 않는다
+    카드 = 행(id='c1', 종류='거래유형', 거래유형='임차', 확인문장='「렌탈 장비 구매」은(는) 물건이나 공간을 빌려 쓰는 거래예요')
+    assert research_sessions.확인_거래유형({'확인한정보': [행(답='직접입력', 정정='빌리는 거예요'), 카드]}) == '임차'
+    assert research_sessions.확인_거래유형({'확인한정보': [카드, {**카드, 'id': 'c2', '거래유형': '구매'}]}) is None
+    assert research_sessions.확인_거래유형({'확인한정보': [{**카드, '거래유형': '기타'}]}) is None
     # 확인된 거래 유형이 있으면 별칭 정확 일치로 끝내지 않고 LLM 이 거래 유형과 함께 고른다(v055 Codex 리뷰)
     부름 = []
     with patch.object(ontology_lookup, '후보_정리', lambda *a: ([{'id': 'n1', '정식명': '노트북', '별칭': [], '비목': ['재료비']}], [])), \
@@ -1108,7 +1113,7 @@ def 앙상블_분류_검사():
     import re
     import item_classify
     import ontology_lookup
-    from llm_qwen import LLM실패
+    from llm_qwen import LLM실패, LLM시스템오류
     from llm_schema import 거래유형_문장에_있음
     외주 = {'id': 'n1', '정식명': '외주가공비', '별칭': [], '비목': ['외주용역비']}
     재료 = {'id': 'n2', '정식명': '시제품 재료', '별칭': [], '비목': ['재료비']}
@@ -1163,6 +1168,7 @@ def 앙상블_분류_검사():
         assert r['방법'] == '조정' and r['분류']['비목'] == '재료비' and r['디버그']['불일치'] == '경로' and len(조정) == 1, r
         _, p, 스키마, k = 조정[0]
         assert k['추론'] is True and k['스트림'] is True and k['타임아웃'] == item_classify.조정_제한초, k
+        assert k['마감초'] == item_classify.조정_제한초 and k['청크_대기초'] == item_classify.조정_청크대기초, k   # v053: 재시도 마감
         # 세션 예산 안에서는 ④-2 몫(120초)을 남긴 만큼만, 모자라도 30초(Codex 리뷰)
         import research_runtime
         for 남음, 기대 in ((400, item_classify.조정_제한초), (200, 80), (100, item_classify.조정_최소초)):
@@ -1211,6 +1217,21 @@ def 앙상블_분류_검사():
         계획.update(A=LLM실패('a'), B=LLM실패('b'), C=LLM실패('c'))
         r = 분류()
         assert r['분류'] is None and r['디버그']['LLM실패'] == 'LLM실패', r
+        # 차. 시스템 오류(v053: 마감까지 재시도해도 실패)는 변형 · 조정 어디서 나도 잡지 않고 올린다. 조정이 실패하면 변형 결과로
+        # 분류를 고르지 않는다(routes_questions._분류 가 다시시도로 응답, 거래유형_질문_검사 에서 화면 경로로 확인)
+        for 어디 in ('A', '조정'):
+            계획.update(A=('외주가공비', '용역'), B=('외주가공비', '용역'), C=('시제품 재료', '용역'), 조정=('외주가공비', '용역'))
+            계획[어디] = LLM시스템오류('분류 LLM', '마감(403)', 3)
+            try:
+                분류()
+                raise AssertionError(f'{어디} 시스템 오류를 삼켰다')
+            except LLM시스템오류:
+                pass
+    # 운영 호출은 한 곳(_운영_llm)에서 마감까지 재시도(v053)로 보낸다
+    받음 = []
+    with patch.object(item_classify, 'llm_호출', lambda p, s, **k: 받음.append(k) or ({}, {})):
+        item_classify._운영_llm('p', {}, 타임아웃=5, 마감초=3.0)
+    assert 받음 == [{'마감까지_재시도': True, '단계': '분류', '타임아웃': 5, '마감초': 3.0}], 받음
     # 거래 유형 확인 카드 후보: 거래 유형마다 한 문장(낱말 검사를 통과), 출처 없음, 종류 거래유형
     후보 = item_classify.거래유형_질문_후보('프로토랩 CNC 가공', ['용역', '구매', '임차', '구독', '기타', '없는값'])
     assert [c['거래유형'] for c in 후보] == ['용역', '구매', '임차', '구독'], 후보
@@ -1230,6 +1251,7 @@ def 거래유형_질문_검사(client, norm):
     import ontology_research_plan
     from _lib import db
     from server import routes_questions
+    from llm_qwen import LLM시스템오류
     상태 = {'② 유형': '기타', '모드': '거래유형'}
 
     def research(공개검색어, **k):
@@ -1243,6 +1265,8 @@ def 거래유형_질문_검사(client, norm):
 
     def 가짜llm(prompt, schema, **k):
         조정 = '<분류기록>' in prompt
+        if 조정 and 상태.get('조정실패'):
+            raise LLM시스템오류('분류 LLM', '마감(403)', 4)
         C = not 조정 and '가나정밀' not in prompt.split('<확인한정보>\n')[1].split('</확인한정보>')[0]
         기록.append(('조정' if 조정 else 'C' if C else 'AB', prompt))
         이름, 유형 = '외주가공비', '용역'
@@ -1251,12 +1275,8 @@ def 거래유형_질문_검사(client, norm):
         번호 = 'N' + re.search(r'N(\d+) [|] ' + 이름, prompt).group(1)
         return {'거래유형': 유형, '거래유형이같은후보': [], '번호': 번호, '확신': '유사', '이유': f'{번호} 이 맞다', '필요정보': []}, {}
 
-    class 연결:
-        def __enter__(self):
-            return types.SimpleNamespace(cursor=lambda: None)
-
-        def __exit__(self, *a):
-            return False
+    def 연결():                     # db.연결 이 여는 autocommit 연결 자리(v053)
+        return types.SimpleNamespace(cursor=lambda: None, closed=False, close=lambda: None)
     후보 = [{'id': 'n1', '정식명': '외주가공비', '별칭': [], '비목': ['외주용역비']},
           {'id': 'n2', '정식명': '시제품 재료', '별칭': [], '비목': ['재료비']}]
     경로 = {'n1': {'비목': '외주용역비', '세목': None, '표시문': '외주용역비', '다른경로': []},
@@ -1322,6 +1342,14 @@ def 거래유형_질문_검사(client, norm):
         문장들 = [e['문장'] for e in ev['진행']]
         assert item_classify.조정_시작문장 in 문장들 and item_classify.조정_끝문장 in 문장들, 문장들
         assert ev['완료'][0]['분류']['비목'] == '외주용역비' and not any(re.search(r'N\d', x) for x in 문장들), ev['완료'][0]
+        # 가지 5. 조정 LLM 이 시스템 오류로 끝내 실패하면(v053 마감까지 재시도 뒤) 변형 결과로 분류를 고르지 않고 다시시도
+        상태['조정실패'] = True
+        token, 둘째 = 시작()
+        기록.clear()
+        여섯 = client.post('/api/questions', json=둘째).json()
+        assert 여섯['상태'] == '분류없음' and 여섯['다음행동'] == '다시시도' and 여섯.get('분류') is None, 여섯
+        assert 여섯['질문'] == [] and len(기록) == 3, 여섯
+        상태['조정실패'] = False
 
 
 if __name__ == '__main__':

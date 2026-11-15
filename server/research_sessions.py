@@ -181,9 +181,16 @@ def 확인_거래유형(조사확인) -> str | None:
     확인 문장에 그 거래 유형의 낱말이 없으면 세지 않는다(llm_schema.거래유형_문장에_있음). 맞아요 한 후보끼리 값이 다르면 None.
     사용자가 품목을 직접 설명했으면(품목설명, 또는 품목 설명 후보에 [직접 입력하기] 정정) None: 그 설명이 앞의 확인을 고칠 수 있으므로
     확인된 거래 유형으로 고정하지 않고 분류 LLM 이 설명을 읽고 정한다(v055 Codex 리뷰 4차).
+    거래 유형 확인 카드(v056, 재조사 후보 종류 거래유형)에서 고른 답이 있으면 그 값이 먼저다: 카드는 ② 확인 · 정정보다 뒤에, 거래 유형만 묻는
+    질문이고 문장은 코드가 쓴다(품목 이름에 다른 거래 유형 낱말이 있어도 낱말 검사를 하지 않는다). 카드 뒤 설명은 기본값으로 정함: 카드 답 유지.
     소비처: routes_questions._분류 → item_classify.분류(확인거래유형=…)."""
     from llm_schema import 거래유형_ENUM, 거래유형_문장에_있음
     조사확인 = 조사확인 or {}
+    카드 = {x.get('거래유형') for x in 조사확인.get('확인한정보') or []
+          if isinstance(x, dict) and x.get('종류') == '거래유형' and x.get('답') == '맞아요'
+          and x.get('거래유형') in 거래유형_ENUM and x.get('거래유형') != '기타'}
+    if 카드:
+        return next(iter(카드)) if len(카드) == 1 else None
     if (조사확인.get('품목설명') or '').strip() or any(
             isinstance(x, dict) and x.get('유형') == '제품성격' and (x.get('정정') or '').strip()
             for x in 조사확인.get('확인한정보') or []):
