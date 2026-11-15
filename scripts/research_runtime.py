@@ -100,7 +100,9 @@ class Budget:
         """남은 시간 · LLM 호출 수가 적어도 이만큼 되게 상한을 늘린다(줄이지 않는다). 쓴 값과 세션 상태(ontology_state 등)는 그대로다.
         /api/judge 가 시작할 때 부른다(routes_judge, 사용자 2026-11-15: 판정이 시간 때문에 실패하지 않게 충분히 늘린다)."""
         with self._lock:
-            self._seconds += max(0.0, seconds - self._remaining())
+            # 이미 상한을 넘긴 세션도 지금부터 `seconds` 가 남게 한다(_remaining 은 0 에서 잘리므로 경과 시간으로 잰다)
+            elapsed = self._elapsed + (time.monotonic() - self._started if self._started is not None else 0)
+            self._seconds = max(self._seconds, elapsed + max(0.0, seconds))
             self._llm_limit = max(self._llm_limit, self.llm_used + max(0, llm))
 
     def request(self) -> "RequestBudget":

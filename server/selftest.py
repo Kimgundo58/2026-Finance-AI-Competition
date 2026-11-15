@@ -312,6 +312,11 @@ def main() -> int:
     늘림.ensure_remaining(seconds=600, llm=40)
     확인("판정 요청 예산: 남은 시간 · LLM 횟수를 600초 · 40회 이상으로 늘린다(줄이지 않는다)",
          늘림.remaining_seconds() >= 599 and sum(늘림.reserve_llm(final=True) for _ in range(41)) == 40)
+    지남 = _예산모듈.Budget(seconds=300, llm=3)
+    지남._elapsed = 500.0          # 앞 단계가 상한(300초)을 넘겨 끝난 세션
+    지남.ensure_remaining(seconds=600, llm=40)
+    확인("판정 요청 예산: 이미 상한을 넘긴 세션도 지금부터 600초가 남는다",
+         지남.remaining_seconds() >= 599, f"{지남.remaining_seconds():.0f}초")
     _판정_재시도_검사(확인)
 
     # mock_판정 은 인용 키를 직접 갖고 있어 위 검사로는 live 경로가 판정 파이프라인의 키 이름
