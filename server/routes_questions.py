@@ -30,6 +30,7 @@ from server._common import (MOCK, 답변_반영, 비목_ENUM, 클라이언트_ip
 from server.catalog import _비목_표준화, _사업명_표준화
 from server.models import 질문요청
 from server.rate_limit import 제한
+import research_runtime
 from research_runtime import 시스템오류
 
 _log = logging.getLogger("uvicorn.error")
@@ -289,9 +290,9 @@ _분류실패_안내 = "지금은 분류를 확인하지 못했어요. 잠시 �
 # v053: ② 품목 조사 · ④-2 · ⑤ 확인 질문이 시스템 오류로 끝났을 때의 안내(다음행동 다시시도와 함께 분류안내 칸에 낸다)
 품목조사실패_안내 = "지금은 품목 정보를 확인하지 못했어요. 잠시 후 다시 시도해 주세요."
 질문실패_안내 = "지금은 확인할 내용을 정리하지 못했어요. 잠시 후 다시 시도해 주세요."
-# 시스템 오류로 끝난 세션의 다시 시도 요청이 새로 받는 예산(research_runtime.Budget 기본값과 같은 몫: 300초 · LLM 100 · 도구 60).
+# 시스템 오류로 끝난 세션의 다시 시도 요청이 새로 받는 예산(research_runtime.Budget 기본값과 같은 몫: 600초 · LLM 200 · 도구 60, v061).
 # 앞 요청이 예산을 다 써서 끝났으면 늘리지 않으면 다시 시도도 바로 같은 실패로 끝난다
-_다시시도_예산 = {"seconds": 300, "llm": 100, "tools": 60}
+_다시시도_예산 = {"seconds": research_runtime.세션_예산초, "llm": research_runtime.세션_LLM, "tools": research_runtime.세션_도구}
 
 
 def _다시시도_응답(조사ID: str | None, 조사: dict | None, 안내: str) -> dict:

@@ -771,7 +771,8 @@ def 재조사_실제경로_검사(client, norm):
         # 가지 6. 시간 부족(④-2 몫을 남길 수 없음) → 재조사 없이 설명입력, 재조사는 「했음」 으로 남는다
         token, 둘째 = 시작()
         n = len(조사호출)
-        with patch.object(routes_questions, '재조사_남길초', 290):
+        import research_runtime         # 세션 예산(세션_예산초)에서 10초만 남기면 재조사 최소 시간이 안 된다
+        with patch.object(routes_questions, '재조사_남길초', research_runtime.세션_예산초 - 10):
             ev = sse(client.post('/api/questions', json=둘째, headers=SSE))
         r = ev['완료'][0]
         assert r['다음행동'] == '설명입력' and len(조사호출) == n, r
@@ -1225,12 +1226,8 @@ def 앙상블_분류_검사():
         assert r['방법'] == '조정' and r['분류']['비목'] == '재료비' and r['디버그']['불일치'] == '경로' and len(조정) == 1, r
         _, p, 스키마, k = 조정[0]
         assert k['추론'] is True and k['스트림'] is True and k['타임아웃'] == item_classify.조정_제한초, k
-        assert k['마감초'] == item_classify.조정_제한초 and k['청크_대기초'] == item_classify.조정_청크대기초, k   # v053: 재시도 마감
-        # 세션 예산 안에서는 ④-2 몫(120초)을 남긴 만큼만, 모자라도 30초(Codex 리뷰)
-        import research_runtime
-        for 남음, 기대 in ((400, item_classify.조정_제한초), (200, 80), (100, item_classify.조정_최소초)):
-            with research_runtime.activate(research_runtime.Budget(seconds=남음, llm=10)):
-                assert abs(item_classify.조정_시간() - 기대) < 2, (남음, item_classify.조정_시간())
+        # v061: 단계 시간 상한(마감초)을 넘기지 않는다 — 시스템 오류 재시도 · 스트리밍 대기는 세션 예산까지(예산 없는 호출만 타임아웃 150초)
+        assert '마감초' not in k and k['청크_대기초'] == item_classify.조정_청크대기초, k
         assert '발췌-n1-위' in p and '[허용] 규범-n2' in p and '변형 C' in p and '[사용자 확인] 공개 확인문장' in p, p
         assert None not in (스키마['properties']['번호'].get('enum') or [None]) and '10. 어느 후보' not in p, 스키마
         assert r['디버그']['조정']['후보'] == ['외주가공비', '시제품 재료'], r['디버그']['조정']

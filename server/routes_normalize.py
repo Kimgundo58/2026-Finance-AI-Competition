@@ -83,15 +83,21 @@ def normalize(req: Request, body: 정규화요청):
         yield _sse("진행", {"단계": "정규화", "상태": "진행중", "문장": "입력에서 지출 정보를 추출하고 있어요." if not MOCK else "연결 확인용 분석 결과를 준비하고 있어요.", "설명": "입력 분석"})
         import research_runtime
 
+        # 세션 예산을 나눠 쓰되 취소는 이 요청에만 건다(질문 · 판정과 같은 RequestBudget, v061): 연결이 끊기면 아래 finally 가
+        # 취소해 워커가 세션 예산(600초) 끝까지 LLM 재시도를 이어가지 않는다
+        요청예산 = (조사세션.budget if 조사세션 else research_runtime.Budget()).request()
+        끝남 = False
+
         def 정리():
-            with research_runtime.activate(조사세션.budget if 조사세션 else research_runtime.Budget()):
+            with research_runtime.activate(요청예산):
                 return (mock_flow.정규화(body), False) if MOCK else _live_정규화(body)
-        # v053: 시스템 오류 재시도로 정리가 길어질 수 있다(예산 300초). 워커 스레드에서 돌리고 12초마다 keep-alive 를 보내
+        # v053: 시스템 오류 재시도로 정리가 길어질 수 있다(세션 예산 600초). 워커 스레드에서 돌리고 12초마다 keep-alive 를 보내
         # 프록시 · 브라우저가 무응답 연결을 끊지 않게 한다(질문 · 판정과 같은 방식)
         ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         try:
             future = ex.submit(contextvars.copy_context().run, 정리)
             yield from _워커_대기(future, queue.Queue(), 12)
+            끝남 = True
             out, 실패 = future.result()
         except 시스템오류 as e:
             # 예산이 끝날 때까지 시스템 오류였다. 저장하지 않고 다시 시도 안내를 낸다
@@ -105,6 +111,8 @@ def normalize(req: Request, body: 정규화요청):
             yield _sse("완료", {"실패": True})
             return
         finally:
+            if not 끝남:
+                요청예산.cancel()
             ex.shutdown(wait=False)
         out.setdefault("질문원문", _합성_질문(body))
         # 거래처: 한 문장에 적혀 있을 때만 값(스펙 8-1). live 는 질의변환 LLM 이 뽑고 입력 글에 그대로 있는 이름만 남긴다
