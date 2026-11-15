@@ -319,6 +319,7 @@ def main() -> int:
          지남.remaining_seconds() >= 599, f"{지남.remaining_seconds():.0f}초")
     _판정_재시도_검사(확인)
     _판정_시스템오류_검사(확인, sse)
+    _마지막검토_검사(확인, c)
 
     # mock_판정 은 인용 키를 직접 갖고 있어 위 검사로는 live 경로가 판정 파이프라인의 키 이름
     # (인용목록·전제목록)을 읽는지 알 수 없다. 가짜 orchestrate 로 교체해 _live_판정 을 직접 부른다.
@@ -960,6 +961,285 @@ def _판정_재시도_검사(확인) -> None:
         llm_qwen._client_얻기, llm_qwen._마감재시도_백오프초 = 원래
 
 
+def _sse_이벤트(텍스트: str) -> dict:
+    evts: dict = {}
+    이름 = None
+    for 줄 in 텍스트.splitlines():
+        if 줄.startswith("event: "):
+            이름 = 줄[7:]
+        elif 줄.startswith("data: ") and 이름:
+            evts.setdefault(이름, []).append(json.loads(줄[6:]))
+    return evts
+
+
+def _마지막검토_검사(확인, c) -> None:
+    """v062 마지막 교차 검토 지적(X1~X4 · C1~C4)을 가짜 LLM · 가짜 DB · 닿지 않는 DSN 으로 본다. 네트워크 · API 키 · 운영 DB 는 쓰지 않는다.
+
+    X1 판정 재요청 중 시스템 오류 → 판정실패(확인 필요 저장 없음) · X2 같은 멱등 키 동시 저장 → 행 1개 ·
+    X3 판정 버전 조회 DB 장애 → 판정실패 SSE(400 아님) · X4 남은 시간 < 백오프면 줄여서 한 번 더 ·
+    C1 LLM 요청 오류 → 판정실패원인 요청오류 · C2 질문 데이터 버전 해시 장애 → 시스템오류(질문 없이 판정 아님) ·
+    C3 질문 · 정리 요청 앞 DB 장애 → 다시 시도 안내 · C4 재시도가 LLM 호출 수 상한에 막히지 않는다"""
+    import threading
+    import time
+    from collections import defaultdict
+    from contextlib import contextmanager
+    from types import SimpleNamespace as NS
+    from unittest.mock import patch
+
+    import httpx
+    import openai
+    import psycopg
+
+    import llm_qwen
+    import orchestrate
+    import research_runtime
+    from llm_qwen import LLM시스템오류
+    from server import _common, auth, ontology_readiness, research_sessions, response_cache, routes_judge, routes_normalize, routes_questions
+    from server.judge_response import 파이프라인결과_매핑, 판정실패_요약_요청오류
+    from server.models import 판정요청, 질문요청
+
+    print("\n[v062 마지막 검토 — 시스템 오류 전파 · 멱등 저장 직렬화 · 요청 앞 DB 재시도 · 마감 직전 재시도 · 요청 오류 안내]")
+    db = orchestrate.db
+    org1 = "00000000-0000-0000-0000-000000000001"
+
+    def 상태_만들기():
+        return orchestrate._판정상태(질문="노션 플러스 1개월", 사업명="모두의 창업 프로젝트", org_id=org1,
+                                  account_id=None, plan_id=None, 기록=False, dry=False, 주입=None, 참조확장_사용=True)
+    본문 = 판정요청(정규화={"품목": "노션", "금액": 10000, "용도": "협업"}, 확정비목="지급수수료", 사업명="모두의 창업 프로젝트")
+
+    # X1 재요청 중 시스템 오류
+    호출: list = []
+    잘못 = {"판정": "가능", "요약": "쓸 수 있어요.", "인용": ["S99"], "전제": [], "해야할일": []}
+
+    def 두번째에_장애(프롬프트, 스키마, **k):
+        호출.append(프롬프트)
+        if len(호출) == 1:
+            return dict(잘못), {"모델": "가짜", "시도": 1}
+        raise LLM시스템오류("판정 LLM", "마감(403)", 9)
+    상태 = 상태_만들기()
+    상태.문장맵, 상태.프롬프트 = {"S01": ("article", 1, None)}, "판정 프롬프트"
+    with patch.object(orchestrate, "llm_호출", 두번째에_장애):
+        결과 = orchestrate._판정호출(상태)
+    매핑 = 파이프라인결과_매핑(결과 or {}, 본문)
+    확인("X1 인용 재요청이 시스템 오류로 끝나면 앞 출력으로 검증하지 않고 판정실패(실패단계 판정호출 · 문의 초안 · 판정 행 없음)",
+         isinstance(결과, dict) and 결과.get("실패단계") == "판정호출" and len(호출) == 2
+         and 매핑.get("판정실패") is True and "문의초안" not in 매핑 and "decision_id" not in 결과, str(결과 and 결과.get("실패단계")))
+
+    # X2 같은 멱등 키 두 요청이 동시에 저장
+    행들: list = []
+    표 = threading.Lock()
+    잠금들: dict = defaultdict(threading.Lock)
+
+    class 잠금연결:
+        """advisory lock(트랜잭션 끝에 풀림)을 흉내 내는 가짜 연결. 찾기(SELECT) 뒤 0.3초 쉬어 두 요청의 찾기가 넣기보다 먼저 끝나게 한다."""
+        def __init__(self):
+            self.잡은, self._r = [], None
+
+        @property
+        def connection(self):
+            return self
+
+        @contextmanager
+        def transaction(self):
+            try:
+                yield
+            finally:
+                while self.잡은:
+                    self.잡은.pop().release()
+
+        def execute(self, sql, 인자=None):
+            if "pg_advisory_xact_lock" in sql:
+                잠금 = 잠금들[인자[0]]
+                잠금.acquire()
+                self.잡은.append(잠금)
+            elif "멱등키" in sql:
+                with 표:
+                    self._r = next(((x["id"],) for x in 행들 if x["키"] == 인자[0]), None)
+                time.sleep(0.3)
+            return self
+
+        def fetchone(self):
+            return self._r
+
+    def 가짜_저장(cur, 행):
+        with 표:
+            행들.append({"id": len(행들) + 1, "키": json.loads(행["모델"])["멱등키"]})
+            return len(행들)
+
+    def 저장요청():
+        상태 = 상태_만들기()
+        상태.멱등키, 상태.cur = "a" * 32, 잠금연결()
+        orchestrate._판정행_저장(상태, {"판정": "가능", "요약": "x", "모델": {}})
+    with patch.object(orchestrate, "decisions_저장", 가짜_저장), patch.object(orchestrate, "decisions_갱신", lambda *a: None), \
+         patch.object(orchestrate, "_코퍼스버전_캐시", "d/c"):
+        스레드 = [threading.Thread(target=저장요청) for _ in range(2)]
+        [t.start() for t in 스레드]
+        [t.join(10) for t in 스레드]
+    확인("X2 같은 멱등 키로 두 요청이 동시에 저장해도 판정 행은 1개(멱등 키 advisory lock 으로 찾기 · 넣기 직렬화)",
+         len(행들) == 1, f"행 {len(행들)}개")
+
+    # X3 조사 세션 판정의 버전 조회 DB 장애
+    가짜세션 = NS(lock=threading.Lock(), 분류={}, 노드결정=None, 판정요청키=None, 판정결과=None)
+    판정본문 = {"정규화": {"품목": "노션", "금액": 10000, "용도": "협업"}, "확정비목": "지급수수료",
+            "사업명": "모두의 창업 프로젝트", "조사ID": "r1", "질문세트": "q1"}
+    공통패치 = (patch.object(routes_judge, "MOCK", False), patch.object(response_cache, "MOCK", False),
+            patch.object(auth, "검증된_org", return_value=org1), patch.object(auth, "검증된_account", return_value=None),
+            patch.object(ontology_readiness, "확인", return_value=None),
+            patch.object(research_sessions, "조회", return_value=가짜세션),
+            patch.object(routes_judge, "_판정전_DB마감초", 1.0), patch.object(db, "_재시도_백오프초", (0.2,)))
+    with 공통패치[0], 공통패치[1], 공통패치[2], 공통패치[3], 공통패치[4], 공통패치[5], 공통패치[6], 공통패치[7], \
+         patch.object(_common, "DSN", "postgresql://u@127.0.0.1:1/x"):
+        response_cache._데이터버전_해시_조회.무효화()
+        r = c.post("/api/judge", json=판정본문)
+    e = _sse_이벤트(r.text) if r.status_code == 200 else {}
+    확인("X3 조사 세션 판정에서 버전 해시를 DB 장애로 못 읽으면 다시 읽은 뒤 판정실패 SSE(「다시 점검」), 400 아님 · 세션 잠금 풀림",
+         r.status_code == 200 and (e.get("판정") or [{}])[0].get("판정실패") is True and "문의초안" not in e
+         and not 가짜세션.lock.locked(), f"HTTP {r.status_code} {r.text[:80]}")
+    with 공통패치[0], 공통패치[1], 공통패치[2], 공통패치[3], 공통패치[4], 공통패치[5], 공통패치[6], 공통패치[7], \
+         patch.object(response_cache, "버전_엄격조회", return_value=("v1", "h1"), create=True), \
+         patch.object(research_sessions, "답변_검증", side_effect=ValueError("입력 변경")):
+        r = c.post("/api/judge", json=판정본문)
+    확인("X3 진짜 입력 · 버전 불일치는 지금처럼 HTTP 400", r.status_code == 400 and not 가짜세션.lock.locked(), f"HTTP {r.status_code}")
+    response_cache._데이터버전_해시_조회.무효화()
+
+    # X4 남은 시간이 다음 백오프보다 짧을 때
+    시도: list = []
+
+    def 한번끊김():
+        시도.append(time.monotonic())
+        if len(시도) == 1:
+            raise psycopg.OperationalError("server closed the connection unexpectedly")
+        return "ok"
+    with patch.object(db, "_재시도_백오프초", (8.0,)):
+        try:
+            값 = db.재시도(한번끊김, 단계="검사", 마감초=1.5)
+        except db.DB시스템오류:
+            값 = None
+    확인("X4 DB: 남은 1.5초 < 백오프 8초여도 대기를 줄여 마감 전에 한 번 더 한다",
+         값 == "ok" and len(시도) == 2 and 시도[1] - 시도[0] < 1.5, f"시도 {len(시도)}번")
+    시도.clear()
+
+    def 늘끊김():
+        시도.append(time.monotonic())
+        raise psycopg.OperationalError("down")
+    t0 = time.monotonic()
+    with patch.object(db, "_재시도_백오프초", (8.0,)):
+        try:
+            db.재시도(늘끊김, 단계="검사", 마감초=1.5)
+            끝 = False
+        except db.DB시스템오류:
+            끝 = True
+    확인("X4 DB: 끝내 끊기면 실제 마감(여유 0.1초 이하)에서 DB시스템오류",
+         끝 and 1.3 <= time.monotonic() - t0 < 1.7 and 2 <= len(시도) <= 3,
+         f"{time.monotonic() - t0:.2f}초 · 시도 {len(시도)}번")
+
+    # 가짜 LLM 클라이언트(비스트리밍, 403 차례 뒤 성공)
+    def _오류(코드, 글):
+        응답 = httpx.Response(코드, request=httpx.Request("POST", "http://gateway.invalid/v1/chat/completions"))
+        종류 = openai.PermissionDeniedError if 코드 == 403 else openai.BadRequestError
+        return 종류(글, response=응답, body=None)
+
+    class 가짜클라이언트:
+        def __init__(self, 차례):
+            self.차례, self.보냄 = list(차례), 0
+            self.chat = NS(completions=NS(create=self._create))
+
+        def _create(self, **kw):
+            self.보냄 += 1
+            다음 = self.차례.pop(0) if self.차례 else "성공"
+            if 다음 in ("403", "400"):
+                raise _오류(int(다음), "denied")
+            return NS(choices=[NS(message=NS(content='{"판정": "불가"}', reasoning_content=None, model_extra={}),
+                                  finish_reason="stop")], usage=None)
+    원래 = llm_qwen._client_얻기
+    try:
+        가짜 = 가짜클라이언트(["403"])
+        llm_qwen._client_얻기 = lambda c=가짜: c
+        with patch.object(llm_qwen, "_마감재시도_백오프초", (8.0,)), \
+             research_runtime.activate(research_runtime.Budget(seconds=3)):
+            try:
+                출력, 메타 = llm_qwen.llm_호출("p", {"type": "object"}, 타임아웃=5, 폴백=False, 마감까지_재시도=True, 단계="검사")
+            except LLM시스템오류:
+                출력, 메타 = None, {}
+        확인("X4 LLM: 남은 3초 < 백오프 8초여도 대기를 줄여 마감 전에 한 번 더 보낸다",
+             출력 == {"판정": "불가"} and 메타.get("시도") == 2, f"보냄 {가짜.보냄}")
+
+        # C4 재시도는 LLM 호출 수 상한에 막히지 않는다(시간이 상한)
+        가짜 = 가짜클라이언트(["403"] * 4)
+        llm_qwen._client_얻기 = lambda c=가짜: c
+        with patch.object(llm_qwen, "_마감재시도_백오프초", (0.05,)), \
+             research_runtime.activate(research_runtime.Budget(seconds=30, llm=2)) as 예산:
+            try:
+                출력, 메타 = llm_qwen.llm_호출("p", {"type": "object"}, 타임아웃=5, 폴백=False, 마감까지_재시도=True, 단계="검사")
+            except LLM시스템오류:
+                출력, 메타 = None, {}
+            쓴 = 예산.llm_used
+        확인("C4 시간이 남으면 403 재시도가 LLM 호출 수 상한(2)에 막히지 않는다(새 호출만 센다)",
+             출력 == {"판정": "불가"} and 메타.get("시도") == 5 and 쓴 == 1, f"보냄 {가짜.보냄} · 센 호출 {쓴}")
+        예산 = research_runtime.Budget(seconds=30, llm=2)
+        try:
+            상한 = 예산.reserve_llm() and not 예산.reserve_llm() and 예산.reserve_llm(재시도=True) and 예산.llm_used == 1
+        except TypeError:
+            상한 = False
+        확인("C4 새 호출은 지금처럼 호출 수 상한을 보고, 재시도 예약은 시간만 본다(세지 않는다)", 상한)
+
+        # C1 요청 오류(400) → 판정실패원인 요청오류
+        가짜 = 가짜클라이언트(["400", "400"])
+        llm_qwen._client_얻기 = lambda c=가짜: c
+        상태 = 상태_만들기()
+        상태.문장맵, 상태.프롬프트 = {"S01": ("article", 1, None)}, "판정 프롬프트"
+        with research_runtime.activate(research_runtime.Budget(seconds=30)):
+            결과 = orchestrate._판정호출(상태)
+        매핑 = 파이프라인결과_매핑(결과 or {}, 본문)
+        이벤트 = _sse_이벤트("".join(routes_judge._판정_이벤트(매핑)))
+        확인("C1 다시 보내도 같은 요청 오류(400)는 판정실패 · 저장 없음이되 판정실패원인 요청오류와 다른 안내 문장",
+             매핑.get("판정실패") is True and 매핑.get("판정실패원인") == "요청오류" and 매핑["요약"] == 판정실패_요약_요청오류
+             and "문의초안" not in 매핑 and (이벤트.get("판정") or [{}])[0].get("판정실패원인") == "요청오류", str(매핑.get("요약"))[:40])
+        일시 = 파이프라인결과_매핑({"판정": "확인 필요", "요약": "x", "실패경로": True, "실패단계": "판정호출", "인용목록": []}, 본문)
+        확인("C1 일시 장애 판정실패에는 판정실패원인이 없다(지금 문장 그대로)", "판정실패원인" not in 일시 and 일시.get("판정실패") is True)
+    finally:
+        llm_qwen._client_얻기 = 원래
+
+    # C2 질문 생성 전 데이터 버전 해시 장애
+    생성: list = []
+    질문본문 = 질문요청(사업명="모두의 창업 프로젝트", 확정비목="지급수수료", 품목="노션", 금액=10000, 용도="협업")
+    with patch.object(response_cache, "요청_해시", return_value="unknown"), \
+         patch.object(response_cache, "질문세트_조회", return_value=None), \
+         patch.object(routes_questions, "_질문생성", side_effect=lambda *a, **k: 생성.append(1) or
+                      {"상태": "있음", "질문": [{"id": "q1", "질문문": "x"}], "메타": {"LLM호출": 1}}), \
+         patch.object(routes_questions, "_요청전_DB마감초", 1.0, create=True), patch.object(db, "_재시도_백오프초", (0.2,)):
+        try:
+            결과 = routes_questions._live_질문(질문본문, None, None, "127.0.0.1", time.time())
+            올림 = False
+        except research_runtime.시스템오류:
+            결과, 올림 = None, True
+    확인("C2 데이터 버전 해시를 DB 장애로 못 읽으면 질문을 만들기 전에 다시 읽고 시스템오류(상태 실패 = 질문 없이 판정 아님)",
+         올림 and not 생성, f"결과 {결과 and 결과.get('상태')} · 질문 생성 {len(생성)}번")
+
+    # C3 질문 · 정리 요청 앞 DB 장애
+    def 끊긴_준비확인(*a, **k):
+        raise psycopg.OperationalError("server closed the connection unexpectedly")
+    준비패치 = (patch.object(ontology_readiness, "확인", 끊긴_준비확인),
+            patch.object(routes_questions, "_요청전_DB마감초", 1.0, create=True),
+            patch.object(routes_normalize, "_요청전_DB마감초", 1.0, create=True), patch.object(db, "_재시도_백오프초", (0.2,)))
+    with 준비패치[0], 준비패치[1], 준비패치[2], 준비패치[3], patch.object(routes_questions, "MOCK", False):
+        r = c.post("/api/questions", json={"사업명": "모두의 창업 프로젝트", "품목": "노션", "금액": 10000, "용도": "협업"},
+                   headers={"accept": "text/event-stream"})
+        완료 = (_sse_이벤트(r.text).get("완료") or [{}])[-1] if r.status_code == 200 else {}
+        확인("C3 /api/questions 규정 준비 확인이 DB 장애면 다시 읽은 뒤 다음행동 다시시도(503 아님)",
+             r.status_code == 200 and 완료.get("다음행동") == "다시시도" and 완료.get("질문") == [], f"HTTP {r.status_code}")
+        r = c.post("/api/questions", json={"사업명": "모두의 창업 프로젝트", "확정비목": "지급수수료", "품목": "노션",
+                                           "금액": 10000, "용도": "협업"})
+        확인("C3 /api/questions 옛 JSON 경로도 준비 확인 DB 장애면 다시시도(상태 실패 = 질문 없이 판정 아님)",
+             r.status_code == 200 and r.json().get("다음행동") == "다시시도", f"HTTP {r.status_code} {r.text[:80]}")
+    with 준비패치[0], 준비패치[1], 준비패치[2], 준비패치[3], patch.object(routes_normalize, "MOCK", False):
+        r = c.post("/api/normalize", json={"질문": "노션 플러스 1개월 결제", "사업명": "모두의 창업 프로젝트",
+                                           "특수관계": {"친족거래": False, "전직임직원업체": False}})
+        오류 = (_sse_이벤트(r.text).get("오류") or [{}])[0]
+    확인("C3 /api/normalize 규정 준비 확인이 DB 장애면 다시 읽은 뒤 오류 이벤트에 다음행동 다시시도",
+         오류.get("다음행동") == "다시시도" and 오류.get("메시지") == routes_normalize.정리실패_안내, str(오류)[:80])
+
+
 def _판정_시스템오류_검사(확인, sse) -> None:
     """v053 판정 쪽 시스템 오류 재시도(지시서 2 · 4절)를 가짜 DB 연결 · 가짜 LLM 으로 본다. 네트워크 · DB · API 키는 쓰지 않는다.
 
@@ -1019,6 +1299,14 @@ def _판정_시스템오류_검사(확인, sse) -> None:
 
         def cursor(self):
             return self
+
+        @property
+        def connection(self):          # 판정 행 저장이 cur.connection.transaction() 으로 찾기 · 넣기를 묶는다(v062)
+            return self
+
+        def transaction(self):
+            from contextlib import nullcontext
+            return nullcontext()
 
         def close(self):
             self.closed = True
@@ -1527,7 +1815,7 @@ def _조정_예산까지_검사(c, 확인) -> None:
     상태 = {"조정": "늦은성공", "조정시도": 0}
     스트리밍초 = 100.0                 # 조정 추론 스트리밍이 끝나는 데 걸리는 시간(운영 첫 요청: 85초 안에 안 끝남, 다시 시도 요청 90.65초)
 
-    def 호출(client, 모델, 프롬프트, 스키마, 온도, 최대토큰, 한도, 추론, 스트림=False, *, 청크_대기초=None):
+    def 호출(client, 모델, 프롬프트, 스키마, 온도, 최대토큰, 한도, 추론, 스트림=False, *, 청크_대기초=None, 재시도=False):
         if "<분류기록>" in 프롬프트:
             상태["조정시도"] += 1
             if 상태["조정"] == "예산끝" or (상태["조정"] == "늦은성공" and 상태["조정시도"] <= 2):

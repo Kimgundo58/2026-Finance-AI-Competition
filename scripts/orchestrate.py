@@ -98,6 +98,18 @@ _시스템오류류 = (research_runtime.시스템오류, *db.재시도_오류)
 시스템오류_실패단계 = ("판정호출", "LLM", "DB", "시스템오류")
 
 
+def _요청오류_필드(e: Exception) -> dict:
+    """LLM 요청 오류(400 · 401 · 404 · 422, 다시 보내도 같은 결과: llm_qwen 이 붙이는 `요청오류`)면 응답에 실패원인을 남긴다(v062).
+    저장하지 않는 것(판정 행 · 캐시 · 문의 초안 없음)은 다른 판정실패와 같다. 화면은 「연결 불안정」 대신 다시 점검해도 같을 수 있다는
+    안내를 낸다(judge_response.판정실패_요약_요청오류 · 판정실패원인)."""
+    return {"실패원인": "요청오류"} if getattr(e, "요청오류", False) else {}
+
+
+def _요청오류_로그(e: Exception) -> str:
+    """운영 로그에서 요청 오류를 일시 장애와 가르는 표시."""
+    return "(요청 오류: 다시 보내도 같은 결과)" if getattr(e, "요청오류", False) else ""
+
+
 class 주입실패(Exception):
     """장애 주입(fault injection) 'db' 가 던지는 예외. 실제 연결 실패와 같은 경로로 처리되는지 본다."""
 
@@ -281,18 +293,22 @@ def _판정행_저장(상태: _판정상태, 응답: dict) -> int | None:
     - 같은 요청 안의 다시 시도: 끊기기 전 INSERT 가 커밋돼 있었으면 그 행을 쓴다.
     - 화면의 「다시 점검」: 화면이 같은 점검의 키를 다시 보내므로, 앞 요청이 행을 커밋한 뒤 끊겨 판정실패로 끝났어도 두 번째 행이 생기지 않는다.
     찾는 범위는 최근 하루(ix_decisions_time) · 같은 계획(plan_id) · 같은 계정이고, RLS 로 같은 기관 · 계정 행만 보인다.
-    유니크 제약이 없어 같은 키로 동시에 온 두 요청이 둘 다 못 찾으면 두 행이 생길 수 있다(docs/9_백로그.md)."""
+    - 같은 키로 동시에 온 두 요청(v062): 찾기와 넣기를 한 트랜잭션으로 묶고 첫 문장에서 멱등 키 단위 advisory lock
+      (pg_advisory_xact_lock, 커밋 · 롤백에 풀림)을 잡는다. 뒤 요청은 앞 요청이 커밋할 때까지 기다린 뒤 그 행을 찾는다.
+      유일 제약(마이그레이션)을 쓰지 않아 병합 뒤 자동 배포가 멈추지 않는다. RLS GUC 는 db.연결 이 세션 단위로 걸어 이 트랜잭션에도 그대로다."""
     def 작업(cur):
         행 = _decisions_행(상태, 응답)
-        r = cur.execute("""SELECT decision_id FROM tenant.decisions
-                            WHERE created_at > now() - interval '1 day' AND "모델"->>'멱등키' = %s
-                              AND plan_id IS NOT DISTINCT FROM %s AND account_id IS NOT DISTINCT FROM %s
-                            ORDER BY decision_id LIMIT 1""", (상태.멱등키, 행.get("plan_id"), 행.get("account_id"))).fetchone()
-        if r:
-            _log.warning("판정 행 저장: 같은 멱등 키의 행이 이미 있다(decision_id=%s) — 새로 넣지 않고 이번 결과로 바꾼다", r[0])
-            decisions_갱신(cur, r[0], 행)
-            return r[0]
-        return decisions_저장(cur, 행)
+        with cur.connection.transaction():
+            cur.execute("SELECT pg_advisory_xact_lock(hashtext('tenant.decisions 멱등키'), hashtext(%s))", (상태.멱등키,))
+            r = cur.execute("""SELECT decision_id FROM tenant.decisions
+                                WHERE created_at > now() - interval '1 day' AND "모델"->>'멱등키' = %s
+                                  AND plan_id IS NOT DISTINCT FROM %s AND account_id IS NOT DISTINCT FROM %s
+                                ORDER BY decision_id LIMIT 1""", (상태.멱등키, 행.get("plan_id"), 행.get("account_id"))).fetchone()
+            if r:
+                _log.warning("판정 행 저장: 같은 멱등 키의 행이 이미 있다(decision_id=%s) — 새로 넣지 않고 이번 결과로 바꾼다", r[0])
+                decisions_갱신(cur, r[0], 행)
+                return r[0]
+            return decisions_저장(cur, 행)
     return _DB(상태, 작업, "판정 저장")
 
 
@@ -803,9 +819,9 @@ def _판정호출(상태: _판정상태) -> dict | None:
                 상태.할일다듬기출력 = f다듬기.result() if f다듬기 else {}
     except (LLM시스템오류, LLM실패) as e:
         상태._지연기록("판정호출", t)
-        _log.error("판정 실패 — 단계=판정호출 사업=%s 사유=%s", 상태.사업명, str(e)[:300])
+        _log.error("판정 실패 — 단계=판정호출%s 사업=%s 사유=%s", _요청오류_로그(e), 상태.사업명, str(e)[:300])
         return _실패응답(상태, "판정호출", "판정 모델 호출에 실패해 결론을 내리지 않았습니다.",
-                      f"판정 호출 실패: {e}", 처리단계="+".join(상태.처리단계))
+                      f"판정 호출 실패: {e}", 처리단계="+".join(상태.처리단계), **_요청오류_필드(e))
     상태._지연기록("판정호출", t)
     return None
 
@@ -853,7 +869,9 @@ def _출력_문제(출력, 문장맵: dict) -> list[tuple[str, str]]:
 
 def _출력문제_재요청(상태: _판정상태, 스키마: dict, 조건수: int) -> tuple[Any, dict]:
     """형식 문제(`_출력_문제`)가 있으면 고칠 점을 프롬프트 끝에 붙여 판정 LLM 에 다시 받는다(최대 `판정_재요청_최대` 번, 예산 안).
-    다시 받다가 시스템 오류로 끝나면 앞 출력을 그대로 쓴다(검증 단계가 확인 필요로 둔다). 메타 `재요청` 에 코드 · 시도를 남긴다."""
+    다시 받다가 시스템 오류(예산까지 재시도한 뒤의 LLM시스템오류 등)로 끝나면 앞 출력을 쓰지 않고 그 오류를 올린다(v062).
+    _판정호출 · 판정() 이 판정실패로 응답하고 판정 행 · 캐시 · 문의 초안을 남기지 않는다(지시서 2절: 시스템 오류는 확인 필요로도 저장하지 않는다).
+    메타 `재요청` 에 코드 · 시도를 남긴다."""
     출력, 메타 = 상태.출력, 상태.판정_메타
     기록 = []
     for _ in range(판정_재요청_최대):
@@ -866,8 +884,8 @@ def _출력문제_재요청(상태: _판정상태, 스키마: dict, 조건수: i
         try:
             새출력, 새메타 = _판정_LLM(프롬프트, 스키마, 조건수)
         except research_runtime.시스템오류 as e:
-            _log.warning("판정 재요청 실패(앞 출력으로 검증): %s", e)
-            break
+            _log.warning("판정 재요청 중 시스템 오류(판정실패로 올린다, 재요청 %d번째): %s", len(기록) + 1, e)
+            raise
         기록.append({"코드": [c for c, _ in 문제], "시도": 새메타.get("시도")})
         출력, 메타 = 새출력, 새메타
     if 기록:
@@ -2288,9 +2306,9 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, account_id
                       f"DB 연결 끊김: {type(e).__name__}: {str(e)[:200]}")
     except (LLM시스템오류, LLM실패) as e:
         # 판정 호출 밖(정규화 · 판정 준비 등)에서 올라온 모델 호출 실패(예산까지 재시도한 뒤). 판정 호출 실패와 같은 문장이다
-        _log.error("판정 실패 — 단계=LLM(%s) 사업=%s 사유=%s", getattr(e, "단계", "-"), 사업명, str(e)[:300])
+        _log.error("판정 실패 — 단계=LLM(%s)%s 사업=%s 사유=%s", getattr(e, "단계", "-"), _요청오류_로그(e), 사업명, str(e)[:300])
         return _실패응답(상태, "LLM", "판정 모델 호출에 실패해 결론을 내리지 않았습니다. 잠시 후 다시 점검해 주세요.",
-                      f"모델 호출 실패: {str(e)[:200]}")
+                      f"모델 호출 실패: {str(e)[:200]}", **_요청오류_필드(e))
     except research_runtime.시스템오류 as e:
         _log.error("판정 실패 — 단계=시스템오류(%s) 사업=%s 사유=%s", e.단계, 사업명, str(e)[:300])
         return _실패응답(상태, "시스템오류", "연결이 불안정해 판정을 내리지 않았습니다. 잠시 후 다시 점검해 주세요.",

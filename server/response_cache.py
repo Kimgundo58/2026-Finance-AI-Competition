@@ -43,8 +43,9 @@ def 캐시키(*조각: Any) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
-def l3_해시(org: str | None) -> str:
+def l3_해시(org: str | None, *, 예외전파: bool = False) -> str:
     """기관 L3 문서 집합과 파싱 상태의 해시. 판정 캐시키에 넣는다. 게스트·mock·DB 오류면 빈 문자열.
+    `예외전파=True` 면 DB 오류를 빈 문자열로 삼키지 않고 올린다(버전_엄격조회).
 
     L3 파싱이 커밋되면 파싱품질이 'pending' 에서 바뀌므로 해시가 바뀐다. 요청 시작 때 계산하므로,
     파싱 커밋 전에 시작해 옛 L3 로 판정한 요청은 옛 해시 키로 저장되어 이후 요청에 적중하지 않는다.
@@ -57,8 +58,27 @@ def l3_해시(org: str | None) -> str:
               '|| coalesce(\'|\' || (SELECT string_agg(a.article_id::text || \':\' || array_to_string(a.concept_ids, \',\'), '
               '\'#\' ORDER BY a.article_id) FROM tenant.l3_articles a JOIN tenant.l3_documents d ON d.doc_id = a.doc_id '
               ' WHERE d.org_id = %s AND d.status = \'active\' AND a.concept_ids IS NOT NULL), \'\')) '
-              'FROM tenant.l3_documents WHERE org_id = %s', (org, org))
+              'FROM tenant.l3_documents WHERE org_id = %s', (org, org), 예외전파=예외전파)
     return 행[0][0] if 행 else ""
+
+
+def 요청_해시_엄격() -> str:
+    """요청_해시() 와 같되 DB 장애로 해시를 못 읽으면("unknown") 연결 오류(psycopg.OperationalError)를 올린다(v062).
+    호출자는 db.재시도 로 감싸 마감까지 다시 읽고, 끝내 안 되면 DB시스템오류 → 각 경로의 다시 시도 · 판정실패 응답을 낸다.
+    "unknown" 을 그대로 쓰면 질문세트 저장이 False 가 되어 질문 없이 판정으로 가거나(routes_questions), 버전 불일치로 보인다(routes_judge)."""
+    해시 = 요청_해시()
+    if 해시 == "unknown":
+        import psycopg
+        raise psycopg.OperationalError("데이터 버전 해시를 읽지 못함")
+    return 해시
+
+
+def 버전_엄격조회(org: str | None) -> tuple[str, str]:
+    """(규정 버전, 기관 버전). 조사 세션의 입력 · 버전 비교(질문 · 판정 라우트)에 쓴다. DB 장애는 연결 오류로 올린다(v062).
+    mock 은 DB 가 없어 기존 값(빈 문자열)을 그대로 돌려준다."""
+    if MOCK:
+        return 요청_해시(), l3_해시(org)
+    return 요청_해시_엄격(), l3_해시(org, 예외전파=True)
 
 
 def 프로필_해시(org: str | None, account: str | None = None) -> str:

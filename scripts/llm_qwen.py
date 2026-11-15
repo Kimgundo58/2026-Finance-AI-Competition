@@ -160,7 +160,10 @@ def _스트림_받기(client: OpenAI, kwargs: dict[str, Any],
 
 def _호출_1회(client: OpenAI, 모델: str, 프롬프트: str, 스키마: dict | None,
            온도: float, 최대토큰: int, 타임아웃: int,
-           추론: bool | None, 스트림: bool = False, *, 청크_대기초: float | None = None) -> tuple[Any, dict]:
+           추론: bool | None, 스트림: bool = False, *, 청크_대기초: float | None = None,
+           재시도: bool = False) -> tuple[Any, dict]:
+    """HTTP 호출 한 번. 서버 예산이 있으면 LLM 호출 하나를 예약한다. `재시도`(마감까지_재시도의 두 번째 시도부터)는
+    호출 수 상한을 보지 않고 시간만 본다(research_runtime.Budget.reserve_llm, v062)."""
     kwargs: dict[str, Any] = {
         "model": 모델,
         "messages": [{"role": "user", "content": 프롬프트}],
@@ -178,7 +181,7 @@ def _호출_1회(client: OpenAI, 모델: str, 프롬프트: str, 스키마: dict
 
     budget = current_budget()
     if budget is not None:
-        if not budget.reserve_llm(final=is_final_call()):
+        if not budget.reserve_llm(final=is_final_call(), 재시도=재시도):
             raise _예산초과("LLM 호출 예산 또는 시간 초과")
         남은시간 = budget.remaining_seconds()
         if 남은시간 <= 0:
@@ -250,6 +253,8 @@ def _시간초과(e: Exception) -> bool:
 # 시간 · 호출 수는 상관없고 판정이 오류로 끝나지 않게). 2026-11-15 전체 실행 두 번: LLM 호출 35회 중 8회 · 28회 중 5회가 403,
 # 모두 다음 시도에 통과했다.
 _마감재시도_백오프초 = (2.0, 4.0, 8.0, 15.0)
+# 마감 전 마지막 시도에 남겨 두는 시간(초). 남은 시간이 다음 백오프보다 짧으면 이만큼만 남기고 기다린 뒤 한 번 더 보낸다(v062)
+_마지막시도_여유초 = 1.0
 # 마감까지_재시도 의 비스트리밍 시도 하나의 대기 하한(초). 호출자의 `타임아웃`(질문 20 · 분류 40초 등)이 더 짧아도 이만큼은 기다린다:
 # 짧게 끊으면 느린 정상 응답이 매번 시간 초과로 끝나 마감까지 같은 실패만 되풀이한다. 게이트웨이가 응답 없는 연결을 약 60초에 끊는다(_스트림_받기)
 _시도_최소초 = 60.0
@@ -338,8 +343,9 @@ def _마감까지_호출(client: OpenAI, 모델: str, 프롬프트: str, 스키�
         이번모델 = 쓸모델
         한도 = 남은 if (스트림 and 청크_대기초 is not None) else min(max(float(타임아웃), _시도_최소초), 남은)
         try:
+            # 두 번째 시도부터는 같은 호출의 재시도라 호출 수 상한에 막히지 않는다(시간이 상한, 사용자 11-13 · v062)
             출력, 메타 = _호출_1회(client, 이번모델, 프롬프트, 스키마, 온도, 최대토큰, 한도, 추론, 스트림,
-                              청크_대기초=청크_대기초)
+                              청크_대기초=청크_대기초, 재시도=n > 1)
             메타["시도"] = n
             if n > 1:
                 _log.warning("[%s LLM] %d번째 시도에 받음(앞선 실패: %s)", 단계, n, 마지막)
@@ -395,9 +401,11 @@ def _마감까지_호출(client: OpenAI, 모델: str, 프롬프트: str, 스키�
             _log.warning("[%s LLM] %d번째 시도 %s — 한 번 더 재시도", 단계, n, 마지막)
             기록(마지막)
             continue
-        대기 = _마감재시도_백오프초[min(백오프, len(_마감재시도_백오프초) - 1)]
-        if 남은초() <= 대기 + 1:
+        # 남은 시간이 다음 백오프보다 짧으면 대기를 줄여 마감 전에 한 번 더 보낸다. 시도에 쓸 1초도 없을 때만 포기한다(v062)
+        남 = 남은초()
+        if 남 <= _마지막시도_여유초:
             raise 마감_실패(" 전에 다시 보낼 시간 없음")
+        대기 = min(_마감재시도_백오프초[min(백오프, len(_마감재시도_백오프초) - 1)], 남 - _마지막시도_여유초)
         백오프 += 1
         _log.warning("[%s LLM] %d번째 시도 %s 오류 — %.0f초 뒤 재시도: %s", 단계, n, 종류, 대기, 마지막)
         기록(마지막, 대기)

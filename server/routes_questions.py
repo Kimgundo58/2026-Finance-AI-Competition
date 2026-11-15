@@ -76,14 +76,22 @@ def questions(req: Request, body: 질문요청):
             body.확정비목 = _비목_표준화(body.확정비목)
             if not 확정비목_허용(body.사업명, body.확정비목):     # 재점검: 저장한 분류가 주관기관 · 운영사 사업비 비목일 수 있다(v054)
                 raise HTTPException(422, f"비목은 다음 10종 중 하나여야 합니다: {비목_ENUM}")
+        # 요청 앞 DB 읽기(규정 준비 확인 · 버전 해시)도 연결 끊김 · 쿼리 시간 초과는 다시 읽는다. 끝내 안 되면 다시 시도 안내(v062)
         if not MOCK:
             try:
-                ontology_readiness.확인(body.사업명)
+                _요청전_DB(lambda: ontology_readiness.확인(body.사업명), "규정 준비 확인")
+            except 시스템오류:
+                raise
             except Exception as e:  # noqa: BLE001
                 raise HTTPException(503, '선택한 사업의 규정을 확인할 수 없습니다') from e
         입력 = research_sessions.입력키(body.사업명, body.확정비목, body.확정세목,
                                      body.품목, body.금액, body.용도, body.부가세구분, body.질문원문)
-        규정버전, 기관버전 = response_cache.요청_해시(), response_cache.l3_해시(org)
+        try:
+            규정버전, 기관버전 = _요청전_DB(lambda: response_cache.버전_엄격조회(org), "규정 버전 읽기")
+        except 시스템오류:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(503, '규정 버전을 확인할 수 없습니다') from e
         if not MOCK and (규정버전 in ('unknown', '', None) or (org and not 기관버전)):
             raise HTTPException(503, '규정 버전을 확인할 수 없습니다')
         버전 = json.dumps([규정버전, 기관버전, 온톨로지_사업(body.사업명)], ensure_ascii=False)
@@ -94,6 +102,13 @@ def questions(req: Request, body: 질문요청):
         if (body.웹조사 and body.조사답변 is None and 세션.조사완료 and isinstance(body.품목설명, str)
                 and body.품목설명.strip() and body.품목설명.strip() != 세션.품목설명):
             raise HTTPException(409, '입력이 변경되어 새 조사가 필요합니다')
+    except 시스템오류 as e:
+        세션.lock.release()
+        _log.warning('확인 질문 시스템 오류(요청 앞 읽기): 단계=%s 시도=%s', e.단계, e.시도)
+        결과 = _다시시도_응답(조사ID, None, 질문실패_안내)
+        if 'text/event-stream' not in req.headers.get('accept', ''):
+            return 결과
+        return _sse응답(iter([_sse('완료', 결과)]))
     except BaseException:
         세션.lock.release()
         raise
@@ -293,6 +308,17 @@ _분류실패_안내 = "지금은 분류를 확인하지 못했어요. 잠시 �
 # 시스템 오류로 끝난 세션의 다시 시도 요청이 새로 받는 예산(research_runtime.Budget 기본값과 같은 몫: 600초 · LLM 200 · 도구 60, v061).
 # 앞 요청이 예산을 다 써서 끝났으면 늘리지 않으면 다시 시도도 바로 같은 실패로 끝난다
 _다시시도_예산 = {"seconds": research_runtime.세션_예산초, "llm": research_runtime.세션_LLM, "tools": research_runtime.세션_도구}
+
+
+# 요청 앞 DB 읽기(규정 준비 확인 · 버전 해시)를 연결 끊김 때 다시 읽는 상한(초). 판정 라우트의 _판정전_DB마감초 와 같은 값(v062, 기본값으로 정함)
+_요청전_DB마감초 = 30.0
+
+
+def _요청전_DB(작업, 단계: str):
+    """요청 앞 DB 읽기 하나(v062). 작업은 시도마다 스스로 연결을 열어 RLS GUC 를 건다(server._common._질의 · db.connect).
+    연결 끊김 · 쿼리 시간 초과는 `_요청전_DB마감초`(서버 예산 안이면 남은 예산과 짧은 쪽)까지 다시 하고, 끝내 안 되면 DB시스템오류."""
+    from _lib import db
+    return db.재시도(작업, 단계=단계, 마감초=_요청전_DB마감초)
 
 
 def _다시시도_응답(조사ID: str | None, 조사: dict | None, 안내: str) -> dict:
@@ -514,7 +540,10 @@ def _기존_질문(req: Request, body: 질문요청, 조사확인=None, 답키=N
         raise HTTPException(422, f"비목은 다음 10종 중 하나여야 합니다: {비목_ENUM}")
     if not MOCK and not 준비확인:
         try:
-            ontology_readiness.확인(body.사업명)
+            _요청전_DB(lambda: ontology_readiness.확인(body.사업명), "규정 준비 확인")
+        except 시스템오류:
+            _로그("실패", 0, ["시스템오류"], False, t0)
+            raise                   # 질문 없이 판정으로 넘기지 않는다. 호출자가 다시시도로 응답한다(v062)
         except Exception:  # noqa: BLE001
             _로그("실패", 0, ["규정확인"], False, t0)
             return dict(_실패_응답)
@@ -581,12 +610,14 @@ def _live_질문(body: 질문요청, org: str | None, account: str | None, ip: s
         _로그(저장값["상태"], len(저장값["질문"]), [], True, t0)
         return 응답(저장값)
 
+    # 질문세트를 저장할 데이터 버전 해시. 질문을 만들기 전에 읽는다. DB 장애로 못 읽으면("unknown") 저장이 False 가 되어
+    # 상태 실패(질문 없이 판정)가 되므로, 연결 오류로 올려 마감까지 다시 읽고 끝내 안 되면 시스템오류 → 다시시도(v062)
+    데이터버전해시 = _요청전_DB(response_cache.요청_해시_엄격, "데이터 버전 읽기")
     ok, _사유 = 제한.통과(ip)
     if not ok:
         _로그("실패", 0, ["요청한도"], False, t0)      # 판정 요청이 자기 한도 오류를 낸다
         return dict(_실패_응답)
 
-    데이터버전해시 = response_cache.요청_해시()
     try:
         r = _질문생성(question_generate, body, org, account, 조사확인, 판정조사설정, 노드결정)
     except 시스템오류:

@@ -29,9 +29,12 @@ from server.models import 정규화요청
 from server.rate_limit import 제한
 from server import mock_flow
 from research_runtime import 시스템오류
+from _lib import db
 
 # 시스템 오류로 입력 정리를 마치지 못했을 때의 화면 안내(v053). 화면은 칸을 비우거나 다음 단계로 넘기지 않는다
 정리실패_안내 = "지금은 입력을 정리하지 못했어요. 잠시 후 다시 시도해 주세요."
+# 요청 앞 규정 준비 확인을 연결 끊김 때 다시 읽는 상한(초). 판정 · 질문 라우트와 같은 값(v062, 기본값으로 정함)
+_요청전_DB마감초 = 30.0
 
 _log = logging.getLogger("uvicorn.error")
 
@@ -70,7 +73,13 @@ def normalize(req: Request, body: 정규화요청):
     def gen():
         try:
             if not MOCK:
-                ontology_readiness.확인(body.사업명)
+                # 연결 끊김 · 쿼리 시간 초과는 30초까지 다시 읽고, 끝내 안 되면 다시 시도 안내(v062, 판정 라우트 _판정전_DB 와 같은 방식)
+                db.재시도(lambda: ontology_readiness.확인(body.사업명), 단계="규정 준비 확인", 마감초=_요청전_DB마감초)
+        except 시스템오류 as e:
+            _log.warning("입력 정리 시스템 오류(요청 앞 읽기): 단계=%s 시도=%s", e.단계, e.시도)
+            yield _sse("오류", {"메시지": 정리실패_안내, "다음행동": "다시시도"})
+            yield _sse("완료", {"실패": True})
+            return
         except Exception:  # noqa: BLE001
             yield _sse("오류", {"메시지": "선택한 사업의 규정을 확인할 수 없습니다. 잠시 후 다시 시도해 주세요."})
             yield _sse("완료", {"실패": True})
