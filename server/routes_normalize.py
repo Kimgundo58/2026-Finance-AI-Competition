@@ -8,6 +8,10 @@
 이벤트 순서: 진행 → 필드* → 결과 → 완료 (실패 시 진행 → 오류 → 완료). 이벤트 이름과 순서는 프론트 계약이다.
 시스템 오류(v053, LLM 연결 끊김 · 403 · 429 · 5xx · JSON 깨짐 · DB 연결 끊김 · 쿼리 시간 초과)는 예산이 끝날 때까지 다시 하고,
 그래도 안 되면 오류 이벤트에 다시 시도 안내(정리실패_안내)와 다음행동 다시시도를 싣는다. 화면은 그 단계에 머물러 같은 버튼으로 다시 보낸다.
+지출 항목 입력 검증(v057, 온톨로지 사업만): 별칭 일치가 아니면 LLM 1회(expense_input_check.검증). 결과 `입력검증`
+{판단, 다음행동, 안내} — 지출 아님이면 다음행동 품목재입력(첫 입력) · 설명입력(요청 `입력검증_시도` ≥ 2, 고쳐 쓴 입력).
+캐시에는 판단만 의미가 있고 다음행동 · 안내는 매 요청의 시도 값으로 다시 만든다(_입력검증_붙이기).
+입력 검증 LLM 의 시스템 오류도 위 규칙(예산 안 재시도 → 다시 시도 안내)이고 지출 아님으로 보지 않는다.
 """
 from __future__ import annotations
 
@@ -59,7 +63,8 @@ def normalize(req: Request, body: 정규화요청):
                             body.품목, body.금액, body.용도, body.추가설명, body.사업명,
                             body.특수관계.친족거래, body.특수관계.전직임직원업체,
                             # 온톨로지 경로는 응답 모양이 달라 옛 경로의 저장값을 쓰지 않는다
-                            body.부가세구분, 온톨로지_사업(body.사업명), body.집행예정일)
+                            body.부가세구분, 온톨로지_사업(body.사업명), body.집행예정일,
+                            "입력검증v1")   # v057: 입력검증 칸이 없는 이전 저장값을 쓰지 않는다
     캐시 = response_cache.조회(k, org, account)
 
     def gen():
@@ -72,7 +77,7 @@ def normalize(req: Request, body: 정규화요청):
             return
         if 캐시 is not None:
             yield _sse("진행", {"단계": "정규화", "상태": "완료", "문장": "저장된 입력 분석 결과를 불러왔어요.", "설명": "저장된 분석 결과 사용"})
-            yield _sse("결과", {"거래처": None, **캐시, "조사ID": 조사ID})   # 거래처 칸 전에 저장한 값
+            yield _sse("결과", {"거래처": None, **_입력검증_붙이기(캐시, body), "조사ID": 조사ID})   # 거래처 칸 전에 저장한 값
             yield _sse("완료", {"캐시": True})
             return
         yield _sse("진행", {"단계": "정규화", "상태": "진행중", "문장": "입력에서 지출 정보를 추출하고 있어요." if not MOCK else "연결 확인용 분석 결과를 준비하고 있어요.", "설명": "입력 분석"})
@@ -107,7 +112,8 @@ def normalize(req: Request, body: 정규화요청):
         out.setdefault("거래처", None)
         if not 실패:                  # 일시적 LLM 오류로 빈 비목후보가 캐시에 남지 않게 한다
             response_cache.저장(k, out, 종류="normalize", org=org, account=account)
-        for 필드 in ("품목", "금액", "금액_추정여부", "용도", "거래처", "비목후보", "분류후보", "수치", "품목확인"):
+        out = _입력검증_붙이기(out, body)
+        for 필드 in ("품목", "금액", "금액_추정여부", "용도", "거래처", "비목후보", "분류후보", "수치", "품목확인", "입력검증"):
             if 필드 in out:
                 yield _sse("필드", {필드: out[필드]})
         yield _sse("결과", {**out, "조사ID": 조사ID})
@@ -194,16 +200,37 @@ def _온톨로지_정규화(body: 정규화요청) -> tuple[dict, bool] | None:
         # 별칭 정확 일치만(LLM 없음). 같으면 ② · ③-1 을 건너뛴다
         별칭 = db.재시도(lambda: item_classify.분류(연.cur(), body.사업명, {"품목": out.get("품목")}, 레이블, llm=None),
                        단계="입력 정리", 연결=연)
+    # 지출 항목 입력 검증(v057): 별칭 일치 · 지출 항목이 빈 경우(한 문장에서 못 뽑음, 화면이 칸을 채우게 한다)는 건너뛴다.
+    # LLM 시스템 오류는 지출 아님으로 보지 않는다: 예산 안 재시도 뒤 예외(시스템오류)로 올려 다시 시도 안내로 끝낸다
+    품목 = out.get("품목") if isinstance(out.get("품목"), str) else ""
+    if 별칭["분류"] or not 품목.strip():
+        입력검증 = {"판단": "건너뜀"}
+    else:
+        import expense_input_check
+        r = expense_input_check.검증(품목, out.get("용도"), out.get("금액"))
+        _log.info("입력 검증 판단=%s ms=%s", r["판단"], r["ms"])
+        입력검증 = {"판단": r["판단"]}
     수치 = {k: v for k, v in (out.get("수치") or {}).items() if v not in (None, "")}
     수치["부가세구분"] = body.부가세구분 or 수치.get("부가세구분") or "모름"
     out.update(분류후보=[], 비목후보=[], 수치=수치, 심층질문=[],
                품목확인={"별칭일치": bool(별칭["분류"]), "분류": 별칭["분류"],
-                       "안내": item_classify.안내문(별칭["분류"]) if 별칭["분류"] else None})
+                       "안내": item_classify.안내문(별칭["분류"]) if 별칭["분류"] else None},
+               입력검증=입력검증)
     for k in ("결제수단", "구매명의", "신청일", "비교견적", "하위항목"):
         out.setdefault(k, None)
     out.pop("누락필드", None)
     out.pop("_출처", None)
     return out, False
+
+
+def _입력검증_붙이기(out: dict, body: 정규화요청) -> dict:
+    """결과의 `입력검증` 에 이번 요청의 다음행동 · 안내를 채운다(v057). 판단은 정리 결과(캐시 포함) 값, 다음행동은 요청 `입력검증_시도`.
+    `입력검증` 이 없는 결과(옛 경로 사업 · 이 기능 전 캐시)는 그대로 둔다: 화면은 지출로 보고 다음 단계로 간다."""
+    값 = out.get("입력검증")
+    if not isinstance(값, dict) or 값.get("판단") not in ("지출", "지출아님", "건너뜀"):
+        return out
+    import expense_input_check
+    return {**out, "입력검증": expense_input_check.응답값(값["판단"], body.입력검증_시도, out.get("품목"))}
 
 
 def _합성_질문(body: 정규화요청) -> str:

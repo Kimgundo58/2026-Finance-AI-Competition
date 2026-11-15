@@ -107,6 +107,10 @@ def questions(req: Request, body: 질문요청):
                 세션.budget.ensure_remaining(**_다시시도_예산)
             with research_runtime.activate(요청예산, emit=emit):
                 if body.웹조사 and body.조사답변 is None:
+                    # v057: 지출 항목이 두 번 지출 아님이면 화면이 받은 한 문장 설명을 첫 요청에 싣는다. 세션에 남겨 ③ 분류 자료가 되고
+                    # (아래 설명_붙이기), ② 품목 조사의 지출문맥 · 검색어 낱말에도 쓴다(web_research.research 의 품목설명 칸)
+                    if isinstance(body.품목설명, str) and body.품목설명.strip():
+                        세션.품목설명 = body.품목설명.strip()
                     if not 세션.조사완료:
                         try:
                             # mock: 외부 호출 없이 고정 조사 결과(스펙 8-5). 검색어 없이도 돈다
@@ -117,7 +121,8 @@ def questions(req: Request, body: 질문요청):
                             else:
                                 # ② 품목 조사(재설계 11-11): 비목을 정하기 전이라 규범 요건 없이 지출 문맥만 준다
                                 준비 = {'요건': [], '문맥': {k: v for k, v in (('품목', body.품목), ('용도', body.용도),
-                                                                             ('금액', body.금액)) if v not in (None, '')}}
+                                                                             ('금액', body.금액), ('품목설명', 세션.품목설명))
+                                                           if v not in (None, '')}}
                                 if not MOCK:
                                     ok, 사유 = 제한.통과(클라이언트_ip(req))
                                     if not ok:

@@ -668,7 +668,8 @@ def research(public_query: str | None = None, *, product_name: str | None = None
         return output
     # v046: 검색어에 쓸 지출 항목 · 사용 목적. 개인 정보 낱말 · 긴 숫자가 든 칸은 검색어 자료(허용글)와 LLM 자료에서 뺀다
     context = dict(context or {})
-    검색칸 = {k: " ".join(v.split()) for k in ("품목", "용도") if isinstance(v := context.get(k), str) and v.strip()}
+    # 품목설명(v057): 지출 항목이 지출 아님으로 두 번 나와 사용자가 적은 한 문장. 품목 · 용도와 같은 사용자 글로 다룬다
+    검색칸 = {k: " ".join(v.split()) for k in ("품목", "용도", "품목설명") if isinstance(v := context.get(k), str) and v.strip()}
     for k in [k for k, v in 검색칸.items() if not _개인정보_없음(v)]:
         del 검색칸[k]
         context.pop(k, None)
@@ -708,7 +709,7 @@ def research(public_query: str | None = None, *, product_name: str | None = None
                       {**(context or {}), **({"거래처": vendor.strip()} if vendor and vendor.strip() else {})})
     # 검색어에 더해도 되는 말: 사용자가 적은 품목 · 용도(개인 정보 칸은 위에서 뺐다). 거래처 이름은 LLM 자료로만 쓰고 검색어로
     # 보내지 않는다(품목 · 용도에 직접 적은 낱말은 예외, _검색어 공개글). 금액도 넣지 않는다
-    문맥글 = " ".join(v for k, v in 계획자료["지출문맥"].items() if k in ("품목", "용도") and isinstance(v, str))
+    문맥글 = " ".join(v for k, v in 계획자료["지출문맥"].items() if k in ("품목", "용도", "품목설명") and isinstance(v, str))
     거래처글 = " ".join(v for v in (vendor, (context or {}).get("거래처")) if isinstance(v, str))
     재조사중 = not 요건모드 and bool(계획자료["지출문맥"].get("필요정보"))
     # 재조사: 필요정보(분류 LLM 글) 낱말도 검색어에 더해도 된다. 개인 정보가 든 항목은 뺀다(보낼 검색어에도 _검색어 가 다시 건다).
