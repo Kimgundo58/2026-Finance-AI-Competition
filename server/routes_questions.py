@@ -138,6 +138,8 @@ def questions(req: Request, body: 질문요청):
                                          '확정세목': body.확정세목, '품목': body.품목,
                                          '용도': body.용도, '질문': body.질문원문},
                                         org_id=org, account_id=account)
+                                    if 세션.품목설명:        # v057 설명입력: 확정비목 경로도 설명을 조사 문맥에 넣는다
+                                        준비 = {**준비, '문맥': {**(준비.get('문맥') or {}), '품목설명': 세션.품목설명}}
                                 import web_research
                                 세션.조사 = web_research.research(None,
                                     requirements=준비['요건'], context=준비['문맥'],

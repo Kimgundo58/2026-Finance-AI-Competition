@@ -1207,6 +1207,25 @@ def _입력검증_검사(확인) -> None:
         확인("입력 검증: 사용자 글이 자료 태그를 닫지 못한다(꺾쇠 이스케이프)", 본 and 본[0].count("</입력>") == 1)
     finally:
         eic._llm_호출 = 원래
+    # ② 품목 조사: 지출문맥에 품목설명이 있을 때만 계획 지시에 설명을 상품 이름 출처로 쓰라는 문장이 붙는다
+    import research_runtime
+    import web_research
+
+    class _막힌검색:
+        def call(self, *a, **k):
+            raise RuntimeError("검사")
+    본: list[str] = []
+
+    def _계획(프롬프트, 스키마, 시간):
+        본.append(프롬프트)
+        raise RuntimeError("검사")
+    붙음 = []
+    for 문맥 in ({"품목": "견적서", "용도": "사업", "품목설명": "디자인 협업 도구 구독"}, {"품목": "피그마", "용도": "디자인"}):
+        본.clear()
+        web_research.research(None, requirements=[], context=문맥, budget=research_runtime.Budget(), client=_막힌검색(),
+                              llm_call=_계획)
+        붙음.append(bool(본) and web_research._설명_계획_지시 in 본[0])
+    확인("② 조사: 품목설명이 있으면 계획 지시에 설명 문장이 붙고, 없으면 지금 프롬프트 그대로", 붙음 == [True, False], str(붙음))
     긴글 = "승인받은 내용에 단순 오탈자가 있었을 뿐인데 수정할 수 없나요"
     확인("입력 검증 안내: 긴 입력은 20자에서 자르고 「…」",
          eic.안내("지출아님", 1, 긴글).startswith(f"'{긴글[:20]}…'만으로는"), eic.안내("지출아님", 1, 긴글))
