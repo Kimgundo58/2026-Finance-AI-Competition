@@ -471,8 +471,10 @@ def 분류(cur, 사업명: str | None, 입력: dict, 레이블: list[dict], 확�
                          **({"실패": type(e).__name__} if e else {})}
                         for v, (g, e) in zip(프롬프트_변형, 결과)]
         키들 = {키(g) for g in 고름}
-        if not 고름:
-            디버그["LLM실패"] = type(결과[0][1]).__name__
+        if not 고름 or (키들 == {None} and len(고름) < len(프롬프트_변형)):
+            # 모두 실패, 또는 일부가 실패하고 나머지가 모두 null: 실패한 변형이 분류를 찾았을 수 있어 「맞는 분류 없음」 으로 보지 않는다
+            # (호출자가 다시시도 로 낸다, v056 Codex 리뷰)
+            디버그["LLM실패"] = next(type(e).__name__ for _, e in 결과 if e)
             _log.warning("분류 LLM 실패: %s", 디버그["LLM실패"])
         elif len(고름) == len(프롬프트_변형) and len(키들) == 1 and None not in 키들:    # 세 변형의 비목 > 세목 일치 → 확정
             노드들 = [g["노드"] for g in 고름]
@@ -487,7 +489,8 @@ def 분류(cur, 사업명: str | None, 입력: dict, 레이블: list[dict], 확�
             디버그["불일치"] = "거래유형" if len(거래들) > 1 else "경로"
             맞는 = [g for g in 고름 if 확인거래유형 and g["거래유형"] == 확인거래유형]
             맞는키 = {키(g) for g in 맞는}
-            if len(거래들) > 1 and 맞는 and len(맞는키) == 1 and None not in 맞는키:    # 확인된 거래 유형과 같은 변형끼리 일치
+            # 확인된 거래 유형과 같은 변형 둘 이상이 같은 경로(하나뿐이면 일치가 아니라 조정한다, v056 Codex 리뷰)
+            if len(거래들) > 1 and len(맞는) >= 2 and len(맞는키) == 1 and None not in 맞는키:
                 노드들 = [g["노드"] for g in 맞는]
                 노드 = max(dict.fromkeys(노드들), key=노드들.count)
                 확신 = "동일" if all(g["노드"] == 노드 and g["확신"] == "동일" for g in 맞는) else "유사"
