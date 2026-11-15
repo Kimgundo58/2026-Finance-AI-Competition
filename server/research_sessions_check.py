@@ -1455,6 +1455,15 @@ def 모든비목_분류_검사(client, norm):
         p = ontology_lookup.분류_경로(커서(행), '초격차 스타트업 프로젝트', 'n', 레이블)
         assert p['비목'] == ontology_norm.모든비목_정식명 and p['모든비목']['사유'] == '비목 조항이 둘 이상', p
         assert ontology_lookup.모든비목_위치(커서(행[2:]), '초격차 스타트업 프로젝트', 'n', 레이블) == {}
+    # 판정 시작 노드: 규정 위치로 정한 비목이 확정 비목과 같을 때만 그 품목이 시작 노드(Codex 리뷰). 다른 비목 · 공통 · 모든 비목 아래가 아니면 아니다
+    위치표 = {'관세': {'비목_노드': '비목:창업/재료비', '모든비목': {'방법': '규정 위치'}},
+           '부채': {'비목_노드': ontology_norm.모든비목, '모든비목': {'방법': '공통'}}}
+    with patch.object(ontology_lookup, '레이블_목록', lambda *a: 레이블),          patch.object(ontology_lookup, '모든비목_경로', lambda cur, 사업, n, 레이블: 위치표[n]):
+        위 = {ontology_norm.모든비목}
+        assert ontology_lookup._규정위치_비목(None, '초격차 스타트업 프로젝트', '관세', 위, '비목:창업/재료비')
+        assert not ontology_lookup._규정위치_비목(None, '초격차 스타트업 프로젝트', '관세', 위, '비목:창업/여비')
+        assert not ontology_lookup._규정위치_비목(None, '예비창업패키지', '부채', 위, '비목:창업/재료비')
+        assert not ontology_lookup._규정위치_비목(None, '예비창업패키지', '관세', {'비목:창업/재료비'}, '비목:창업/재료비')
     # 판정 대상: 모든비목_정식명은 모든 비목 노드 자체(DB 조회 없음), 세목은 없다
     with patch.object(ontology_lookup.ontology_graph, '준비', lambda cur: None):
         대상 = ontology_lookup.대상_노드(None, '예비창업패키지', ontology_norm.모든비목_정식명)
