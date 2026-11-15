@@ -961,12 +961,14 @@ def _판정_시스템오류_검사(확인, sse) -> None:
 
     ① 단계 중 DB 연결 끊김 → 새 연결(RLS GUC 다시 설정)로 그 단계만 다시 하고 상태 · 진행 줄이 겹치지 않는다
     ② 끊김이 예산 끝까지 이어지면 실패단계 DB → 판정실패(문의 초안 · 캐시 · 계획 연결 없음), 재시도 기록이 남는다
-    ③ 판정 행 저장 중 끊김(INSERT 는 커밋됨) → 멱등 키로 찾고 다시 넣지 않는다
+    ③ 판정 행 저장 중 끊김(INSERT 는 커밋됨) → 멱등 키로 찾고 다시 넣지 않는다. 화면이 「다시 점검」 에서 같은 키를 보내면 새 행 없이 그 행을 바꾼다
     ④ 판정 LLM 출력의 인용이 문장 목록 밖 → 고칠 점을 알려 다시 받는다(최대 2번)
     ⑤ 판정 전 DB 읽기(질문세트) 장애 → 답변유실이 아니라 판정실패 SSE"""
     from unittest.mock import patch
 
     import psycopg
+
+    import inspect
 
     import ontology_lookup as _조회
     import orchestrate
@@ -980,6 +982,7 @@ def _판정_시스템오류_검사(확인, sse) -> None:
     db = orchestrate.db
     열린: list = []
     행들: list[dict] = []          # 가짜 tenant.decisions
+    갱신: list = []                # 가짜 UPDATE tenant.decisions 의 decision_id
 
     class 가짜연결:
         def __init__(self, *a, **k):
@@ -997,6 +1000,8 @@ def _판정_시스템오류_검사(확인, sse) -> None:
                     가짜연결.INSERT_끊김 = False
                     self.closed = True
                     raise psycopg.OperationalError("server closed the connection unexpectedly")
+            if sql.startswith("UPDATE tenant.decisions"):
+                갱신.append(인자[-1])
             return self
 
         def fetchone(self):
@@ -1081,6 +1086,35 @@ def _판정_시스템오류_검사(확인, sse) -> None:
          len(행들) == 1 and decision_id == 1 and 행들[0]["모델"].get("멱등키") == 상태.멱등키
          and isinstance(행들[0]["모델"].get("재시도"), list), f"행 {len(행들)}개")
     가짜연결.INSERT_끊김 = False
+    갱신.clear()                   # 위 같은 요청 안의 다시 시도도 찾은 행을 같은 값으로 바꾼다
+    # 앞 요청은 행을 커밋한 뒤 판정실패로 끝났다 → 사용자가 「다시 점검」(화면이 같은 멱등 키를 보냄) → 새 요청 상태
+    다음 = 상태_만들기()
+    다음.멱등키 = 상태.멱등키
+    다음.db연결 = db.연결(다음.org_id, None)
+    with patch.object(db, "connect", side_effect=가짜연결), patch.object(orchestrate, "_코퍼스버전_캐시", "docs1/chunks1"),          research_runtime.activate(research_runtime.Budget(seconds=30)):
+        두번째 = orchestrate._판정행_저장(다음, {"판정": "확인 필요", "요약": "다시 점검", "모델": {}})
+    확인("판정 행 저장: 「다시 점검」 이 같은 멱등 키를 보내면 새 행을 넣지 않고 앞 행(같은 decision_id)을 이번 결과로 바꾼다",
+         len(행들) == 1 and 두번째 == 1 and 갱신 == [1], f"행 {len(행들)}개 · 갱신 {갱신}")
+    다른 = 상태_만들기()
+    다른.db연결 = db.연결(다른.org_id, None)
+    with patch.object(db, "connect", side_effect=가짜연결), patch.object(orchestrate, "_코퍼스버전_캐시", "docs1/chunks1"),          research_runtime.activate(research_runtime.Budget(seconds=30)):
+        세번째 = orchestrate._판정행_저장(다른, {"판정": "가능", "요약": "새 점검", "모델": {}})
+    확인("판정 행 저장: 키가 다른 새 점검은 새 행을 넣는다", len(행들) == 2 and 세번째 == 2 and 갱신 == [1], f"행 {len(행들)}개")
+    받은키: list = []
+
+    def 키_보기(상태, _정규화):
+        받은키.append(상태.멱등키)
+        return orchestrate._기본응답("확인 필요", "셀프테스트")
+    with patch.object(db, "connect", side_effect=가짜연결), patch.object(_조회, "새경로_대상", return_value=True),          patch.object(orchestrate, "_정규화단계", 키_보기):
+        orchestrate.판정("노션", 사업명="모두의 창업 프로젝트", 기록=False, 멱등키="a" * 32)
+        orchestrate.판정("노션", 사업명="모두의 창업 프로젝트", 기록=False, 멱등키="'; DROP")
+        orchestrate.판정("노션", 사업명="모두의 창업 프로젝트", 기록=False)
+    확인("판정(): 화면이 보낸 멱등 키(32자리 16진수)를 쓰고, 형식이 다르거나 없으면 새로 만든다",
+         받은키[0] == "a" * 32 and len(받은키) == 3 and all(len(k) == 32 and k != "a" * 32 for k in 받은키[1:])
+         and 받은키[1] != 받은키[2], str(받은키))
+    확인("판정요청: 멱등키 필드를 받고 판정 라우트가 orchestrate.판정() 에 넘긴다",
+         판정요청(정규화={}, 멱등키="b" * 32).멱등키 == "b" * 32
+         and "멱등키=body.멱등키" in inspect.getsource(routes_judge._live_판정))
 
     # ④ 인용 재요청
     호출: list = []

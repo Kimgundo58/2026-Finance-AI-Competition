@@ -160,7 +160,8 @@ class _판정상태:
     cur: Any = None
     # 판정 한 건이 쓰는 autocommit 연결(db.연결). 끊기면 단계를 다시 할 때 새 연결을 열고 RLS GUC 를 다시 건다. conn · cur 는 그 연결의 현재 값이다
     db연결: Any = None
-    # 판정 행(tenant.decisions) 멱등 키. 저장 중 연결이 끊겨 커밋 여부를 모를 때 같은 행이 있는지 이 값으로 찾는다(모델 칸 `멱등키`, 사용자 정보 없음)
+    # 판정 행(tenant.decisions) 멱등 키. 저장 중 연결이 끊겨 커밋 여부를 모를 때 같은 행이 있는지 이 값으로 찾는다(모델 칸 `멱등키`, 사용자 정보 없음).
+    # 화면이 점검을 시작할 때 만든 키를 보내면(「다시 점검」 도 같은 키) 그 값, 없으면 요청마다 새 uuid
     멱등키: str = field(default_factory=lambda: uuid.uuid4().hex)
     # 정규화
     정규화결과: dict = field(default_factory=dict)
@@ -275,21 +276,23 @@ def _DB(상태: _판정상태, 작업, 단계: str):
 
 
 def _판정행_저장(상태: _판정상태, 응답: dict) -> int | None:
-    """판정 행을 멱등하게 넣는다. INSERT 중 연결이 끊기면 커밋됐는지 알 수 없다(autocommit). 다시 할 때는 먼저 같은 멱등 키
-    (모델 칸 `멱등키`, 요청마다 새 uuid)의 행을 찾고 없을 때만 넣는다. 찾는 범위는 최근 하루(ix_decisions_time)이고 RLS 로 같은 기관 · 계정 행만 보인다."""
-    n = 0
-
+    """판정 행을 멱등하게 넣는다. INSERT 중 연결이 끊기면 커밋됐는지 알 수 없다(autocommit). 그래서 넣기 전에 같은 멱등 키
+    (모델 칸 `멱등키`)의 행을 찾고, 있으면 새로 넣지 않고 그 행을 이번 결과로 바꾼다(UPDATE, decision_id 그대로).
+    - 같은 요청 안의 다시 시도: 끊기기 전 INSERT 가 커밋돼 있었으면 그 행을 쓴다.
+    - 화면의 「다시 점검」: 화면이 같은 점검의 키를 다시 보내므로, 앞 요청이 행을 커밋한 뒤 끊겨 판정실패로 끝났어도 두 번째 행이 생기지 않는다.
+    찾는 범위는 최근 하루(ix_decisions_time) · 같은 계획(plan_id) · 같은 계정이고, RLS 로 같은 기관 · 계정 행만 보인다.
+    유니크 제약이 없어 같은 키로 동시에 온 두 요청이 둘 다 못 찾으면 두 행이 생길 수 있다(docs/9_백로그.md)."""
     def 작업(cur):
-        nonlocal n
-        n += 1
-        if n > 1:
-            r = cur.execute("""SELECT decision_id FROM tenant.decisions
-                                WHERE created_at > now() - interval '1 day' AND "모델"->>'멱등키' = %s
-                                ORDER BY decision_id LIMIT 1""", (상태.멱등키,)).fetchone()
-            if r:
-                _log.warning("판정 행 저장: 끊기기 전 INSERT 가 커밋돼 있었다(decision_id=%s) — 다시 넣지 않는다", r[0])
-                return r[0]
-        return decisions_저장(cur, _decisions_행(상태, 응답))
+        행 = _decisions_행(상태, 응답)
+        r = cur.execute("""SELECT decision_id FROM tenant.decisions
+                            WHERE created_at > now() - interval '1 day' AND "모델"->>'멱등키' = %s
+                              AND plan_id IS NOT DISTINCT FROM %s AND account_id IS NOT DISTINCT FROM %s
+                            ORDER BY decision_id LIMIT 1""", (상태.멱등키, 행.get("plan_id"), 행.get("account_id"))).fetchone()
+        if r:
+            _log.warning("판정 행 저장: 같은 멱등 키의 행이 이미 있다(decision_id=%s) — 새로 넣지 않고 이번 결과로 바꾼다", r[0])
+            decisions_갱신(cur, r[0], 행)
+            return r[0]
+        return decisions_저장(cur, 행)
     return _DB(상태, 작업, "판정 저장")
 
 
@@ -394,6 +397,17 @@ def decisions_저장(cur, 행: dict) -> int | None:
     q = (f'INSERT INTO tenant.decisions ({",".join(chr(34)+k+chr(34) for k in 키)}) '
          f'VALUES ({",".join(["%s"] * len(키))}) RETURNING decision_id')
     return cur.execute(q, [행[k] for k in 키]).fetchone()[0]
+
+
+def decisions_갱신(cur, decision_id: int, 행: dict) -> None:
+    """`tenant.decisions` 의 한 행을 이번 판정 결과로 바꾼다(같은 멱등 키의 행, `_판정행_저장`). created_at 도 지금으로 바꾼다.
+    org_id · account_id · plan_id 는 찾을 때 맞춘 값이라 바꾸지 않는다. RLS 로 같은 기관 · 계정 행만 바뀐다."""
+    키 = [k for k in 행 if k in _decisions_컬럼 and k not in ("org_id", "account_id", "plan_id")]
+    if not 키:
+        return
+    q = (f'UPDATE tenant.decisions SET {",".join(chr(34)+k+chr(34)+"=%s" for k in 키)}, created_at = now() '
+         'WHERE decision_id = %s')
+    cur.execute(q, [*(행[k] for k in 키), decision_id])
 
 
 _코퍼스버전_캐시: str | None = None
@@ -2181,7 +2195,8 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, account_id
        확정세목: str | None = None, 추가입력값: dict | None = None, 부가세구분: str | None = None,
        사용일자: str | None = None, 노드결정: dict | None = None, 조건답: list[dict] | None = None, 상황노드: list[str] | None = None,
        기록누적: dict | None = None, l3숫자라벨: list[dict] | None = None, dry: bool = False, 기록: bool = True, 주입: str | None = None,
-       참조확장_사용: bool = True, 조사: dict | None = None, 거래처관계: dict | None = None) -> dict:
+       참조확장_사용: bool = True, 조사: dict | None = None, 거래처관계: dict | None = None,
+       멱등키: str | None = None) -> dict:
     """질문 하나를 판정해 응답 dict 를 돌려준다. 어떤 실패도 예외로 올리지 않는다: 시스템 오류는 예산까지 다시 하고 끝내 실패하면
     실패단계 판정호출 · LLM · DB(판정실패), 근거 부족 · 코드 오류는 확인 필요로 반환한다.
 
@@ -2198,7 +2213,8 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, account_id
     `상황노드`([ID], 확인 질문 LLM 이 고른 절차 · 시간 · 주체 노드(5-14 C). 판정 라우트가 서버 저장값에서 읽어 넘긴다. 그 노드의 규범을 문맥 · 조건 문장에만 더하고 코드 불가는 내지 않는다).
     평가용 인자: `dry`(LLM 없이 규칙 정규화와 프롬프트 구성까지만), `기록`(tenant.decisions 기록 여부),
     `주입`(장애 주입 'db'|'timeout'|'schema'|'empty'|'cite'|'onto'), `참조확장_사용`(False 면 B3 을 넣지 않는다).
-    부수 효과: `기록` 이면 게이트·정상 종료를 tenant.decisions 에 넣는다. 실패 종료는 기록하지 않는다.
+    `멱등키`(화면이 점검 시작 때 만든 판정 행 멱등 키, 32자리 16진수. 「다시 점검」 이 같은 값을 보낸다. 형식이 다르면 쓰지 않고 새로 만든다).
+    부수 효과: `기록` 이면 게이트·정상 종료를 tenant.decisions 에 넣는다(같은 멱등 키의 행이 있으면 그 행을 바꾼다). 실패 종료는 기록하지 않는다.
     """
     상태 = _판정상태(질문=질문, 사업명=사업명, org_id=org_id, account_id=account_id,
                    plan_id=plan_id, 기록=기록,
@@ -2211,6 +2227,8 @@ def 판정(질문: str, *, 사업명: str | None = None, org_id=None, account_id
                    기록누적=기록누적 if isinstance(기록누적, dict) else None,
                    l3숫자라벨=[x for x in l3숫자라벨 or [] if isinstance(x, dict)],
                    거래처관계={k: v for k, v in (거래처관계 or {}).items() if isinstance(v, bool)})
+    if isinstance(멱등키, str) and re.fullmatch(r"[0-9a-f]{32}", 멱등키):
+        상태.멱등키 = 멱등키
     # autocommit: LLM 호출 동안 읽기 트랜잭션을 잡고 있으면 다른 세션의 DDL·VACUUM 이 막힌다. 새 연결에는 미들웨어의 GUC 가 없어
     # db.연결 이 열 때마다 app.org_id·app.account_id 를 세션 단위로 건다(L3 조회 · 프로필 조회 · decisions INSERT 가 RLS 에 막히지 않게).
     # 연결은 첫 단계에서 연다. 열지 못하거나 도중에 끊기면 단계를 새 연결로 다시 한다(`_단계_재실행`)

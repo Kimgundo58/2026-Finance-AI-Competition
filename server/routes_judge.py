@@ -583,7 +583,7 @@ def _live_판정(body: 판정요청, account_id: str | None = None, 사용자답
                        사용자답변=사용자답변, 답변유실=답변유실,
                        확정세목=body.확정세목, 추가입력값=body.추가입력값, 부가세구분=body.부가세구분, 사용일자=body.사용일자,
                        노드결정=노드결정, 조건답=조건답, 상황노드=상황노드, 기록누적=기록누적, l3숫자라벨=L3라벨,
-                       거래처관계=body.특수관계.model_dump(),
+                       거래처관계=body.특수관계.model_dump(), 멱등키=body.멱등키,
                        **({'조사': 조사} if 조사 is not None else {}))
     return 파이프라인결과_매핑(r, body)
 
