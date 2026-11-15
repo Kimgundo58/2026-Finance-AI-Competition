@@ -556,9 +556,11 @@ def 상위_세목(cur, 사업명: str | None, 노드_id: str, 비목_id: str) ->
 def 후보_정리(cur, 사업명: str | None, 레이블: list[dict]) -> tuple[list[dict], list[dict]]:
     """③-0 품목 → 세목 → 비목 분류의 후보(재설계 11-11). (남김, 버림).
 
-    범위: 이 사업이 쓰는 비목(레이블의 비목 행) 전체와 모든 비목(`비목:창업/*`) 아래 세목 · 품목 노드. 비목을 먼저 고르지 않는다.
-    같은 정식명이 공통(적용사업 NULL, L1)과 이 사업(L2) 둘 다면 이 사업 노드만 남긴다(사용자 결정 11-11).
-    남김 = [{id, 정식명, 별칭, 비목: [소속 비목 이름], 적용사업}] concept_id 순. 버림 = [{id, 정식명, 대신: [남긴 id]}] — ④ 안전망 재료.
+    범위: 이 사업이 쓰는 비목(레이블의 비목 행) 노드 자체와 그 아래 · 모든 비목(`비목:창업/*`) 아래 세목 · 품목 노드. 비목을 먼저 고르지 않는다.
+    비목 노드 자체(v056, 11-15 분류 실험: 세목 · 품목이 맞지 않는 지출이 갈 곳)는 남김 앞에 레이블 순서로 두고 `비목노드: True` 를 붙인다.
+    같은 정식명이 공통(적용사업 NULL, L1)과 이 사업(L2) 둘 다면 이 사업 노드만 남긴다(사용자 결정 11-11). 비목 노드는 이 거르기에 넣지 않는다.
+    남김 = [{id, 정식명, 별칭, 비목: [소속 비목 이름], 적용사업, 비목노드?}] 비목 노드 다음 concept_id 순.
+    버림 = [{id, 정식명, 대신: [남긴 id]}] — ④ 안전망 재료.
     """
     뿌리 = {x["노드"]: x["비목"] for x in 레이블 if x.get("세목") is None}
     전체: dict[str, dict] = {}
@@ -578,7 +580,59 @@ def 후보_정리(cur, 사업명: str | None, 레이블: list[dict]) -> tuple[li
             버림.append({"id": i, "정식명": h["정식명"], "대신": 같은이름_사업})
             continue
         남김.append({**h, "적용사업": 적용.get(i)})
-    return 남김, 버림
+    # 비목 노드의 별칭은 넣지 않는다(11-15 분류 실험 V1a · V3 와 같다. 비목 별칭은 품목 낱말이 많아 세목 · 품목 후보와 겹친다)
+    비목들 = [{"id": x["노드"], "정식명": x["비목"], "별칭": [],
+            "비목": [x["비목"]], "적용사업": None, "비목노드": True}
+           for x in 레이블 if x.get("세목") is None and x["노드"] not in 전체]
+    return [*비목들, *남김], 버림
+
+
+def _문서_순위(사업명: str | None) -> dict[str, int]:
+    """규정 발췌를 고를 문서 순위: 이 사업 문서(schema.json `문서사업`) 0. 다른 사업 문서는 표에 넣지 않는다(쓰지 않는다).
+    L1 은 호출자가 corpus.documents.layer 로 1 을 준다."""
+    schema = _스키마()
+    문서, 사업표 = schema.get("문서키") or {}, schema.get("사업키") or {}
+    return {문서[k]: (0 if 사업표.get(키) == 사업명 else 9) for k, 키 in (schema.get("문서사업") or {}).items() if k in 문서}
+
+
+def 규정_발췌(cur, 사업명: str | None, 노드들: list[str], 최대: int = 2, 글자: int = 110) -> dict[str, str]:
+    """③ 분류 후보마다 붙이는 규정 원문 발췌(v056) {노드: "발췌 / 발췌"}. corpus.age_provenance 개념 근거에서
+    이 사업 문서(L2 등) 먼저, 없으면 L1 문서. 다른 사업 문서와 그 밖의 문서는 쓰지 않는다. 같은 순위에서는 긴 발췌 먼저,
+    발췌마다 공백을 하나로 줄여 `글자` 자까지, 최대 `최대` 개. 발췌가 없는 노드는 키가 없다(11-15 분류 실험 variants.근거 와 같은 규칙)."""
+    if not 노드들:
+        return {}
+    순위 = _문서_순위(사업명)
+    모음: dict[str, list] = {}
+    for oid, doc, layer, 발췌 in cur.execute(
+            """SELECT p.owner_id, p.doc_id, d.layer, p.발췌 FROM corpus.age_provenance p
+                 LEFT JOIN corpus.documents d USING (doc_id)
+                WHERE p.owner_kind = '개념' AND p.칸 = '근거' AND p.owner_id = ANY(%s)""", (list(노드들),)).fetchall():
+        순 = 순위.get(doc, 1 if layer == "L1" else 9)
+        if 발췌 and 순 < 9:
+            모음.setdefault(oid, []).append((순, -len(발췌), " ".join(발췌.split())[:글자]))
+    return {oid: " / ".join(list(dict.fromkeys(x[2] for x in sorted(xs)))[:최대]) for oid, xs in 모음.items()}
+
+
+def 분류_규범문장(cur, 사업명: str | None, 노드들: list[str], 최대: int = 8) -> dict[str, list[str]]:
+    """③ 조정(v056)에 넣는 노드별 규범 문장 {노드: ["[종류] 문장"]}. corpus.age_norms 의 요건 · 허용 · 금지 · 한도 중
+    대상이 그 노드이고 적용사업이 NULL 이거나 이 사업인 것. 문장은 결과.문장 → 결과.조건문장 → 조건.자연어 순으로, 160자까지."""
+    if not 노드들:
+        return {}
+    out: dict[str, list[str]] = {}
+    for 종류, 결과, 조건, t in cur.execute(
+            """SELECT n.종류, n.결과, n.조건, t FROM corpus.age_norms n, unnest(n.대상) t
+                WHERE t = ANY(%s) AND n.종류 IN ('요건', '허용', '금지', '한도')
+                  AND (n.적용사업 IS NULL OR n.적용사업 = %s)
+                ORDER BY t, n.norm_id""", (list(노드들), 사업명)).fetchall():
+        글 = (결과 or {}).get("문장") or (결과 or {}).get("조건문장") or "; ".join((조건 or {}).get("자연어") or [])
+        if 글:
+            out.setdefault(t, []).append(f"[{종류}] {' '.join(글.split())[:160]}")
+    return {k: list(dict.fromkeys(v))[:최대] for k, v in out.items()}
+
+
+def 상위_노드(cur, 사업명: str | None, 노드: str) -> list[str]:
+    """노드에서 위로 가까운 순서의 상위 노드 id 목록(③ 조정 근거용, v056). 노드 자신은 넣지 않는다."""
+    return list(dict.fromkeys(u for _, u in _상위_경로(cur, 노드, [사업명] if 사업명 else [])))
 
 
 def 분류_경로(cur, 사업명: str | None, 노드_id: str, 레이블: list[dict]) -> dict | None:
@@ -774,6 +828,7 @@ def _age_필수(fn):
 비목_품목금지 = _age_필수(비목_품목금지)
 조문_행 = _age_필수(조문_행)
 세목_한도_있음 = _age_필수(세목_한도_있음)
+상위_노드 = _age_필수(상위_노드)
 
 # 능력 질문 테스트 ─────────────────────────────────────────────────────────
 
@@ -980,6 +1035,18 @@ def _자체시험() -> int:
                           and 상위_세목(cur, 사업, "품목:창업/고영향AI인증검증비", 수수료) is None
                           and 상위_세목(cur, 사업, "세목:창업/지급수수료/멘토링비", "비목:창업/재료비") is None
                           and 상위_세목(cur, 사업, 수수료, 수수료) is None))
+                # v056 ③ 앙상블 분류 재료: 비목 노드 후보 · 규정 발췌 · 규범 문장 · 상위 노드
+                레이블 = 레이블_목록(cur, 사업)
+                남김, _ = 후보_정리(cur, 사업, 레이블)
+                비목후보 = [c for c in 남김 if c.get("비목노드")]
+                t.append(("v056 후보_정리: 이 사업 비목 노드가 앞에 비목노드 표시로 온다", bool(비목후보)
+                          and 남김[:len(비목후보)] == 비목후보 and "비목:창업/재료비" in {c["id"] for c in 비목후보}))
+                발췌 = 규정_발췌(cur, 사업, ["비목:창업/재료비", "세목:창업/지급수수료/멘토링비", "없는:노드"])
+                t.append(("v056 규정_발췌: 발췌 2개 이하 · 110자 이하, 없는 노드는 키 없음", bool(발췌) and "없는:노드" not in 발췌
+                          and all(len(x) <= 110 for v in 발췌.values() for x in v.split(" / "))))
+                규범 = 분류_규범문장(cur, 사업, ["비목:창업/재료비"])
+                t.append(("v056 분류_규범문장: [종류] 문장 · 160자", all(x.startswith("[") and len(x) <= 170 for v in 규범.values() for x in v)))
+                t.append(("v056 상위_노드: 세목 위로 비목", "비목:창업/지급수수료" in 상위_노드(cur, 사업, "세목:창업/지급수수료/멘토링비")))
                 t.append(("세목_한도_있음: 한도 있는 세목이 있는 비목만", 세목_한도_있음(cur, 사업, "비목:창업/지급수수료")
                           and not 세목_한도_있음(cur, 사업, "비목:창업/기계장치") and not 세목_한도_있음(cur, 사업, "비목:창업/재료비")))
                 행들 = 근거_조문(cur, 적용_규범(cur, 사업, "비목:창업/재료비")["규범"], 3, "비목:창업/재료비", 사업=사업)

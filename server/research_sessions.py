@@ -49,7 +49,7 @@ class Session:
     판정조사: dict | None = None       # ④-2 판정용 조사 {상태, 요건결과: {조건키: …}, 출처}. 질문 요청이 저장하고 답변_검증 이 판정에 넘긴다
     시스템오류: bool = False          # 앞 요청(② · ③ · ④-2 · ⑤)이 시스템 오류(DB · LLM, v053)로 끝났다. 질문결과를 같은 답에 다시 내주지 않고
                                        # 다시 하며, 다시 시도 요청은 예산을 새로 받는다(routes_questions). 이전 이름 분류실패(③ 만)
-    재조사: dict | None = None         # ③-R 재조사 결과 {후보: [...]}. 세션.조사 와 따로 둔다(조사답변 id 는 세션.조사 후보와 맞아야 한다).
+    재조사: dict | None = None         # ③-R 재조사 결과 {후보: [...], 종류?}. 종류 거래유형 = 거래 유형 확인 카드(v056, 같은 자리 · 한 번). 세션.조사 와 따로 둔다(조사답변 id 는 세션.조사 후보와 맞아야 한다).
                                        # None 이 아니면 재조사를 이미 했다(한 번만 한다, 스펙 8-2 서버 순서)
     재조사확인: list | None = None     # 재조사 후보 + 사용자 답. 한 번 받으면 남기고 다음 요청 · 판정(답변_검증)이 여기서 읽는다(품목설명 과 같다)
     설명정리: dict = field(default_factory=dict)  # 5-2 사용자 한 문장 → 분류 자료 JSON 글(item_classify.설명_반영). 같은 문장은 세션에서 한 번만 바꾼다
@@ -97,8 +97,10 @@ def 입력키(사업, 비목, 세목, 품목, 금액, 용도, 부가세구분=No
     return hashlib.sha256(json.dumps(값, ensure_ascii=False, separators=(',', ':')).encode()).hexdigest()
 
 
-def _답_결합(후보, 답변):
-    """후보마다 받은 답을 붙인 행 목록. 답이 빠졌거나 형식이 틀리면 ValueError."""
+def _답_결합(후보, 답변, 일부=False):
+    """후보마다 받은 답을 붙인 행 목록. 답이 빠졌거나 형식이 틀리면 ValueError.
+    일부=True(거래 유형 확인 카드, v056): 답한 후보만 행으로 남기고 답이 하나도 없을 때만 ValueError. 거래 유형마다 한 문장이라
+    맞는 하나에만 [맞아요] 하면 된다. 옛 화면이 모든 후보에 답해도 받는다([맞아요] 가 둘 이상이면 확인된 거래 유형이 없다)."""
     표 = {x['id']: x for x in 후보}
     if len(표) != len(후보):
         raise ValueError('조사 후보 오류')
@@ -111,10 +113,12 @@ def _답_결합(후보, 답변):
         if a.get('정정') and a['답'] != '직접입력':
             raise ValueError('조사 정정 오류')
         답표[a['id']] = a
-    if set(답표) != set(표):
+    if (not 답표) if 일부 else set(답표) != set(표):
         raise ValueError('답하지 않은 조사 후보')
     확인 = []
     for c in 후보:
+        if c['id'] not in 답표:
+            continue
         a = 답표[c['id']]
         row = {**copy.deepcopy(c), '답': a['답']}
         if a.get('정정'):
@@ -142,7 +146,7 @@ def 재조사_답변(s, 답변):
     재조사를 하지 않았거나 찾은 후보가 없는 세션에 온 답은 쓰지 않는다(재조사 로직: routes_questions._재조사).
     """
     후보 = (s.재조사 or {}).get('후보') or []
-    return _답_결합(후보, 답변) if 후보 and 답변 else []
+    return _답_결합(후보, 답변, 일부=(s.재조사 or {}).get('종류') == '거래유형') if 후보 and 답변 else []
 
 
 def 재조사_붙이기(조사, 재조사확인):
