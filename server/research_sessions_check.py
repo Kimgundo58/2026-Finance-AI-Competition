@@ -1163,6 +1163,11 @@ def 앙상블_분류_검사():
         assert r['방법'] == '조정' and r['분류']['비목'] == '재료비' and r['디버그']['불일치'] == '경로' and len(조정) == 1, r
         _, p, 스키마, k = 조정[0]
         assert k['추론'] is True and k['스트림'] is True and k['타임아웃'] == item_classify.조정_제한초, k
+        # 세션 예산 안에서는 ④-2 몫(120초)을 남긴 만큼만, 모자라도 30초(Codex 리뷰)
+        import research_runtime
+        for 남음, 기대 in ((400, item_classify.조정_제한초), (200, 80), (100, item_classify.조정_최소초)):
+            with research_runtime.activate(research_runtime.Budget(seconds=남음, llm=10)):
+                assert abs(item_classify.조정_시간() - 기대) < 2, (남음, item_classify.조정_시간())
         assert '발췌-n1-위' in p and '[허용] 규범-n2' in p and '변형 C' in p and '[사용자 확인] 공개 확인문장' in p, p
         assert None not in (스키마['properties']['번호'].get('enum') or [None]) and '9. 어느 후보' not in p, 스키마
         assert r['디버그']['조정']['후보'] == ['외주가공비', '시제품 재료'], r['디버그']['조정']
