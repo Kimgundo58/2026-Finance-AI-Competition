@@ -738,6 +738,7 @@ def main() -> int:
     _입력검증_검사(확인, sse)
     _조사_단계상한_검사(c, 확인)
     _조정_예산까지_검사(c, 확인)
+    _정리_연결끊김_검사(c, 확인)
 
     print("\n[요청 제한·캐시·관리 엔드포인트]")
     확인("관리 엔드포인트는 토큰 없이 403", c.get("/admin/status").status_code == 403)
@@ -1639,6 +1640,45 @@ def _조정_예산까지_검사(c, 확인) -> None:
              (q.get("분류") or {}).get("비목") == "외주용역비" and q.get("다음행동") != "다시시도"
              and [r.get("상태") for r in 판정조사들] == ["미확인"] and research_runtime.세션_예산초 == 600,
              f"{str(q)[:160]} {판정조사들}")
+
+
+def _정리_연결끊김_검사(c, 확인) -> None:
+    """v061 /api/normalize 는 세션 예산을 요청 예산(RequestBudget)으로 나눠 쓰고, 연결이 끊기면 그 요청 예산만 취소한다.
+    세션 예산이 600초로 늘어 끊긴 요청의 워커가 LLM 재시도를 600초까지 이어가지 않게 한다(Codex 적대적 리뷰).
+    _live_정규화 를 멈춰 두고 SSE 생성기를 keep-alive 뒤에 닫아 본다. 외부 호출 없음."""
+    import threading
+    from unittest.mock import patch
+
+    import research_runtime
+    from server import research_sessions
+    from server import routes_normalize as _RN
+
+    print("\n[v061 /api/normalize — 연결이 끊기면 그 요청의 예산만 취소]")
+    잡힘: dict = {}
+    시작, 풀림 = threading.Event(), threading.Event()
+
+    def 멈춘정리(body):
+        잡힘["예산"] = research_runtime.current_budget()
+        시작.set()
+        풀림.wait(10)
+        return {"품목": body.품목}, True
+    원래대기 = _RN._워커_대기
+    with patch.object(_RN, "MOCK", False), patch.object(_RN.ontology_readiness, "확인", lambda *a, **k: None), \
+            patch.object(_RN.response_cache, "조회", lambda *a, **k: None), patch.object(_RN, "_live_정규화", 멈춘정리), \
+            patch.object(_RN, "_워커_대기", lambda f, q, 초, *a: 원래대기(f, q, 0.2, *a)), \
+            patch.object(_RN, "_sse응답", lambda g: 잡힘.setdefault("생성기", g) and None or {}):
+        c.post("/api/normalize", json={"질문": "모니터 30만원 사려고 해요"})
+        g = 잡힘["생성기"]
+        next(g)                                   # 진행 줄
+        next(g)                                   # 워커 대기 중 keep-alive
+        시작.wait(5)
+        g.close()                                 # 연결 끊김
+        풀림.set()
+    예산 = 잡힘.get("예산")
+    세션 = [s for s in research_sessions._세션.values() if s.budget is getattr(예산, "_parent", None)]
+    확인("v061 · /api/normalize 연결이 끊기면 그 요청 예산을 취소(워커의 LLM 재시도가 바로 멈춤), 세션 예산은 그대로",
+         isinstance(예산, research_runtime.RequestBudget) and 예산.remaining_seconds() == 0
+         and len(세션) == 1 and 세션[0].budget.remaining_seconds() > 0, f"{type(예산).__name__} 세션={len(세션)}")
 
 
 def _새흐름_검사(c, sse, 확인) -> None:
