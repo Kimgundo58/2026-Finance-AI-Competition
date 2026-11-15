@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
 from research_runtime import 공개조사_실패문장, 시스템오류
+from llm_schema import 거래유형_ENUM, 거래유형_뜻, 거래유형_문장에_있음
 from apick_mcp import ApickClient, ApickError, public_url as url_ok, strip_tracking
 
 _log = logging.getLogger("uvicorn.error")
@@ -62,8 +63,12 @@ def _스키마(유형들: tuple) -> dict:
 
 
 def _후보_스키마(유형들: tuple) -> dict:
-    """후보 작성 스키마: 읽지못함(품목 내용이 없는 본문의 주소) · 후보. 유형은 이번 조사 목적(제품성격 · 거래처 정보)으로만 한정한다."""
-    fields = {**_FIELDS, "properties": {**_FIELDS["properties"], "유형": {"type": "string", "enum": list(유형들)}}}
+    """후보 작성 스키마: 읽지못함(품목 내용이 없는 본문의 주소) · 후보. 유형은 이번 조사 목적(제품성격 · 거래처 정보)으로만 한정한다.
+    거래유형(v055)은 확인 문장이 말하는 거래 유형(llm_schema.거래유형_ENUM). 사용자가 [맞아요] 하면 ③ 분류의 확인된 거래 유형이 된다
+    (research_sessions.확인_거래유형)."""
+    fields = {**_FIELDS, "properties": {**_FIELDS["properties"], "유형": {"type": "string", "enum": list(유형들)},
+                                         "거래유형": {"type": "string", "enum": list(거래유형_ENUM)}},
+              "required": [*_FIELDS["required"], "거래유형"]}
     return {"type": "object", "additionalProperties": False, "properties": {
         "읽지못함": {"type": "array", "items": {"type": "string"}},
         "후보": {"type": "array", "items": fields}}, "required": ["읽지못함", "후보"]}
@@ -419,6 +424,10 @@ _후보_지시 = (
     "후보의 내용은 「(업체 · 상품)은 (무엇)이에요. 맞나요?」 꼴의 짧은 한국어 한 문장(50자 안팎)이다. 판정에 필요한 것(무엇을 "
     "제공하는지, 필요하면 요금)만 쓰고 위치 · 시설 · 분위기 · 이벤트 같은 부가 정보는 쓰지 않는다. 본문 문장을 옮겨 적지 말고 "
     "본문에 있는 사실만 요점으로 쓴다(꼴: 「(상품 이름)은 (요금)인 (무엇)이에요. 맞나요?」, 요금은 본문에 있을 때만). "
+    "거래유형은 사용자가 돈을 내고 받는 것 하나다: " + " · ".join(f"{k}({v})" for k, v in 거래유형_뜻.items()) + ". "
+    "후보의 내용에 그 거래 유형을 쉬운 말로 드러낸다(예: 「가나정밀 CNC 가공은 부품을 사는 게 아니라 가공을 맡기는 서비스예요. "
+    "맞나요?」, 「다라노트 팀 요금제는 매달 요금을 내고 쓰는 문서 협업 서비스 구독이에요. 맞나요?」). 기준 본문으로 거래 유형을 알 수 "
+    "없으면 거래유형을 기타로 두고 내용에 거래 유형을 짐작해 쓰지 않는다.\n"
     "후보의 유형은 내용의 중심 정보 유형이고, URL 은 기준 본문의 주소다. 후보의 발췌는 그 품목이 무엇인지(무엇을 제공하는지)를 "
     "직접 보여 주는 기준 본문의 연속 구절 하나를 글자 그대로 옮기며, 사진 설명 · 날짜 · 제목만 있는 줄은 고르지 않는다. 실제 구매 사실이나 법적 결론은 쓰지 마라. "
     "내용에 기준 본문에 없는 숫자·금액·통화를 쓰지 말고 주소·마크다운 기호를 넣지 마라. "
@@ -595,8 +604,13 @@ def _후보_고르기(plan: dict, bodies: dict, 유형들: tuple) -> dict | None
         source = {"제목": urlsplit(u).hostname, "url": u, "발췌": excerpt,
                   "수집시각": datetime.now(timezone.utc).isoformat()}
         확인문장 = re.sub(r"\s*맞나요\s*[?？]?\s*$", "", 질문).strip() if 질문종류 == "문장" else ""
+        # 거래유형(v055): 화면에 내지 않는 값. 확인 문장(질문종류 문장)에 드러나 사용자가 [맞아요] 하면 확인된 거래 유형이 된다.
+        # 화면 문장에 그 유형의 낱말이 없으면(코드 검사에 걸린 기본 문장 포함) 사용자가 볼 수 없으므로 기타로 둔다
+        거래유형 = c.get("거래유형") if c.get("거래유형") in 거래유형_ENUM else "기타"
+        if 거래유형 != "기타" and not (질문종류 == "문장" and 거래유형_문장에_있음(거래유형, 확인문장)):
+            거래유형 = "기타"
         return {"id": uuid.uuid4().hex, "유형": c["유형"], "내용": excerpt,
-                "확인문장": 확인문장 or excerpt, "질문": 질문, "질문종류": 질문종류,
+                "확인문장": 확인문장 or excerpt, "질문": 질문, "질문종류": 질문종류, "거래유형": 거래유형,
                 "출처": [source], "상태": "확인필요"}
     return None
 
