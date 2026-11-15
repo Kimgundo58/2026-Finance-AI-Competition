@@ -499,15 +499,16 @@ def 분류(cur, 사업명: str | None, 입력: dict, 레이블: list[dict], 확�
         else:
             거래들 = {g["거래유형"] for g in 고름}
             디버그["불일치"] = "거래유형" if len(거래들) > 1 else "경로"
+            셋다 = len(고름) == len(프롬프트_변형)       # 변형이 하나라도 실패하면 지름길(확인된 거래 유형 · 질문) 없이 조정(Codex 리뷰)
             맞는 = [g for g in 고름 if 확인거래유형 and g["거래유형"] == 확인거래유형]
             맞는키 = {키(g) for g in 맞는}
             # 확인된 거래 유형과 같은 변형 둘 이상이 같은 경로(하나뿐이면 일치가 아니라 조정한다, v056 Codex 리뷰)
-            if len(거래들) > 1 and len(맞는) >= 2 and len(맞는키) == 1 and None not in 맞는키:
+            if 셋다 and len(거래들) > 1 and len(맞는) >= 2 and len(맞는키) == 1 and None not in 맞는키:
                 노드들 = [g["노드"] for g in 맞는]
                 노드 = max(dict.fromkeys(노드들), key=노드들.count)
                 확신 = "동일" if all(g["노드"] == 노드 and g["확신"] == "동일" for g in 맞는) else "유사"
                 방법 = "확인거래유형"
-            elif (len(거래들) > 1 and not 확인거래유형 and 거래유형_질문가능 and None not in 거래들
+            elif (셋다 and len(거래들) > 1 and not 확인거래유형 and 거래유형_질문가능 and None not in 거래들
                   and len(물을것 := [t for t in dict.fromkeys(g["거래유형"] for g in 고름) if t != "기타"]) >= 2):
                 # 기타를 뺀 거래 유형이 둘 이상일 때만 묻는다(기타는 고를 수 있어도 확인된 거래 유형이 아니다). 하나뿐이면 조정
                 거래유형질문 = 물을것
