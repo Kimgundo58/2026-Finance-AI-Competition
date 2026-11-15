@@ -1290,6 +1290,23 @@ def _조사_단계상한_검사(c, 확인) -> None:
     확인("v060 · 후보 작성이 서버 예산이 끝날 때까지 403 → 시스템오류(다시시도)",
          isinstance(out, research_runtime.시스템오류) and 초 < 5, f"{out!r:.160} {초:.1f}초")
 
+    # 마감 분류(llm_qwen): 한 시도가 단계 상한 · 서버 예산을 둘 다 넘겨 돌아오면 예산 끝남(LLM시스템오류)이다. 예산이 남았으면 LLM단계상한초과
+    def 늦은403(*a, **k):
+        time.sleep(2.5)
+        raise _403()
+
+    def 마감분류(예산초):
+        with patch.object(llm_qwen, "_client_얻기", return_value=None), patch.object(llm_qwen, "_호출_1회", 늦은403), \
+                research_runtime.activate(research_runtime.Budget(seconds=예산초)):
+            try:
+                llm_qwen.llm_호출("p", {"type": "object"}, 타임아웃=1, 재시도=0, 마감까지_재시도=True, 마감초=1.0, 단계="공개 조사")
+            except llm_qwen.LLM시스템오류 as e:
+                return type(e).__name__
+        return "받음"
+    분류 = (마감분류(2.0), 마감분류(300.0))
+    확인("v060 · 한 시도가 단계 상한 · 서버 예산을 둘 다 넘김 → LLM시스템오류(다시시도), 예산이 남았으면 LLM단계상한초과",
+         분류 == ("LLM시스템오류", "LLM단계상한초과"), str(분류))
+
     # /api/questions ② 요청(live 경로): 조사 세션 예산 · 조사 시간 상한만 줄이고 같은 세 경우
     def 묻기(계획들, 정리들, 예산초, 웹초, 전체초, 백오프, **추가):
         호출, _ = 가짜LLM(계획들, 정리들)

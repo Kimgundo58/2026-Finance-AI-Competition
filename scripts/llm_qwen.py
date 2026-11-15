@@ -309,9 +309,12 @@ def _마감까지_호출(client: OpenAI, 모델: str, 프롬프트: str, 스키�
 
     def 단계상한이_먼저() -> bool:
         """서버 예산보다 `마감초`(단계 시간 상한)가 1초 넘게 먼저 끝나는가. 호출자가 예산의 남은 시간을 `마감초` 로 넘기면 두 값이
-        거의 같아 예산 끝남으로 본다. 예산이 없는 호출(CLI · 검사)은 단계 상한이 아니라 `타임아웃` 이 마감이다."""
-        return (마감초 is not None and budget is not None
-                and 로컬마감 - time.monotonic() + 1.0 < budget.remaining_seconds())
+        거의 같아 예산 끝남으로 본다. 서버 예산이 1초 이하로 남았으면(끝났으면) 언제나 예산 끝남이다: 한 시도가 두 마감을 다 넘겨
+        돌아와도 시스템오류(다시시도)로 올린다. 예산이 없는 호출(CLI · 검사)은 단계 상한이 아니라 `타임아웃` 이 마감이다."""
+        if 마감초 is None or budget is None:
+            return False
+        예산남음 = budget.remaining_seconds()
+        return 예산남음 > 1.0 and 로컬마감 - time.monotonic() + 1.0 < 예산남음
 
     def 마감_실패(앞말: str) -> LLM시스템오류:
         """마감 실패 예외와 오류 로그. 단계 시간 상한이 먼저면 LLM단계상한초과, 서버 예산이 마감이면 LLM시스템오류."""

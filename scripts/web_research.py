@@ -1003,7 +1003,7 @@ def research(public_query: str | None = None, *, product_name: str | None = None
             if stop:
                 break
         except 시스템오류 as e:
-            if 계획호출중 and isinstance(e, 단계상한초과):
+            if 계획호출중 and isinstance(e, 단계상한초과) and budget.remaining_seconds() > 0:
                 # 계획 LLM 의 시스템 오류 재시도가 서버 예산보다 조사 시간 상한에 먼저 닿았다(v060). 상한 뒤에는 새 검색 · 읽기를
                 # 시작하지 않으므로 계획을 받았어도 쓸 곳이 없다: 시스템 오류가 아니라 조사 시간이 끝난 것으로 보고 얻은 만큼으로 끝낸다
                 # (②: 후보가 없으면 부족정보 · [직접 입력하기], ④-2: 못찾음 → 확인 질문). 계획을 한 번도 받지 못했으면 아래 _조사_못함 이다
