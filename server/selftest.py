@@ -312,6 +312,7 @@ def main() -> int:
     늘림.ensure_remaining(seconds=600, llm=40)
     확인("판정 요청 예산: 남은 시간 · LLM 횟수를 600초 · 40회 이상으로 늘린다(줄이지 않는다)",
          늘림.remaining_seconds() >= 599 and sum(늘림.reserve_llm(final=True) for _ in range(41)) == 40)
+    _판정_재시도_검사(확인)
 
     # mock_판정 은 인용 키를 직접 갖고 있어 위 검사로는 live 경로가 판정 파이프라인의 키 이름
     # (인용목록·전제목록)을 읽는지 알 수 없다. 가짜 orchestrate 로 교체해 _live_판정 을 직접 부른다.
@@ -878,6 +879,76 @@ def main() -> int:
 
     print(f"\n{'PASS 전부 통과' if not 실패 else f'FAIL {실패}건'}")
     return 1 if 실패 else 0
+
+
+def _판정_재시도_검사(확인) -> None:
+    """판정 호출 경로(llm_호출 마감까지_재시도=True, orchestrate._판정호출 과 같은 인자)를 가짜 LLM 클라이언트로 돌린다.
+
+    403 뒤 성공 · 스트림 청크 무응답 뒤 성공 · 끝내 실패(폴백 모델로 가지 않는다)를 본다. 네트워크 · API 키는 쓰지 않는다."""
+    from types import SimpleNamespace as NS
+
+    import httpx
+    import openai
+
+    import llm_qwen
+
+    class 가짜스트림:
+        def __init__(self, 조각들, 끊김=None):
+            self._조각들, self._끊김 = 조각들, 끊김
+
+        def __iter__(self):
+            yield from self._조각들
+            if self._끊김 is not None:
+                raise self._끊김
+
+        def close(self):
+            pass
+
+    def 청크(내용, 종료=None):
+        return NS(usage=None, choices=[NS(delta=NS(content=내용, reasoning_content=None, model_extra={}),
+                                          finish_reason=종료)])
+
+    def _403():
+        응답 = httpx.Response(403, request=httpx.Request("POST", "http://gateway.invalid/v1/chat/completions"))
+        return openai.PermissionDeniedError("Workspace endpoint access denied", response=응답, body=None)
+
+    class 가짜클라이언트:
+        def __init__(self, 차례):
+            self.차례, self.모델들 = list(차례), []
+            self.chat = NS(completions=NS(create=self._create))
+
+        def _create(self, **kw):
+            self.모델들.append(kw["model"])
+            다음 = self.차례.pop(0) if self.차례 else "403"
+            if 다음 == "403":
+                raise _403()
+            if 다음 == "무응답":
+                return 가짜스트림([청크('{"판정"')], 끊김=httpx.ReadTimeout("read timeout"))
+            return 가짜스트림([청크('{"판정": "불가"}', "stop")])
+
+    원래 = llm_qwen._client_얻기, llm_qwen._마감재시도_백오프초
+    try:
+        llm_qwen._마감재시도_백오프초 = (0.2,)
+        인자 = dict(온도=0.0, 최대토큰=8192, 스트림=True, 폴백=False, 마감까지_재시도=True, 청크_대기초=30.0)
+        for 이름, 차례, 시도수 in (("403 뒤 2번째 시도", ["403", "성공"], 2),
+                               ("스트림 청크 무응답 뒤 2번째 시도", ["무응답", "성공"], 2)):
+            가짜 = 가짜클라이언트(차례)
+            llm_qwen._client_얻기 = lambda c=가짜: c
+            출력, 메타 = llm_qwen.llm_호출("p", {"type": "object"}, 타임아웃=5, **인자)
+            확인(f"판정 LLM 재시도: {이름}에 받는다(시도 {시도수}, 폴백 모델 안 씀)",
+                 출력 == {"판정": "불가"} and 메타.get("시도") == 시도수 and 메타.get("스트림") is True
+                 and set(가짜.모델들) == {llm_qwen.기본_모델}, str(메타.get("시도")))
+        가짜 = 가짜클라이언트([])
+        llm_qwen._client_얻기 = lambda c=가짜: c
+        try:
+            llm_qwen.llm_호출("p", {"type": "object"}, 타임아웃=2, **인자)
+            끝내실패 = False
+        except llm_qwen.LLM실패 as e:
+            끝내실패 = "회 시도" in str(e)
+        확인("판정 LLM 재시도: 마감까지 403 이면 LLM실패(시도 횟수 포함), 폴백 모델로 보내지 않는다",
+             끝내실패 and len(가짜.모델들) >= 2 and set(가짜.모델들) == {llm_qwen.기본_모델}, f"{len(가짜.모델들)}회")
+    finally:
+        llm_qwen._client_얻기, llm_qwen._마감재시도_백오프초 = 원래
 
 
 def _새흐름_검사(c, sse, 확인) -> None:
