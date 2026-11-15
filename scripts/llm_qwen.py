@@ -21,7 +21,7 @@ from typing import Any
 
 import httpx
 from openai import OpenAI
-from research_runtime import current_budget, is_final_call, 시스템오류, 재시도_기록
+from research_runtime import current_budget, is_final_call, 단계상한초과, 시스템오류, 재시도_기록
 
 
 class LLM실패(Exception):
@@ -266,6 +266,10 @@ class LLM시스템오류(시스템오류):
     판정실패 · 다시시도가 된다(research_runtime.시스템오류)."""
 
 
+class LLM단계상한초과(LLM시스템오류, 단계상한초과):
+    """서버 예산보다 `마감초`(그 단계의 시간 상한)가 먼저 끝나 멈췄다(v060). 예산은 남아 있다. 받지 않은 곳에서는 LLM시스템오류 와 같다."""
+
+
 def _재시도_대상_아님(e: Exception) -> bool:
     """다시 보내도 같은 결과인 요청 오류(400 · 401 · 404 · 422). 한 번 더 · 폴백 한 번 뒤에는 마감까지 기다리지 않는다."""
     import openai
@@ -290,7 +294,8 @@ def _마감까지_호출(client: OpenAI, 모델: str, 프롬프트: str, 스키�
       (기존 llm_호출 폴백 규칙). 그 뒤에도 실패하면 기본 모델로 마감까지 다시 보낸다. 판정 LLM 은 폴백=False(사용자 2026-11-15).
     - 한 시도의 대기 상한: 스트리밍 + 청크_대기초(판정)는 마감까지 전체(청크 무응답이 멈춤을 잡는다), 그 밖은 max(`타임아웃`, `_시도_최소초`) 와 마감 중 짧은 쪽.
     - 실패한 시도는 모두 경고 로그 · 재시도 기록(research_runtime.재시도_기록), 끝내 실패하면 오류 로그를 남긴다.
-    메타에 `시도`(보낸 횟수)를 넣는다. 끝내 실패하면 LLM시스템오류(단계 · 원인 · 시도).
+    메타에 `시도`(보낸 횟수)를 넣는다. 끝내 실패하면 LLM시스템오류(단계 · 원인 · 시도). 서버 예산이 남았는데 `마감초` 가 먼저 끝났으면
+    그 하위 클래스 LLM단계상한초과 다(v060: 공개 조사 계획 LLM 이 「조사 시간 끝남」 으로 받는다).
     """
     budget = current_budget()
     지금 = time.monotonic()
@@ -302,6 +307,22 @@ def _마감까지_호출(client: OpenAI, 모델: str, 프롬프트: str, 스키�
             남.append(max(0.0, 로컬마감 - time.monotonic()))
         return min(남)
 
+    def 단계상한이_먼저() -> bool:
+        """서버 예산보다 `마감초`(단계 시간 상한)가 1초 넘게 먼저 끝나는가. 호출자가 예산의 남은 시간을 `마감초` 로 넘기면 두 값이
+        거의 같아 예산 끝남으로 본다. 서버 예산이 1초 이하로 남았으면(끝났으면) 언제나 예산 끝남이다: 한 시도가 두 마감을 다 넘겨
+        돌아와도 시스템오류(다시시도)로 올린다. 예산이 없는 호출(CLI · 검사)은 단계 상한이 아니라 `타임아웃` 이 마감이다."""
+        if 마감초 is None or budget is None:
+            return False
+        예산남음 = budget.remaining_seconds()
+        return 예산남음 > 1.0 and 로컬마감 - time.monotonic() + 1.0 < 예산남음
+
+    def 마감_실패(앞말: str) -> LLM시스템오류:
+        """마감 실패 예외와 오류 로그. 단계 시간 상한이 먼저면 LLM단계상한초과, 서버 예산이 마감이면 LLM시스템오류."""
+        상한 = 단계상한이_먼저()
+        이름 = "단계 시간 상한" if 상한 else "마감"
+        _log.error("[%s LLM] 실패 — %s%s, %d회 시도, 마지막 오류: %s", 단계, 이름, 앞말, n, 마지막)
+        return (LLM단계상한초과 if 상한 else LLM시스템오류)(f"{단계} LLM", f"{이름}({마지막 or '시도 전'})", n)
+
     def 기록(원인: str, 대기: float = 0.0) -> None:
         재시도_기록(f"{단계} LLM", 원인, n, 대기)
 
@@ -312,8 +333,7 @@ def _마감까지_호출(client: OpenAI, 모델: str, 프롬프트: str, 스키�
     while True:
         남은 = 남은초()
         if 남은 <= 0:
-            _log.error("[%s LLM] 실패 — 마감, %d회 시도, 마지막 오류: %s", 단계, n, 마지막)
-            raise LLM시스템오류(f"{단계} LLM", f"마감({마지막 or '시도 전'})", n)
+            raise 마감_실패("")
         n += 1
         이번모델 = 쓸모델
         한도 = 남은 if (스트림 and 청크_대기초 is not None) else min(max(float(타임아웃), _시도_최소초), 남은)
@@ -377,14 +397,16 @@ def _마감까지_호출(client: OpenAI, 모델: str, 프롬프트: str, 스키�
             continue
         대기 = _마감재시도_백오프초[min(백오프, len(_마감재시도_백오프초) - 1)]
         if 남은초() <= 대기 + 1:
-            _log.error("[%s LLM] 실패 — 마감 전에 다시 보낼 시간 없음, %d회 시도, 마지막 오류: %s", 단계, n, 마지막)
-            raise LLM시스템오류(f"{단계} LLM", f"마감({마지막})", n)
+            raise 마감_실패(" 전에 다시 보낼 시간 없음")
         백오프 += 1
         _log.warning("[%s LLM] %d번째 시도 %s 오류 — %.0f초 뒤 재시도: %s", 단계, n, 종류, 대기, 마지막)
         기록(마지막, 대기)
         time.sleep(대기)
     _log.error("[%s LLM] 실패 — 요청 오류, %d회 시도, 마지막 오류: %s", 단계, n, 마지막)
-    raise LLM시스템오류(f"{단계} LLM", f"요청 오류({마지막})", n)
+    오류 = LLM시스템오류(f"{단계} LLM", f"요청 오류({마지막})", n)
+    # 다시 보내도 같은 결과(400 등). 서버 예산이 남았을 때만 붙인다(web_research.research 가 얻은 만큼으로 끝낼지 본다)
+    오류.요청오류 = budget is None or budget.remaining_seconds() > 0
+    raise 오류
 
 
 def llm_호출(프롬프트: str, 스키마: dict | None, *,

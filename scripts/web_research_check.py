@@ -835,8 +835,10 @@ def 조사모델_검사():
         import web_research
         보낸 = []
         def 가짜(prompt, schema, *, 모델, 재시도, 타임아웃, 추론, 마감까지_재시도=False, 마감초=None, 단계=None):
-            # v053: 조사 LLM 은 조사 마감(timeout)까지 시스템 오류를 다시 보낸다(마감까지_재시도)
-            assert 마감까지_재시도 and 마감초 == float(타임아웃) and 단계 == "공개 조사", (마감까지_재시도, 마감초, 단계)
+            # v053: 조사 LLM 은 시스템 오류를 마감까지 다시 보낸다(마감까지_재시도). v060: 계획은 조사 시간 상한(timeout)까지,
+            # 후보 작성 · 요건 정리는 서버 예산 끝까지(마감초 None)
+            정리 = _후보역할(schema) or web_research._요건역할(schema)
+            assert 마감까지_재시도 and 마감초 == (None if 정리 else float(타임아웃)) and 단계 == "공개 조사", (마감까지_재시도, 마감초, 단계)
             보낸.append((모델, 재시도, 타임아웃, 추론))
             if 실패.pop(0):
                 raise llm_qwen.LLM실패("synthetic")
@@ -845,6 +847,9 @@ def 조사모델_검사():
             실패 = [False]
             assert web_research._기본_계획호출()("p", {}, 30) == {"행동": "완료"}
             assert 보낸 == [(llm_qwen.기본_모델, 0, 30, False)], 보낸
+            for 정리스키마 in ({"properties": {"후보": {}}}, {"properties": {"결과": {}}}):   # 후보 작성 · 요건 정리
+                실패 = [False]
+                web_research._기본_계획호출()("p", 정리스키마, 30)
             보낸.clear(); 실패 = [True]
             try:
                 web_research._기본_계획호출()("p", {}, 30)
@@ -871,7 +876,7 @@ def 조사모델_검사():
 
 
 def 시스템오류_검사(body):
-    """v053: 계획 · 후보 작성 LLM 이 조사 마감까지 시스템 오류면 쓸 수 있는 결과(후보)가 없을 때 research() 가 시스템오류를 올린다.
+    """v053: 계획 · 후보 작성 LLM 이 서버 예산이 끝날 때까지 시스템 오류면 쓸 수 있는 결과(후보)가 없을 때 research() 가 시스템오류를 올린다.
     「공개 정보에서 찾지 못함」 으로 넘기지 않는다(호출자 routes_questions 가 다시시도로 응답). 형식 오류 같은 그 밖의 실패는 지금처럼 조사 못함."""
     from research_runtime import 시스템오류
     url = "https://example.com/product"

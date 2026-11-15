@@ -149,7 +149,7 @@ def questions(req: Request, body: 질문요청):
                                     requirements=준비['요건'], context=준비['문맥'],
                                     public_url=body.판매URL, budget=요청예산, emit=emit, vendor=body.거래처)
                         except 시스템오류 as e:
-                            # 계획 · 후보 LLM(또는 DB)이 조사 마감까지 실패해 얻은 것이 없다. 「공개 정보 없음」 으로 넘기지 않고
+                            # 계획 · 후보 LLM(또는 DB)이 서버 예산이 끝날 때까지 실패해 얻은 것이 없다(조사 시간 상한에 닿은 것은 후보 없음, v060). 「공개 정보 없음」 으로 넘기지 않고
                             # 다시 시도 안내를 낸다. 조사완료 를 남기지 않아 다시 시도 요청이 ② 를 다시 한다(v053)
                             _log.warning('공개 정보 조사 시스템 오류: 단계=%s 시도=%s', e.단계, e.시도)
                             세션.입력, 세션.버전, 세션.요청키 = 입력, 버전, 요청키
@@ -482,7 +482,7 @@ def _재조사(body: 질문요청, 필요정보: list[str], ip: str | None = Non
         r = web_research.research(None, requirements=[], context=문맥, public_url=body.판매URL, vendor=body.거래처,
                                   budget=예산, emit=알림, 제한초=제한초, 읽은주소=읽은주소)
     except 시스템오류:
-        # 계획 · 후보 LLM 이 재조사 마감까지 실패해 얻은 것이 없다. 「못 찾음」 으로 넘기지 않고 올려 다시시도로 응답한다(v053)
+        # 계획 · 후보 LLM 이 서버 예산이 끝날 때까지 실패해 얻은 것이 없다(재조사 시간 상한에 닿은 것은 못 찾음, v060). 「못 찾음」 으로 넘기지 않고 올려 다시시도로 응답한다(v053)
         research_runtime.emit("재조사", 재조사_없음문장, "실패", id=event_id)
         raise
     except Exception as e:                                    # noqa: BLE001
