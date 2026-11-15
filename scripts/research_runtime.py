@@ -56,7 +56,7 @@ class Budget:
     # 횟수 상한(2026-11-12 사용자: 비용 · 호출 횟수는 상관없다, 막지 말 것). 실제로 묶는 건 시간(전체 세션_예산초)이다.
     # 도구 60(2026-11-13): ② 품목 조사(계획 6 · 도구 10 · 120초)에 ④-2 판정용 조사(계획 15 · 도구 30)가 더해졌다.
     # 판정 요청은 시작할 때 남은 몫을 600초 · LLM 40회 이상으로 늘린다(ensure_remaining, routes_judge).
-    # LLM 횟수에는 게이트웨이 일시 오류 재시도(llm_qwen._일시오류_추가 · _마감재시도_백오프초)도 HTTP 호출마다 예약된다
+    # LLM 횟수는 새 호출만 센다. 운영 경로(마감까지_재시도)의 시스템 오류 재시도는 세지 않고 시간만 본다(v062, reserve_llm 재시도)
     # 읽은 본문 글자 상한 150,000(2026-11-13): ④-2 가 본문을 최대 30번 더 읽는다
     def __init__(self, *, seconds: float = 세션_예산초, tools: int = 세션_도구, llm: int = 세션_LLM,
                  evidence_chars: int = 150000, emit=None):
@@ -117,8 +117,12 @@ class Budget:
             self.tools_used += 1
             return True
 
-    def reserve_llm(self, *, final: bool = False) -> bool:
+    def reserve_llm(self, *, final: bool = False, 재시도: bool = False) -> bool:
+        """LLM 호출 하나를 예약한다. `재시도`(같은 호출을 시스템 오류 때문에 다시 보냄, llm_qwen._마감까지_호출)는 호출 수를 세지 않고
+        시간만 본다(v062): 호출 수 · 비용은 따지지 않고 시간이 상한이다(사용자 11-13). 호출 수 상한은 새 호출에만 걸린다."""
         with self._lock:
+            if 재시도:
+                return self._remaining() > 0
             limit = self._llm_limit if final else max(0, self._llm_limit - 1)
             if self._remaining() <= 0 or self.llm_used >= limit:
                 return False
@@ -192,8 +196,8 @@ class RequestBudget:
     def reserve_tool(self) -> bool:
         return not self._cancelled and self._parent.reserve_tool()
 
-    def reserve_llm(self, *, final: bool = False) -> bool:
-        return not self._cancelled and self._parent.reserve_llm(final=final)
+    def reserve_llm(self, *, final: bool = False, 재시도: bool = False) -> bool:
+        return not self._cancelled and self._parent.reserve_llm(final=final, 재시도=재시도)
 
     def add_evidence(self, text: str) -> bool:
         return not self._cancelled and self._parent.add_evidence(text)

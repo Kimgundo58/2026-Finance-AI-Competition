@@ -352,7 +352,8 @@ def 시스템오류_검사(client, norm):
                 routes_questions._live_질문(body, None, None, '127.0.0.1', 0.0)
                 raise AssertionError('저장 실패를 삼킴')
             except 시스템오류 as e:
-                assert e.단계 == '확인 질문 저장 DB' and e.시도 == 1, e
+                # v062: 남은 시간이 백오프보다 짧아도 대기를 줄여 마감까지 다시 쓴다(sleep 을 막아 여러 번 돈다)
+                assert e.단계 == '확인 질문 저장 DB' and e.시도 >= 2, e
 
     # 사업 목록(요청 처리 전): 잠깐 못 읽으면 다시 읽어 표준 이름을 내고, 마감까지 못 읽으면 503(결과를 만들지 않는다)
     from fastapi import HTTPException

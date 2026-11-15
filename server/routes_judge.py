@@ -138,7 +138,9 @@ def judge(req: Request, body: 판정요청, mock: str | None = None,
             입력 = research_sessions.입력키(body.사업명, None if 서버분류 else body.확정비목, None if 서버분류 else body.확정세목,
                                          n.get('품목'), n.get('금액'), n.get('용도'), body.부가세구분,
                                          (n.get('질문원문') or n.get('질문') or n.get('_원문') or '')[:2000] or None)
-            규정버전, 기관버전 = response_cache.요청_해시(), response_cache.l3_해시(body.org_id)
+            # 버전 해시를 못 읽은 DB 장애는 버전 불일치(400)가 아니다. 판정 전 DB 마감까지 다시 읽고, 끝내 안 되면 판정실패(v062)
+            규정버전, 기관버전 = (_판정전_DB(lambda: response_cache.버전_엄격조회(body.org_id), "규정 버전 읽기")
+                              if not MOCK else (response_cache.요청_해시(), response_cache.l3_해시(body.org_id)))
             if not MOCK and (규정버전 in ('unknown', '', None) or (body.org_id and not 기관버전)):
                 raise ValueError('규정 버전 확인 실패')
             버전 = json.dumps([규정버전, 기관버전, 온톨로지_사업(body.사업명)], ensure_ascii=False)
@@ -147,6 +149,10 @@ def judge(req: Request, body: 판정요청, mock: str | None = None,
         except research_sessions.재질문 as e:
             조사세션.lock.release()
             raise HTTPException(409, '확인 내용이 변경되어 질문을 다시 만들어야 합니다') from e
+        except research_runtime.시스템오류 as e:
+            조사세션.lock.release()
+            _log.error("판정 실패 — 단계=%s(판정 전 읽기) 시도=%s", e.단계, e.시도)
+            return _sse응답(_판정실패_스트림(body, 판정실패_요약_DB))
         except Exception as e:
             조사세션.lock.release()
             raise HTTPException(400, '조사 내용이 변경되어 다시 확인해야 합니다') from e
@@ -460,6 +466,8 @@ def _판정_이벤트(out: dict):
     판정값["버전스탬프"] = out.get("규정버전")  # 구 이름 호환(제거 예정: 다음 릴리스)
     if out.get("판정실패"):
         판정값["판정실패"] = True     # 화면은 이 값을 보면 판정 대신 「다시 점검」 을 보인다
+        if out.get("판정실패원인"):    # 요청오류(v062): 화면은 「연결 불안정」 대신 문구를 바꿔 다시 점검 · 주관기관 문의 안내를 보인다
+            판정값["판정실패원인"] = out["판정실패원인"]
     yield _sse("판정", 판정값)
     yield _sse("해야할일", out.get("해야할일", []))
     yield _sse("인용", out.get("인용", []))
