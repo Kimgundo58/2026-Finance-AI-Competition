@@ -336,7 +336,7 @@ def _분류(body: 질문요청, 조사확인: dict | None, 조사ID: str | None 
         레이블 = [x for x in ontology_lookup.레이블_목록(cur, body.사업명) if x["비목"] in 비목_ENUM]
         return item_classify.분류(cur, body.사업명, {"품목": body.품목, "용도": body.용도, "금액": body.금액, "거래처": body.거래처},
                                 레이블, item_classify.확인정보_글(조사확인, (조사확인 or {}).get('품목설명') or body.품목설명),
-                                설명캐시=설명캐시)
+                                설명캐시=설명캐시, 확인거래유형=research_sessions.확인_거래유형(조사확인))
     try:
         # DB 연결 끊김 · 시간 초과는 새 연결로 다시 하고(db.재시도), 분류 · 설명 정리 LLM 은 예산까지 다시 보낸다(item_classify._운영_llm, v053)
         with db.연결() as 연:
@@ -348,8 +348,8 @@ def _분류(body: 질문요청, 조사확인: dict | None, 조사ID: str | None 
         _log.warning("분류 실패: %s", type(e).__name__)
         return {"분류": None, "노드결정": None, "안내": _분류실패_안내, "실패": True, "다음행동": "다시시도"}
     d = r["디버그"]
-    _log.info("분류 방법=%s 후보=%s 버림=%s 다른경로=%s 설명정리=%s ms=%s", r["방법"], d.get("후보수"), len(d.get("버린후보") or []),
-              len(d.get("다른경로") or []), d.get("설명정리"), d.get("ms"))
+    _log.info("분류 방법=%s 후보=%s 버림=%s 다른경로=%s 설명정리=%s 확인거래유형=%s ms=%s", r["방법"], d.get("후보수"),
+              len(d.get("버린후보") or []), len(d.get("다른경로") or []), d.get("설명정리"), d.get("확인거래유형"), d.get("ms"))
     if not r["분류"] and d.get("LLM실패"):                    # 분류 LLM 이 실패했다. 맞는 분류가 없다는 뜻이 아니다
         return {"분류": None, "노드결정": None, "안내": _분류실패_안내, "실패": True, "다음행동": "다시시도", "_디버그": d}
     if not r["분류"]:

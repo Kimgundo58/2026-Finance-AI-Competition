@@ -467,7 +467,28 @@ def main():
     apick_분류_검사()
     요건조사_검사()
     시스템오류_검사(body)
+    거래유형_검사()
     print("웹 조사 모의 검사 통과")
+
+
+def 거래유형_검사():
+    """v055: 후보 작성 스키마에 거래유형(필수, llm_schema.거래유형_ENUM)이 있고 지시가 확인 문장에 거래 유형을 드러내게 한다.
+    LLM 이 고른 값은 후보에 그대로, ENUM 밖 · 빠진 값은 기타. 요건 모드(④-2) 스키마에는 넣지 않는다."""
+    import web_research
+    from llm_schema import 거래유형_ENUM
+    s = web_research._후보_스키마(("제품성격",))
+    칸 = s["properties"]["후보"]["items"]
+    assert 칸["properties"]["거래유형"]["enum"] == list(거래유형_ENUM) and "거래유형" in 칸["required"], 칸
+    assert "거래유형" not in json.dumps(web_research._요건_스키마(["C1"]), ensure_ascii=False)
+    assert "부품을 사는 게 아니라 가공을 맡기는 서비스" in web_research._후보_지시 and "용역(사람 · 업체에 업무를 맡김)" in web_research._후보_지시
+    url, 발췌 = "https://example.com/product", "This is a search API for developers."
+    body = "Example official documentation. " + 발췌
+    for 값, 기대 in (("용역", "용역"), ("구독", "구독"), ("대여", "기타"), (None, "기타")):
+        c = {"유형": "제품성격", "내용": "Example 은 개발자용 검색 API 구독이에요. 맞나요?", "발췌": 발췌, "URL": url}
+        if 값 is not None:
+            c["거래유형"] = 값
+        r = web_research._후보_고르기({"후보": [c]}, {url: body}, ("제품성격",))
+        assert r and r["거래유형"] == 기대 and r["질문종류"] == "문장", (값, r)
 
 
 def 추론끔_검사(llm_qwen):
