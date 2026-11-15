@@ -1012,8 +1012,11 @@ def research(public_query: str | None = None, *, product_name: str | None = None
                 break
             # LLM · DB 시스템 오류가 서버 예산이 끝날 때까지 이어졌다(v053 · v060). 쓸 수 있는 결과(후보 · 확인된 요건)가 없으면 올려 호출자가
             # 다시시도로 응답한다: 읽은 본문을 정리하지 못한 채 「공개 정보에서 찾지 못함」 으로 넘기지 않는다.
-            # 이미 후보 · 확인된 요건이 있으면 지금처럼 얻은 만큼으로 끝낸다(얻은 것을 버리지 않게, 기본값으로 정함)
-            if not output.get("후보") and not any(v.get("결과") == "확인됨" for v in 요건결과.values()):
+            # 서버 예산까지 이어진 시스템 오류는 확인된 요건이 일부 있어도 올린다(v060): 정리하지 못한 나머지 요건을 「못찾음」 으로
+            # 채우면 장애가 근거 부족으로 바뀌고, 예산이 없어 뒤 단계(⑤ 질문)도 돌 수 없다. 다시 보내도 같은 요청 오류(400 등,
+            # llm_qwen 이 `요청오류` 를 붙인다)만 지금처럼 얻은 만큼으로 끝낸다(얻은 것을 버리지 않게, 기본값으로 정함)
+            if (not getattr(e, "요청오류", False)
+                    or not output.get("후보") and not any(v.get("결과") == "확인됨" for v in 요건결과.values())):
                 raise
             오류끝 = True
             break

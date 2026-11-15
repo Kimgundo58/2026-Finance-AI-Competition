@@ -1290,6 +1290,47 @@ def _조사_단계상한_검사(c, 확인) -> None:
     확인("v060 · 후보 작성이 서버 예산이 끝날 때까지 403 → 시스템오류(다시시도)",
          isinstance(out, research_runtime.시스템오류) and 초 < 5, f"{out!r:.160} {초:.1f}초")
 
+    # ④-2 에서 요건 하나를 확인한 뒤 다음 정리가 서버 예산 끝까지 403 → 나머지를 「못찾음」 으로 채우지 않고 시스템오류(다시시도).
+    # 다시 보내도 같은 요청 오류(400)면 지금처럼 얻은 만큼(상태 일부)으로 끝낸다
+    주소2 = "https://example.org/page2"
+    본문글2 = "Example Pro 디자인 툴 요금 안내 두 번째 페이지입니다. 팀 단위 좌석으로 사용하며 결제 통화는 원화입니다."
+
+    class 도구2(도구):
+        def call(self, name, args, timeout):
+            if name == "google_search":
+                return {"content": [{"type": "text", "text": json.dumps({"link": 주소2})}]}
+            return {"content": [{"type": "text", "text": 본문글2 if args.get("url") == 주소2 else 본문글}]}
+
+    def _400():
+        응답 = httpx.Response(400, request=httpx.Request("POST", "http://gateway.invalid/v1/chat/completions"))
+        return openai.BadRequestError("bad request", response=응답, body=None)
+    두줄 = [{"번호": "C1", "조건": "구독 방식으로 결제하는가", "원문": "", "시점": ""},
+          {"번호": "C2", "조건": "외화로 결제하는가", "원문": "", "시점": ""}]
+    정리C1 = {"결과": [{**정리출력["결과"][0]}, {"조건": "C2", "결과": "못찾음", "값": "", "발췌": "", "URL": "", "이유": "",
+                                              "같은업체": "예", "같은업체이유": ""}], "읽지못함": []}
+    계획2 = [{"행동": "검색", "유형": "제품성격", "검색어": "디자인 툴 구독", "URL": []},
+           {"행동": "본문", "유형": "제품성격", "검색어": "", "URL": [주소2]}]
+    for 이름, 둘째, 기대 in (("403", "403", "시스템오류"), ("400", "400", "일부")):
+        차례 = {"계획": list(계획2), "정리": [정리C1]}
+
+        def 호출2(client, 모델, 프롬프트, 스키마, *a, _둘째=둘째, _차례=차례, **k):
+            역 = "정리" if web_research._요건역할(스키마) else "계획"
+            if _차례[역]:
+                return _차례[역].pop(0), {}
+            raise _403() if _둘째 == "403" else _400()
+        예산 = research_runtime.Budget(seconds=4.0)
+        with patch.object(llm_qwen, "_client_얻기", return_value=None), patch.object(llm_qwen, "_호출_1회", 호출2), \
+                patch.object(llm_qwen, "_마감재시도_백오프초", (0.2,)), patch.object(web_research, "_추출여유초", 0.5), \
+                patch.dict(os.environ, {"SUDDOE_RESEARCH_MODEL": ""}), research_runtime.activate(예산):
+            try:
+                r = web_research.research(None, budget=예산, client=도구2(), public_url=주소, 사실확인=두줄,
+                                          context={"품목": "디자인 툴 구독"})
+                결과 = r.get("상태")
+            except research_runtime.시스템오류:
+                결과 = "시스템오류"
+        확인(f"v060 · ④-2 요건 1개 확인 뒤 다음 정리가 {이름} → {기대}"
+             + ("(나머지를 못찾음으로 채우지 않음)" if 이름 == "403" else "(요청 오류는 얻은 만큼으로 끝냄)"), 결과 == 기대, str(결과))
+
     # 마감 분류(llm_qwen): 한 시도가 단계 상한 · 서버 예산을 둘 다 넘겨 돌아오면 예산 끝남(LLM시스템오류)이다. 예산이 남았으면 LLM단계상한초과
     def 늦은403(*a, **k):
         time.sleep(2.5)

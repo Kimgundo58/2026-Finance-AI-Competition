@@ -403,7 +403,9 @@ def _마감까지_호출(client: OpenAI, 모델: str, 프롬프트: str, 스키�
         기록(마지막, 대기)
         time.sleep(대기)
     _log.error("[%s LLM] 실패 — 요청 오류, %d회 시도, 마지막 오류: %s", 단계, n, 마지막)
-    raise LLM시스템오류(f"{단계} LLM", f"요청 오류({마지막})", n)
+    오류 = LLM시스템오류(f"{단계} LLM", f"요청 오류({마지막})", n)
+    오류.요청오류 = True     # 다시 보내도 같은 결과(400 등). 예산은 남아 있다(web_research.research 가 얻은 만큼으로 끝낼지 본다)
+    raise 오류
 
 
 def llm_호출(프롬프트: str, 스키마: dict | None, *,
