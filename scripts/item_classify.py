@@ -162,8 +162,16 @@ def 분류_제한초() -> int:
     return int(os.environ.get("SUDDOE_CLASSIFY_TIMEOUT") or 40)
 
 
-def 설명_정리(문장: str, llm=llm_호출) -> dict | None:
-    """사용자 한 문장 → {품목, 성격, 설명, 용도}. LLM 1회. 실패 · 시간 초과 · 형식 오류는 None(호출자가 문장을 그대로 쓴다).
+def _운영_llm(프롬프트, 스키마, **kw):
+    """③ 분류 · 설명 정리의 운영 LLM 호출(v053): 시스템 오류는 서버 예산이 끝날 때까지 재시도하고, 끝내 실패하면
+    llm_qwen.LLM시스템오류 를 올린다(아래 `except LLM실패` 에 걸리지 않고 routes_questions._분류 가 다시시도로 응답한다).
+    검사 · 키트는 `llm=` 로 다른 함수를 넘긴다."""
+    return llm_호출(프롬프트, 스키마, 마감까지_재시도=True, 단계="분류", **kw)
+
+
+def 설명_정리(문장: str, llm=_운영_llm) -> dict | None:
+    """사용자 한 문장 → {품목, 성격, 설명, 용도}. LLM 1회. 형식 오류는 None(호출자가 문장을 그대로 쓴다).
+    시스템 오류는 운영 호출(_운영_llm)이 예산까지 재시도하고 끝내 실패하면 LLM시스템오류 를 올린다(None 으로 바꾸지 않는다).
     예산: 호출한 요청의 research_runtime.Budget 을 llm_호출 이 그대로 쓴다(횟수 · 남은 시간).
     문장은 이스케이프(꺾쇠 → 전각)해 넣는다. 문장 안의 `</설명>` 이 자료 태그를 닫지 못한다."""
     try:
@@ -181,7 +189,7 @@ def 설명_정리(문장: str, llm=llm_호출) -> dict | None:
     return 값 if 값["설명"] or 값["품목"] else None
 
 
-def 설명_반영(확인정보: list[str], llm=llm_호출, 캐시: dict | None = None) -> tuple[list[str], dict]:
+def 설명_반영(확인정보: list[str], llm=_운영_llm, 캐시: dict | None = None) -> tuple[list[str], dict]:
     """확인정보 안의 사용자설명 을 JSON 칸 글로 바꾼다. 실패한 문장은 글자 그대로 둔다(5-2 지금 방식).
     캐시(조사 세션의 설명정리)에 있는 문장은 다시 바꾸지 않는다. 성공만 캐시에 둔다(실패는 다음 요청에서 다시 해 본다)."""
     캐시 = {} if 캐시 is None else 캐시
@@ -205,8 +213,9 @@ def 설명_반영(확인정보: list[str], llm=llm_호출, 캐시: dict | None =
 
 
 def 분류(cur, 사업명: str | None, 입력: dict, 레이블: list[dict], 확인정보: list[str] | None = None,
-       llm=llm_호출, 설명캐시: dict | None = None) -> dict:
-    """입력 {품목, 용도, 금액, 거래처} → {분류 | None, 노드결정 | None, 방법, 디버그, 필요정보}. LLM 실패는 분류 None(판정이 확인 필요로 간다).
+       llm=_운영_llm, 설명캐시: dict | None = None) -> dict:
+    """입력 {품목, 용도, 금액, 거래처} → {분류 | None, 노드결정 | None, 방법, 디버그, 필요정보}. 형식 오류(LLM실패)는 분류 None 과 디버그 LLM실패.
+    시스템 오류(LLM시스템오류)는 잡지 않고 올린다(routes_questions._분류 가 다시시도로 응답한다, v053).
 
     분류 = {비목, 세목, 표시문, 품목(고른 노드 정식명)}. 방법 = 별칭 | LLM | 없음.
     필요정보 = 분류 LLM 이 번호 null 일 때 적은 「무엇을 알면 고를 수 있는가」(최대 2개). 분류가 있으면 빈 목록.

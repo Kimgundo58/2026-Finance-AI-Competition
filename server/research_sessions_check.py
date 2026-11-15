@@ -88,6 +88,7 @@ def main():
             session.expires = 0
             assert client.post('/api/questions', json=request).status_code == 400
             분류실패_검사(client, norm)
+            시스템오류_검사(client, norm)
             판정조사_검사(client, norm)
             실제_품목조사_검사(client)
             판정조사_항상_검사(client, norm)
@@ -234,6 +235,161 @@ def 판정조사_항상_검사(client, norm):
     assert 입력들[0]['_판정조사설정'] == {'판매URL': None, '거래처': 'A'} and '_판정조사설정' not in 입력들[2], 입력들
 
 
+def 시스템오류_검사(client, norm):
+    """v053: 시스템 오류(LLM · DB 장애)가 예산 끝까지 이어지면 ① 입력 정리 · ② 품목 조사 · ③ 분류 · ⑤ 질문 모두 다음행동 다시시도로
+    답하고 결과를 저장하지 않는다(질문 없이 판정으로 넘기지 않는다). 다시 보내면 그 단계를 새 예산으로 다시 한다.
+    db.재시도: 연결 끊김은 새 연결(RLS GUC 다시 설정)로 다시 하고 기록을 남긴다, 마감이면 DB시스템오류. 가짜 LLM · 가짜 DB 만 쓴다."""
+    import psycopg
+    import research_runtime
+    from research_runtime import 시스템오류
+    from server import mock_flow, routes_normalize, routes_questions
+    from _lib import db
+
+    def 장애(단계):
+        return 시스템오류(단계, 'synthetic', 3)
+
+    # ① /api/normalize: 오류 이벤트에 다시 시도 안내 · 다음행동, 결과 이벤트 없음(저장하지 않음). 다시 보내면 정리한다
+    def 정리장애(body):
+        raise 장애('입력 정리 LLM')
+    norm = {**norm, '용도': '시스템 오류 시험'}         # 앞 검사가 저장한 정리 결과를 받지 않게
+    with patch.object(mock_flow, '정규화', 정리장애):
+        ev = sse(client.post('/api/normalize', json=norm))
+    assert ev['오류'][0] == {'메시지': routes_normalize.정리실패_안내, '다음행동': '다시시도'} and '결과' not in ev, ev
+    assert ev['완료'][0] == {'실패': True}, ev
+    assert '결과' in sse(client.post('/api/normalize', json=norm))
+
+    # ② 품목 조사: 얻은 것이 없으면 「공개 정보 없음」 으로 넘기지 않고 다시 시도 안내. 다시 보내면 ② 를 새 예산으로 다시 한다
+    token = sse(client.post('/api/normalize', json=norm))['결과'][0]['조사ID']
+    req = {'조사ID': token, '사업명': '예비창업패키지', '품목': 'API', '금액': 100, '용도': '개발', '웹조사': True}
+    원래조사 = mock_flow.품목조사
+    횟수 = []
+
+    def 조사(품목, 거래처):
+        횟수.append(1)
+        if len(횟수) == 1:
+            raise 장애('공개 조사 LLM')
+        return 원래조사(품목, 거래처)
+    with patch.object(mock_flow, '품목조사', 조사):
+        r = client.post('/api/questions', json=req).json()
+        assert r['상태'] == '분류없음' and r['다음행동'] == '다시시도' and r['분류안내'] == routes_questions.품목조사실패_안내, r
+        assert r['조사ID'] == token and r['분류'] is None and r['질문'] == [], r
+        세션 = research_sessions.조회(token, None, None)
+        assert 세션.시스템오류 and not 세션.조사완료
+        세션.budget._seconds = 0                       # 앞 요청이 예산을 다 썼어도 다시 시도는 새 예산을 받는다
+        r = client.post('/api/questions', json=req).json()
+        assert r['상태'] == '조사확인' and r['조사']['후보'] and len(횟수) == 2, r
+        assert not 세션.시스템오류 and 세션.조사완료 and 세션.budget.remaining_seconds() > 250
+
+    # ③ 분류 · ⑤ 질문: 다시 시도 안내(단계별 문장)를 내고, 같은 답으로 다시 보내면 저장된 안내가 아니라 그 단계를 다시 한다
+    확인 = {**req, '조사답변': [{'id': r['조사']['후보'][0]['id'], '답': '맞아요'}]}
+    for 대상, 안내 in (('_분류', routes_questions._분류실패_안내), ('_기존_질문', routes_questions.질문실패_안내)):
+        원래 = getattr(routes_questions, 대상)
+        불림 = []
+
+        def 가짜(*a, _원래=원래, _불림=불림, _대상=대상, **k):
+            _불림.append(1)
+            if len(_불림) == 1:
+                raise 장애('분류 LLM' if _대상 == '_분류' else '확인 질문 LLM')
+            return _원래(*a, **k)
+        with patch.object(routes_questions, 대상, 가짜):
+            for 머리 in ({}, {'Accept': 'text/event-stream'}):
+                불림.clear()
+                if 머리:
+                    첫 = sse(client.post('/api/questions', json=확인, headers=머리))['완료'][0]
+                else:
+                    첫 = client.post('/api/questions', json=확인).json()
+                assert 첫['상태'] == '분류없음' and 첫['다음행동'] == '다시시도' and 첫['분류안내'] == 안내, (대상, 첫)
+                assert 첫['질문세트'] is None and 첫['질문'] == [], (대상, 첫)
+                assert research_sessions.조회(token, None, None).시스템오류
+                둘 = client.post('/api/questions', json=확인).json()
+                assert len(불림) == 2 and 둘.get('다음행동') != '다시시도' and 둘['상태'] != '실패', (대상, 둘)
+                세션 = research_sessions.조회(token, None, None)
+                assert not 세션.시스템오류
+                세션.질문결과 = None                   # 다음 가지가 저장된 결과를 받지 않고 다시 돌게 한다
+
+    # ⑤ 질문세트 저장: 연결 끊김은 다시 써서(UPSERT) 질문을 낸다, 다시 써도 안 되면 다시 시도(질문 없이 판정으로 넘기지 않는다)
+    from server.models import 질문요청
+    import question_generate
+    body = 질문요청(사업명='예비창업패키지', 확정비목='여비', 품목='API 저장', 금액=100, 용도='개발')
+    질문 = {'id': 'Q1', '질문': '출장 목적인가요?', '선택지': ['예', '아니요', '모르겠어요'], '근거': []}
+    저장시도 = []
+
+    def 저장(*a, 예외전파=False, **k):
+        저장시도.append(예외전파)
+        if len(저장시도) == 1:
+            raise psycopg.OperationalError('synthetic')
+        return True
+
+    def 늘끊김(*a, **k):
+        raise psycopg.OperationalError('synthetic')
+    with patch.object(routes_questions.response_cache, '질문세트_조회', lambda *a: None), \
+         patch.object(routes_questions.response_cache, '저장', 저장), \
+         patch.object(routes_questions.제한, '통과', lambda ip: (True, None)), \
+         patch.object(question_generate, '질문_공개', lambda q: q), \
+         patch.object(question_generate, '질문생성', lambda 입력, **kw: {'상태': '있음', '질문': [질문], '메타': {'LLM호출': 1}}), \
+         patch('time.sleep', lambda s: None):
+        r = routes_questions._live_질문(body, None, None, '127.0.0.1', 0.0)
+        assert r['상태'] == '있음' and r['질문'] == [질문] and 저장시도[:2] == [True, True], (r, 저장시도)
+        with patch.object(routes_questions.response_cache, '저장', 늘끊김), patch.object(db, '_예산없음_마감초', 0.5):
+            try:
+                routes_questions._live_질문(body, None, None, '127.0.0.1', 0.0)
+                raise AssertionError('저장 실패를 삼킴')
+            except 시스템오류 as e:
+                assert e.단계 == '확인 질문 저장 DB' and e.시도 == 1, e
+
+    # db.재시도 · db.연결: 끊기면 닫고 새 연결을 열어 GUC 를 다시 건다, 재시도 기록은 요청 예산에 남는다, 마감이면 DB시스템오류
+    열림 = []
+
+    class 가짜연결:
+        def __init__(self):
+            self.closed, self.실행 = False, []
+            열림.append(self)
+
+        def execute(self, sql, 값=None):
+            self.실행.append((sql, 값))
+
+        def cursor(self):
+            return self
+
+        def close(self):
+            self.closed = True
+    시도 = []
+
+    def 작업(연):
+        연.cur()
+        시도.append(1)
+        if len(시도) == 1:
+            raise psycopg.errors.QueryCanceled('synthetic')
+        if len(시도) == 2:
+            raise psycopg.InterfaceError('synthetic')
+        return 'ok'
+
+    def 늘(오류):
+        def f():
+            raise 오류('synthetic')
+        return f
+    예산 = research_runtime.Budget(seconds=60)
+    with patch.object(db, 'connect', lambda **k: 가짜연결()), patch('time.sleep', lambda s: None):
+        with research_runtime.activate(예산), db.연결('org-1', 'acc-1') as 연:
+            assert db.재시도(lambda: 작업(연), 단계='시험', 연결=연) == 'ok'
+        assert len(열림) == 3 and all(c.실행 and "set_config('app.org_id'" in c.실행[0][0] and c.실행[0][1] == ('org-1', 'acc-1')
+                                     for c in 열림), [c.실행 for c in 열림]
+        assert all(c.closed for c in 열림)
+        assert [(x['단계'], x['시도'], x['대기초']) for x in 예산.재시도] == [('시험 DB', 1, 1.0), ('시험 DB', 2, 2.0)], 예산.재시도
+        assert 예산.재시도[0]['원인'].startswith('QueryCanceled'), 예산.재시도
+        with research_runtime.activate(research_runtime.Budget(seconds=3)):
+            try:
+                db.재시도(늘(psycopg.OperationalError), 단계='시험')
+                raise AssertionError('마감을 넘김')
+            except db.DB시스템오류 as e:
+                assert e.단계 == '시험 DB' and e.시도 >= 2 and isinstance(e, 시스템오류), e
+        try:                                           # 재시도 대상이 아닌 오류(문법 · 제약 위반)는 그대로 올린다
+            db.재시도(늘(psycopg.errors.SyntaxError), 단계='시험')
+            raise AssertionError('코드 오류를 다시 시도함')
+        except psycopg.errors.SyntaxError:
+            pass
+
+
 def 분류실패_검사(client, norm):
     """③ 분류가 장애(DB · LLM)로 끝나면 화면 안내는 「확인하지 못했어요 · 다시 시도」이고, 같은 답으로 다시 부르면 저장된 결과를 내지 않고
     분류를 다시 한다. 맞는 분류가 없다는 결과는 예전처럼 안내문(None)이고 저장해 다시 쓴다(2026-11-12 실행기록 20261112_225525)."""
@@ -262,11 +418,8 @@ def 분류실패_검사(client, norm):
     # _분류 자체: DB 예외 · 분류 LLM 실패는 실패=True, 맞는 분류 없음은 실패 없이 안내문(None)
     body = types.SimpleNamespace(사업명='예비창업패키지', 품목='API', 용도='개발', 금액=100, 거래처=None, 품목설명=None)
     from _lib import db
-    class 연결:
-        def __enter__(self):
-            return types.SimpleNamespace(cursor=lambda: None)
-        def __exit__(self, *a):
-            return False
+    def 연결():                     # db.연결 이 여는 autocommit 연결 자리(v053: with 블록 대신 연결 객체를 들고 다시 연다)
+        return types.SimpleNamespace(cursor=lambda: None, closed=False, close=lambda: None)
     def 끊김(**k):
         raise ConnectionError('synthetic')
     import ontology_lookup
@@ -317,11 +470,8 @@ def 설명정리_검사(client, norm):
         return {'성격': '구입', '성격이같은후보': ['N1'], '번호': 'N1', '확신': '유사', '이유': 'x'}, {'지연ms': 1}
     후보 = [{'id': 'n1', '정식명': '시제품 재료', '별칭': [], '비목': ['재료비']}]
     경로 = {'비목': '재료비', '세목': None, '표시문': '재료비', '다른경로': []}
-    class 연결:
-        def __enter__(self):
-            return types.SimpleNamespace(cursor=lambda: None)
-        def __exit__(self, *a):
-            return False
+    def 연결():                     # db.연결 이 여는 autocommit 연결 자리(v053)
+        return types.SimpleNamespace(cursor=lambda: None, closed=False, close=lambda: None)
     body = types.SimpleNamespace(사업명='예비창업패키지', 품목='필라멘트', 용도='시제품', 금액=100, 거래처=None, 품목설명=None)
     원래분류 = item_classify.분류
     def 분류자료():
@@ -475,14 +625,10 @@ def 재조사_실제경로_검사(client, norm):
         return {'분류': 값, '노드결정': None, '방법': 'LLM' if 값 else '없음', '디버그': {},
                 '필요정보': [] if 값 or not 상태['필요정보'] else 필요}
 
-    class 연결:
-        def __enter__(self):
-            if 상태['db장애']:
-                raise ConnectionError('synthetic')
-            return types.SimpleNamespace(cursor=lambda: None)
-
-        def __exit__(self, *a):
-            return False
+    def 연결():                     # db.연결 이 여는 autocommit 연결 자리(v053)
+        if 상태['db장애']:
+            raise ConnectionError('synthetic')
+        return types.SimpleNamespace(cursor=lambda: None, closed=False, close=lambda: None)
 
     def 가짜질문(req, body, 조사확인=None, 답키=None, 준비확인=False, 노드결정=None, 판정조사설정=None):
         return {'상태': '없음', '질문세트': None, '질문': [], '추가입력': [], '용어풀이': []}

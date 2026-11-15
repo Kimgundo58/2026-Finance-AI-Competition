@@ -100,7 +100,10 @@ def 추가_조회(cur, 조회: dict, 입력: dict, *, 요청: str | None = None,
         raise ValueError('추가 확인 요청 오류')
     try:
         버전 = ontology_age.준비_버전(cur)
-    except psycopg.Error:                   # 선택 조회의 DB 오류는 이 조회만 실패로 둔다(리뷰 28-9)
+    except psycopg.Error as e:              # 선택 조회의 DB 오류는 이 조회만 실패로 둔다(리뷰 28-9)
+        # 연결 끊김 · 시간 초과는 시스템 오류다(v053): 실패로 두면 가능을 낮춘다. 올려 호출자의 DB 재시도가 새 연결로 다시 한다
+        if isinstance(e, (psycopg.OperationalError, psycopg.InterfaceError)):
+            raise
         research_runtime.emit('규정추가조회', '추가 규정의 확인을 마치지 못했어요.', '실패')
         return 마침('실패')
     확인문맥 = 확인정보_문맥(입력.get('_조사확인'))
@@ -175,8 +178,12 @@ def 추가_조회(cur, 조회: dict, 입력: dict, *, 요청: str | None = None,
                 if 결과['상한도달']:
                     research_runtime.emit('규정추가조회', '조회 결과가 많아 일부만 확인했어요.', '완료')
             상태['결과'][캐시키] = 결과
-        except (ValueError, RuntimeError, LLM실패, psycopg.Error):
-            # psycopg.Error = statement_timeout(QueryCanceled) 같은 DB 오류. 읽기 전용 트랜잭션은 이미 되돌렸다.
+        except (psycopg.errors.QueryCanceled, ValueError, RuntimeError, LLM실패, psycopg.Error) as e:
+            # 연결 끊김(QueryCanceled 밖의 OperationalError · InterfaceError)은 시스템 오류다(v053): 이 조회만 실패로 캐시하면
+            # 단계를 다시 해도 실패 결과를 다시 쓴다. 캐시하지 않고 올려 호출자의 DB 재시도(db.재시도 · 판정 단계 재실행)가 새 연결로 다시 한다
+            if isinstance(e, (psycopg.OperationalError, psycopg.InterfaceError)) and not isinstance(e, psycopg.errors.QueryCanceled):
+                raise
+            # QueryCanceled = LLM 이 쓴 질의가 statement_timeout 에 걸림. 같은 질의는 다시 보내도 같아 재시도하지 않는다(기본값으로 정함, v053).
             # 선택 조회라 전체 판정을 실패(확인 필요)로 만들지 않고 이 조회만 실패로 둔다(리뷰 28-9)
             상태['결과'][캐시키] = {'완료': False, '상태': '실패', '지도부분': 지도부분, '입력잘림': 입력잘림, '규범': [], '근거행': []}
             research_runtime.emit('규정추가조회', '추가 규정의 확인을 마치지 못했어요.', '실패')

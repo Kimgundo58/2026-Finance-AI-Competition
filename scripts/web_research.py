@@ -18,7 +18,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
-from research_runtime import 공개조사_실패문장
+from research_runtime import 공개조사_실패문장, 시스템오류
 from apick_mcp import ApickClient, ApickError, public_url as url_ok, strip_tracking
 
 _log = logging.getLogger("uvicorn.error")
@@ -547,13 +547,16 @@ def _요건_고르기(out: dict, bodies: dict, 번호들: list[str]) -> dict[str
 def _기본_계획호출():
     """계획 · 후보 작성 LLM 호출(두 역할 같은 모델). 모델은 `SUDDOE_RESEARCH_MODEL`, 비어 있으면 기본 모델(`SUDDOE_QWEN_MODEL`).
     2026-11-12 사용자: 경량 모델 대신 기본 모델(qwen3.7-plus)을 쓴다(비용이 작다). 기본 모델이 실패하면 llm_호출 이
-    폴백 모델로 한 번 더 보낸다. `SUDDOE_RESEARCH_MODEL` 로 다른 모델을 지정하면 폴백하지 않는다."""
+    폴백 모델로 한 번 더 보낸다. `SUDDOE_RESEARCH_MODEL` 로 다른 모델을 지정하면 폴백하지 않는다.
+    v053: 시스템 오류(403 · 429 · 5xx · 연결 끊김 · JSON 깨짐)는 이 조사의 남은 시간(`timeout`, 조사 마감 · 서버 예산 중 짧은 쪽)까지
+    재시도한다(마감까지_재시도). 끝내 실패하면 LLM시스템오류 — research() 가 얻은 것이 없을 때만 올린다."""
     import os
     from llm_qwen import 기본_모델, llm_호출
     조사_모델 = os.environ.get("SUDDOE_RESEARCH_MODEL") or 기본_모델
 
     def 호출(prompt, schema, timeout):
-        return llm_호출(prompt, schema, 모델=조사_모델, 재시도=0, 타임아웃=max(1, int(timeout)), 추론=False)[0]
+        return llm_호출(prompt, schema, 모델=조사_모델, 재시도=0, 타임아웃=max(1, int(timeout)), 추론=False,
+                        마감까지_재시도=True, 마감초=max(1.0, float(timeout)), 단계="공개 조사")[0]
     return 호출
 
 
@@ -978,6 +981,14 @@ def research(public_query: str | None = None, *, product_name: str | None = None
                         판단.setdefault(u, _맞지않음)
             if stop:
                 break
+        except 시스템오류:
+            # LLM · DB 시스템 오류가 이 조사의 마감까지 이어졌다(v053). 쓸 수 있는 결과(후보 · 확인된 요건)가 없으면 올려 호출자가
+            # 다시시도로 응답한다: 읽은 본문을 정리하지 못한 채 「공개 정보에서 찾지 못함」 으로 넘기지 않는다.
+            # 이미 후보 · 확인된 요건이 있으면 지금처럼 얻은 만큼으로 끝낸다(얻은 것을 버리지 않게, 기본값으로 정함)
+            if not output.get("후보") and not any(v.get("결과") == "확인됨" for v in 요건결과.values()):
+                raise
+            오류끝 = True
+            break
         except Exception:
             오류끝 = True
             break

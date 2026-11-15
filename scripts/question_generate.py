@@ -33,6 +33,7 @@ from _lib import db
 from assemble_context import _문장ID_생성기
 from llm_qwen import LLM실패, 기본_모델, llm_호출
 from llm_validate import 문장ID_메타
+from research_runtime import 시스템오류
 from rule_lookup import l3_상위확인, 금지목록_일치
 
 _log = logging.getLogger("uvicorn.error")
@@ -428,7 +429,8 @@ def _새경로_준비(cur, 입력: dict, org_id) -> dict:
 
 def 판정용_조사(입력: dict, 판단줄: list[dict], 설정: dict) -> dict:
     """④-2 판정용 조사(재설계 11-13). 조건 줄(C1…)마다 공개 웹으로 확인할 수 있는 사실을 web_research 요건 모드로 찾는다.
-    반환 {상태, 요건결과: {조건키: {번호, 결과, 값, 발췌, URL, 이유}}, 출처}. 예외를 올리지 않는다(실패 · 시간 없음은 요건결과 없이 상태만).
+    반환 {상태, 요건결과: {조건키: {번호, 결과, 값, 발췌, URL, 이유}}, 출처}. 실패 · 시간 없음은 요건결과 없이 상태만 낸다.
+    시스템오류(계획 · 정리 LLM 이 조사 마감까지 실패해 얻은 것이 없음, v053)는 올린다: 호출자(라우트)가 다시시도로 응답한다.
     화면에는 진행 한 줄과 끝 한 줄만 낸다(조건 번호 · 규범 ID 없이)."""
     import research_runtime
     import uuid
@@ -455,6 +457,9 @@ def 판정용_조사(입력: dict, 판단줄: list[dict], 설정: dict) -> dict:
         # 공개 검색어는 넘기지 않는다(v046). 계획 LLM 이 지출 항목 · 사용 목적 · 조건 낱말로 검색어를 만든다
         r = web_research.research(None, public_url=설정.get("판매URL") or None, 사실확인=사실,
                                   context=문맥, budget=예산, emit=알림, vendor=설정.get("거래처"), 제한초=제한)
+    except 시스템오류:
+        research_runtime.emit("판정조사", "공개 웹에서 규정에 필요한 정보를 확인하지 못했어요.", "실패", id=event_id)
+        raise
     except Exception as e:                                  # noqa: BLE001
         _log.warning("판정용 조사 실패: %s", type(e).__name__)
         research_runtime.emit("판정조사", "공개 웹에서 규정에 필요한 정보를 확인하지 못했어요.", "실패", id=event_id)
@@ -481,6 +486,8 @@ def _채운세목_칸(cur, 입력: dict, 결정: dict | None, 비목_id: str, �
                                    품목=입력.get("품목"))
         있는키 = {c["키"] for c in 있는칸}
         return [c for c in ontology_gate.추가입력_칸(조회["적용"]["규범"], 채움["세목"]) if c["키"] not in 있는키]
+    except (*db.재시도_오류, 시스템오류):
+        raise                   # 연결 끊김 · 시간 초과는 시스템 오류다. 칸을 빼지 않고 db.재시도 가 새 연결로 다시 한다(v053)
     except Exception as e:                                    # noqa: BLE001
         _log.warning("채운 세목 칸 실패: %s", type(e).__name__)
         return []
@@ -490,6 +497,8 @@ def _풀이_목록(cur, 사업명: str | None) -> list[dict]:
     """화면에 낼 수 있는 용어 풀이. 못 읽으면 풀이 없이 간다(질문 · 판정을 막지 않는다)."""
     try:
         return ontology_terms.풀이_목록(cur, 사업명)
+    except db.재시도_오류:
+        raise                   # 연결 끊김 · 시간 초과는 풀이 없이 가지 않고 db.재시도 가 다시 한다(v053)
     except Exception as e:                               # noqa: BLE001
         _log.warning("용어 풀이 조회 실패: %s", type(e).__name__)
         return []
@@ -497,7 +506,11 @@ def _풀이_목록(cur, 사업명: str | None) -> list[dict]:
 
 def 질문생성(입력: dict, *, org_id=None, account_id=None, 모델: str | None = None,
           타임아웃: int | None = None) -> dict:
-    """입력(사업명, 비목, 세부유형, 품목, 용도, 금액, 질문)으로 질문을 만든다. 예외를 올리지 않는다.
+    """입력(사업명, 비목, 세부유형, 품목, 용도, 금액, 질문)으로 질문을 만든다. 시스템오류 말고는 예외를 올리지 않는다.
+
+    시스템 오류(v053): DB 연결 끊김 · 쿼리 시간 초과는 단계(준비 · 조문 메타 · 풀이 · 칸)마다 새 연결로 다시 하고(db.재시도, 새 연결마다
+    RLS GUC 다시 설정), LLM 은 서버 예산까지 다시 보낸다(마감까지_재시도). 그래도 실패하면 research_runtime.시스템오류 를 올린다.
+    호출자(routes_questions)는 질문 없이 판정으로 넘기지 않고 다음행동 다시시도로 응답한다.
 
     반환: {"상태": 있음|없음|바로판정|실패, "질문": [내부 항목], "메타": {...}}. 온톨로지 경로는 `추가입력` 을 더한다.
     내부 항목: id, 질문문, 충족답, 이유, 할일, 근거{doc_id, 조번호, 조제목, 항호, 원문}, 근거조문{종류, id, doc_id, 조번호}.
@@ -509,45 +522,49 @@ def 질문생성(입력: dict, *, org_id=None, account_id=None, 모델: str | No
     타임아웃 = 타임아웃 or int(os.environ.get("SUDDOE_QUESTION_TIMEOUT") or 20)
     메타["모델"] = 모델
     try:
-        with db.connect(connect_timeout=5, autocommit=True) as conn:
-            # 새 커넥션에는 미들웨어의 GUC 가 없다. L3 를 읽으려면 RLS 값을 직접 설정한다(판정()과 같다).
-            if org_id:
-                conn.execute("SELECT set_config('app.org_id', %s, false), "
-                             "set_config('app.account_id', %s, false)",
-                             (str(org_id), str(account_id) if account_id else ""))
-            cur = conn.cursor()
-            사업명, 비목 = 입력.get("사업명"), 입력["비목"]
-            품목, 용도 = 입력.get("품목") or (입력.get("질문") or "")[:40], 입력.get("용도") or ""
-            if ontology_lookup.새경로_대상(cur, 사업명):
-                return _새경로_질문(cur, conn, 입력, org_id, 모델, 타임아웃, 메타, t0)
-            if 금지목록_일치(cur, 품목, 용도, 사업명, 비목):
-                return {"상태": "바로판정", "질문": [], "메타": {**메타, "사유": "금지목록"}}
-            l3 = l3_load.조문_조회(cur, org_id, 비목=비목) if org_id else []
-            상위 = l3_상위확인(l3_load.l3룰(cur, org_id, 비목)) if org_id else {"need_upper": True}
-            t = time.time()
-            r = retrieve.검색(cur, 입력.get("질문") or f"{용도} {품목}".strip(), 사업명,
-                            top_k=5, 사업필터=orchestrate.사업필터)
-            메타["검색ms"] = int((time.time() - t) * 1000)
-            l3단독 = (not 상위.get("need_upper")) and bool(l3)
-            if (not r["top5"] or r["최고유사도"] < orchestrate.검색_최소유사도) and not l3단독:
-                return {"상태": "바로판정", "질문": [], "메타": {**메타, "사유": "근거없음"}}
-            항목 = 조문_후보(cur, 사업명=사업명, 비목=비목, 검색결과=r, l3=l3)
-            if not 항목:
-                return {"상태": "없음", "질문": [], "메타": {**메타, "사유": "후보없음"}}
-            번호 = _문장ID_생성기()
-            블록 = 번호.원문블록("규정 원문", 항목)
-            문장맵 = 번호.문장맵
-            조문메타 = 문장ID_메타(문장맵, conn=conn, org_id=org_id)
+        # 새 커넥션에는 미들웨어의 GUC 가 없다. L3 를 읽으려면 RLS 값을 직접 설정한다(판정()과 같다). db.연결 이 다시 열 때마다 건다
+        with db.연결(org_id, account_id) as 연:
+            if db.재시도(lambda: ontology_lookup.새경로_대상(연.cur(), 입력.get("사업명")), 단계="확인 질문 준비", 연결=연):
+                return _새경로_질문(연, 입력, org_id, 모델, 타임아웃, 메타, t0)
+            준비 = db.재시도(lambda: _옛경로_준비(연, 입력, org_id, 메타), 단계="확인 질문 준비", 연결=연)
+    except 시스템오류:
+        raise
     except Exception as e:                               # noqa: BLE001
         _log.warning("질문생성 준비 실패: %s", type(e).__name__)
         return {"상태": "실패", "질문": [], "메타": {**메타, "사유": f"준비실패:{type(e).__name__}"}}
+    if "상태" in 준비:
+        return 준비
+    return _질문_작성(입력, 준비["블록"], 준비["문장맵"], 준비["조문메타"], 모델, 타임아웃, 메타, t0)
 
-    return _질문_작성(입력, 블록, 문장맵, 조문메타, 모델, 타임아웃, 메타, t0)
+
+def _옛경로_준비(연, 입력: dict, org_id, 메타: dict) -> dict:
+    """온톨로지 밖 사업의 질문 재료(DB 만). 끝나는 결과({상태, 질문, 메타}) 또는 {블록, 문장맵, 조문메타}. db.재시도 가 다시 부른다."""
+    cur = 연.cur()
+    사업명, 비목 = 입력.get("사업명"), 입력["비목"]
+    품목, 용도 = 입력.get("품목") or (입력.get("질문") or "")[:40], 입력.get("용도") or ""
+    if 금지목록_일치(cur, 품목, 용도, 사업명, 비목):
+        return {"상태": "바로판정", "질문": [], "메타": {**메타, "사유": "금지목록"}}
+    l3 = l3_load.조문_조회(cur, org_id, 비목=비목) if org_id else []
+    상위 = l3_상위확인(l3_load.l3룰(cur, org_id, 비목)) if org_id else {"need_upper": True}
+    t = time.time()
+    r = retrieve.검색(cur, 입력.get("질문") or f"{용도} {품목}".strip(), 사업명,
+                    top_k=5, 사업필터=orchestrate.사업필터)
+    메타["검색ms"] = int((time.time() - t) * 1000)
+    l3단독 = (not 상위.get("need_upper")) and bool(l3)
+    if (not r["top5"] or r["최고유사도"] < orchestrate.검색_최소유사도) and not l3단독:
+        return {"상태": "바로판정", "질문": [], "메타": {**메타, "사유": "근거없음"}}
+    항목 = 조문_후보(cur, 사업명=사업명, 비목=비목, 검색결과=r, l3=l3)
+    if not 항목:
+        return {"상태": "없음", "질문": [], "메타": {**메타, "사유": "후보없음"}}
+    번호 = _문장ID_생성기()
+    블록 = 번호.원문블록("규정 원문", 항목)
+    return {"블록": 블록, "문장맵": 번호.문장맵, "조문메타": 문장ID_메타(번호.문장맵, conn=연.conn, org_id=org_id)}
 
 
-def _새경로_질문(cur, conn, 입력: dict, org_id, 모델: str, 타임아웃: int, 메타: dict, t0: float) -> dict:
-    """온톨로지 경로. LLM 질문이 실패해도 코드가 만든 칸 · 부가세 질문은 낸다. 조회 오류는 바깥에서 실패로 처리한다."""
-    준비 = _새경로_준비(cur, 입력, org_id)
+def _새경로_질문(연, 입력: dict, org_id, 모델: str, 타임아웃: int, 메타: dict, t0: float) -> dict:
+    """온톨로지 경로. 질문 LLM 의 형식 오류(LLM실패)면 코드가 만든 칸 · 부가세 질문만 낸다. 조회 오류는 바깥에서 실패로 처리한다.
+    DB 단계(④ 조회 · 조문 메타 · 풀이 · 채운 세목 칸)는 db.재시도 로 새 연결에서 다시 하고, 시스템오류는 올린다(v053)."""
+    준비 = db.재시도(lambda: _새경로_준비(연.cur(), 입력, org_id), 단계="규정 조회", 연결=연)
     분류결정 = {"노드결정": 입력["_노드결정"]} if 입력.get("_노드결정") else {}   # 판정 라우트가 질문세트 저장값에서 읽는다
     if "바로" in 준비:
         return {"상태": "바로판정", "질문": [], "추가입력": [], "메타": {**메타, "사유": 준비["바로"]}, **분류결정}
@@ -560,9 +577,9 @@ def _새경로_질문(cur, conn, 입력: dict, org_id, 모델: str, 타임아웃
         메타["판정조사"] = {"상태": 판정조사["상태"], "확인": len(확인키), "조건": len(준비["판단조건"])}   # 개수만. 조건 글 · URL 은 남기지 않는다
     번호 = _문장ID_생성기()
     블록 = "\n\n".join(번호.항목블록(제목, 항목들) for 제목, 항목들 in 준비["문맥"]["블록"])
-    조문메타 = 문장ID_메타(번호.문장맵, conn=conn, org_id=org_id)
+    조문메타 = db.재시도(lambda: 문장ID_메타(번호.문장맵, conn=연.conn, org_id=org_id), 단계="확인 질문 준비", 연결=연)
     # 6-5 주입: 후보 조문에 나온 용어의 풀이만(AI검증 이상). 판정 프롬프트에는 넣지 않는다
-    풀이들 = _풀이_목록(cur, 입력.get("사업명"))
+    풀이들 = db.재시도(lambda: _풀이_목록(연.cur(), 입력.get("사업명")), 단계="확인 질문 준비", 연결=연)
     넣을풀이 = ontology_terms.글에서_찾기(풀이들, [블록], 상한=ontology_terms.프롬프트_상한, 먼저=준비["노드들"])
     메타["용어풀이_프롬프트"] = len(넣을풀이)
     r = _질문_작성(입력, 블록, 번호.문장맵, 조문메타, 모델, 타임아웃, 메타, t0, 온톨로지경로=True,
@@ -571,7 +588,8 @@ def _새경로_질문(cur, conn, 입력: dict, org_id, 모델: str, 타임아웃
                   L3숫자후보=준비["L3숫자후보"] or None, 판정조사=판정조사, 판단조건=준비["판단조건"])
     r.update(분류결정)
     코드질문 = 준비["코드질문"]
-    칸 = [*준비["추가입력"], *_채운세목_칸(cur, 입력, r.get("노드결정"), 준비["비목_id"], 준비["추가입력"])]
+    칸 = [*준비["추가입력"], *db.재시도(lambda: _채운세목_칸(연.cur(), 입력, r.get("노드결정"), 준비["비목_id"], 준비["추가입력"]),
+                                   단계="확인 질문 준비", 연결=연)]
     # 질문 묶음(최대 3개) 순서: 노드 확인 → 자연어 조건(금지 → 한도 → 의무, 5-14 B) → 그 밖의 질문. 부가세 질문은 지금처럼 묶음 밖에 따로 붙는다
     노드질문 = [q] if (q := r.pop("노드질문", None)) else []
     조건질문 = (r.pop("조건질문", None) or [])[:최대_질문수 - len(노드질문)]
@@ -634,8 +652,10 @@ def _질문_작성(입력: dict, 블록: str, 문장맵: dict, 조문메타: dic
         # 노드 출력(ID · 확신 · 확인질문 한 줄) · 조건 질문(규범 ID · 번호 · 질문 최대 3줄)만큼 늘린다. 잘리면 질문 전체가 실패한다. 둘 다 없으면 지금 값 그대로
         import research_runtime
         with research_runtime.task("확인질문", f"규정 원문 {len(문장맵)}개를 바탕으로 확인 질문을 만들고 있어요.", "확인 질문 작성을 마쳤어요."):
+            # 시스템 오류는 서버 예산까지 다시 보내고(v053), 끝내 실패하면 LLM시스템오류 가 라우트까지 올라가 다시시도가 된다
             출력, llm메타 = llm_호출(프롬프트, 스키마, 모델=모델, 온도=0.0, 추론=False,
-                                최대토큰=(1400 if 품목후보 else 1200) + (500 if 조건목록 else 0) + (200 if 상황후보 else 0) + (500 if L3숫자후보 else 0), 타임아웃=타임아웃, 재시도=0)
+                                최대토큰=(1400 if 품목후보 else 1200) + (500 if 조건목록 else 0) + (200 if 상황후보 else 0) + (500 if L3숫자후보 else 0), 타임아웃=타임아웃, 재시도=0,
+                                마감까지_재시도=True, 단계="확인 질문")
     except LLM실패 as e:
         메타["llm_ms"] = int((time.time() - t) * 1000)
         _log.warning("질문생성 LLM 실패: %s", str(e)[:120])

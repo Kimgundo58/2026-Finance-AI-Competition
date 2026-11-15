@@ -6,9 +6,12 @@ persist.판정_저장() 으로 계획에 연결한다. 응답은 response_cache 
 질문세트(POST /api/questions 의 키)와 답변이 오면 서버에 저장한 질문 문장과 답 값으로 사용자답변을 만들어 판정에 넣는다.
 이벤트 순서: 진행*3 → 판정 → 해야할일 → 인용 → 전제 → 참조관계 → (문의초안) → 결과 → 저장 → 완료.
 이벤트 이름과 순서는 프론트 계약이다. 참조관계 이벤트 바로 뒤에 같은 내용을 이전 이벤트 이름으로 한 번
-더 보낸다(한 릴리스 동안, judge_response 호환 블록). 예외·타임아웃·파이프라인 실패는 모두 확인 필요로
-반환하고, 그 결과는 캐시하지 않으며 계획에도 연결하지 않는다. 그중 AI 모델 호출 실패 · 마감 초과는 `판정` · `결과`
-이벤트에 `판정실패: true` 를 붙이고 문의 초안을 보내지 않는다(화면은 판정 대신 「다시 점검」, judge_response.판정실패_단계).
+더 보낸다(한 릴리스 동안, judge_response 호환 블록). 예외·타임아웃·파이프라인 실패는 판정 값 확인 필요로
+반환하고, 그 결과는 캐시하지 않으며 계획에도 연결하지 않는다. 그중 시스템 오류(AI 모델 호출 · DB 연결이 예산까지 실패,
+판정 전 DB 읽기 실패) · 마감 초과는 `판정` · `결과` 이벤트에 `판정실패: true` 를 붙이고 문의 초안을 보내지 않는다
+(화면은 판정 대신 「다시 점검」, judge_response.판정실패_단계).
+판정 전 DB 읽기(규정 준비 확인 · 질문세트 · 지출 기록)는 워커 전이라 서버 예산이 없다. 연결 끊김은 요청마다 합쳐 `_판정전_DB마감초`
+(30초) 안에서 다시 읽고(db.재시도), 끝내 실패하면 판정실패로 응답한다(빈 값 · 답변유실로 판정을 낮추지 않는다).
 환경변수: SUDDOE_JUDGE_HEARTBEAT_SEC(12), SUDDOE_JUDGE_DEADLINE_SEC(660), SUDDOE_JUDGE_MIN_BUDGET_SEC(600),
 SUDDOE_JUDGE_MIN_LLM_CALLS(40), SUDDOE_JUDGE_ANSWERS(1, 0 이면 확인 질문·답변 미반영).
 """
@@ -28,12 +31,15 @@ from server._common import (MOCK, _정수_환경변수, _sse, _sse응답, _워�
                             온톨로지_사업)
 from server.catalog import _비목_표준화, _사업명_표준화
 from server.judge_response import (_사용자프로필값_구성, 구_참조관계_이벤트, 구_판정키_포함,
-                                   파이프라인결과_매핑, 판정실패_요약, 할일_공개)
+                                   파이프라인결과_매핑, 판정실패_요약, 판정실패_요약_DB, 할일_공개)
 from server.models import 판정요청
 from server.persist import 판정_저장
 from server.rate_limit import 제한
 from server import mock_data
 from server.selftest import mock_판정
+
+import research_runtime                       # server.research_sessions 가 scripts/ 를 sys.path 에 넣는다
+from _lib import db                           # orchestrate 와 같은 모듈 이름으로 가져온다(DB시스템오류 클래스가 같아야 한다)
 
 _log = logging.getLogger("suddoe.judge")
 
@@ -49,6 +55,32 @@ _판정_타임아웃초 = _정수_환경변수("SUDDOE_JUDGE_DEADLINE_SEC", 660)
 # 늘리기만 하고 세션 상태는 그대로 둔다(research_runtime.Budget.ensure_remaining). 운영 상한 실행 두 번에서 판정 뒤 37 · 49초가 남았다
 _판정_최소초 = _정수_환경변수("SUDDOE_JUDGE_MIN_BUDGET_SEC", 600)
 _판정_최소LLM = _정수_환경변수("SUDDOE_JUDGE_MIN_LLM_CALLS", 40)
+# 판정 전 DB 읽기(워커 전, 서버 예산 없음)를 연결 끊김 때 다시 읽는 시간의 요청당 합계(초). SSE 가 아직 열리지 않아 짧게 둔다(기본값으로 정함, v053)
+_판정전_DB마감초 = 30.0
+_판정전_마감: contextvars.ContextVar = contextvars.ContextVar("판정전_마감", default=None)
+
+
+def _판정전_DB(작업, 단계: str):
+    """판정 전 DB 읽기 하나. 연결 끊김 · 쿼리 시간 초과는 이 요청의 판정 전 마감(`_판정전_DB마감초`)까지 다시 한다.
+    작업은 시도마다 스스로 연결 · 트랜잭션을 열어 RLS GUC 를 다시 건다(server._common.트랜잭션 · _질의). 끝내 실패하면 DB시스템오류."""
+    마감 = _판정전_마감.get()
+    남은 = _판정전_DB마감초 if 마감 is None else max(0.1, 마감 - time.monotonic())
+    return db.재시도(작업, 단계=단계, 마감초=남은)
+
+
+def _질문세트_엄격조회(k: str, org: str | None, account: str | None):
+    """response_cache.질문세트_조회 와 같은 행을 읽되 DB 오류를 삼키지 않는다(없음과 장애를 가른다). 게스트는 메모리 캐시라 DB 를 읽지 않는다.
+    데이터 버전 해시를 못 읽으면(DB 장애) 연결 오류로 올려 다시 읽게 한다."""
+    if org is None:
+        return response_cache.질문세트_조회(k, org, account)
+    return _판정전_DB(lambda: response_cache.질문세트_조회(k, org, account, 예외전파=True), "질문세트 읽기")
+
+
+def _판정실패_스트림(body, 요약: str | None = None):
+    """판정 전 단계의 시스템 오류 응답. 판정 값은 확인 필요, `판정실패: true`, 문의 초안 · 캐시 · 계획 연결 없음."""
+    yield from _판정_이벤트(_실패_결과(body, 판정실패=True, 요약=요약))
+    yield _sse("저장", {"저장": False, "사유": "판정에 실패해 계획에 연결하지 않았습니다"})
+    yield _sse("완료", {"실패": True})
 
 
 @router.post("/api/judge")
@@ -74,9 +106,13 @@ def judge(req: Request, body: 판정요청, mock: str | None = None,
     body.org_id = auth.검증된_org(req)
     # 계정도 토큰에서만 정한다. 계획·판정·프로필·캐시는 계정 단위다(L3 는 org 단위).
     account_id = auth.검증된_account(req)
+    _판정전_마감.set(time.monotonic() + _판정전_DB마감초)
     if not MOCK:
         try:
-            ontology_readiness.확인(body.사업명)
+            _판정전_DB(lambda: ontology_readiness.확인(body.사업명), "규정 준비 확인")
+        except research_runtime.시스템오류 as e:
+            _log.error("판정 실패 — 단계=%s 시도=%s", e.단계, e.시도)
+            return _sse응답(_판정실패_스트림(body, 판정실패_요약_DB))
         except Exception:  # noqa: BLE001
             def 규정오류():
                 out = _실패_결과(body)
@@ -124,6 +160,17 @@ def judge(req: Request, body: 판정요청, mock: str | None = None,
         조사세션.판정요청키 = 판정요청키
         조사세션.lock.release()
     반영 = 답변_반영()
+    try:
+        return _judge_본체(body, mock, account_id, 조사세션, 조사, 서버분류, 반영,
+                           판정요청키 if 조사세션 else None)
+    except research_runtime.시스템오류 as e:
+        # 판정 전 DB 읽기(질문세트 · 지출 기록)가 마감까지 실패했다. 빈 값으로 판정하면 노드 결정 · 답이 빠져 판정이 달라진다
+        _log.error("판정 실패 — 단계=%s(판정 전 읽기) 시도=%s", e.단계, e.시도)
+        return _sse응답(_판정실패_스트림(body, 판정실패_요약_DB))
+
+
+def _judge_본체(body: 판정요청, mock, account_id, 조사세션, 조사, 서버분류: bool, 반영: bool, 판정요청키):
+    """judge() 의 캐시 조회 · 판정 전 읽기 · SSE 생성. 판정 전 DB 읽기의 시스템 오류는 judge() 가 판정실패로 바꾼다."""
     # 확인 질문 LLM 이 고른 품목 노드(5-13). 서버 저장값에서만 읽는다. 캐시 조회 전에 읽어 키에 넣는다:
     # 질문이 0개라 질문세트가 오지 않아도 노드 결정은 판정을 바꾸므로, 결정 전 결과가 캐시에서 나오면 안 된다
     노드결정 = (_노드결정_읽기(body, account_id)
@@ -142,6 +189,8 @@ def judge(req: Request, body: 판정요청, mock: str | None = None,
     try:
         기록누적 = (_기록누적_읽기(body, account_id)
                   if not MOCK and 온톨로지_사업(body.사업명) else None)
+    except research_runtime.시스템오류:
+        raise
     except Exception:  # noqa: BLE001
         _log.exception("지출 기록 조회 실패")
         기록누적, 기록오류 = None, True
@@ -273,11 +322,13 @@ def _사용자답변_읽기(body: 판정요청, account_id: str | None) -> tuple
         return None, False, None
     try:
         from server.routes_questions import 질문경로_일치
-        저장값 = response_cache.질문세트_조회(body.질문세트, body.org_id, account_id)
+        저장값 = _질문세트_엄격조회(body.질문세트, body.org_id, account_id)
         if 질문경로_일치(저장값, body.사업명) and isinstance(저장값.get("질문"), list):
             import question_generate
             답변들 = [a.model_dump() for a in body.답변]
             return question_generate.답변_구성(저장값, 답변들) or None, False, question_generate.부가세_답(저장값, 답변들)
+    except research_runtime.시스템오류:
+        raise                     # DB 장애는 답변유실(가능 → 확인 필요)이 아니라 판정실패다
     except Exception as e:                                    # noqa: BLE001
         _log.warning("질문세트 읽기 실패: %s", type(e).__name__)
     return None, True, None
@@ -297,11 +348,11 @@ def _질문저장값_읽기(body: 판정요청, account_id: str | None) -> dict 
         금액 = float(금액) if isinstance(금액, (int, float)) and not isinstance(금액, bool) else None
         k = 질문세트_키(body.org_id, account_id, body.사업명, body.확정비목, body.확정세목, body.부가세구분, None,
                      n.get("품목"), 금액, n.get("용도"), (n.get("질문원문") or "")[:2000] or None)
-    저장값 = response_cache.질문세트_조회(k, body.org_id, account_id)
+    저장값 = _질문세트_엄격조회(k, body.org_id, account_id)
     if not 질문경로_일치(저장값, body.사업명):
         저장값 = None
     if 저장값 is None and not body.질문세트:
-        저장값 = response_cache.질문세트_조회(
+        저장값 = _질문세트_엄격조회(
             노드결정_키(body.org_id, account_id, body.사업명, body.확정비목, body.확정세목, n.get("품목")),
             body.org_id, account_id)
         if not 질문경로_일치(저장값, body.사업명):
@@ -322,9 +373,11 @@ def _기록누적_읽기(body: 판정요청, account_id: str | None) -> dict | N
         사업표준 = lambda v: 사업표.get(_사업명_키(v)) if v else None
         비목표준 = lambda v: (_비목_표준화(v) if v else None) if _비목_표준화(v) in 비목_ENUM else None
         사용일자 = orchestrate.유효_날짜(body.사용일자) or orchestrate.유효_날짜(body.정규화.get("사용일자"))
-        with 트랜잭션(body.org_id, account_id) as cur:
-            return orchestrate.지출기록_읽기(cur, body.org_id, account_id, body.사업명, body.확정비목, body.plan_id, 사용일자,
-                                        사업_표준화=사업표준, 비목_표준화=비목표준)
+        def 한번():
+            with 트랜잭션(body.org_id, account_id) as cur:      # 시도마다 새 연결 · 트랜잭션 · RLS GUC
+                return orchestrate.지출기록_읽기(cur, body.org_id, account_id, body.사업명, body.확정비목, body.plan_id, 사용일자,
+                                            사업_표준화=사업표준, 비목_표준화=비목표준)
+        return _판정전_DB(한번, "지출 기록 읽기")
     except Exception as e:                                    # noqa: BLE001
         _log.warning("지출 기록 읽기 실패: %s", type(e).__name__)
         raise
@@ -335,6 +388,8 @@ def _L3숫자라벨_읽기(body: 판정요청, account_id: str | None) -> list[d
     try:
         import question_generate
         return question_generate.L3숫자_라벨(_질문저장값_읽기(body, account_id))
+    except research_runtime.시스템오류:
+        raise                     # DB 장애를 「값 없음」으로 두면 판정이 달라진다. judge() 가 판정실패로 응답한다
     except Exception as e:                                    # noqa: BLE001
         _log.warning("L3 숫자 라벨 읽기 실패: %s", type(e).__name__)
         return None
@@ -345,6 +400,8 @@ def _상황노드_읽기(body: 판정요청, account_id: str | None) -> list[str
     try:
         import question_generate
         return question_generate.상황_노드(_질문저장값_읽기(body, account_id))
+    except research_runtime.시스템오류:
+        raise                     # DB 장애를 「값 없음」으로 두면 판정이 달라진다. judge() 가 판정실패로 응답한다
     except Exception as e:                                    # noqa: BLE001
         _log.warning("상황 노드 읽기 실패: %s", type(e).__name__)
         return None
@@ -364,6 +421,8 @@ def _노드결정_읽기(body: 판정요청, account_id: str | None) -> dict | N
         저장값 = _질문저장값_읽기(body, account_id)
         답변들 = [a.model_dump() for a in body.답변] if body.질문세트 else []
         return question_generate.노드_결정(저장값, 답변들, n.get("품목"))
+    except research_runtime.시스템오류:
+        raise                     # DB 장애를 「값 없음」으로 두면 판정이 달라진다. judge() 가 판정실패로 응답한다
     except Exception as e:                                    # noqa: BLE001
         _log.warning("노드 결정 읽기 실패: %s", type(e).__name__)
         return None
@@ -377,10 +436,12 @@ def _조건답_읽기(body: 판정요청, account_id: str | None) -> list[dict] 
     try:
         import question_generate
         from server.routes_questions import 질문경로_일치
-        저장값 = response_cache.질문세트_조회(body.질문세트, body.org_id, account_id)
+        저장값 = _질문세트_엄격조회(body.질문세트, body.org_id, account_id)
         if not 질문경로_일치(저장값, body.사업명):
             return None
         return question_generate.조건_답(저장값, [a.model_dump() for a in body.답변]) or None
+    except research_runtime.시스템오류:
+        raise                     # DB 장애를 「값 없음」으로 두면 판정이 달라진다. judge() 가 판정실패로 응답한다
     except Exception as e:                                    # noqa: BLE001
         _log.warning("조건 답 읽기 실패: %s", type(e).__name__)
         return None
@@ -460,6 +521,10 @@ def _판정_실행(body: 판정요청, account_id: str | None, 사용자답변: 
             return _실패_결과(body, 판정실패=True), True
         try:
             out = future.result()
+        except research_runtime.시스템오류 as e:
+            # orchestrate.판정() 밖(응답 매핑 등)으로 올라온 시스템 오류도 판정실패다(확인 필요 · 문의 초안으로 바꾸지 않는다)
+            _log.error("judge 실패 — 시스템 오류 %s (plan_id=%s)", e.단계, body.plan_id)
+            return _실패_결과(body, 판정실패=True, 요약=판정실패_요약_DB if isinstance(e, db.DB시스템오류) else None), True
         except Exception:                                 # noqa: BLE001
             # 실패해도 세 판정 밖으로 나가지 않는다. 원인은 서버 로그에만 남긴다.
             _log.exception("judge 실패 — 확인 필요로 반환 (plan_id=%s)", body.plan_id)
@@ -471,16 +536,17 @@ def _판정_실행(body: 판정요청, account_id: str | None, 사용자답변: 
         ex.shutdown(wait=False)
 
 
-def _실패_결과(body: 판정요청, *, 판정실패: bool = False) -> dict:
+def _실패_결과(body: 판정요청, *, 판정실패: bool = False, 요약: str | None = None) -> dict:
     """예외·타임아웃 때의 확인 필요 결과. 이 요청의 정규화 값으로만 문의 초안을 만든다.
 
-    `판정실패`(마감 초과)면 문의 초안 없이 `판정실패: true` 를 붙인다. 화면은 판정 대신 「다시 점검」 을 보인다."""
+    `판정실패`(마감 초과 · 시스템 오류)면 문의 초안 없이 `판정실패: true` 를 붙인다. 화면은 판정 대신 「다시 점검」 을 보인다.
+    `요약` 은 판정실패 문장(없으면 AI 연결 문장 판정실패_요약)."""
     out = {"판정": "확인 필요",
            "요약": "일시적인 오류로 판정하지 못했습니다. 잠시 후 다시 시도해 주세요.",
            "해야할일": [], "인용": [], "전제": [], "신뢰등급": None, "규정버전": None,
            "참조관계": [], "사용자답변": []}
     if 판정실패:
-        return {**out, "요약": 판정실패_요약, "판정실패": True}
+        return {**out, "요약": 요약 or 판정실패_요약, "판정실패": True}
     try:
         초안 = inquiry.문의초안(body.정규화, {"판정": "확인 필요", "실패경로": True}, body.사업명, body.확정비목)
     except Exception:                                         # noqa: BLE001

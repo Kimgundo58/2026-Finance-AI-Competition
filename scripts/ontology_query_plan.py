@@ -86,8 +86,10 @@ def 계획(cur, *, 지도, 입력, 요청, 이전결과, budget):
     계획입력 = json.loads(prompt.split('\n', 1)[1])
     메타 = {'입력잘림': bool(계획입력.get('입력잘림')),
           '이전조회잘림': bool((계획입력.get('이전조회') or {}).get('잘림'))}
+    # 마감: 조회 실행 몫 15초를 남긴 예산. 시스템 오류는 그때까지 재시도하고 끝내 실패하면 LLM시스템오류(판정실패 · 다시시도, v053)
     출력, _ = llm_호출(prompt, _스키마, 모델=기본_모델, 재시도=0, 추론=False,
-                    타임아웃=min(25, max(1, int(budget.remaining_seconds() - 15))))
+                    타임아웃=min(25, max(1, int(budget.remaining_seconds() - 15))),
+                    마감까지_재시도=True, 마감초=max(1.0, budget.remaining_seconds() - 15), 단계="규정조회계획")
     if not isinstance(출력, dict) or 출력.get('행동') not in ('조회', '완료'):
         raise ValueError('조회 계획 형식 오류')
     질의, 인자 = 출력.get('질의'), 출력.get('인자')
