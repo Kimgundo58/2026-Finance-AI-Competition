@@ -1092,12 +1092,13 @@ def 거래유형_질문_검사(client, norm):
         token, 둘째 = 시작()
         assert client.post('/api/questions', json=둘째).json()['다음행동'] == '재조사확인'
         정정 = {**둘째, '조사답변': [{'id': 'p1', '답': '직접입력', '정정': '가나정밀에 가공을 맡겨요'}]}
-        여덟 = client.post('/api/questions', json=정정).json()
-        assert 여덟['분류']['비목'] == '외주용역비' and '다음행동' not in 여덟, 여덟
-        세션 = research_sessions.조회(token, None, None)
-        assert 세션.재조사 is not None and not research_sessions.재조사_답_대기(세션), 세션.재조사
-        아홉 = client.post('/api/questions', json={**정정, '품목설명': 'CNC 로 부품을 깎아 받는 용역'})
-        assert 아홉.status_code == 200 and 아홉.json()['분류']['비목'] == '외주용역비', 아홉.text
+        with patch.object(item_classify, '설명_반영', lambda 정보, llm=None, 캐시=None: (list(정보), None)):   # 설명 정리 LLM 자리
+            여덟 = client.post('/api/questions', json=정정).json()
+            assert 여덟['분류']['비목'] == '외주용역비' and '다음행동' not in 여덟, 여덟
+            세션 = research_sessions.조회(token, None, None)
+            assert 세션.재조사 is not None and not research_sessions.재조사_답_대기(세션), 세션.재조사
+            아홉 = client.post('/api/questions', json={**정정, '품목설명': 'CNC 로 부품을 깎아 받는 용역'})
+            assert 아홉.status_code == 200 and 아홉.json()['분류']['비목'] == '외주용역비', 아홉.text
 
 
 def 모든비목_분류_검사(client, norm):
