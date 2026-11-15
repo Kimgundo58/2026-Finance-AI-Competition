@@ -88,6 +88,10 @@ def questions(req: Request, body: 질문요청):
         요청키 = json.dumps([입력, body.질문원문, body.웹조사, body.공개검색어, body.판매URL, body.거래처], ensure_ascii=False)
         if 세션.입력 is not None and (세션.입력 != 입력 or 세션.버전 != 버전 or getattr(세션, '요청키', None) != 요청키):
             raise HTTPException(409, '입력이 변경되어 새 조사가 필요합니다')
+        # v057: 조사가 끝난 세션의 첫 요청(조사 답 없음)에 다른 품목설명이 오면 SSE 를 열기 전에 409 로 알린다(화면은 새 조사로 다시 연다)
+        if (body.웹조사 and body.조사답변 is None and 세션.조사완료 and isinstance(body.품목설명, str)
+                and body.품목설명.strip() and body.품목설명.strip() != 세션.품목설명):
+            raise HTTPException(409, '입력이 변경되어 새 조사가 필요합니다')
     except BaseException:
         세션.lock.release()
         raise
