@@ -3870,48 +3870,6 @@
     "title": "계획통계",
     "description": "홈 화면 통계 카드 값. 목록 응답에 포함해 보낸다(통계 전용 API 없음).\n\n전체 = 확인필요 + 위험 + 특이사항없음 + 점검전."
    },
-   "server__models________11": {
-    "properties": {
-     "단계": {
-      "type": "string",
-      "enum": [
-       "사전승인·확인",
-       "견적",
-       "계약",
-       "집행",
-       "증빙"
-      ],
-      "title": "단계"
-     },
-     "상태": {
-      "type": "string",
-      "enum": [
-       "완료",
-       "진행중",
-       "시작전",
-       "항목없음"
-      ],
-      "title": "상태"
-     },
-     "완료": {
-      "type": "integer",
-      "title": "완료",
-      "default": 0
-     },
-     "전체": {
-      "type": "integer",
-      "title": "전체",
-      "default": 0
-     }
-    },
-    "type": "object",
-    "required": [
-     "단계",
-     "상태"
-    ],
-    "title": "단계항목",
-    "description": "지출 건의 진행 단계 한 칸. plan_tasks 에서 계산하고 저장하지 않는다."
-   },
    "server__models________12": {
     "properties": {
      "plan_id": {
@@ -4031,24 +3989,6 @@
        }
       ],
       "title": "실제지출액"
-     },
-     "단계요약": {
-      "items": {
-       "$ref": "#/components/schemas/server__models________11"
-      },
-      "type": "array",
-      "title": "단계요약"
-     },
-     "현재단계": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "현재단계"
      }
     },
     "type": "object",
@@ -4233,24 +4173,6 @@
        }
       ],
       "title": "실제지출액"
-     },
-     "단계요약": {
-      "items": {
-       "$ref": "#/components/schemas/server__models________11"
-      },
-      "type": "array",
-      "title": "단계요약"
-     },
-     "현재단계": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "현재단계"
      },
      "질문원문": {
       "anyOf": [
