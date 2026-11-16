@@ -1,0 +1,7 @@
+{
+  "python.analysis.extraPaths": ["scripts", "debug"],
+  "jupyter.interactiveWindow.creationMode": "perFile",
+  "jupyter.notebookFileRoot": "${workspaceFolder}/debug",
+  "jupyter.debugJustMyCode": true,
+  "terminal.integrated.env.windows": { "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1" }
+}

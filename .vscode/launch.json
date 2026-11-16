@@ -1,0 +1,84 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "판정 디버그 서버 (운영)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/debug/판정_단계별.py",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "env": {
+        "PYTHONIOENCODING": "utf-8",
+        "PYTHONUTF8": "1",
+        "SUDDOE_DEBUG_MODE": "서버"
+      }
+    },
+    {
+      "name": "판정 디버그 서버 (mock)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/debug/판정_단계별.py",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "env": {
+        "PYTHONIOENCODING": "utf-8",
+        "PYTHONUTF8": "1",
+        "SUDDOE_DEBUG_MODE": "서버",
+        "SUDDOE_DEBUG_CONNECTION": "mock"
+      }
+    },
+    {
+      "name": "판정 단계별 (운영)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/debug/판정_단계별.py",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "env": {
+        "PYTHONIOENCODING": "utf-8",
+        "PYTHONUTF8": "1"
+      }
+    },
+    {
+      "name": "판정 단계별 (운영, 라이브러리 안까지)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/debug/판정_단계별.py",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "env": {
+        "PYTHONIOENCODING": "utf-8",
+        "PYTHONUTF8": "1"
+      }
+    },
+    {
+      "name": "검색만 다시 (판정 단계 폴더)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/debug/판정_단계별.py",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": [
+        "검색다시",
+        "${input:판정단계폴더}"
+      ],
+      "env": {
+        "PYTHONIOENCODING": "utf-8",
+        "PYTHONUTF8": "1"
+      }
+    }
+  ],
+  "inputs": [
+    {
+      "id": "판정단계폴더",
+      "type": "promptString",
+      "description": "판정 단계 폴더 (예: debug/실행기록/20261116_120000/04_judge)"
+    }
+  ]
+}
