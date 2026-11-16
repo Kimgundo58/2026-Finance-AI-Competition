@@ -322,7 +322,7 @@ def _float변환(v) -> float | None:
 
 
 _목록_컬럼 = ("plan_id", "제목", "확정비목", "금액", "판정", "집행예정일",
-             "updated_at", "사업명", "상태", "실제지출일", "실제지출액")
+             "updated_at", "사업명", "상태", "실제지출일", "실제지출액", "용도")
 
 
 def _live_목록(org_id: str | None) -> list[dict]:
@@ -334,7 +334,8 @@ def _live_목록(org_id: str | None) -> list[dict]:
     조건, 인자 = _계정조건(org_id)
     행 = _질의(f"""
         SELECT p.plan_id, p.제목, p.확정비목, p.금액, d.판정, p.집행예정일,
-               p.updated_at, p.사업명, p.상태, p."실제지출일", p."실제지출액"
+               p.updated_at, p.사업명, p.상태, p."실제지출일", p."실제지출액",
+               p.정규화->>'용도'
         FROM tenant.expense_plans p
         LEFT JOIN tenant.decisions d ON d.decision_id = p.latest_decision_id
         WHERE {조건}
