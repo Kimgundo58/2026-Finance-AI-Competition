@@ -2,7 +2,7 @@
 """판정 효과 비교(P5-2, docs/5_룰/5-9_검증과_측정.md 판정 효과 프로토콜): 화면이 부르는 API 경로로 옛 경로와 새 경로를 돌려 비교표를 낸다.
 
 eval_e2e.py 는 판정() 을 확정비목 · 답변 · org 없이 불러 화면 경로를 증명하지 못한다. 이 도구는 ux_flow_check.py 처럼 서버를 프로세스 안에서 띄우고
-화면과 같은 순서로 부른다: POST /api/normalize → 첫 분류 후보 선택 → POST /api/questions → 답변 · 숫자 칸 → POST /api/judge.
+화면과 같은 순서로 부른다: POST /api/normalize → 비목후보 선택 → POST /api/questions → 답변 · 숫자 칸 → POST /api/judge.
 값을 고르는 규칙은 프런트(app/checkumait-app.tsx · lib/questions.ts)와 같다. 옛 경로 = SUDDOE_ONTOLOGY_PROGRAMS 비움, 새 경로 = 사업 지정.
 
 입력(문항)
@@ -174,9 +174,8 @@ def 화면_흐름(client, m: 문항, a, 만든기관: list[str], 잠금: threadi
         return 흐름
 
     선택지 = _사업_비목(m.사업명)
-    첫분류 = next((c for c in 정규화.get("분류후보") or [] if c.get("비목") in 선택지), None)
-    비목 = (첫분류 or {}).get("비목") or next((c.get("비목") for c in 정규화.get("비목후보") or [] if c.get("비목") in 선택지), None)
-    세목 = (첫분류 or {}).get("세목")
+    비목 = next((c.get("비목") for c in 정규화.get("비목후보") or [] if c.get("비목") in 선택지), None)
+    세목 = None
     if not 비목 and a.dry:          # LLM 없는 연결 확인 전용. 규칙으로 찾은 비목, 없으면 재료비. 판정이 없어 결과에 영향이 없다
         import normalize_run
         비목 = next((b for b in normalize_run.규칙_정규화(입력_글(m, a.입력))["비목후보"] if b in 선택지), "재료비")

@@ -709,19 +709,14 @@ def 커버율_실행(cur, 데이터: list[문항], a) -> dict[str, list[dict]]:
             변환, 실패 = None, f"LLM실패: {str(e)[:80]}"
         else:
             실패 = None if 변환 else "온톨로지 경로 대상이 아님"
-        후보들 = (변환 or {}).get("분류후보") or []
-        첫후보 = 후보들[0] if 후보들 else {}
+        # 정규화는 분류를 고르지 않는다(재설계 11-11, 분류는 ③ item_classify). 「추정」 방식은 비목 없이 조회한다
         정답 = _정답_비목(m.비목)
         for 방식 in 방식들:
             기본 = {"gold_id": m.gold_id, "세트": m.세트, "L3": m.L3}
             if 실패:
                 결과행[방식].append({**기본, "실패": 실패})
                 continue
-            if 방식 == "정답" and 정답:
-                비목 = 정답
-                세목 = next((c.get("세목") for c in 후보들 if c.get("비목") == 정답), None)
-            else:
-                비목, 세목 = 첫후보.get("비목"), 첫후보.get("세목")
+            비목, 세목 = (정답, None) if 방식 == "정답" and 정답 else (None, None)
             r = 후보_문맥(cur, m, 변환, 비목, 세목, 종류들, 글)
             대조 = {}
             for 종류, 문맥 in r["문맥들"].items():
@@ -730,10 +725,10 @@ def 커버율_실행(cur, 데이터: list[문항], a) -> dict[str, list[dict]]:
                             "빠진수": 문맥["빠진수"], "L3_초과": 문맥["L3_초과"], "온톨로지항목수": 문맥["온톨로지항목수"]}
             마지막 = 대조[종류들[-1]]
             결과행[방식].append({**기본, "후보": 대조, "비목": 비목, "세목": 세목,
-                              "비목불일치": bool(정답) and 첫후보.get("비목") != 정답, "정답비목없음": not 정답,
-                              "추정없음": not 첫후보, "노드없음": r["노드없음"],
+                              "비목불일치": bool(정답), "정답비목없음": not 정답,
+                              "추정없음": True, "노드없음": r["노드없음"],
                               "놓친유형": 놓친_분류(cur, 마지막["놓침"], r["비목_id"], m.사업명)})
-        print(f"  {n}/{len(데이터)} gold_id={m.gold_id} 변환={'실패' if 실패 else '완료'} 후보수={len(후보들)}", flush=True)
+        print(f"  {n}/{len(데이터)} gold_id={m.gold_id} 변환={'실패' if 실패 else '완료'}", flush=True)
     return 결과행
 
 

@@ -66,7 +66,7 @@ def 정규화(body) -> dict:
     """/api/normalize 결과. 보낸 지출 항목을 그대로 돌려준다(한 문장이면 그 문장이 지출 항목). 거래처는 문장의 「거래처 ○○」 만."""
     문장 = (body.질문 or "").strip()
     품목 = 문장 or (body.품목 or "")
-    out = {**{k: v for k, v in mock_정규화.items() if k not in ("품목확인", "비목후보", "분류후보")},
+    out = {**{k: v for k, v in mock_정규화.items() if k not in ("품목확인", "비목후보")},
            "품목": 품목,
            "금액": _금액(문장) if 문장 else body.금액,
            "금액_추정여부": False,
@@ -75,13 +75,13 @@ def 정규화(body) -> dict:
            "수치": {"부가세구분": body.부가세구분 or "모름"},
            "거래처": (m.group(1) if (m := re.search(r"거래처\s*[:：]?\s*([^\s,.]+)", 문장)) else None) if 문장 else None,
            "비목후보": [], "심층질문": []}
-    if 가지(품목) == "옛경로":            # 옛 경로 사업: 품목확인 · 분류후보 없이 비목후보만(routes_normalize._live_정규화 와 같은 모양)
+    if 가지(품목) == "옛경로":            # 옛 경로 사업: 품목확인 없이 비목후보만(routes_normalize._live_정규화 와 같은 모양)
         return {**out, "비목후보": list(옛경로_비목후보)}
     별칭 = 가지(품목) == "별칭"
     from item_classify import 안내문
     # 지출 항목 입력 검증(v057): 「지출아님」 이면 지출 아님. 다음행동 · 안내는 routes_normalize._입력검증_붙이기 가 요청의 시도 값으로 채운다
     판단 = "건너뜀" if 별칭 else "지출아님" if 가지(품목) == "지출아님" else "지출"
-    return {**out, "분류후보": [],
+    return {**out,
             "품목확인": {"별칭일치": 별칭, "분류": dict(고정분류) if 별칭 else None,
                      "안내": 안내문(고정분류) if 별칭 else None},
             "입력검증": {"판단": 판단}}
