@@ -267,6 +267,7 @@ class 계획요약(BaseModel):
     집행예정일: str | None = None      # 예상 지출일
     updated_at: str | None = None      # 최근 수정일
     사업명: str | None = None
+    용도: str | None = None            # 사용 목적. 정규화 칸의 「용도」(v066: 목록에도 실어 홈 · 상세가 빈칸이 되지 않게)
     상태: Literal["draft", "judged"] = "draft"   # 진행 상태이지 판정 값이 아니다
     실제지출일: str | None = None
     실제지출액: float | None = None
@@ -365,7 +366,6 @@ class 피드백입력(판정피드백):
 
 class 계획상세(계획요약):
     질문원문: str | None = None
-    용도: str | None = None
     거래처: str | None = None
     추가설명: str | None = None
     정규화: dict[str, Any] = Field(default_factory=dict)
