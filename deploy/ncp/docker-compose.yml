@@ -72,8 +72,12 @@ services:
       SUDDOE_ONTOLOGY_PROGRAMS: ${SUDDOE_ONTOLOGY_PROGRAMS:-}
       # 별도 읽기 전용 볼륨에 둔 공개 검색 키 파일. 키 값은 이미지에 넣지 않는다.
       SUDDOE_APICK_API_KEY_FILE: /run/suddoe-secrets/apick.key
-      SUDDOE_QWEN_MODEL: ${SUDDOE_QWEN_MODEL:-qwen3.7-plus}
+      # 판정 외 모든 단계의 기본 모델(2026-11-17 qwen3.7-plus → Gemini 3.8 Flash). 모델 ID 는 SUDDOE_LLM_BASE_URL(Runyour) 기준
+      SUDDOE_QWEN_MODEL: ${SUDDOE_QWEN_MODEL:-gemini/gemini-3.8-flash}
       SUDDOE_QWEN_FALLBACK_MODEL: ${SUDDOE_QWEN_FALLBACK_MODEL:-qwen3.8-flash}
+      # ④ 판정 앙상블(쉼표 구분, 순서 = 대표 출력 우선순위). 「:-」 가 아니라 「-」 라서 .env 에 SUDDOE_JUDGE_MODELS= (빈 값)을 쓰면
+      # 빈 값 그대로 들어가 기본 모델 하나로 판정한다(되돌리기). .env 에 줄이 없을 때만 아래 세 모델을 쓴다
+      SUDDOE_JUDGE_MODELS: ${SUDDOE_JUDGE_MODELS-anthropic/claude-sonnet-5-5,gemini/gemini-3.8-flash,openai/gpt-6.1-terra}
       SUDDOE_QUESTION_MODEL: ${SUDDOE_QUESTION_MODEL:-}
       SUDDOE_QUESTION_TIMEOUT: ${SUDDOE_QUESTION_TIMEOUT:-20}
       SUDDOE_JUDGE_ANSWERS: ${SUDDOE_JUDGE_ANSWERS:-1}

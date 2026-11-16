@@ -5,8 +5,9 @@ normalize_run(정규화 호출, 폼 경로 비목후보 추출)과 orchestrate(�
 공개: llm_호출(프롬프트, 스키마, *, 모델, 온도, 최대토큰, 타임아웃, 재시도, 추론, 추론끔_여유초, 스트림, 폴백,
 마감까지_재시도, 청크_대기초) -> (출력, 메타), 예외 LLM실패.
 환경변수: SUDDOE_LLM_API_KEY(필수, 없으면 DASHSCOPE_API_KEY), SUDDOE_LLM_BASE_URL(기본값 DashScope 국제 리전),
-SUDDOE_QWEN_MODEL, SUDDOE_QWEN_FALLBACK_MODEL. 다른 OpenAI 호환 라우터(예: Runyour AI)를 쓰면 BASE_URL 과
-모델 ID(예: qwen/qwen3.7-plus)를 그 라우터 기준으로 넣는다.
+SUDDOE_QWEN_MODEL(판정 외 모든 단계의 기본 모델), SUDDOE_QWEN_FALLBACK_MODEL, SUDDOE_JUDGE_MODELS(④ 판정 앙상블 모델, `판정_모델들`).
+다른 OpenAI 호환 라우터(예: Runyour AI)를 쓰면 BASE_URL 과 모델 ID(예: gemini/gemini-3.8-flash)를 그 라우터 기준으로 넣는다.
+환경변수 이름의 QWEN 은 이전 이름이다(값은 Gemini 등 다른 회사 모델이어도 된다).
 스키마를 주면 response_format(json_schema, strict)으로 JSON 출력을 강제한다.
 마감까지_재시도=False 의 실패는 LLM실패 로 올린다. 마감까지_재시도=True(운영 경로)의 실패는 LLM시스템오류 로 올린다:
 호출자는 이를 확인 필요로 바꾸지 않고 판정실패 · 다시시도로 응답한다(v053).
@@ -45,7 +46,10 @@ _log = logging.getLogger(__name__)
 
 _DASHSCOPE_ENDPOINT = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
 ENDPOINT = os.environ.get("SUDDOE_LLM_BASE_URL", "").strip() or _DASHSCOPE_ENDPOINT
-기본_모델 = os.environ.get("SUDDOE_QWEN_MODEL", "qwen3.7-plus")
+# 기본 모델(판정 외 모든 단계). 2026-11-17 qwen3.7-plus → Gemini 3.8 Flash(debug/판정_모델앙상블_설계.md).
+# Gemini 는 OpenAI 호환 게이트웨이(Runyour)로만 부른다. DashScope 를 바로 부르면(BASE_URL 비움) 그 목록에 있는 qwen3.7-plus 를 쓴다.
+기본_모델 = (os.environ.get("SUDDOE_QWEN_MODEL", "").strip()
+          or ("qwen3.7-plus" if ENDPOINT == _DASHSCOPE_ENDPOINT else "gemini/gemini-3.8-flash"))
 폴백_모델 = os.environ.get("SUDDOE_QWEN_FALLBACK_MODEL", "qwen3.8-flash")
 # 호출자가 더 작게 넘겨도 최소 이만큼은 준다. 추론을 켠 판정은 추론 토큰이 이 대부분을 쓴다
 # (2026-11-12 운영 게이트웨이 실측, 같은 판정 프롬프트: 추론 1,436~3,436 토큰, 답 JSON 은 100 토큰 안팎).
@@ -77,11 +81,26 @@ def _모델_이름(모델: str) -> str:
     return 모델.rsplit("/", 1)[-1]
 
 
+def 판정_모델들() -> list[str]:
+    """④ 판정 앙상블 모델(SUDDOE_JUDGE_MODELS, 쉼표로 구분). 순서가 대표 출력 우선순위다(orchestrate._판정_앙상블).
+    비어 있으면 [] → 기본 모델 하나로 판정한다(앙상블 전 동작, 환경변수만으로 되돌린다). 같은 모델을 두 번 적으면 한 번만 쓴다.
+    호출할 때마다 환경변수를 읽는다(검사 · 디버그 키트가 실행 중에 바꾼다)."""
+    값 = os.environ.get("SUDDOE_JUDGE_MODELS", "")
+    return list(dict.fromkeys(m.strip() for m in 값.split(",") if m.strip()))
+
+
+def 판정_모델_구성() -> str:
+    """판정 응답 캐시 키에 넣는 판정 모델 구성. 모델을 바꾸면 이전 모델의 판정이 캐시에서 나가지 않는다(server/routes_judge)."""
+    모델들 = 판정_모델들()
+    return "앙상블:" + ",".join(모델들) if len(모델들) >= 2 else "단일:" + (모델들[0] if 모델들 else 기본_모델)
+
+
 def _추론_비활성_대상(모델: str) -> bool:
-    """flash 계열은 추론을 켜면 출력이 지나치게 길어지고, 오픈소스 qwen3-* 계열은 비스트리밍
-    호출에서 추론을 켜면 400 으로 거부한다. 두 계열은 항상 끈다."""
+    """qwen 의 flash 계열은 추론을 켜면 출력이 지나치게 길어지고, 오픈소스 qwen3-* 계열은 비스트리밍
+    호출에서 추론을 켜면 400 으로 거부한다. 두 계열은 항상 끈다.
+    qwen 계열에만 적용한다: 이름에 flash 가 든 다른 회사 모델(gemini-3.8-flash)은 호출자가 정한 대로 둔다(2026-11-17)."""
     이름 = _모델_이름(모델)
-    return "flash" in 이름 or 이름.startswith("qwen3-")
+    return 이름.startswith("qwen") and ("flash" in 이름 or 이름.startswith("qwen3-"))
 
 
 def _추론_끄기_옵션() -> dict:
@@ -172,9 +191,11 @@ def _호출_1회(client: OpenAI, 모델: str, 프롬프트: str, 스키마: dict
         "timeout": 타임아웃,
     }
     if 스키마 is not None:
+        # 스키마 이름은 영문 · 숫자 · _ · - 만 쓴다. OpenAI API 는 name 을 ^[a-zA-Z0-9_-]+$ 로 검사해 한글 이름(이전 값 「판정」)을
+        # 400 으로 거부한다(2026-11-17 판정 앙상블에 GPT 를 넣으며 바꿈, Runyour 경유 동작은 미확인)
         kwargs["response_format"] = {
             "type": "json_schema",
-            "json_schema": {"name": "판정", "schema": 스키마, "strict": True},
+            "json_schema": {"name": "suddoe_output", "schema": 스키마, "strict": True},
         }
     if 추론 is False or _추론_비활성_대상(모델):
         kwargs["extra_body"] = _추론_끄기_옵션()

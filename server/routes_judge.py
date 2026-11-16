@@ -39,6 +39,8 @@ from server import mock_data
 from server.selftest import mock_판정
 
 import research_runtime                       # server.research_sessions 가 scripts/ 를 sys.path 에 넣는다
+import llm_qwen                               # 판정 모델 구성(캐시 키). 모듈로 가져와 실행 중 환경변수 변경을 따른다
+import assemble_context                       # 판정 프롬프트 버전(캐시 키)
 from _lib import db                           # orchestrate 와 같은 모듈 이름으로 가져온다(DB시스템오류 클래스가 같아야 한다)
 
 _log = logging.getLogger("suddoe.judge")
@@ -204,6 +206,9 @@ def _judge_본체(body: 판정요청, mock, account_id, 조사세션, 조사, �
     # 자연어 조건 확인 질문의 답(5-14 B). 서버 저장값의 규범 ID · 조건 번호에 화면 답 값만 맞춘다. 판정을 바꾸므로 키에 넣는다
     조건답 = (_조건답_읽기(body, account_id)
              if 반영 and not MOCK and body.질문세트 and 온톨로지_사업(body.사업명) else None)
+    # 조건 유형(2026-11-17, 질문 단계가 조건 줄마다 붙여 질문세트에 저장). 상한 · 할 일 · 화면 칸을 바꾸므로 키에 넣는다
+    조건유형 = (_조건유형_읽기(body, account_id)
+              if 반영 and not MOCK and 온톨로지_사업(body.사업명) else None)
 
     k = response_cache.캐시키(
         # 계정을 키에 넣는다. 다른 계정의 응답(그 계정의 계획·판정 id·프로필 전제)이 나가면 안 된다.
@@ -225,6 +230,10 @@ def _judge_본체(body: 판정요청, mock, account_id, 조사세션, 조사, �
         body.사용일자 if 온톨로지_사업(body.사업명) else None,
         # ?mock= 은 mock 모드에서만 응답을 바꾼다. live 에서 키에 넣으면 캐시를 우회할 수 있다.
         *([mock] if MOCK else []),
+        # 판정 모델 구성(SUDDOE_JUDGE_MODELS · 기본 모델). 모델을 바꾸면 이전 모델의 판정이 캐시에서 나가지 않는다(2026-11-17 판정 앙상블)
+        llm_qwen.판정_모델_구성(),
+        # 판정 프롬프트 버전. 프롬프트 · 요약 조립을 바꾸면 이전 판정이 캐시에서 나가지 않는다(V14, 2026-11-17)
+        assemble_context.프롬프트_버전,
         # 노드 결정이 없으면 조각을 더하지 않는다(지금 키 그대로)
         *([json.dumps(노드결정, ensure_ascii=False, sort_keys=True)] if 노드결정 else []),
         # 상황 노드가 없으면 조각을 더하지 않는다(지금 키 그대로)
@@ -234,7 +243,9 @@ def _judge_본체(body: 판정요청, mock, account_id, 조사세션, 조사, �
         # L3 숫자 라벨이 없으면 조각을 더하지 않는다(지금 키 그대로)
         *([json.dumps(L3라벨, ensure_ascii=False, sort_keys=True)] if L3라벨 else []),
         # 조건 확인 질문이 없으면 조각을 더하지 않는다(지금 키 그대로)
-        *([json.dumps(조건답, ensure_ascii=False, sort_keys=True)] if 조건답 else []))
+        *([json.dumps(조건답, ensure_ascii=False, sort_keys=True)] if 조건답 else []),
+        # 조건 유형이 없으면 조각을 더하지 않는다(지금 키 그대로)
+        *([json.dumps(조건유형, ensure_ascii=False, sort_keys=True)] if 조건유형 else []))
     캐시 = None if 기록오류 or 조사세션 else response_cache.조회(k, body.org_id, account_id)
     # 검색 전에 계산한다. 판정 도중 규정이 활성화되면 결과는 옛 해시로 저장되어 이후 요청에 적중하지 않는다.
     데이터버전해시 = response_cache.요청_해시()
@@ -296,7 +307,7 @@ def _judge_본체(body: 판정요청, mock, account_id, 조사세션, 조사, �
         else:
             워커실행 = True
             out, 실패 = yield from _판정_실행(body, account_id, 사용자답변, 답변유실, 노드결정, 조건답, 상황노드, 기록누적, L3라벨, 조사세션, 조사,
-                                          판정키=None if 답변유실 else k)
+                                          판정키=None if 답변유실 else k, 조건유형=조건유형)
             # decision_id 를 캐시에 넣으면 다른 요청이 남의 판정 행을 자기 계획에 연결한다.
             decision_id = out.pop("decision_id", None)
             # 조사 답은 다른 요청의 캐시에 넣지 않는다. 저장 질문을 못 읽어 낮춘 판정(답변유실)은 일시 장애라 캐시에 두지 않는다(리뷰 28-18)
@@ -454,6 +465,30 @@ def _조건답_읽기(body: 판정요청, account_id: str | None) -> list[dict] 
         return None
 
 
+def _조건유형_읽기(body: 판정요청, account_id: str | None) -> dict | None:
+    """저장한 질문세트의 조건 유형(2026-11-17) → {유형, 출처, 물음, 관계힌트}. 없거나 못 읽으면 None(지금 판정 그대로).
+
+    질문세트 저장값을 `_질문저장값_읽기` 로 읽는다(질문세트 키 엄격 조회, 없으면 같은 키를 다시 만들어 조회, 각각 질문경로_일치 확인).
+    관계힌트는 저장값 또는 이번 판정 요청의 입력(품목 · 용도 · 질문원문)에 관계 낱말이 있으면 참이다(그 줄은 모름이면 상한을 그대로 건다).
+    """
+    try:
+        import question_generate
+        저장값 = _질문저장값_읽기(body, account_id)
+        유형 = question_generate.조건유형_읽기(저장값)
+        if not 유형:
+            return None
+        n = body.정규화
+        힌트 = question_generate.관계힌트_읽기(저장값) or question_generate.관계힌트(
+            {"품목": n.get("품목"), "용도": n.get("용도"), "질문": n.get("질문원문")})
+        return {"유형": 유형, "출처": question_generate.조건유형_출처_읽기(저장값),
+                "물음": question_generate.조건물음_읽기(저장값), "관계힌트": 힌트}
+    except research_runtime.시스템오류:
+        raise                     # DB 장애를 「값 없음」으로 두면 판정이 달라진다. judge() 가 판정실패로 응답한다
+    except Exception as e:                                    # noqa: BLE001
+        _log.warning("조건 유형 읽기 실패: %s", type(e).__name__)
+        return None
+
+
 def _판정_이벤트(out: dict):
     """판정 → 해야할일 → 인용 → 전제 → 참조관계 → (문의초안) → 결과 이벤트를 고정 순서로 yield 한다.
 
@@ -483,7 +518,7 @@ def _판정_이벤트(out: dict):
 def _판정_실행(body: 판정요청, account_id: str | None, 사용자답변: list[dict] | None = None,
             답변유실: bool = False, 노드결정: dict | None = None, 조건답: list[dict] | None = None,
             상황노드: list[str] | None = None, 기록누적: dict | None = None, L3라벨: list[dict] | None = None,
-            조사세션=None, 조사=None, 판정키: str | None = None):
+            조사세션=None, 조사=None, 판정키: str | None = None, 조건유형: dict | None = None):
     """_live_판정 을 워커 스레드에서 실행하고, 기다리는 동안 SSE keep-alive 주석을 yield 한다.
 
     `out, 실패 = yield from _판정_실행(body, account_id, 사용자답변, 답변유실)` 로 쓴다. 예외나 타임아웃은 확인 필요 결과와
@@ -500,17 +535,18 @@ def _판정_실행(body: 판정요청, account_id: str | None, 사용자답변: 
     ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     # submit 은 컨텍스트 변수를 복사하지 않는다. 미들웨어가 설정한 현재_org 를 워커에 넘긴다.
     이벤트 = queue.Queue()
+    유형인자 = {"조건유형": 조건유형} if 조건유형 else {}      # 없으면 넘기지 않는다(지금 호출 그대로)
     def 작업():
         try:
             with research_runtime.activate(요청예산, emit=이벤트.put):
                 if 조사세션:
-                    out = _live_판정(body, account_id, 사용자답변, 답변유실, 노드결정, 조건답, 상황노드, 기록누적, L3라벨, 조사)
+                    out = _live_판정(body, account_id, 사용자답변, 답변유실, 노드결정, 조건답, 상황노드, 기록누적, L3라벨, 조사, **유형인자)
                     if not out.get('_실패') and 판정키 is not None:
                         saved = {k: v for k, v in out.items() if k not in ('decision_id', '_실패')}
                         saved['조사'] = research_sessions.화면_조사(조사)
                         조사세션.판정결과, 조사세션.판정키 = (saved, out.get('decision_id')), 판정키
                     return out
-                return _live_판정(body, account_id, 사용자답변, 답변유실, 노드결정, 조건답, 상황노드, 기록누적, L3라벨)
+                return _live_판정(body, account_id, 사용자답변, 답변유실, 노드결정, 조건답, 상황노드, 기록누적, L3라벨, **유형인자)
         finally:
             if 조사세션:
                 조사세션.lock.release()
@@ -570,7 +606,7 @@ def _실패_결과(body: 판정요청, *, 판정실패: bool = False, 요약: st
 def _live_판정(body: 판정요청, account_id: str | None = None, 사용자답변: list[dict] | None = None,
              답변유실: bool = False, 노드결정: dict | None = None, 조건답: list[dict] | None = None,
              상황노드: list[str] | None = None, 기록누적: dict | None = None, L3라벨: list[dict] | None = None,
-             조사=None) -> dict:
+             조사=None, 조건유형: dict | None = None) -> dict:
     """orchestrate.판정() 을 호출하고 응답 계약으로 바꾼다. 워커 스레드에서 실행된다."""
     import orchestrate
     # 질문 원문이 없을 때만 품목·용도·금액으로 문장을 재구성한다. 합성 문장(_합성_질문)을 다시
@@ -593,7 +629,8 @@ def _live_판정(body: 판정요청, account_id: str | None = None, 사용자답
                        확정세목=body.확정세목, 추가입력값=body.추가입력값, 부가세구분=body.부가세구분, 사용일자=body.사용일자,
                        노드결정=노드결정, 조건답=조건답, 상황노드=상황노드, 기록누적=기록누적, l3숫자라벨=L3라벨,
                        거래처관계=body.특수관계.model_dump(), 멱등키=body.멱등키,
-                       **({'조사': 조사} if 조사 is not None else {}))
+                       **({'조사': 조사} if 조사 is not None else {}),
+                       **({'조건유형': 조건유형} if 조건유형 else {}))
     return 파이프라인결과_매핑(r, body)
 
 
